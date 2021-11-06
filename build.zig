@@ -1,5 +1,10 @@
 const std = @import("std");
 
+const zig_args = std.build.Pkg{
+    .name = "zig-args",
+    .path = .{ .path = "./vendor/zig-args/args.zig" },
+};
+
 pub fn build(b: *std.build.Builder) void {
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
@@ -15,6 +20,8 @@ pub fn build(b: *std.build.Builder) void {
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.install();
+
+    exe.addPackage(zig_args);
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());
