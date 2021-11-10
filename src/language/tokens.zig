@@ -120,3 +120,30 @@ pub const Token = union(enum) {
         };
     }
 };
+
+// FIXME: Merge this with toString above
+pub fn tokenTypeToString(token_type: std.meta.Tag(Token)) []const u8 {
+    return switch (token_type) {
+        .String => "<string>",
+        .Identifier => "<identifier>",
+        .Integer => "<integer>",
+        .FloatingPoint => "<floating point>",
+        .EOF => "<end of file>",
+        .Comment => "<comment>",
+        else => {
+            // FIXME: This could probably be improved by somehow generating
+            //        a switch. Although maybe the compiler is sufficiently
+            //        smart to do that.
+            //        I'd like to use @hasField here, but name is not
+            //        comptime.
+            const name = @tagName(token_type);
+            inline for (@typeInfo(TokenRepresentation).Struct.decls) |decl| {
+                if (std.mem.eql(u8, name, decl.name)) {
+                    return @field(TokenRepresentation, decl.name);
+                }
+            }
+
+            @panic("Unknown token");
+        },
+    };
+}

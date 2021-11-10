@@ -40,18 +40,36 @@ pub fn deinit(self: *Self) void {
 }
 
 /// Return the next token from the file stream.
-pub fn nextToken(self: *Self) !tokens.Token {
+pub fn nextToken(self: *Self) !*tokens.Token {
     if (!self.initialized)
         @panic("Attempting to call Lexer.nextToken on uninitialized lexer");
 
     try self.skipWhitespace();
-    if (self.eof()) return tokens.Token{ .EOF = .{} };
+    if (self.eof()) {
+        self.current_token = tokens.Token{ .EOF = .{} };
+        return &self.current_token;
+    }
 
-    if (try self.lexComment()) |token| return token;
-    if (try self.lexString()) |token| return token;
-    if (try self.lexNumber()) |token| return token;
-    if (try self.lexIdentifier()) |token| return token;
-    if (try self.lexSymbol()) |token| return token;
+    if (try self.lexComment()) |token| {
+        self.current_token = token;
+        return &self.current_token;
+    }
+    if (try self.lexString()) |token| {
+        self.current_token = token;
+        return &self.current_token;
+    }
+    if (try self.lexNumber()) |token| {
+        self.current_token = token;
+        return &self.current_token;
+    }
+    if (try self.lexIdentifier()) |token| {
+        self.current_token = token;
+        return &self.current_token;
+    }
+    if (try self.lexSymbol()) |token| {
+        self.current_token = token;
+        return &self.current_token;
+    }
 
     @panic("Shouldn't reach here!");
 }
@@ -400,3 +418,4 @@ file_contents: []u8 = undefined,
 buffer: BufferType = undefined,
 stream: PeekStreamType = undefined,
 reader: PeekStreamType.Reader = undefined,
+current_token: tokens.Token = undefined,

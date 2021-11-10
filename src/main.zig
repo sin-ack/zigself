@@ -59,7 +59,7 @@ pub fn main() !u8 {
     try parser.initInPlaceFromFilePath(file_path, allocator);
     defer parser.deinit();
 
-    try parser.parse();
+    _ = try parser.parse();
     // rootNode.dumpTree();
 
     return 0;
