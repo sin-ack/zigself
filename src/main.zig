@@ -59,8 +59,14 @@ pub fn main() !u8 {
     try parser.initInPlaceFromFilePath(file_path, allocator);
     defer parser.deinit();
 
-    _ = try parser.parse();
-    // rootNode.dumpTree();
+    var script_node = try parser.parse();
+    defer script_node.deinit(allocator);
+
+    for (parser.diagnostics.diagnostics.items) |diagnostic| {
+        std.debug.print("{}: {s}: {s}\n", .{ diagnostic.location.format(), @tagName(diagnostic.level), diagnostic.message });
+    }
+
+    script_node.dumpTree(0);
 
     return 0;
 }
