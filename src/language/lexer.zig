@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const tokens = @import("./tokens.zig");
+const Location = @import("./location.zig");
 
 const MaximumLookaheadLength = 4096;
 
@@ -43,6 +44,7 @@ pub fn deinit(self: *Self) void {
 pub fn nextToken(self: *Self) !*tokens.Token {
     if (!self.initialized)
         @panic("Attempting to call Lexer.nextToken on uninitialized lexer");
+    self.token_start = self.token_end;
 
     try self.skipWhitespace();
     if (self.eof()) {
@@ -100,6 +102,8 @@ fn skipWhitespace(self: *Self) !void {
             last_byte = c;
             break;
         }
+
+        self.token_end.advanceForCharacter(c);
     }
     // We will have read one extra byte at this point.
     if (last_byte) |c| {
@@ -114,10 +118,13 @@ fn lexComment(self: *Self) !?tokens.Token {
         try self.stream.putBackByte(first_byte);
         return null;
     }
+    self.token_end.advanceForCharacter(first_byte);
 
     var did_escape = false;
     var did_finish_comment = false;
     while (try self.readByte()) |c| {
+        self.token_end.advanceForCharacter(c);
+
         if (c == '\"') {
             if (!did_escape) {
                 did_finish_comment = true;
@@ -145,6 +152,7 @@ fn lexString(self: *Self) !?tokens.Token {
         try self.stream.putBackByte(first_byte);
         return null;
     }
+    self.token_end.advanceForCharacter(first_byte);
 
     var string_builder = std.ArrayList(u8).init(self.allocator);
     defer string_builder.deinit();
@@ -155,6 +163,8 @@ fn lexString(self: *Self) !?tokens.Token {
         if (c == '\n' or c == '\r') {
             return error.NewlineInStringLiteral;
         }
+
+        self.token_end.advanceForCharacter(c);
 
         // TODO: Handle more complicated escapes, like \xNN and \uNNNN.
         if (did_escape) {
@@ -195,6 +205,7 @@ fn lexNumber(self: *Self) !?tokens.Token {
         try self.stream.putBackByte(first_byte);
         return null;
     }
+    self.token_end.advanceForCharacter(first_byte);
 
     var parser_state: NumberParserState = .Initial;
     var integer: u64 = 0;
@@ -328,6 +339,8 @@ fn lexNumber(self: *Self) !?tokens.Token {
                 }
             },
         }
+
+        self.token_end.advanceForCharacter(c);
     }
 
     if (did_finish_number) {
@@ -350,6 +363,7 @@ fn lexIdentifier(self: *Self) !?tokens.Token {
         try self.stream.putBackByte(first_byte);
         return null;
     }
+    self.token_end.advanceForCharacter(first_byte);
 
     var token = tokens.Token{ .Identifier = undefined };
     var offset: usize = 0;
@@ -373,6 +387,7 @@ fn lexIdentifier(self: *Self) !?tokens.Token {
 
         token.Identifier[offset] = c;
         offset += 1;
+        self.token_end.advanceForCharacter(c);
     }
 
     if (did_finish_identifier) {
@@ -400,6 +415,8 @@ fn lexSymbol(self: *Self) !?tokens.Token {
                 try self.stream.putBack(slice);
             } else {
                 if (std.mem.eql(u8, representation, slice)) {
+                    self.token_end.column += representation.len;
+
                     return @unionInit(tokens.Token, field.name, .{});
                 }
 
@@ -419,3 +436,5 @@ buffer: BufferType = undefined,
 stream: PeekStreamType = undefined,
 reader: PeekStreamType.Reader = undefined,
 current_token: tokens.Token = undefined,
+token_start: Location = .{},
+token_end: Location = .{},

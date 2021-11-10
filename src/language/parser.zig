@@ -47,10 +47,9 @@ pub fn parse(self: *Self) !AST.ScriptNode {
     defer statements.deinit();
 
     while (self.lexer.current_token != .EOF) {
-        const statement_node = try self.parseStatement(.EOF);
-        if (statement_node == null) break;
-
-        try statements.append(statement_node.?);
+        if (try self.parseStatement(.EOF)) |statement| {
+            try statements.append(statement);
+        }
     }
 
     return AST.ScriptNode{ .statements = statements.toOwnedSlice() };
@@ -62,6 +61,7 @@ fn expectToken(self: *Self, token_type: std.meta.Tag(tokens.Token), action: Expe
     if (self.lexer.current_token != token_type) {
         try self.diagnostics.reportDiagnosticFormatted(
             .Error,
+            self.lexer.token_start,
             "Expected '{s}', got '{s}'",
             .{ tokens.tokenTypeToString(token_type), self.lexer.current_token.toString() },
         );
@@ -77,7 +77,7 @@ fn expectToken(self: *Self, token_type: std.meta.Tag(tokens.Token), action: Expe
 }
 
 fn parseStatement(self: *Self, alternative_terminator: std.meta.Tag(tokens.Token)) ParserFunctionErrorSet!?AST.StatementNode {
-    const expression = try self.parseExpression();
+    var expression = try self.parseExpression();
     if (expression == null) {
         // Attempt to recover by consuming up to the next statement or end of scope
         while (self.lexer.current_token != .Period and self.lexer.current_token != alternative_terminator and self.lexer.current_token != .EOF) {
@@ -93,25 +93,36 @@ fn parseStatement(self: *Self, alternative_terminator: std.meta.Tag(tokens.Token
 
     if (self.lexer.current_token == .Period) {
         _ = try self.lexer.nextToken();
-    } else if (self.lexer.current_token == alternative_terminator) {
+    } else if (self.lexer.current_token != alternative_terminator) {
         try self.diagnostics.reportDiagnosticFormatted(
             .Error,
+            self.lexer.token_start,
             "Expected period or '{s}' after expression, got '{s}'",
             .{ tokens.tokenTypeToString(alternative_terminator), self.lexer.current_token.toString() },
         );
+
+        // Attempt to recover by consuming up to the next statement or end of scope
+        while (self.lexer.current_token != .Period and self.lexer.current_token != alternative_terminator and self.lexer.current_token != .EOF) {
+            _ = try self.lexer.nextToken();
+        }
+
+        if (self.lexer.current_token == .Period) {
+            _ = try self.lexer.nextToken();
+        }
+
+        expression.?.deinit(self.allocator);
+        return null;
     }
 
     return AST.StatementNode{ .expression = expression.? };
 }
 
 fn parseExpression(self: *Self) ParserFunctionErrorSet!?AST.ExpressionNode {
-    const primary = try self.parsePrimary();
-    // TODO: Recovery
-    if (primary == null) return null;
-
-    // TODO: Handling message expressions
-
-    return primary;
+    if (try self.parsePrimary()) |primary| {
+        return primary;
+    } else {
+        return null;
+    }
 }
 
 fn parsePrimary(self: *Self) ParserFunctionErrorSet!?AST.ExpressionNode {
@@ -125,6 +136,7 @@ fn parsePrimary(self: *Self) ParserFunctionErrorSet!?AST.ExpressionNode {
             // TODO: Recovery
             try self.diagnostics.reportDiagnosticFormatted(
                 .Error,
+                self.lexer.token_start,
                 "Got unknown token '{s}' while parsing primary expression",
                 .{self.lexer.current_token.toString()},
             );
@@ -143,7 +155,7 @@ fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.Expr
                 return AST.ExpressionNode{ .Object = object };
             } else {
                 // TODO: Recovery
-                try self.diagnostics.reportDiagnostic(.Error, "Slot list cannot be present in a sub-expression");
+                try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Slot list cannot be present in a sub-expression");
 
                 object.deinit(self.allocator);
                 return null;
@@ -159,7 +171,7 @@ fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.Expr
                 return statement.expression;
             } else {
                 // TODO: Recovery
-                try self.diagnostics.reportDiagnostic(.Error, "Only one expression must be present in a sub-expression");
+                try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Only one expression must be present in a sub-expression");
 
                 object.deinit(self.allocator);
                 return null;
@@ -217,6 +229,7 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
                                 if (self.lexer.current_token != .ParenOpen) {
                                     try self.diagnostics.reportDiagnosticFormatted(
                                         .Error,
+                                        self.lexer.token_start,
                                         "Expected object after slot with keywords, got '{s}'",
                                         .{self.lexer.current_token.toString()},
                                     );
@@ -225,7 +238,11 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
                                     break :slot_parsing false;
                                 }
 
-                                break :value_parsing AST.ExpressionNode{ .Object = try self.parseObject() };
+                                if (try self.parseObject()) |object| {
+                                    break :value_parsing AST.ExpressionNode{ .Object = object };
+                                } else {
+                                    break :slot_parsing false;
+                                }
                             } else {
                                 if (self.lexer.current_token == .Arrow or self.lexer.current_token == .Equals) {
                                     is_mutable = self.lexer.current_token == .Arrow;
@@ -245,6 +262,7 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
                                 } else if (!(self.lexer.current_token == .Period or self.lexer.current_token == .Pipe)) {
                                     try self.diagnostics.reportDiagnosticFormatted(
                                         .Error,
+                                        self.lexer.token_start,
                                         "Expected '.', '|', '<-' or '=' after slot name, got '{s}'",
                                         .{self.lexer.current_token.toString()},
                                     );
@@ -288,6 +306,7 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
             } else if (self.lexer.current_token != .Pipe) {
                 try self.diagnostics.reportDiagnosticFormatted(
                     .Error,
+                    self.lexer.token_start,
                     "Expected '.' or '|' after slot, got '{s}'",
                     .{self.lexer.current_token.toString()},
                 );
@@ -309,9 +328,9 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
     while (self.lexer.current_token != .ParenClose) {
         // NOTE: parseStatement will have handled the "consuming until end of
         //       statement" part here, so we don't need to do it ourselves.
-        if (try self.parseStatement(.ParenClose)) |statement| {
+        if (try self.parseStatement(.ParenClose)) |*statement| {
             errdefer statement.deinit(self.allocator);
-            try statements.append(statement);
+            try statements.append(statement.*);
         }
     }
 
@@ -358,7 +377,7 @@ fn parseSlotName(self: *Self) ParserFunctionErrorSet!?SlotName {
 
         // Keyword messages have their casing as: foo: param Bar: param Baz: param
         if (is_parsing_keyword_message and !std.ascii.isUpper(keyword_slice[0])) {
-            try self.diagnostics.reportDiagnostic(.Error, "Keyword argument must have uppercase prefix");
+            try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Keyword argument must have uppercase prefix");
             return null;
         }
 
@@ -371,6 +390,7 @@ fn parseSlotName(self: *Self) ParserFunctionErrorSet!?SlotName {
             // that's an error.
             try self.diagnostics.reportDiagnosticFormatted(
                 .Error,
+                self.lexer.token_start,
                 "Expected ':' after slot keyword, got '{s}'",
                 .{self.lexer.current_token.toString()},
             );
@@ -385,6 +405,7 @@ fn parseSlotName(self: *Self) ParserFunctionErrorSet!?SlotName {
         if ((try self.lexer.nextToken()).* != .Identifier) {
             try self.diagnostics.reportDiagnosticFormatted(
                 .Error,
+                self.lexer.token_start,
                 "Expected parameter name after slot keyword, got '{s}'",
                 .{self.lexer.current_token.toString()},
             );
@@ -455,6 +476,7 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
                             if (!(self.lexer.current_token == .Pipe or self.lexer.current_token == .Period)) {
                                 try self.diagnostics.reportDiagnosticFormatted(
                                     .Error,
+                                    self.lexer.token_start,
                                     "Expected '|' or '.' after argument slot, got '{s}'",
                                     .{self.lexer.current_token.toString()},
                                 );
@@ -481,6 +503,7 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
                             } else if (!(self.lexer.current_token == .Pipe or self.lexer.current_token == .Period)) {
                                 try self.diagnostics.reportDiagnosticFormatted(
                                     .Error,
+                                    self.lexer.token_start,
                                     "Expected '.', '|', '<-' or '=' after slot name, got '{s}'",
                                     .{self.lexer.current_token.toString()},
                                 );
@@ -523,6 +546,7 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
             } else if (self.lexer.current_token != .Pipe) {
                 try self.diagnostics.reportDiagnosticFormatted(
                     .Error,
+                    self.lexer.token_start,
                     "Expected '.' or '|' after slot, got '{s}'",
                     .{self.lexer.current_token.toString()},
                 );
@@ -546,7 +570,7 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
         //       statement" part here, so we don't need to do it ourselves.
         if (try self.parseStatement(.BracketClose)) |*statement| {
             errdefer statement.deinit(self.allocator);
-            try statements.append(statement);
+            try statements.append(statement.*);
         }
     }
 
@@ -578,6 +602,7 @@ fn parseNumber(self: *Self) ParserFunctionErrorSet!?AST.NumberNode {
         else => {
             try self.diagnostics.reportDiagnosticFormatted(
                 .Error,
+                self.lexer.token_start,
                 "Expected number value, got '{s}'",
                 .{self.lexer.current_token.toString()},
             );
