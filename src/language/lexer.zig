@@ -212,11 +212,10 @@ const NumberParserState = enum { Initial, MaybeRepresentation, Binary, Hexadecim
 /// Lex a number (integer or floating-point), if possible.
 fn lexNumber(self: *Self) !?tokens.Token {
     var first_byte: u8 = (try self.readByte()) orelse return null;
+    try self.stream.putBackByte(first_byte);
     if (!std.ascii.isDigit(first_byte)) {
-        try self.stream.putBackByte(first_byte);
         return null;
     }
-    self.token_end.advanceForCharacter(first_byte);
 
     var parser_state: NumberParserState = .Initial;
     var integer: u64 = 0;
