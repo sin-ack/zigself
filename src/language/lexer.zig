@@ -238,6 +238,7 @@ fn lexNumber(self: *Self) !?tokens.Token {
                     // This is just a regular decimal number which we can switch
                     // to floating point later if we want to.
                     parser_state = .Decimal;
+                    integer += c - '0';
                 }
             },
             .MaybeRepresentation => {
