@@ -130,18 +130,9 @@ pub const ExpressionNode = union(enum) {
 
     pub fn deinit(self: *ExpressionNode, allocator: *Allocator) void {
         switch (self.*) {
-            .Object => {
-                self.Object.deinit(allocator);
-                allocator.destroy(self.Object);
-            },
-            .Block => {
-                self.Block.deinit(allocator);
-                allocator.destroy(self.Block);
-            },
-            .Message => {
-                self.Message.deinit(allocator);
-                allocator.destroy(self.Message);
-            },
+            .Object => self.Object.destroy(allocator),
+            .Block => self.Block.destroy(allocator),
+            .Message => self.Message.destroy(allocator),
 
             .Identifier => self.Identifier.deinit(allocator),
             .String => self.String.deinit(allocator),
@@ -162,7 +153,7 @@ pub const ExpressionNode = union(enum) {
 
             .Identifier => self.Identifier.dumpTree(printer),
             .String => self.String.dumpTree(printer),
-            .Number => self.String.dumpTree(printer),
+            .Number => self.Number.dumpTree(printer),
         }
         printer.dedent();
     }
@@ -182,6 +173,11 @@ pub const ObjectNode = struct {
             statement.deinit(allocator);
         }
         allocator.free(self.statements);
+    }
+
+    pub fn destroy(self: *ObjectNode, allocator: *Allocator) void {
+        self.deinit(allocator);
+        allocator.destroy(self);
     }
 
     pub fn dumpTree(self: ObjectNode, printer: *ASTPrinter) void {
@@ -278,6 +274,11 @@ pub const BlockNode = struct {
         allocator.free(self.statements);
     }
 
+    pub fn destroy(self: *BlockNode, allocator: *Allocator) void {
+        self.deinit(allocator);
+        allocator.destroy(self);
+    }
+
     pub fn dumpTree(self: BlockNode, printer: *ASTPrinter) void {
         printer.print(CYAN ++ "BlockNode\n" ++ CLEAR, .{});
         printer.indent();
@@ -329,6 +330,11 @@ pub const MessageNode = struct {
             argument.deinit(allocator);
         }
         allocator.free(self.arguments);
+    }
+
+    pub fn destroy(self: *MessageNode, allocator: *Allocator) void {
+        self.deinit(allocator);
+        allocator.destroy(self);
     }
 
     pub fn dumpTree(self: MessageNode, printer: *ASTPrinter) void {
@@ -388,7 +394,7 @@ pub const NumberNode = union(enum) {
     FloatingPoint: f64,
 
     pub fn dumpTree(self: NumberNode, printer: *ASTPrinter) void {
-        printer.print(CYAN ++ "NumberNode " ++ CLEAR, .{self.value.len});
+        printer.print(CYAN ++ "NumberNode " ++ CLEAR, .{});
         switch (self) {
             .Integer => std.debug.print("{}\n", .{self.Integer}),
             .FloatingPoint => std.debug.print("{}\n", .{self.FloatingPoint}),

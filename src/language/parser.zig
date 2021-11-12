@@ -175,7 +175,7 @@ fn parsePrimary(self: *Self) ParserFunctionErrorSet!?AST.ExpressionNode {
 
 fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.ExpressionNode {
     if (try self.parseObject()) |object| {
-        errdefer object.deinit(self.allocator);
+        errdefer object.destroy(self.allocator);
 
         if (object.slots.len > 0) {
             if (object.statements.len == 0) {
@@ -184,7 +184,7 @@ fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.Expr
                 // TODO: Recovery
                 try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Slot list cannot be present in a sub-expression");
 
-                object.deinit(self.allocator);
+                object.destroy(self.allocator);
                 return null;
             }
         } else {
@@ -192,15 +192,15 @@ fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.Expr
                 const statement = object.statements[0];
 
                 // This is done so that the slice is freed but the expression isn't.
-                object.statements = object.statements[0..0];
-                object.deinit(self.allocator);
+                object.statements = try self.allocator.resize(object.statements, 0);
+                object.destroy(self.allocator);
 
                 return statement.expression;
             } else {
                 // TODO: Recovery
                 try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Only one expression must be present in a sub-expression");
 
-                object.deinit(self.allocator);
+                object.destroy(self.allocator);
                 return null;
             }
         }
@@ -252,6 +252,7 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
                                     slot_name.deinit(self.allocator);
                                     break :slot_parsing false;
                                 }
+                                is_mutable = false;
 
                                 if (self.lexer.current_token != .ParenOpen) {
                                     try self.diagnostics.reportDiagnosticFormatted(
@@ -316,7 +317,6 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
                         });
                     }
 
-                    _ = try self.lexer.nextToken();
                     break :slot_parsing true;
                 }
 
@@ -350,9 +350,9 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
                 }
             }
         }
-    }
 
-    _ = try self.lexer.nextToken();
+        _ = try self.lexer.nextToken();
+    }
 
     while (self.lexer.current_token != .ParenClose) {
         // NOTE: parseStatement will have handled the "consuming until end of
@@ -485,6 +485,8 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
                     const identifier_copy = try self.allocator.dupe(u8, identifier_slice);
                     errdefer self.allocator.free(identifier_copy);
 
+                    _ = try self.lexer.nextToken();
+
                     var value = value_parsing: {
                         if (is_argument) {
                             // If this is an argument slot, we don't allow the assignment of
@@ -579,9 +581,9 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
                 }
             }
         }
-    }
 
-    _ = try self.lexer.nextToken();
+        _ = try self.lexer.nextToken();
+    }
 
     while (self.lexer.current_token != .BracketClose) {
         // NOTE: parseStatement will have handled the "consuming until end of
@@ -612,8 +614,8 @@ fn parseKeywordMessageToSelf(self: *Self, identifier: AST.IdentifierNode) Parser
 
     // TODO: Intern these
     const self_identifier = try self.allocator.dupe(u8, "self");
-    // NOTE: We transfer the ownership to the function at call time, so it will
-    //       clean up the receiver and identifier on failure.
+    // NOTE: We transfer the ownership to parseMessageCommon at call time, so it
+    //       will clean up the receiver and identifier on failure.
 
     const receiver = AST.ExpressionNode{ .Identifier = AST.IdentifierNode{ .value = self_identifier } };
     return try self.parseMessageCommon(receiver, identifier);
@@ -629,9 +631,20 @@ fn parseMessageToReceiver(self: *Self, receiver: AST.ExpressionNode) ParserFunct
     }
 
     const identifier_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
+
+    // Determine whether this identifier can be a message. Normally
+    // parseMessageCommon would do this but we get rid of the identifier below
+    // by doing a nextToken, so we won't be able to recover the parser state at
+    // that point.
+    if (std.ascii.isUpper(identifier_slice[0])) {
+        std.debug.print("parseMessageToReceiver: This message is part of an outer expression, giving up\n", .{});
+        // Nope, can't use it.
+        return receiver;
+    }
+
     const identifier_copy = try self.allocator.dupe(u8, identifier_slice);
-    // NOTE: We transfer the ownership to the function at call time, so it will
-    //       clean up the receiver and identifier on failure.
+    // NOTE: We transfer the ownership to parseMessageCommon at call time, so it
+    //       will clean up the receiver and identifier on failure.
 
     {
         errdefer self.allocator.free(identifier_copy);
@@ -802,10 +815,10 @@ fn parseMessageCommon(
                     }
 
                     try current_message_name.appendSlice(identifier_slice);
+                    _ = try self.lexer.nextToken();
 
                     if (!try self.expectToken(.Colon, .Consume)) {
                         current_receiver.deinit(self.allocator);
-
                         return null;
                     }
 
