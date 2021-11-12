@@ -46,19 +46,22 @@ pub fn nextToken(self: *Self) !*tokens.Token {
     if (!self.initialized)
         @panic("Attempting to call Lexer.nextToken on uninitialized lexer");
 
-    try self.skipWhitespace();
-    if (self.eof()) {
-        if (LEXER_DEBUG) std.debug.print("lexer: Reached EOF!\n", .{});
-        self.current_token = tokens.Token{ .EOF = .{} };
-        return &self.current_token;
-    }
+    while (true) {
+        try self.skipWhitespace();
+        if (self.eof()) {
+            if (LEXER_DEBUG) std.debug.print("lexer: Reached EOF!\n", .{});
+            self.current_token = tokens.Token{ .EOF = .{} };
+            return &self.current_token;
+        }
 
-    self.token_start = self.token_end;
+        self.token_start = self.token_end;
 
-    if (try self.lexComment()) |token| {
-        if (LEXER_DEBUG) std.debug.print("lexer: Lexed a comment\n", .{});
-        self.current_token = token;
-        return &self.current_token;
+        if (try self.lexComment()) |token| {
+            _ = token;
+            if (LEXER_DEBUG) std.debug.print("lexer: Parsed a comment, continuing\n", .{});
+        } else {
+            break;
+        }
     }
     if (try self.lexString()) |token| {
         if (LEXER_DEBUG) std.debug.print("lexer: Lexed a string: \"{s}\"\n", .{token.String});
