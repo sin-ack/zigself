@@ -63,23 +63,24 @@ pub fn nextToken(self: *Self) !*tokens.Token {
             break;
         }
     }
+
     if (try self.lexString()) |token| {
-        if (LEXER_DEBUG) std.debug.print("lexer: Lexed a string: \"{s}\"\n", .{token.String});
+        if (LEXER_DEBUG) std.debug.print("lexer: Current token is now a string: \"{s}\"\n", .{token.String});
         self.current_token = token;
         return &self.current_token;
     }
     if (try self.lexNumber()) |token| {
-        if (LEXER_DEBUG) std.debug.print("lexer: Lexed a number\n", .{});
+        if (LEXER_DEBUG) std.debug.print("lexer: Current token is now a number\n", .{});
         self.current_token = token;
         return &self.current_token;
     }
     if (try self.lexIdentifier()) |token| {
-        if (LEXER_DEBUG) std.debug.print("lexer: Lexed an identifier: \"{s}\"\n", .{token.Identifier});
+        if (LEXER_DEBUG) std.debug.print("lexer: Current token is now an identifier: \"{s}\"\n", .{token.Identifier});
         self.current_token = token;
         return &self.current_token;
     }
     if (try self.lexSymbol()) |token| {
-        if (LEXER_DEBUG) std.debug.print("lexer: Lexed a symbol: '{s}'\n", .{token.toString()});
+        if (LEXER_DEBUG) std.debug.print("lexer: Current token is now a symbol: '{s}'\n", .{token.toString()});
         self.current_token = token;
         return &self.current_token;
     }
