@@ -2,6 +2,7 @@ const std = @import("std");
 const zig_args = @import("zig-args");
 
 const Parser = @import("./language/parser.zig");
+const AST = @import("./language/ast.zig");
 
 const ArgumentSpec = struct {
     help: bool = false,
@@ -66,7 +67,9 @@ pub fn main() !u8 {
         std.debug.print("{}: {s}: {s}\n", .{ diagnostic.location.format(), @tagName(diagnostic.level), diagnostic.message });
     }
 
-    script_node.dumpTree(0);
+    var printer = AST.ASTPrinter.init(2, allocator);
+    defer printer.deinit();
+    script_node.dumpTree(&printer);
 
     return 0;
 }

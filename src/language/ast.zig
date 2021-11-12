@@ -1,10 +1,82 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-fn printWithIndent(indent: usize, comptime fmt: []const u8, args: anytype) void {
-    std.io.getStdErr().writer().writeByteNTimes(' ', indent) catch return;
-    std.debug.print(fmt, args);
-}
+// FIXME: Move this to another file, or use a library
+const DARKGRAY = "\x1b[90m";
+const GRAY = "\x1b[37m";
+const GREEN = "\x1b[32m";
+const ORANGE = "\x1b[33m";
+const CYAN = "\x1b[36m";
+const CLEAR = "\x1b[0m";
+
+pub const ASTPrinter = struct {
+    indent_width: usize,
+
+    branches: std.ArrayList(Branch),
+    current_indent: usize = 0,
+    is_stem: bool = false,
+
+    const Branch = struct { indent: usize, concluded: bool };
+
+    pub fn init(indent_width: usize, allocator: *Allocator) ASTPrinter {
+        return .{
+            .indent_width = indent_width,
+            .branches = std.ArrayList(Branch).init(allocator),
+        };
+    }
+
+    const StemIsLast = enum { Last, NotLast };
+    pub fn setStem(self: *ASTPrinter, is_last: StemIsLast) void {
+        self.is_stem = true;
+        if (self.branches.items.len > 0) {
+            self.branches.items[self.branches.items.len - 1].concluded = is_last == .Last;
+        }
+    }
+
+    pub fn indent(self: *ASTPrinter) void {
+        self.branches.append(.{ .indent = self.current_indent, .concluded = false }) catch unreachable;
+        self.current_indent += self.indent_width;
+    }
+
+    pub fn dedent(self: *ASTPrinter) void {
+        _ = self.branches.pop();
+        self.current_indent -= self.indent_width;
+    }
+
+    pub fn print(self: *ASTPrinter, comptime fmt: []const u8, args: anytype) void {
+        const writer = std.io.getStdErr().writer();
+        writer.writeAll(DARKGRAY) catch return;
+
+        var last_indent: usize = 0;
+        for (self.branches.items) |branch, i| {
+            if (i + 1 == self.branches.items.len) {
+                if (self.is_stem) {
+                    writer.writeAll(if (branch.concluded) "└" else "├") catch return;
+                } else {
+                    writer.writeAll("│") catch return;
+                }
+
+                var stem_i: usize = 0;
+                while (stem_i < self.current_indent - branch.indent - 2) : (stem_i += 1) {
+                    writer.writeAll(if (self.is_stem) "─" else " ") catch return;
+                }
+                writer.writeAll("╴") catch return;
+            } else {
+                writer.writeAll(if (!branch.concluded) "│" else " ") catch return;
+                writer.writeByteNTimes(' ', self.indent_width - 1) catch return;
+            }
+
+            last_indent = branch.indent;
+        }
+
+        writer.writeAll(CLEAR) catch return;
+        std.debug.print(fmt, args);
+    }
+
+    pub fn deinit(self: *ASTPrinter) void {
+        self.branches.deinit();
+    }
+};
 
 /// A node which describes a single script.
 pub const ScriptNode = struct {
@@ -17,11 +89,15 @@ pub const ScriptNode = struct {
         allocator.free(self.statements);
     }
 
-    pub fn dumpTree(self: ScriptNode, indent: usize) void {
-        printWithIndent(indent, "ScriptNode\n", .{});
-        for (self.statements) |statement| {
-            statement.dumpTree(indent + 2);
+    pub fn dumpTree(self: ScriptNode, printer: *ASTPrinter) void {
+        printer.print(CYAN ++ "ScriptNode\n" ++ CLEAR, .{});
+
+        printer.indent();
+        for (self.statements) |statement, i| {
+            printer.setStem(if (i == self.statements.len - 1) .Last else .NotLast);
+            statement.dumpTree(printer);
         }
+        printer.dedent();
     }
 };
 
@@ -33,9 +109,13 @@ pub const StatementNode = struct {
         self.expression.deinit(allocator);
     }
 
-    pub fn dumpTree(self: StatementNode, indent: usize) void {
-        printWithIndent(indent, "StatementNode\n", .{});
-        self.expression.dumpTree(indent + 2);
+    pub fn dumpTree(self: StatementNode, printer: *ASTPrinter) void {
+        printer.print(CYAN ++ "StatementNode\n" ++ CLEAR, .{});
+
+        printer.indent();
+        printer.setStem(.Last);
+        self.expression.dumpTree(printer);
+        printer.dedent();
     }
 };
 
@@ -50,9 +130,18 @@ pub const ExpressionNode = union(enum) {
 
     pub fn deinit(self: *ExpressionNode, allocator: *Allocator) void {
         switch (self.*) {
-            .Object => self.Object.deinit(allocator),
-            .Block => self.Block.deinit(allocator),
-            .Message => self.Message.deinit(allocator),
+            .Object => {
+                self.Object.deinit(allocator);
+                allocator.destroy(self.Object);
+            },
+            .Block => {
+                self.Block.deinit(allocator);
+                allocator.destroy(self.Block);
+            },
+            .Message => {
+                self.Message.deinit(allocator);
+                allocator.destroy(self.Message);
+            },
 
             .Identifier => self.Identifier.deinit(allocator),
             .String => self.String.deinit(allocator),
@@ -61,17 +150,21 @@ pub const ExpressionNode = union(enum) {
         }
     }
 
-    pub fn dumpTree(self: ExpressionNode, indent: usize) void {
-        printWithIndent(indent, "ExpressionNode\n", .{});
-        switch (self) {
-            .Object => self.Object.dumpTree(indent + 2),
-            .Block => self.Block.dumpTree(indent + 2),
-            .Message => self.Message.dumpTree(indent + 2),
+    pub fn dumpTree(self: ExpressionNode, printer: *ASTPrinter) void {
+        printer.print(CYAN ++ "ExpressionNode\n" ++ CLEAR, .{});
 
-            .Identifier => self.Identifier.dumpTree(indent + 2),
-            .String => self.String.dumpTree(indent + 2),
-            .Number => self.String.dumpTree(indent + 2),
+        printer.indent();
+        printer.setStem(.Last);
+        switch (self) {
+            .Object => self.Object.dumpTree(printer),
+            .Block => self.Block.dumpTree(printer),
+            .Message => self.Message.dumpTree(printer),
+
+            .Identifier => self.Identifier.dumpTree(printer),
+            .String => self.String.dumpTree(printer),
+            .Number => self.String.dumpTree(printer),
         }
+        printer.dedent();
     }
 };
 
@@ -91,18 +184,29 @@ pub const ObjectNode = struct {
         allocator.free(self.statements);
     }
 
-    pub fn dumpTree(self: ObjectNode, indent: usize) void {
-        printWithIndent(indent, "ObjectNode\n", .{});
+    pub fn dumpTree(self: ObjectNode, printer: *ASTPrinter) void {
+        printer.print(CYAN ++ "ObjectNode\n" ++ CLEAR, .{});
+        printer.indent();
 
-        printWithIndent(indent + 2, "slots:\n", .{});
-        for (self.slots) |slot| {
-            slot.dumpTree(indent + 4);
+        printer.setStem(.NotLast);
+        printer.print("slots:\n", .{});
+        printer.indent();
+        for (self.slots) |slot, i| {
+            printer.setStem(if (i == self.slots.len - 1) .Last else .NotLast);
+            slot.dumpTree(printer);
         }
+        printer.dedent();
 
-        printWithIndent(indent + 4, "statements:\n", .{});
-        for (self.statements) |statement| {
-            statement.dumpTree(indent + 4);
+        printer.setStem(.Last);
+        printer.print("statements:\n", .{});
+        printer.indent();
+        for (self.statements) |statement, i| {
+            printer.setStem(if (i == self.statements.len - 1) .Last else .NotLast);
+            statement.dumpTree(printer);
         }
+        printer.dedent();
+
+        printer.dedent();
     }
 };
 
@@ -127,22 +231,34 @@ pub const SlotNode = struct {
         self.value.deinit(allocator);
     }
 
-    pub fn dumpTree(self: SlotNode, indent: usize) void {
-        const is_mutable_string: []const u8 = if (self.is_mutable) "mutable" else "not mutable";
-        const is_parent_string: []const u8 = if (self.is_parent) "parent" else "not parent";
-        const is_argument_string: []const u8 = if (self.is_argument) "argument" else "not argument";
-        printWithIndent(indent, "SlotNode ({s}, {s}, {s})\n", .{ is_mutable_string, is_parent_string, is_argument_string });
+    pub fn dumpTree(self: SlotNode, printer: *ASTPrinter) void {
+        const is_mutable_string: []const u8 = if (self.is_mutable) GREEN ++ "mutable" ++ CLEAR else GRAY ++ "not mutable" ++ CLEAR;
+        const is_parent_string: []const u8 = if (self.is_parent) GREEN ++ "parent" ++ CLEAR else GRAY ++ "not parent" ++ CLEAR;
+        const is_argument_string: []const u8 = if (self.is_argument) GREEN ++ "argument" ++ CLEAR else GRAY ++ "not argument" ++ CLEAR;
+        printer.print(
+            CYAN ++ "SlotNode" ++ CLEAR ++ " ({s}, {s}, {s})\n",
+            .{ is_mutable_string, is_parent_string, is_argument_string },
+        );
+        printer.indent();
 
-        printWithIndent(indent + 2, "name: \"{s}\"\n", .{self.name});
-        printWithIndent(indent + 2, "arguments: ", .{});
+        printer.setStem(.NotLast);
+        printer.print("name: " ++ GREEN ++ "\"{s}\"\n" ++ CLEAR, .{self.name});
+        printer.setStem(.NotLast);
+        printer.print("arguments: " ++ GREEN, .{});
         for (self.arguments) |argument, i| {
             if (i != 0) std.debug.print(", ", .{});
             std.debug.print("\"{s}\"", .{argument});
         }
-        std.debug.print("\n", .{});
+        std.debug.print("\n" ++ CLEAR, .{});
 
-        printWithIndent(indent + 2, "value:\n", .{});
-        self.value.dumpTree(indent + 4);
+        printer.setStem(.Last);
+        printer.print("value:\n", .{});
+        printer.indent();
+        printer.setStem(.Last);
+        self.value.dumpTree(printer);
+        printer.dedent();
+
+        printer.dedent();
     }
 };
 
@@ -162,18 +278,29 @@ pub const BlockNode = struct {
         allocator.free(self.statements);
     }
 
-    pub fn dumpTree(self: BlockNode, indent: usize) void {
-        printWithIndent(indent, "BlockNode\n", .{});
+    pub fn dumpTree(self: BlockNode, printer: *ASTPrinter) void {
+        printer.print(CYAN ++ "BlockNode\n" ++ CLEAR, .{});
+        printer.indent();
 
-        printWithIndent(indent + 2, "slots:\n", .{});
-        for (self.slots) |slot| {
-            slot.dumpTree(indent + 4);
+        printer.setStem(.NotLast);
+        printer.print("slots:\n", .{});
+        printer.indent();
+        for (self.slots) |slot, i| {
+            printer.setStem(if (i == self.slots.len - 1) .Last else .NotLast);
+            slot.dumpTree(printer);
         }
+        printer.dedent();
 
-        printWithIndent(indent + 4, "statements:\n", .{});
-        for (self.statements) |statement| {
-            statement.dumpTree(indent + 4);
+        printer.setStem(.Last);
+        printer.print("statements:\n", .{});
+        printer.indent();
+        for (self.statements) |statement, i| {
+            printer.setStem(if (i == self.statements.len - 1) .Last else .NotLast);
+            statement.dumpTree(printer);
         }
+        printer.dedent();
+
+        printer.dedent();
     }
 };
 
@@ -184,8 +311,8 @@ pub const IdentifierNode = struct {
         allocator.free(self.value);
     }
 
-    pub fn dumpTree(self: IdentifierNode, indent: usize) void {
-        printWithIndent(indent, "IdentifierNode \"{s}\"\n", .{self.value});
+    pub fn dumpTree(self: IdentifierNode, printer: *ASTPrinter) void {
+        printer.print(CYAN ++ "IdentifierNode " ++ GREEN ++ "\"{s}\"\n" ++ CLEAR, .{self.value});
     }
 };
 
@@ -204,21 +331,33 @@ pub const MessageNode = struct {
         allocator.free(self.arguments);
     }
 
-    pub fn dumpTree(self: MessageNode, indent: usize) void {
-        const message_type: []const u8 = if (self.arguments.len == 0) "unary" else "keyword";
-        printWithIndent(indent, "MessageNode ({s})\n", .{message_type});
+    pub fn dumpTree(self: MessageNode, printer: *ASTPrinter) void {
+        const message_type: []const u8 = if (self.arguments.len == 0) GREEN ++ "unary" ++ CLEAR else ORANGE ++ "keyword" ++ CLEAR;
+        printer.print(CYAN ++ "MessageNode" ++ CLEAR ++ " ({s})\n", .{message_type});
+        printer.indent();
 
-        printWithIndent(indent + 2, "receiver:", .{});
-        self.receiver.dumpTree(indent + 4);
+        printer.setStem(.NotLast);
+        printer.print("receiver:\n", .{});
+        printer.indent();
+        printer.setStem(.Last);
+        self.receiver.dumpTree(printer);
+        printer.dedent();
 
-        printWithIndent(indent + 2, "name: \"{s}\"\n", .{self.message_name});
+        printer.setStem(if (self.arguments.len == 0) .Last else .NotLast);
+        printer.print("name: " ++ GREEN ++ "\"{s}\"\n" ++ CLEAR, .{self.message_name});
 
-        printWithIndent(indent + 2, "arguments:", .{});
-        for (self.arguments) |argument, i| {
-            if (i != 0) std.debug.print(", ", .{});
-            std.debug.print("\"{s}\"", .{argument});
+        if (self.arguments.len > 0) {
+            printer.setStem(.Last);
+            printer.print("arguments:\n", .{});
+            printer.indent();
+            for (self.arguments) |argument, i| {
+                printer.setStem(if (i == self.arguments.len - 1) .Last else .NotLast);
+                argument.dumpTree(printer);
+            }
+            printer.dedent();
         }
-        std.debug.print("\n", .{});
+
+        printer.dedent();
     }
 };
 
@@ -229,13 +368,18 @@ pub const StringNode = struct {
         allocator.free(self.value);
     }
 
-    pub fn dumpTree(self: StringNode, indent: usize) void {
-        printWithIndent(indent, "StringNode ({} bytes)\n", .{self.value.len});
-        printWithIndent(indent + 2, "content: \"{s}", .{self.value[0..std.math.min(200, self.value.len)]});
+    pub fn dumpTree(self: StringNode, printer: *ASTPrinter) void {
+        printer.print(CYAN ++ "StringNode" ++ CLEAR ++ " (" ++ GREEN ++ "{}" ++ CLEAR ++ " bytes)\n", .{self.value.len});
+        printer.indent();
+
+        printer.setStem(.Last);
+        printer.print("content: \"{s}", .{self.value[0..std.math.min(200, self.value.len)]});
         if (self.value.len > 200) {
             std.debug.print("...", .{});
         }
         std.debug.print("\"\n", .{});
+
+        printer.dedent();
     }
 };
 
@@ -243,8 +387,8 @@ pub const NumberNode = union(enum) {
     Integer: u64,
     FloatingPoint: f64,
 
-    pub fn dumpTree(self: NumberNode, indent: usize) void {
-        printWithIndent(indent, "NumberNode ", .{self.value.len});
+    pub fn dumpTree(self: NumberNode, printer: *ASTPrinter) void {
+        printer.print(CYAN ++ "NumberNode " ++ CLEAR, .{self.value.len});
         switch (self) {
             .Integer => std.debug.print("{}\n", .{self.Integer}),
             .FloatingPoint => std.debug.print("{}\n", .{self.FloatingPoint}),

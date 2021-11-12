@@ -6,6 +6,20 @@ const Diagnostics = @import("./diagnostics.zig");
 
 const Self = @This();
 
+const SlotName = struct {
+    name: []u8,
+    arguments: [][]u8,
+
+    pub fn deinit(self: *SlotName, allocator: *std.mem.Allocator) void {
+        allocator.free(self.name);
+
+        for (self.arguments) |argument| {
+            allocator.free(argument);
+        }
+        allocator.free(self.arguments);
+    }
+};
+
 fn errorSetOf(comptime Fn: anytype) type {
     return @typeInfo(@typeInfo(@TypeOf(Fn)).Fn.return_type.?).ErrorUnion.error_set;
 }
@@ -44,11 +58,17 @@ pub fn parse(self: *Self) !AST.ScriptNode {
     _ = try self.lexer.nextToken();
 
     var statements = std.ArrayList(AST.StatementNode).init(self.allocator);
-    defer statements.deinit();
+    defer {
+        for (statements.items) |*statement| {
+            statement.deinit(self.allocator);
+        }
+        statements.deinit();
+    }
 
     while (self.lexer.current_token != .EOF) {
-        if (try self.parseStatement(.EOF)) |statement| {
-            try statements.append(statement);
+        if (try self.parseStatement(.EOF)) |*statement| {
+            errdefer statement.deinit(self.allocator);
+            try statements.append(statement.*);
         }
     }
 
@@ -77,8 +97,32 @@ fn expectToken(self: *Self, token_type: std.meta.Tag(tokens.Token), action: Expe
 }
 
 fn parseStatement(self: *Self, alternative_terminator: std.meta.Tag(tokens.Token)) ParserFunctionErrorSet!?AST.StatementNode {
-    var expression = try self.parseExpression();
-    if (expression == null) {
+    if (try self.parseExpression()) |*expression| {
+        if (self.lexer.current_token == .Period) {
+            _ = try self.lexer.nextToken();
+        } else if (self.lexer.current_token != alternative_terminator) {
+            try self.diagnostics.reportDiagnosticFormatted(
+                .Error,
+                self.lexer.token_start,
+                "Expected period or '{s}' after expression, got '{s}'",
+                .{ tokens.tokenTypeToString(alternative_terminator), self.lexer.current_token.toString() },
+            );
+
+            // Attempt to recover by consuming up to the next statement or end of scope
+            while (self.lexer.current_token != .Period and self.lexer.current_token != alternative_terminator and self.lexer.current_token != .EOF) {
+                _ = try self.lexer.nextToken();
+            }
+
+            if (self.lexer.current_token == .Period) {
+                _ = try self.lexer.nextToken();
+            }
+
+            expression.deinit(self.allocator);
+            return null;
+        }
+
+        return AST.StatementNode{ .expression = expression.* };
+    } else {
         // Attempt to recover by consuming up to the next statement or end of scope
         while (self.lexer.current_token != .Period and self.lexer.current_token != alternative_terminator and self.lexer.current_token != .EOF) {
             _ = try self.lexer.nextToken();
@@ -90,36 +134,19 @@ fn parseStatement(self: *Self, alternative_terminator: std.meta.Tag(tokens.Token
 
         return null;
     }
-
-    if (self.lexer.current_token == .Period) {
-        _ = try self.lexer.nextToken();
-    } else if (self.lexer.current_token != alternative_terminator) {
-        try self.diagnostics.reportDiagnosticFormatted(
-            .Error,
-            self.lexer.token_start,
-            "Expected period or '{s}' after expression, got '{s}'",
-            .{ tokens.tokenTypeToString(alternative_terminator), self.lexer.current_token.toString() },
-        );
-
-        // Attempt to recover by consuming up to the next statement or end of scope
-        while (self.lexer.current_token != .Period and self.lexer.current_token != alternative_terminator and self.lexer.current_token != .EOF) {
-            _ = try self.lexer.nextToken();
-        }
-
-        if (self.lexer.current_token == .Period) {
-            _ = try self.lexer.nextToken();
-        }
-
-        expression.?.deinit(self.allocator);
-        return null;
-    }
-
-    return AST.StatementNode{ .expression = expression.? };
 }
 
 fn parseExpression(self: *Self) ParserFunctionErrorSet!?AST.ExpressionNode {
-    if (try self.parsePrimary()) |primary| {
-        return primary;
+    if (try self.parsePrimary()) |*primary| {
+        errdefer primary.deinit(self.allocator);
+
+        if (primary.* == .Identifier and self.lexer.current_token == .Colon) {
+            return try self.parseKeywordMessageToSelf(primary.Identifier);
+        } else if (self.lexer.current_token == .Identifier) {
+            return try self.parseMessageToReceiver(primary.*);
+        }
+
+        return primary.*;
     } else {
         return null;
     }
@@ -219,7 +246,7 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
                             _ = try self.lexer.nextToken();
                         }
 
-                        const value = value_parsing: {
+                        var value = value_parsing: {
                             if (slot_name.arguments.len > 0) {
                                 if (!try self.expectToken(.Equals, .Consume)) {
                                     slot_name.deinit(self.allocator);
@@ -241,6 +268,7 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
                                 if (try self.parseObject()) |object| {
                                     break :value_parsing AST.ExpressionNode{ .Object = object };
                                 } else {
+                                    slot_name.deinit(self.allocator);
                                     break :slot_parsing false;
                                 }
                             } else {
@@ -249,11 +277,11 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
                                     _ = try self.lexer.nextToken();
 
                                     // NOTE: We need to override ParenOpen here because
-                                    //       parsePrimary only parses sub-expressions or
+                                    //       parseExpression only parses sub-expressions or
                                     //       slots objects.
                                     switch (self.lexer.current_token) {
                                         .ParenOpen => if (try self.parseObject()) |object| break :value_parsing AST.ExpressionNode{ .Object = object },
-                                        else => if (try self.parsePrimary()) |primary| break :value_parsing primary,
+                                        else => if (try self.parseExpression()) |expression| break :value_parsing expression,
                                     }
 
                                     // If we got here, then parsing either of them failed.
@@ -276,6 +304,7 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
                                 break :value_parsing AST.ExpressionNode{ .Identifier = AST.IdentifierNode{ .value = nil_identifier } };
                             }
                         };
+                        errdefer value.deinit(self.allocator);
 
                         try slots.append(AST.SlotNode{
                             .is_mutable = is_mutable,
@@ -343,26 +372,13 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
     return object_node;
 }
 
-const SlotName = struct {
-    name: []u8,
-    arguments: [][]u8,
-
-    pub fn deinit(self: *SlotName, allocator: *std.mem.Allocator) void {
-        allocator.free(self.name);
-
-        for (self.arguments) |argument| {
-            allocator.free(argument);
-        }
-        allocator.free(self.arguments);
-    }
-};
-
 fn parseSlotName(self: *Self) ParserFunctionErrorSet!?SlotName {
     if (!try self.expectToken(.Identifier, .DontConsume))
         return null;
 
     var name = std.ArrayList(u8).init(self.allocator);
     defer name.deinit();
+
     var arguments = std.ArrayList([]u8).init(self.allocator);
     defer {
         for (arguments.items) |argument| {
@@ -469,7 +485,7 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
                     const identifier_copy = try self.allocator.dupe(u8, identifier_slice);
                     errdefer self.allocator.free(identifier_copy);
 
-                    const value = value_parsing: {
+                    var value = value_parsing: {
                         if (is_argument) {
                             // If this is an argument slot, we don't allow the assignment of
                             // any sort of value.
@@ -490,11 +506,12 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
                                 _ = try self.lexer.nextToken();
 
                                 // NOTE: We need to override ParenOpen here because
-                                //       parsePrimary only parses sub-expressions or
+                                //       parseExpression only parses sub-expressions or
                                 //       slots objects.
                                 switch (self.lexer.current_token) {
-                                    .ParenOpen => if (try self.parseObject()) |object| break :value_parsing AST.ExpressionNode{ .Object = object },
-                                    else => if (try self.parsePrimary()) |primary| break :value_parsing primary,
+                                    .ParenOpen => if (try self.parseObject()) |object|
+                                        break :value_parsing AST.ExpressionNode{ .Object = object },
+                                    else => if (try self.parseExpression()) |expression| break :value_parsing expression,
                                 }
 
                                 // If we got here, then parsing either of them failed.
@@ -517,6 +534,7 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
                         const nil_identifier = try self.allocator.dupe(u8, "nil");
                         break :value_parsing AST.ExpressionNode{ .Identifier = AST.IdentifierNode{ .value = nil_identifier } };
                     };
+                    errdefer value.deinit(self.allocator);
 
                     try slots.append(AST.SlotNode{
                         .is_mutable = is_mutable,
@@ -581,6 +599,246 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
     block_node.statements = statements.toOwnedSlice();
 
     return block_node;
+}
+
+fn parseKeywordMessageToSelf(self: *Self, identifier: AST.IdentifierNode) ParserFunctionErrorSet!?AST.ExpressionNode {
+    // Arguments aren't mutable in Zig.
+    var identifier_mut = identifier;
+
+    if (!try self.expectToken(.Colon, .DontConsume)) {
+        identifier_mut.deinit(self.allocator);
+        return null;
+    }
+
+    // TODO: Intern these
+    const self_identifier = try self.allocator.dupe(u8, "self");
+    // NOTE: We transfer the ownership to the function at call time, so it will
+    //       clean up the receiver and identifier on failure.
+
+    const receiver = AST.ExpressionNode{ .Identifier = AST.IdentifierNode{ .value = self_identifier } };
+    return try self.parseMessageCommon(receiver, identifier);
+}
+
+fn parseMessageToReceiver(self: *Self, receiver: AST.ExpressionNode) ParserFunctionErrorSet!?AST.ExpressionNode {
+    // Arguments aren't mutable in Zig.
+    var receiver_mut = receiver;
+
+    if (!try self.expectToken(.Identifier, .DontConsume)) {
+        receiver_mut.deinit(self.allocator);
+        return null;
+    }
+
+    const identifier_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
+    const identifier_copy = try self.allocator.dupe(u8, identifier_slice);
+    // NOTE: We transfer the ownership to the function at call time, so it will
+    //       clean up the receiver and identifier on failure.
+
+    {
+        errdefer self.allocator.free(identifier_copy);
+        _ = try self.lexer.nextToken();
+    }
+
+    const identifier = AST.IdentifierNode{ .value = identifier_copy };
+    return try self.parseMessageCommon(receiver, identifier);
+}
+
+const MessageParsingState = enum { Unary, Keyword };
+fn parseMessageCommon(
+    self: *Self,
+    receiver: AST.ExpressionNode,
+    first_identifier: AST.IdentifierNode,
+) ParserFunctionErrorSet!?AST.ExpressionNode {
+    // At this part of message parsing, we're going to be at one of these two
+    // points:
+    // 1) It was a keyword message. We are at a Colon token, and will start
+    //    parsing a keyword message from the get-go.
+    // 2) It was a unary message, possibly followed up by more unary messages,
+    //    maybe ending in a keyword message. We are at an Identifier token, and
+    //    will reduce it to a new expression.
+
+    // Arguments aren't mutable in Zig.
+    var first_identifier_mut = first_identifier;
+
+    var parsing_state = MessageParsingState.Unary;
+
+    var current_receiver = receiver;
+    errdefer current_receiver.deinit(self.allocator);
+
+    var current_message_name = std.ArrayList(u8).init(self.allocator);
+    defer current_message_name.deinit();
+
+    var parameters = std.ArrayList(AST.ExpressionNode).init(self.allocator);
+    defer {
+        for (parameters.items) |*parameter| {
+            parameter.deinit(self.allocator);
+        }
+        parameters.deinit();
+    }
+
+    // Used when passing an identifier string from unary to keyword parsing state.
+    var unary_to_keyword_identifier: []const u8 = undefined;
+    // Used to tell whether the Keyword state should use unary-to-keyword
+    // passover or the first identifier as the initial keyword, because we can
+    // have two ways of entering the Keyword state.
+    var should_use_passover_as_first_identifier = false;
+
+    // If the next token is not a Colon, then we want to immediately reduce
+    // the first identifier into the receiver; this handles the case of
+    // chained unary messages.
+    if (self.lexer.current_token != .Colon) {
+        errdefer first_identifier_mut.deinit(self.allocator);
+
+        var message_node = try self.allocator.create(AST.MessageNode);
+        message_node.receiver = current_receiver;
+        // NOTE: We now take ownership of the first identifier's string
+        message_node.message_name = first_identifier.value;
+        message_node.arguments = try self.allocator.alloc(AST.ExpressionNode, 0);
+        current_receiver = AST.ExpressionNode{ .Message = message_node };
+
+        should_use_passover_as_first_identifier = true;
+    } else {
+        // If it *is* a colon, we want to switch to Keyword mode immediately.
+        parsing_state = .Keyword;
+    }
+
+    state_machine: while (true) {
+        switch (parsing_state) {
+            .Unary => {
+                if (self.lexer.current_token == .Identifier) {
+                    const identifier_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
+                    if (std.ascii.isUpper(identifier_slice[0])) {
+                        // We are parsing a unary message and the message name
+                        // starts with an uppercase?! No, this is part of an
+                        // outer expression, probably a keyword message this
+                        // unary message expression is an argument to. Give up
+                        // parsing.
+                        break :state_machine;
+                    }
+
+                    const identifier_copy = try self.allocator.dupe(u8, identifier_slice);
+                    errdefer self.allocator.free(identifier_copy);
+
+                    unary_to_keyword_identifier = identifier_copy;
+                    // Look ahead once to see whether we should be collapsing
+                    // this into a new message or we should be letting keyword
+                    // state handle this from now on.
+                    if ((try self.lexer.nextToken()).* == .Colon) {
+                        // Yep, it's a keyword. Switch over.
+                        parsing_state = .Keyword;
+                        continue :state_machine;
+                    }
+
+                    // No, it's not. Collapse this identifier into an unary
+                    // message and let the state machine handle the rest.
+                    var message_node = try self.allocator.create(AST.MessageNode);
+                    message_node.receiver = current_receiver;
+                    message_node.message_name = identifier_copy;
+                    message_node.arguments = try self.allocator.alloc(AST.ExpressionNode, 0);
+                    current_receiver = AST.ExpressionNode{ .Message = message_node };
+                } else {
+                    // We let the statement parser throw any errors related
+                    // to unexpected tokens at the end of an expression.
+                    break :state_machine;
+                }
+            },
+            .Keyword => {
+                if (parameters.items.len == 0) {
+                    // We have not parsed anything keyword-related yet, so let's
+                    // figure out what the first keyword is now.
+                    if (should_use_passover_as_first_identifier) {
+                        // We were parsing unary messages before we got here,
+                        // so use the passover value.
+                        defer self.allocator.free(unary_to_keyword_identifier);
+
+                        // Sanity check
+                        if (std.ascii.isUpper(unary_to_keyword_identifier[0]))
+                            @panic("Got an uppercase keyword as first keyword argument from unary state?!");
+
+                        if (!try self.expectToken(.Colon, .Consume)) {
+                            current_receiver.deinit(self.allocator);
+                            return null;
+                        }
+
+                        try current_message_name.appendSlice(unary_to_keyword_identifier);
+                    } else {
+                        // Unary never triggered so we should be using the first
+                        // identifier.
+                        defer first_identifier_mut.deinit(self.allocator);
+
+                        // The same sanity check can't be repeated here because
+                        // first_identifier is given by the expression parser
+                        // who has no idea about keyword rules.
+                        if (std.ascii.isUpper(first_identifier.value[0])) {
+                            break :state_machine;
+                        }
+
+                        if (!try self.expectToken(.Colon, .Consume)) {
+                            current_receiver.deinit(self.allocator);
+                            return null;
+                        }
+
+                        try current_message_name.appendSlice(first_identifier.value);
+                    }
+                    try current_message_name.append(':');
+
+                    if (try self.parseExpression()) |*expression| {
+                        errdefer expression.deinit(self.allocator);
+                        try parameters.append(expression.*);
+                    } else {
+                        current_receiver.deinit(self.allocator);
+                        return null;
+                    }
+                }
+
+                // Okay, NOW we can resume regular parsing proper.
+
+                if (self.lexer.current_token == .Identifier) {
+                    const identifier_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
+
+                    // We are at the start of a new keyword. Verify that it is
+                    // part of this message.
+                    if (!std.ascii.isUpper(identifier_slice[0])) {
+                        break :state_machine;
+                    }
+
+                    try current_message_name.appendSlice(identifier_slice);
+
+                    if (!try self.expectToken(.Colon, .Consume)) {
+                        current_receiver.deinit(self.allocator);
+
+                        return null;
+                    }
+
+                    try current_message_name.append(':');
+
+                    if (try self.parseExpression()) |*expression| {
+                        errdefer expression.deinit(self.allocator);
+                        try parameters.append(expression.*);
+                    } else {
+                        current_receiver.deinit(self.allocator);
+                        return null;
+                    }
+                } else {
+                    break :state_machine;
+                }
+            },
+        }
+    }
+
+    // If we're in keyword mode, let's compile the collected slot name and
+    // variables into a message expression.
+    switch (parsing_state) {
+        .Unary => return current_receiver,
+        .Keyword => {
+            var message_node = try self.allocator.create(AST.MessageNode);
+            message_node.receiver = current_receiver;
+            // NOTE: We now take ownership of the first identifier's string
+            message_node.message_name = current_message_name.toOwnedSlice();
+            message_node.arguments = parameters.toOwnedSlice();
+
+            return AST.ExpressionNode{ .Message = message_node };
+        },
+    }
 }
 
 fn parseIdentifier(self: *Self) ParserFunctionErrorSet!?AST.IdentifierNode {

@@ -4,6 +4,7 @@ const tokens = @import("./tokens.zig");
 const Location = @import("./location.zig");
 
 const MaximumLookaheadLength = 4096;
+const LEXER_DEBUG = true;
 
 const Self = @This();
 const BufferType = std.io.FixedBufferStream([]const u8);
@@ -44,31 +45,38 @@ pub fn deinit(self: *Self) void {
 pub fn nextToken(self: *Self) !*tokens.Token {
     if (!self.initialized)
         @panic("Attempting to call Lexer.nextToken on uninitialized lexer");
-    self.token_start = self.token_end;
 
     try self.skipWhitespace();
     if (self.eof()) {
+        if (LEXER_DEBUG) std.debug.print("lexer: Reached EOF!\n", .{});
         self.current_token = tokens.Token{ .EOF = .{} };
         return &self.current_token;
     }
 
+    self.token_start = self.token_end;
+
     if (try self.lexComment()) |token| {
+        if (LEXER_DEBUG) std.debug.print("lexer: Lexed a comment\n", .{});
         self.current_token = token;
         return &self.current_token;
     }
     if (try self.lexString()) |token| {
+        if (LEXER_DEBUG) std.debug.print("lexer: Lexed a string: \"{s}\"\n", .{token.String});
         self.current_token = token;
         return &self.current_token;
     }
     if (try self.lexNumber()) |token| {
+        if (LEXER_DEBUG) std.debug.print("lexer: Lexed a number\n", .{});
         self.current_token = token;
         return &self.current_token;
     }
     if (try self.lexIdentifier()) |token| {
+        if (LEXER_DEBUG) std.debug.print("lexer: Lexed an identifier: \"{s}\"\n", .{token.Identifier});
         self.current_token = token;
         return &self.current_token;
     }
     if (try self.lexSymbol()) |token| {
+        if (LEXER_DEBUG) std.debug.print("lexer: Lexed a symbol: '{s}'\n", .{token.toString()});
         self.current_token = token;
         return &self.current_token;
     }
