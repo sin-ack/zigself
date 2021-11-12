@@ -1,6 +1,7 @@
+"Hello world"
 'Hello world!' printLine.
 
-"A test comment!"
+"Adding a slot to lobby"
 _AddSlot: (|
   point = (|
     parent* = traits clonable.
@@ -12,6 +13,28 @@ _AddSlot: (|
       c
     ).
 
-    distanceFromOrigin = ( ((x square) + (y square)) squareRoot ).
+    distanceFromOrigin = ( ((x square) add: (y square)) squareRoot ).
+
+    copyX: x Y: y = (| c |
+      c: copy.
+      c x: x.
+      c y: y.
+      c
+    )
   |).
 |).
+
+"Fizzbuzz"
+1 to: 100 Do: [| :i. str <- '' |
+  (3 divides: i) ifTrue: [ str: str concat: 'Fizz' ].
+  (5 divides: i) ifTrue: [ str: str concat: 'Buzz' ].
+  (str isEmpty) ifTrue: [ i printString printLine ] False: [ str printLine ].
+].
+
+"Fibonacci numbers"
+1 to: 10 Do: [|
+  :i.
+  ctx = (| fib: n = ( (n lessThan: 1) ifTrue: [ 1 ] False: [ (fib: i prec) add: fib: i prec prec ] ) |)
+|
+  (ctx fib: i) printLine
+].
