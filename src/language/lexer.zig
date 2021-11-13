@@ -46,6 +46,8 @@ pub fn nextToken(self: *Self) !*tokens.Token {
     if (!self.initialized)
         @panic("Attempting to call Lexer.nextToken on uninitialized lexer");
 
+    self.consumed_whitespace = 0;
+
     while (true) {
         try self.skipWhitespace();
         if (self.eof()) {
@@ -115,6 +117,7 @@ fn skipWhitespace(self: *Self) !void {
             break;
         }
 
+        self.consumed_whitespace += 1;
         self.token_end.advanceForCharacter(c);
     }
     // We will have read one extra byte at this point.
@@ -448,5 +451,7 @@ buffer: BufferType = undefined,
 stream: PeekStreamType = undefined,
 reader: PeekStreamType.Reader = undefined,
 current_token: tokens.Token = undefined,
+
 token_start: Location = .{},
 token_end: Location = .{},
+consumed_whitespace: usize = 0,

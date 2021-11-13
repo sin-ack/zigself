@@ -562,9 +562,16 @@ fn parseSlotName(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionError
             return null;
         }
 
+        var tokens_consumed: usize = 0;
         while (self.lexer.current_token.isOperator()) {
+            if (tokens_consumed > 0 and self.lexer.consumed_whitespace > 0) {
+                try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Unexpected whitespace between binary message tokens");
+                return null;
+            }
+
             try name.appendSlice(self.lexer.current_token.toString());
             _ = try self.lexer.nextToken();
+            tokens_consumed += 1;
         }
 
         if (!try self.expectToken(.Identifier, .DontConsume))
@@ -863,9 +870,16 @@ fn parseBinaryMessage(self: *Self, receiver: AST.ExpressionNode) ParserFunctionE
         return null;
     }
 
+    var tokens_consumed: usize = 0;
     while (self.lexer.current_token.isOperator()) {
+        if (tokens_consumed > 0 and self.lexer.consumed_whitespace > 0) {
+            try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Unexpected whitespace between binary message tokens");
+            return null;
+        }
+
         try message_name.appendSlice(self.lexer.current_token.toString());
         _ = try self.lexer.nextToken();
+        tokens_consumed += 1;
     }
 
     if (try self.parseExpression()) |*expression| {
