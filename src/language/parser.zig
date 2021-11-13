@@ -209,7 +209,6 @@ fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.Expr
     return null;
 }
 
-// FIXME: Refactor this code into multiple functions.
 fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
     if (!try self.expectToken(.ParenOpen, .Consume))
         return null;
@@ -232,120 +231,34 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
 
     if (self.lexer.current_token == .Pipe) {
         _ = try self.lexer.nextToken();
+
         while (self.lexer.current_token != .Pipe) {
-            const did_parse_slot = slot_parsing: {
-                if (try self.parseSlotName()) |*slot_name| {
-                    {
-                        errdefer slot_name.deinit(self.allocator);
-
-                        var is_mutable = true;
-                        var is_parent = false;
-
-                        if (self.lexer.current_token == .Asterisk) {
-                            is_parent = true;
-                            _ = try self.lexer.nextToken();
-                        }
-
-                        var value = value_parsing: {
-                            if (slot_name.arguments.len > 0) {
-                                if (!try self.expectToken(.Equals, .Consume)) {
-                                    slot_name.deinit(self.allocator);
-                                    break :slot_parsing false;
-                                }
-                                is_mutable = false;
-
-                                if (self.lexer.current_token != .ParenOpen) {
-                                    try self.diagnostics.reportDiagnosticFormatted(
-                                        .Error,
-                                        self.lexer.token_start,
-                                        "Expected object after slot with keywords, got '{s}'",
-                                        .{self.lexer.current_token.toString()},
-                                    );
-
-                                    slot_name.deinit(self.allocator);
-                                    break :slot_parsing false;
-                                }
-
-                                if (try self.parseObject()) |object| {
-                                    break :value_parsing AST.ExpressionNode{ .Object = object };
-                                } else {
-                                    slot_name.deinit(self.allocator);
-                                    break :slot_parsing false;
-                                }
-                            } else {
-                                if (self.lexer.current_token == .Arrow or self.lexer.current_token == .Equals) {
-                                    is_mutable = self.lexer.current_token == .Arrow;
-                                    _ = try self.lexer.nextToken();
-
-                                    // NOTE: We need to override ParenOpen here because
-                                    //       parseExpression only parses sub-expressions or
-                                    //       slots objects.
-                                    switch (self.lexer.current_token) {
-                                        .ParenOpen => if (try self.parseObject()) |object| break :value_parsing AST.ExpressionNode{ .Object = object },
-                                        else => if (try self.parseExpression()) |expression| break :value_parsing expression,
-                                    }
-
-                                    // If we got here, then parsing either of them failed.
-                                    slot_name.deinit(self.allocator);
-                                    break :slot_parsing false;
-                                } else if (!(self.lexer.current_token == .Period or self.lexer.current_token == .Pipe)) {
-                                    try self.diagnostics.reportDiagnosticFormatted(
-                                        .Error,
-                                        self.lexer.token_start,
-                                        "Expected '.', '|', '<-' or '=' after slot name, got '{s}'",
-                                        .{self.lexer.current_token.toString()},
-                                    );
-
-                                    slot_name.deinit(self.allocator);
-                                    break :slot_parsing false;
-                                }
-
-                                // TODO: Intern these
-                                const nil_identifier = try self.allocator.dupe(u8, "nil");
-                                break :value_parsing AST.ExpressionNode{ .Identifier = AST.IdentifierNode{ .value = nil_identifier } };
-                            }
-                        };
-                        errdefer value.deinit(self.allocator);
-
-                        try slots.append(AST.SlotNode{
-                            .is_mutable = is_mutable,
-                            .is_parent = is_parent,
-                            .is_argument = false,
-                            .name = slot_name.name,
-                            .arguments = slot_name.arguments,
-                            .value = value,
-                        });
-                    }
-
-                    break :slot_parsing true;
-                }
-
-                break :slot_parsing false;
-            };
-
-            if (!did_parse_slot) {
-                // Attempt to recover by eating up to either the pipe or period
-                while (self.lexer.current_token != .Period and self.lexer.current_token != .Pipe) {
-                    _ = try self.lexer.nextToken();
-                }
-            }
-
-            if (self.lexer.current_token == .Period) {
-                _ = try self.lexer.nextToken();
-            } else if (self.lexer.current_token != .Pipe) {
-                try self.diagnostics.reportDiagnosticFormatted(
-                    .Error,
-                    self.lexer.token_start,
-                    "Expected '.' or '|' after slot, got '{s}'",
-                    .{self.lexer.current_token.toString()},
-                );
-
-                // Attempt to recover by eating up to either the pipe or period
-                while (self.lexer.current_token != .Period and self.lexer.current_token != .Pipe) {
-                    _ = try self.lexer.nextToken();
-                }
+            if (try self.parseSlot(.Object)) |*slot| {
+                errdefer slot.deinit(self.allocator);
+                try slots.append(slot.*);
 
                 if (self.lexer.current_token == .Period) {
+                    _ = try self.lexer.nextToken();
+                } else if (self.lexer.current_token != .Pipe) {
+                    try self.diagnostics.reportDiagnosticFormatted(
+                        .Error,
+                        self.lexer.token_start,
+                        "Expected '.' or '|' after slot, got '{s}'",
+                        .{self.lexer.current_token.toString()},
+                    );
+
+                    // Attempt to recover by eating up to either the pipe or period
+                    while (self.lexer.current_token != .Period and self.lexer.current_token != .Pipe) {
+                        _ = try self.lexer.nextToken();
+                    }
+
+                    if (self.lexer.current_token == .Period) {
+                        _ = try self.lexer.nextToken();
+                    }
+                }
+            } else {
+                // Attempt to recover by eating up to either the pipe or period
+                while (self.lexer.current_token != .Period and self.lexer.current_token != .Pipe) {
                     _ = try self.lexer.nextToken();
                 }
             }
@@ -372,7 +285,207 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
     return object_node;
 }
 
-fn parseSlotName(self: *Self) ParserFunctionErrorSet!?SlotName {
+fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
+    if (!try self.expectToken(.BracketOpen, .Consume))
+        return null;
+
+    var slots = std.ArrayList(AST.SlotNode).init(self.allocator);
+    defer {
+        for (slots.items) |*slot| {
+            slot.deinit(self.allocator);
+        }
+        slots.deinit();
+    }
+
+    var statements = std.ArrayList(AST.StatementNode).init(self.allocator);
+    defer {
+        for (statements.items) |*statement| {
+            statement.deinit(self.allocator);
+        }
+        statements.deinit();
+    }
+
+    if (self.lexer.current_token == .Pipe) {
+        _ = try self.lexer.nextToken();
+
+        while (self.lexer.current_token != .Pipe) {
+            if (try self.parseSlot(.Block)) |*slot| {
+                errdefer slot.deinit(self.allocator);
+                try slots.append(slot.*);
+
+                if (self.lexer.current_token == .Period) {
+                    _ = try self.lexer.nextToken();
+                } else if (self.lexer.current_token != .Pipe) {
+                    try self.diagnostics.reportDiagnosticFormatted(
+                        .Error,
+                        self.lexer.token_start,
+                        "Expected '.' or '|' after slot, got '{s}'",
+                        .{self.lexer.current_token.toString()},
+                    );
+
+                    // Attempt to recover by eating up to either the pipe or period
+                    while (self.lexer.current_token != .Period and self.lexer.current_token != .Pipe) {
+                        _ = try self.lexer.nextToken();
+                    }
+
+                    if (self.lexer.current_token == .Period) {
+                        _ = try self.lexer.nextToken();
+                    }
+                }
+            } else {
+                // Attempt to recover by eating up to either the pipe or period
+                while (self.lexer.current_token != .Period and self.lexer.current_token != .Pipe) {
+                    _ = try self.lexer.nextToken();
+                }
+            }
+        }
+
+        _ = try self.lexer.nextToken();
+    }
+
+    while (self.lexer.current_token != .BracketClose) {
+        // NOTE: parseStatement will have handled the "consuming until end of
+        //       statement" part here, so we don't need to do it ourselves.
+        if (try self.parseStatement(.BracketClose)) |*statement| {
+            errdefer statement.deinit(self.allocator);
+            try statements.append(statement.*);
+        }
+    }
+
+    _ = try self.lexer.nextToken();
+
+    const block_node = try self.allocator.create(AST.BlockNode);
+    block_node.slots = slots.toOwnedSlice();
+    block_node.statements = statements.toOwnedSlice();
+
+    return block_node;
+}
+
+const SlotParsingMode = enum { Object, Block };
+fn parseSlot(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionErrorSet!?AST.SlotNode {
+    var is_mutable = true;
+    var is_parent = false;
+    var is_argument = false;
+
+    if (self.lexer.current_token == .Colon) {
+        if (parsing_mode == .Block) {
+            is_argument = true;
+            _ = try self.lexer.nextToken();
+        } else {
+            try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Object slots may not be arguments");
+            return null;
+        }
+    }
+
+    if (try self.parseSlotName(parsing_mode)) |*slot_name| {
+        errdefer slot_name.deinit(self.allocator);
+
+        if (self.lexer.current_token == .Asterisk) {
+            if (parsing_mode == .Object) {
+                is_parent = true;
+                _ = try self.lexer.nextToken();
+            } else {
+                try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Block slots may not be parents");
+
+                slot_name.deinit(self.allocator);
+                return null;
+            }
+        }
+
+        var value = value_parsing: {
+            if (slot_name.arguments.len > 0) {
+                // If we get here then we *MUST* be in Object slot parsing mode,
+                // because only Objects can have slots with keywords.
+                std.debug.assert(parsing_mode == .Object);
+
+                if (!try self.expectToken(.Equals, .Consume)) {
+                    slot_name.deinit(self.allocator);
+                    return null;
+                }
+                is_mutable = false;
+
+                if (self.lexer.current_token != .ParenOpen) {
+                    try self.diagnostics.reportDiagnosticFormatted(
+                        .Error,
+                        self.lexer.token_start,
+                        "Expected object after slot with keywords, got '{s}'",
+                        .{self.lexer.current_token.toString()},
+                    );
+
+                    slot_name.deinit(self.allocator);
+                    return null;
+                }
+
+                if (try self.parseObject()) |object| {
+                    break :value_parsing AST.ExpressionNode{ .Object = object };
+                } else {
+                    slot_name.deinit(self.allocator);
+                    return null;
+                }
+            } else {
+                if (is_argument) {
+                    // If this is an argument slot, we don't allow the assignment of
+                    // any sort of value.
+                    if (!(self.lexer.current_token == .Pipe or self.lexer.current_token == .Period)) {
+                        try self.diagnostics.reportDiagnosticFormatted(
+                            .Error,
+                            self.lexer.token_start,
+                            "Expected '|' or '.' after argument slot, got '{s}'",
+                            .{self.lexer.current_token.toString()},
+                        );
+
+                        slot_name.deinit(self.allocator);
+                        return null;
+                    }
+                } else {
+                    if (self.lexer.current_token == .Arrow or self.lexer.current_token == .Equals) {
+                        is_mutable = self.lexer.current_token == .Arrow;
+                        _ = try self.lexer.nextToken();
+
+                        // NOTE: We need to override ParenOpen here because
+                        //       parseExpression only parses sub-expressions or
+                        //       slots objects.
+                        switch (self.lexer.current_token) {
+                            .ParenOpen => if (try self.parseObject()) |object| break :value_parsing AST.ExpressionNode{ .Object = object },
+                            else => if (try self.parseExpression()) |expression| break :value_parsing expression,
+                        }
+
+                        // If we got here, then parsing either of them failed.
+                        slot_name.deinit(self.allocator);
+                        return null;
+                    } else if (!(self.lexer.current_token == .Period or self.lexer.current_token == .Pipe)) {
+                        try self.diagnostics.reportDiagnosticFormatted(
+                            .Error,
+                            self.lexer.token_start,
+                            "Expected '.', '|', '<-' or '=' after slot name, got '{s}'",
+                            .{self.lexer.current_token.toString()},
+                        );
+
+                        slot_name.deinit(self.allocator);
+                        return null;
+                    }
+                }
+
+                // TODO: Intern these
+                const nil_identifier = try self.allocator.dupe(u8, "nil");
+                break :value_parsing AST.ExpressionNode{ .Identifier = AST.IdentifierNode{ .value = nil_identifier } };
+            }
+        };
+
+        return AST.SlotNode{
+            .is_mutable = is_mutable,
+            .is_parent = is_parent,
+            .is_argument = is_argument,
+            .name = slot_name.name,
+            .arguments = slot_name.arguments,
+            .value = value,
+        };
+    }
+
+    return null;
+}
+
+fn parseSlotName(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionErrorSet!?SlotName {
     if (!try self.expectToken(.Identifier, .DontConsume))
         return null;
 
@@ -400,7 +513,12 @@ fn parseSlotName(self: *Self) ParserFunctionErrorSet!?SlotName {
         try name.appendSlice(keyword_slice);
 
         if ((try self.lexer.nextToken()).* == .Colon) {
-            is_parsing_keyword_message = true;
+            if (parsing_mode == .Block) {
+                try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Blocks cannot have keyword slots");
+                return null;
+            } else {
+                is_parsing_keyword_message = true;
+            }
         } else if (is_parsing_keyword_message) {
             // If we're parsing a keyword message and there's no colon after a keyword,
             // that's an error.
@@ -440,167 +558,6 @@ fn parseSlotName(self: *Self) ParserFunctionErrorSet!?SlotName {
     }
 
     return SlotName{ .name = name.toOwnedSlice(), .arguments = arguments.toOwnedSlice() };
-}
-
-fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
-    if (!try self.expectToken(.BracketOpen, .Consume))
-        return null;
-
-    var slots = std.ArrayList(AST.SlotNode).init(self.allocator);
-    defer {
-        for (slots.items) |*slot| {
-            slot.deinit(self.allocator);
-        }
-        slots.deinit();
-    }
-
-    var statements = std.ArrayList(AST.StatementNode).init(self.allocator);
-    defer {
-        for (statements.items) |*statement| {
-            statement.deinit(self.allocator);
-        }
-        statements.deinit();
-    }
-
-    if (self.lexer.current_token == .Pipe) {
-        _ = try self.lexer.nextToken();
-
-        while (self.lexer.current_token != .Pipe) {
-            const did_parse_slot = slot_parsing: {
-                var is_mutable = true;
-                var is_argument = false;
-
-                if (self.lexer.current_token == .Colon) {
-                    is_argument = true;
-                    _ = try self.lexer.nextToken();
-                }
-
-                if (!try self.expectToken(.Identifier, .DontConsume)) {
-                    break :slot_parsing false;
-                }
-
-                const identifier_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
-
-                {
-                    const identifier_copy = try self.allocator.dupe(u8, identifier_slice);
-                    errdefer self.allocator.free(identifier_copy);
-
-                    _ = try self.lexer.nextToken();
-
-                    var value = value_parsing: {
-                        if (is_argument) {
-                            // If this is an argument slot, we don't allow the assignment of
-                            // any sort of value.
-                            if (!(self.lexer.current_token == .Pipe or self.lexer.current_token == .Period)) {
-                                try self.diagnostics.reportDiagnosticFormatted(
-                                    .Error,
-                                    self.lexer.token_start,
-                                    "Expected '|' or '.' after argument slot, got '{s}'",
-                                    .{self.lexer.current_token.toString()},
-                                );
-
-                                self.allocator.free(identifier_copy);
-                                break :slot_parsing false;
-                            }
-                        } else {
-                            if (self.lexer.current_token == .Equals or self.lexer.current_token == .Arrow) {
-                                is_mutable = self.lexer.current_token == .Arrow;
-                                _ = try self.lexer.nextToken();
-
-                                // NOTE: We need to override ParenOpen here because
-                                //       parseExpression only parses sub-expressions or
-                                //       slots objects.
-                                switch (self.lexer.current_token) {
-                                    .ParenOpen => if (try self.parseObject()) |object|
-                                        break :value_parsing AST.ExpressionNode{ .Object = object },
-                                    else => if (try self.parseExpression()) |expression| break :value_parsing expression,
-                                }
-
-                                // If we got here, then parsing either of them failed.
-                                self.allocator.free(identifier_copy);
-                                break :slot_parsing false;
-                            } else if (!(self.lexer.current_token == .Pipe or self.lexer.current_token == .Period)) {
-                                try self.diagnostics.reportDiagnosticFormatted(
-                                    .Error,
-                                    self.lexer.token_start,
-                                    "Expected '.', '|', '<-' or '=' after slot name, got '{s}'",
-                                    .{self.lexer.current_token.toString()},
-                                );
-
-                                self.allocator.free(identifier_copy);
-                                break :slot_parsing false;
-                            }
-                        }
-
-                        // TODO: Intern these
-                        const nil_identifier = try self.allocator.dupe(u8, "nil");
-                        break :value_parsing AST.ExpressionNode{ .Identifier = AST.IdentifierNode{ .value = nil_identifier } };
-                    };
-                    errdefer value.deinit(self.allocator);
-
-                    try slots.append(AST.SlotNode{
-                        .is_mutable = is_mutable,
-                        .is_parent = false,
-                        .is_argument = is_argument,
-                        .name = identifier_copy,
-                        .arguments = try self.allocator.alloc([]u8, 0),
-                        .value = value,
-                    });
-
-                    break :slot_parsing true;
-                }
-
-                _ = try self.lexer.nextToken();
-                break :slot_parsing true;
-            };
-
-            if (!did_parse_slot) {
-                // Attempt to recover by eating up to either the pipe or period
-                while (self.lexer.current_token != .Period and self.lexer.current_token != .Pipe) {
-                    _ = try self.lexer.nextToken();
-                }
-            }
-
-            if (self.lexer.current_token == .Period) {
-                _ = try self.lexer.nextToken();
-            } else if (self.lexer.current_token != .Pipe) {
-                try self.diagnostics.reportDiagnosticFormatted(
-                    .Error,
-                    self.lexer.token_start,
-                    "Expected '.' or '|' after slot, got '{s}'",
-                    .{self.lexer.current_token.toString()},
-                );
-
-                // Attempt to recover by eating up to either the pipe or period
-                while (self.lexer.current_token != .Period and self.lexer.current_token != .Pipe) {
-                    _ = try self.lexer.nextToken();
-                }
-
-                if (self.lexer.current_token == .Period) {
-                    _ = try self.lexer.nextToken();
-                }
-            }
-        }
-
-        _ = try self.lexer.nextToken();
-    }
-
-    while (self.lexer.current_token != .BracketClose) {
-        // NOTE: parseStatement will have handled the "consuming until end of
-        //       statement" part here, so we don't need to do it ourselves.
-        if (try self.parseStatement(.BracketClose)) |*statement| {
-            errdefer statement.deinit(self.allocator);
-            try statements.append(statement.*);
-        }
-    }
-
-    _ = try self.lexer.nextToken();
-
-    const block_node = try self.allocator.create(AST.BlockNode);
-    block_node.slots = slots.toOwnedSlice();
-    block_node.statements = statements.toOwnedSlice();
-
-    return block_node;
 }
 
 fn parseKeywordMessageToSelf(self: *Self, identifier: AST.IdentifierNode) ParserFunctionErrorSet!?AST.ExpressionNode {
