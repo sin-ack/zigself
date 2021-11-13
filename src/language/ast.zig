@@ -6,6 +6,7 @@ const DARKGRAY = "\x1b[90m";
 const GRAY = "\x1b[37m";
 const GREEN = "\x1b[32m";
 const ORANGE = "\x1b[33m";
+const MAGENTA = "\x1b[35m";
 const CYAN = "\x1b[36m";
 const CLEAR = "\x1b[0m";
 
@@ -338,7 +339,16 @@ pub const MessageNode = struct {
     }
 
     pub fn dumpTree(self: MessageNode, printer: *ASTPrinter) void {
-        const message_type: []const u8 = if (self.arguments.len == 0) GREEN ++ "unary" ++ CLEAR else ORANGE ++ "keyword" ++ CLEAR;
+        const message_type: []const u8 = blk: {
+            if (self.arguments.len == 0) {
+                break :blk GREEN ++ "unary" ++ CLEAR;
+            } else if (self.arguments.len == 1 and !std.ascii.isAlpha(self.message_name[0]) and self.message_name[0] != '_') {
+                break :blk MAGENTA ++ "binary" ++ CLEAR;
+            } else {
+                break :blk ORANGE ++ "keyword" ++ CLEAR;
+            }
+        };
+
         printer.print(CYAN ++ "MessageNode" ++ CLEAR ++ " ({s})\n", .{message_type});
         printer.indent();
 

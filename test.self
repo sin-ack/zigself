@@ -26,9 +26,9 @@ _AddSlot: (|
 
 "Fizzbuzz"
 1 to: 100 Do: [| :i. str <- '' |
-  (3 divides: i) ifTrue: [ str: str concat: 'Fizz' ].
-  (5 divides: i) ifTrue: [ str: str concat: 'Buzz' ].
-  (str isEmpty) ifTrue: [ i printString printLine ] False: [ str printLine ].
+  ((i % 3) = 0) ifTrue: [ str: str, 'Fizz' ].
+  ((i % 5) = 0) ifTrue: [ str: str, 'Buzz' ].
+  str isEmpty ifTrue: [ i printString printLine ] False: [ str printLine ].
 ].
 
 "Fibonacci numbers"

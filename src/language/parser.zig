@@ -144,6 +144,8 @@ fn parseExpression(self: *Self) ParserFunctionErrorSet!?AST.ExpressionNode {
             return try self.parseKeywordMessageToSelf(primary.Identifier);
         } else if (self.lexer.current_token == .Identifier) {
             return try self.parseMessageToReceiver(primary.*);
+        } else if (self.lexer.current_token.isOperator()) {
+            return try self.parseBinaryMessage(primary.*);
         }
 
         return primary.*;
@@ -808,6 +810,57 @@ fn parseMessageCommon(
 
             return AST.ExpressionNode{ .Message = message_node };
         },
+    }
+}
+
+fn parseBinaryMessage(self: *Self, receiver: AST.ExpressionNode) ParserFunctionErrorSet!?AST.ExpressionNode {
+    // Arguments aren't mutable in Zig.
+    var receiver_mut = receiver;
+    errdefer receiver_mut.deinit(self.allocator);
+
+    var message_name = std.ArrayList(u8).init(self.allocator);
+    defer message_name.deinit();
+
+    if (!self.lexer.current_token.isOperator()) {
+        try self.diagnostics.reportDiagnosticFormatted(
+            .Error,
+            self.lexer.token_start,
+            "Expected an operator token for binary message, got '{s}'",
+            .{self.lexer.current_token.toString()},
+        );
+
+        receiver_mut.deinit(self.allocator);
+        return null;
+    }
+
+    while (self.lexer.current_token.isOperator()) {
+        try message_name.appendSlice(self.lexer.current_token.toString());
+        _ = try self.lexer.nextToken();
+    }
+
+    if (try self.parseExpression()) |*expression| {
+        errdefer expression.deinit(self.allocator);
+        // TODO: Disallow mixing different binary messages without parenthesis,
+        //       as it looks ambiguous. Self doesn't define any precedence for
+        //       operators, so they would always be processed right-to-left.
+        //
+        //       Not having any precedence doesn't really sound that good either,
+        //       though. Could we do better here? Maybe objects that are the same
+        //       "type" (i.e. a binary message resolves to identical method
+        //       activations on both objects) can have a type precedence within?
+        //       Though that wouldn't work for custom types. I wouldn't like
+        //       it to be world-dependent either, that would easily break across
+        //       worlds. Need to put more thought here.
+
+        const message_node = try self.allocator.create(AST.MessageNode);
+        message_node.message_name = message_name.toOwnedSlice();
+        message_node.arguments = try self.allocator.alloc(AST.ExpressionNode, 1);
+        message_node.arguments[0] = expression.*;
+        message_node.receiver = receiver;
+        return AST.ExpressionNode{ .Message = message_node };
+    } else {
+        receiver_mut.deinit(self.allocator);
+        return null;
     }
 }
 

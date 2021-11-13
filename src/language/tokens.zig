@@ -51,6 +51,29 @@ pub const TokenRepresentation = struct {
     pub const BraceClose = "}";
 };
 
+pub const OperatorTokens = [_]std.meta.Tag(Token){
+    .Bang,
+    .Sigil,
+    .Hash,
+    .Dollar,
+    .Percent,
+    .Cap,
+    .Ampersand,
+    .Asterisk,
+    .Comma,
+    .Semicolon,
+    .Slash,
+    .Backslash,
+    .LessThan,
+    .GreaterThan,
+    .Equals,
+    .Plus,
+    .Minus,
+    .QuestionMark,
+    .Backtick,
+    .Tilde,
+};
+
 /// All the tokens in the self language. The fields which are marked "void" have
 /// a representation in TokenRepresentation.
 pub const Token = union(enum) {
@@ -118,6 +141,15 @@ pub const Token = union(enum) {
                 @panic("Unknown token");
             },
         };
+    }
+
+    pub fn isOperator(self: Token) bool {
+        inline for (OperatorTokens) |tag| {
+            if (self == tag)
+                return true;
+        }
+
+        return false;
     }
 };
 
