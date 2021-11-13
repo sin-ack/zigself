@@ -20,6 +20,11 @@ _AddSlot: (|
       c x: x.
       c y: y.
       c
+    ).
+
+    + p = (| c |
+      c: copy. c x: x + p x. c y: y + p y.
+      c
     )
   |).
 |).

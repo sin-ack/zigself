@@ -488,9 +488,6 @@ fn parseSlot(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionErrorSet!
 }
 
 fn parseSlotName(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionErrorSet!?SlotName {
-    if (!try self.expectToken(.Identifier, .DontConsume))
-        return null;
-
     var name = std.ArrayList(u8).init(self.allocator);
     defer name.deinit();
 
@@ -502,51 +499,76 @@ fn parseSlotName(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionError
         arguments.deinit();
     }
 
-    var is_parsing_keyword_message = false;
-    while (self.lexer.current_token == .Identifier) {
-        const keyword_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
+    if (self.lexer.current_token == .Identifier) {
+        var is_parsing_keyword_message = false;
+        while (self.lexer.current_token == .Identifier) {
+            const keyword_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
 
-        // Keyword messages have their casing as: foo: param Bar: param Baz: param
-        if (is_parsing_keyword_message and !std.ascii.isUpper(keyword_slice[0])) {
-            try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Keyword argument must have uppercase prefix");
-            return null;
-        }
+            // Keyword messages have their casing as: foo: param Bar: param Baz: param
+            if (is_parsing_keyword_message and !std.ascii.isUpper(keyword_slice[0])) {
+                try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Keyword argument must have uppercase prefix");
+                return null;
+            }
 
-        try name.appendSlice(keyword_slice);
+            try name.appendSlice(keyword_slice);
 
-        if ((try self.lexer.nextToken()).* == .Colon) {
-            if (parsing_mode == .Block) {
-                try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Blocks cannot have keyword slots");
+            if ((try self.lexer.nextToken()).* == .Colon) {
+                if (parsing_mode == .Block) {
+                    try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Blocks cannot have keyword slots");
+                    return null;
+                } else {
+                    is_parsing_keyword_message = true;
+                }
+            } else if (is_parsing_keyword_message) {
+                // If we're parsing a keyword message and there's no colon after a keyword,
+                // that's an error.
+                try self.diagnostics.reportDiagnosticFormatted(
+                    .Error,
+                    self.lexer.token_start,
+                    "Expected ':' after slot keyword, got '{s}'",
+                    .{self.lexer.current_token.toString()},
+                );
                 return null;
             } else {
-                is_parsing_keyword_message = true;
+                // If we weren't parsing a keyword message, then this is just a unary message.
+                break;
             }
-        } else if (is_parsing_keyword_message) {
-            // If we're parsing a keyword message and there's no colon after a keyword,
-            // that's an error.
-            try self.diagnostics.reportDiagnosticFormatted(
-                .Error,
-                self.lexer.token_start,
-                "Expected ':' after slot keyword, got '{s}'",
-                .{self.lexer.current_token.toString()},
-            );
+
+            try name.append(':');
+
+            if ((try self.lexer.nextToken()).* != .Identifier) {
+                try self.diagnostics.reportDiagnosticFormatted(
+                    .Error,
+                    self.lexer.token_start,
+                    "Expected parameter name after slot keyword, got '{s}'",
+                    .{self.lexer.current_token.toString()},
+                );
+                return null;
+            }
+
+            const argument_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
+            const argument_copy = try self.allocator.dupe(u8, argument_slice);
+
+            {
+                errdefer self.allocator.free(argument_copy);
+                try arguments.append(argument_copy);
+            }
+
+            _ = try self.lexer.nextToken();
+        }
+    } else if (self.lexer.current_token.isOperator()) {
+        if (parsing_mode != .Object) {
+            try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Binary slots are only allowed on objects");
             return null;
-        } else {
-            // If we weren't parsing a keyword message, then this is just a unary message.
-            break;
         }
 
-        try name.append(':');
-
-        if ((try self.lexer.nextToken()).* != .Identifier) {
-            try self.diagnostics.reportDiagnosticFormatted(
-                .Error,
-                self.lexer.token_start,
-                "Expected parameter name after slot keyword, got '{s}'",
-                .{self.lexer.current_token.toString()},
-            );
-            return null;
+        while (self.lexer.current_token.isOperator()) {
+            try name.appendSlice(self.lexer.current_token.toString());
+            _ = try self.lexer.nextToken();
         }
+
+        if (!try self.expectToken(.Identifier, .DontConsume))
+            return null;
 
         const argument_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
         const argument_copy = try self.allocator.dupe(u8, argument_slice);
@@ -557,6 +579,14 @@ fn parseSlotName(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionError
         }
 
         _ = try self.lexer.nextToken();
+    } else {
+        try self.diagnostics.reportDiagnosticFormatted(
+            .Error,
+            self.lexer.token_start,
+            "Expected operator character or identifier for slot name, got '{s}'",
+            .{self.lexer.current_token.toString()},
+        );
+        return null;
     }
 
     return SlotName{ .name = name.toOwnedSlice(), .arguments = arguments.toOwnedSlice() };
