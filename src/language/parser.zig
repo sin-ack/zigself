@@ -143,16 +143,27 @@ fn parseStatement(self: *Self, alternative_terminator: std.meta.Tag(tokens.Token
 fn parseExpression(self: *Self) ParserFunctionErrorSet!?AST.ExpressionNode {
     if (try self.parsePrimary()) |*primary| {
         errdefer primary.deinit(self.allocator);
+        var receiver = primary.*;
 
         if (primary.* == .Identifier and self.lexer.current_token == .Colon) {
             return try self.parseKeywordMessageToSelf(primary.Identifier);
         } else if (self.lexer.current_token == .Identifier) {
-            return try self.parseMessageToReceiver(primary.*);
-        } else if (self.lexer.current_token.isOperator()) {
-            return try self.parseBinaryMessage(primary.*);
+            if (try self.parseMessageToReceiver(primary.*)) |message_expr| {
+                receiver = message_expr;
+            } else {
+                return null;
+            }
         }
 
-        return primary.*;
+        if (self.lexer.current_token.isOperator()) {
+            if (try self.parseBinaryMessage(receiver)) |message_expr| {
+                receiver = message_expr;
+            } else {
+                return null;
+            }
+        }
+
+        return receiver;
     } else {
         return null;
     }
