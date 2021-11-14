@@ -94,6 +94,16 @@ pub fn nextToken(self: *Self) !*tokens.Token {
     @panic("Shouldn't reach here!");
 }
 
+/// Return the line from the file contents corresponding to the given location.
+pub fn getLineForLocation(self: *Self, location: Location) ![]const u8 {
+    var start_offset = location.offset - (location.column - 1);
+    var end_offset = start_offset + 1;
+
+    while (end_offset < self.file_contents.len and self.file_contents[end_offset] != '\n') : (end_offset += 1) {}
+
+    return self.file_contents[start_offset..end_offset];
+}
+
 /// Return whether the lexer has reached the end of the file.
 fn eof(self: *Self) bool {
     // Note that we only consider it truly EOF if:
@@ -434,7 +444,7 @@ fn lexSymbol(self: *Self) !?tokens.Token {
                 try self.stream.putBack(slice);
             } else {
                 if (std.mem.eql(u8, representation, slice)) {
-                    self.token_end.column += representation.len;
+                    self.token_end.advanceNColumns(representation.len);
 
                     return @unionInit(tokens.Token, field.name, .{});
                 }

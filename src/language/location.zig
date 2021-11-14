@@ -11,6 +11,11 @@ pub fn advanceColumn(self: *Self) void {
     self.offset += 1;
 }
 
+pub fn advanceNColumns(self: *Self, n: usize) void {
+    self.column += n;
+    self.offset += n;
+}
+
 pub fn advanceLine(self: *Self) void {
     self.line += 1;
     self.column = 1;

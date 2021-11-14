@@ -67,8 +67,15 @@ pub fn main() !u8 {
     var script_node = try parser.parse();
     defer script_node.deinit(allocator);
 
+    const writer = std.io.getStdErr().writer();
+
     for (parser.diagnostics.diagnostics.items) |diagnostic| {
-        std.debug.print("{}: {s}: {s}\n", .{ diagnostic.location.format(), @tagName(diagnostic.level), diagnostic.message });
+        const line = try parser.lexer.getLineForLocation(diagnostic.location);
+
+        std.debug.print("{s}:{}: {s}: {s}\n", .{ file_path, diagnostic.location.format(), @tagName(diagnostic.level), diagnostic.message });
+        std.debug.print("{s}\n", .{line});
+        try writer.writeByteNTimes(' ', diagnostic.location.column - 1);
+        try writer.writeAll("^\n");
     }
 
     var printer = AST.ASTPrinter.init(2, allocator);
