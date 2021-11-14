@@ -10,9 +10,11 @@ const AST = @import("./language/ast.zig");
 
 const ArgumentSpec = struct {
     help: bool = false,
+    @"dump-ast": bool = false,
 
     pub const shorthands = .{
         .h = "help",
+        .A = "dump-ast",
     };
 };
 
@@ -27,6 +29,7 @@ const usage_text =
     \\  path              File path for the entrypoint of the Self program.
     \\Options:
     \\  --help, -h        Print this help output.
+    \\  --dump-ast, -A    Dump the AST tree for the input file and exit.
     \\
 ;
 
@@ -78,9 +81,12 @@ pub fn main() !u8 {
         try writer.writeAll("^\n");
     }
 
-    var printer = AST.ASTPrinter.init(2, allocator);
-    defer printer.deinit();
-    script_node.dumpTree(&printer);
+    if (arguments.options.@"dump-ast") {
+        var printer = AST.ASTPrinter.init(2, allocator);
+        defer printer.deinit();
+        script_node.dumpTree(&printer);
+        return 0;
+    }
 
-    return 0;
+    @panic("VM hasn't been implemented yet! Try using -A.");
 }
