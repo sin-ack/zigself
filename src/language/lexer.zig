@@ -8,7 +8,7 @@ const tokens = @import("./tokens.zig");
 const Location = @import("./location.zig");
 
 const MaximumLookaheadLength = 4096;
-const LEXER_DEBUG = true;
+const LEXER_DEBUG = false;
 
 const Self = @This();
 const BufferType = std.io.FixedBufferStream([]const u8);
