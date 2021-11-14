@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const Location = @import("./location.zig");
 const Lexer = @import("./lexer.zig");
 const AST = @import("./ast.zig");
 const tokens = @import("./tokens.zig");
@@ -360,12 +361,42 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
         _ = try self.lexer.nextToken();
     }
 
+    var did_use_return = false;
+    var return_use_location: Location = .{};
     while (self.lexer.current_token != .BracketClose) {
+        if (did_use_return) {
+            try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Unexpected expression after return expression in block");
+            try self.diagnostics.reportDiagnostic(.Note, return_use_location, "Return expression used here");
+
+            // Try to recover by eating up to bracket
+            while (self.lexer.current_token != .BracketClose) {
+                _ = try self.lexer.nextToken();
+            }
+
+            break;
+        }
+
+        if (self.lexer.current_token == .Cap) {
+            did_use_return = true;
+            return_use_location = self.lexer.token_start;
+
+            _ = try self.lexer.nextToken();
+        }
+
         // NOTE: parseStatement will have handled the "consuming until end of
         //       statement" part here, so we don't need to do it ourselves.
         if (try self.parseStatement(.BracketClose)) |*statement| {
             errdefer statement.deinit(self.allocator);
-            try statements.append(statement.*);
+
+            if (did_use_return) {
+                const return_node = try self.allocator.create(AST.ReturnNode);
+                return_node.expression = statement.expression;
+                errdefer return_node.destroy(self.allocator);
+
+                try statements.append(AST.StatementNode{ .expression = AST.ExpressionNode{ .Return = return_node } });
+            } else {
+                try statements.append(statement.*);
+            }
         }
     }
 

@@ -128,6 +128,7 @@ pub const ExpressionNode = union(enum) {
     Object: *ObjectNode,
     Block: *BlockNode,
     Message: *MessageNode,
+    Return: *ReturnNode,
 
     Identifier: IdentifierNode,
     String: StringNode,
@@ -138,6 +139,7 @@ pub const ExpressionNode = union(enum) {
             .Object => self.Object.destroy(allocator),
             .Block => self.Block.destroy(allocator),
             .Message => self.Message.destroy(allocator),
+            .Return => self.Return.destroy(allocator),
 
             .Identifier => self.Identifier.deinit(allocator),
             .String => self.String.deinit(allocator),
@@ -155,6 +157,7 @@ pub const ExpressionNode = union(enum) {
             .Object => self.Object.dumpTree(printer),
             .Block => self.Block.dumpTree(printer),
             .Message => self.Message.dumpTree(printer),
+            .Return => self.Return.dumpTree(printer),
 
             .Identifier => self.Identifier.dumpTree(printer),
             .String => self.String.dumpTree(printer),
@@ -376,6 +379,31 @@ pub const MessageNode = struct {
             }
             printer.dedent();
         }
+
+        printer.dedent();
+    }
+};
+
+/// A return node is used to signify non-local returns from blocks. It is only
+/// allowed within blocks and must be the last expression in the block.
+pub const ReturnNode = struct {
+    expression: ExpressionNode,
+
+    pub fn deinit(self: *ReturnNode, allocator: *Allocator) void {
+        self.expression.deinit(allocator);
+    }
+
+    pub fn destroy(self: *ReturnNode, allocator: *Allocator) void {
+        self.deinit(allocator);
+        allocator.destroy(self);
+    }
+
+    pub fn dumpTree(self: *ReturnNode, printer: *ASTPrinter) void {
+        printer.print(CYAN ++ "ReturnNode\n" ++ CLEAR, .{});
+        printer.indent();
+
+        printer.setStem(.Last);
+        self.expression.dumpTree(printer);
 
         printer.dedent();
     }

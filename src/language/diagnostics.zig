@@ -8,7 +8,7 @@ const Location = @import("./location.zig");
 const Self = @This();
 
 pub const DiagnosticLevel = enum {
-    Info,
+    Note,
     Warning,
     Error,
 };
