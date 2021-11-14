@@ -679,7 +679,6 @@ fn parseMessageToReceiver(self: *Self, receiver: AST.ExpressionNode) ParserFunct
     // by doing a nextToken, so we won't be able to recover the parser state at
     // that point.
     if (std.ascii.isUpper(identifier_slice[0])) {
-        std.debug.print("parseMessageToReceiver: This message is part of an outer expression, giving up\n", .{});
         // Nope, can't use it.
         return receiver;
     }
