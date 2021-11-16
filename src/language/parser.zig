@@ -553,7 +553,7 @@ fn parseSlotName(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionError
     if (self.lexer.current_token == .Identifier) {
         var is_parsing_keyword_message = false;
         while (self.lexer.current_token == .Identifier) {
-            const keyword_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
+            const keyword_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
 
             // Keyword messages have their casing as: foo: param Bar: param Baz: param
             if (is_parsing_keyword_message and !std.ascii.isUpper(keyword_slice[0])) {
@@ -597,7 +597,7 @@ fn parseSlotName(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionError
                 return null;
             }
 
-            const argument_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
+            const argument_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
             const argument_copy = try self.allocator.dupe(u8, argument_slice);
 
             {
@@ -628,7 +628,7 @@ fn parseSlotName(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionError
         if (!try self.expectToken(.Identifier, .DontConsume))
             return null;
 
-        const argument_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
+        const argument_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
         const argument_copy = try self.allocator.dupe(u8, argument_slice);
 
         {
@@ -677,7 +677,7 @@ fn parseMessageToReceiver(self: *Self, receiver: AST.ExpressionNode) ParserFunct
         return null;
     }
 
-    const identifier_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
+    const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
 
     // Determine whether this identifier can be a message. Normally
     // parseMessageCommon would do this but we get rid of the identifier below
@@ -764,7 +764,7 @@ fn parseMessageCommon(
         switch (parsing_state) {
             .Unary => {
                 if (self.lexer.current_token == .Identifier) {
-                    const identifier_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
+                    const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
                     if (std.ascii.isUpper(identifier_slice[0])) {
                         // We are parsing a unary message and the message name
                         // starts with an uppercase?! No, this is part of an
@@ -852,7 +852,7 @@ fn parseMessageCommon(
                 // Okay, NOW we can resume regular parsing proper.
 
                 if (self.lexer.current_token == .Identifier) {
-                    const identifier_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
+                    const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
 
                     // We are at the start of a new keyword. Verify that it is
                     // part of this message.
@@ -962,7 +962,7 @@ fn parseIdentifier(self: *Self) ParserFunctionErrorSet!?AST.IdentifierNode {
     if (!try self.expectToken(.Identifier, .DontConsume))
         return null;
 
-    const identifier_slice = self.lexer.current_token.Identifier[0..self.lexer.current_token.Identifier.len];
+    const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
     const identifier_copy = try self.allocator.dupe(u8, identifier_slice);
     errdefer self.allocator.free(identifier_copy);
 
