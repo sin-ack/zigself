@@ -192,6 +192,8 @@ fn parsePrimary(self: *Self) ParserFunctionErrorSet!?AST.ExpressionNode {
 }
 
 fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.ExpressionNode {
+    const start_of_object = self.lexer.token_start;
+
     if (try self.parseObject()) |object| {
         errdefer object.destroy(self.allocator);
 
@@ -200,13 +202,16 @@ fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.Expr
                 return AST.ExpressionNode{ .Object = object };
             } else {
                 // TODO: Recovery
-                try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Slot list cannot be present in a sub-expression");
+                try self.diagnostics.reportDiagnostic(.Error, start_of_object, "Slot list cannot be present in a sub-expression");
 
                 object.destroy(self.allocator);
                 return null;
             }
         } else {
-            if (object.statements.len == 1) {
+            if (object.statements.len == 0) {
+                // Just an empty object.
+                return AST.ExpressionNode{ .Object = object };
+            } else if (object.statements.len == 1) {
                 const statement = object.statements[0];
 
                 // This is done so that the slice is freed but the expression isn't.
@@ -216,7 +221,7 @@ fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.Expr
                 return statement.expression;
             } else {
                 // TODO: Recovery
-                try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Only one expression must be present in a sub-expression");
+                try self.diagnostics.reportDiagnostic(.Error, start_of_object, "Only one expression must be present in a sub-expression");
 
                 object.destroy(self.allocator);
                 return null;
