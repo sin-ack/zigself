@@ -12,8 +12,8 @@ const Diagnostics = @import("./diagnostics.zig");
 const Self = @This();
 
 const SlotName = struct {
-    name: []u8,
-    arguments: [][]u8,
+    name: []const u8,
+    arguments: [][]const u8,
 
     pub fn deinit(self: *SlotName, allocator: *std.mem.Allocator) void {
         allocator.free(self.name);

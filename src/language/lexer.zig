@@ -460,7 +460,7 @@ fn lexSymbol(self: *Self) !?tokens.Token {
 // Zig's RLS is currently broken. :^(
 initialized: bool = false,
 allocator: *std.mem.Allocator = undefined,
-file_contents: []u8 = undefined,
+file_contents: []const u8 = undefined,
 buffer: BufferType = undefined,
 stream: PeekStreamType = undefined,
 reader: PeekStreamType.Reader = undefined,
