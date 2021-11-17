@@ -97,37 +97,37 @@ fn init(self: *Self, allocator: *Allocator, content: ObjectContent) void {
 fn deinit(self: *Self) void {
     switch (self.content) {
         .Empty => {},
-        .Slots => {
-            for (self.content.Slots.slots) |*slot| {
+        .Slots => |slots| {
+            for (slots.slots) |*slot| {
                 slot.deinit();
             }
-            self.allocator.free(self.content.Slots.slots);
+            self.allocator.free(slots.slots);
         },
-        .Method => {
-            for (self.content.Method.arguments) |argument| {
+        .Method => |method| {
+            for (method.arguments) |argument| {
                 self.allocator.free(argument);
             }
-            self.allocator.free(self.content.Method.arguments);
+            self.allocator.free(method.arguments);
 
-            for (self.content.Method.slots) |*slot| {
+            for (method.slots) |*slot| {
                 slot.deinit();
             }
-            self.allocator.free(self.content.Method.slots);
+            self.allocator.free(method.slots);
 
-            for (self.content.Method.statements) |*statement| {
+            for (method.statements) |*statement| {
                 statement.deinit(self.allocator);
             }
-            self.allocator.free(self.content.Method.statements);
+            self.allocator.free(method.statements);
         },
-        .ByteVector => {
-            self.content.ByteVector.parent.unref();
-            self.allocator.free(self.content.ByteVector.values);
+        .ByteVector => |bytevector| {
+            bytevector.parent.unref();
+            self.allocator.free(bytevector.values);
         },
-        .Integer => {
-            self.content.Integer.parent.unref();
+        .Integer => |integer| {
+            integer.parent.unref();
         },
-        .FloatingPoint => {
-            self.content.FloatingPoint.parent.unref();
+        .FloatingPoint => |floating_point| {
+            floating_point.parent.unref();
         },
     }
 }
@@ -235,6 +235,96 @@ pub fn activateMethod(self: *Self, arguments: []Ref) !Ref {
     }
 
     return try createSlots(self.allocator, slots.toOwnedSlice());
+}
+
+// NOTE: This is currently unused but will become used once _Clone is available.
+pub fn copy(self: Self) !Ref {
+    switch (self.content) {
+        .Empty => return createEmpty(self.allocator),
+
+        .Slots => |slots| {
+            var slots_copy = try std.ArrayList(Slot).initCapacity(self.allocator, slots.slots.len);
+            errdefer {
+                for (slots_copy.items) |*slot| {
+                    slot.deinit();
+                }
+                slots_copy.deinit();
+            }
+
+            for (slots.slots) |slot| {
+                var slot_copy = try slot.copy();
+                errdefer slot_copy.deinit();
+
+                try slots_copy.append(slot_copy);
+            }
+
+            return try createSlots(self.allocator, slots_copy.toOwnedSlice());
+        },
+
+        .Method => |method| {
+            var arguments_copy = try std.ArrayList([]const u8).initCapacity(self.allocator, method.arguments.len);
+            errdefer {
+                for (arguments_copy.items) |argument| {
+                    self.allocator.free(argument);
+                }
+                arguments_copy.deinit();
+            }
+
+            var slots_copy = try std.ArrayList(Slot).initCapacity(self.allocator, method.slots.len);
+            errdefer {
+                for (slots_copy.items) |*slot| {
+                    slot.deinit();
+                }
+                slots_copy.deinit();
+            }
+
+            var statements_copy = try std.ArrayList(AST.StatementNode).initCapacity(self.allocator, method.statements.len);
+            errdefer {
+                for (statements_copy.items) |*statement| {
+                    statement.deinit(self.allocator);
+                }
+                statements_copy.deinit();
+            }
+
+            for (method.arguments) |argument| {
+                var argument_copy = try self.allocator.dupe(u8, argument);
+                errdefer self.allocator.free(argument_copy);
+
+                try arguments_copy.append(argument_copy);
+            }
+
+            for (method.slots) |slot| {
+                var slot_copy = try slot.copy();
+                errdefer slot_copy.deinit();
+
+                try slots_copy.append(slot_copy);
+            }
+
+            for (method.statements) |statement| {
+                var statement_copy = try ASTCopyVisitor.visitStatement(statement, self.allocator);
+                errdefer statement_copy.deinit(self.allocator);
+
+                try statements_copy.append(statement_copy);
+            }
+
+            return try createMethod(self.allocator, arguments_copy.toOwnedSlice(), slots_copy.toOwnedSlice(), statements_copy.toOwnedSlice());
+        },
+
+        .ByteVector => |vector| {
+            vector.parent.ref();
+            return try createCopyFromStringLiteral(self.allocator, vector.values, vector.parent);
+        },
+
+        .Integer => |integer| {
+            integer.parent.ref();
+            return try createFromIntegerLiteral(self.allocator, integer.value, integer.parent);
+        },
+
+        .FloatingPoint => |floating_point| {
+            floating_point.parent.ref();
+            return try createFromFloatingPointLiteral(self.allocator, floating_point.value, floating_point.parent);
+        },
+    }
 }
 
 pub fn is(self: *Self, tag: std.meta.Tag(ObjectContent)) bool {
