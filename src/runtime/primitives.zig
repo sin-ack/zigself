@@ -9,6 +9,7 @@ const Object = @import("./object.zig");
 
 const basic_primitives = @import("./primitives/basic.zig");
 const bytevector_primitives = @import("./primitives/bytevector.zig");
+const number_primitives = @import("./primitives/number.zig");
 
 /// A primitive specification. The `name` field specifies the exact selector the
 /// primitive uses (i.e. `_DoFoo:WithBar:`, or `_PrintLine`), and the `function`
@@ -19,8 +20,12 @@ const PrimitiveSpec = struct {
 };
 
 const PrimitiveRegistry = &[_]PrimitiveSpec{
+    // basic primitives
     .{ .name = "_Nil", .function = basic_primitives.Nil },
+    // byte vector primitives
     .{ .name = "_PrintLine", .function = bytevector_primitives.PrintLine },
+    // number primitives
+    .{ .name = "_IntAdd:", .function = number_primitives.IntAdd },
 };
 
 // FIXME: This is very naive! We shouldn't need to linear search every single

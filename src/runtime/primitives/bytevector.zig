@@ -13,13 +13,26 @@ const basic_primitives = @import("./basic.zig");
 pub fn PrintLine(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) !Object.Ref {
     _ = arguments;
 
-    if (receiver.value.content != .ByteVector) {
-        std.debug.panic("Expected a byte vector as the receiver for _PrintLine, got {s}\n", .{@tagName(receiver.value.content)});
-    }
-
     const writer = std.io.getStdOut().writer();
-    // FIXME: Don't ignore this error.
-    writer.print("{s}\n", .{receiver.value.content.ByteVector.values}) catch unreachable;
+
+    // FIXME: Don't ignore errors.
+    switch (receiver.value.content) {
+        .ByteVector => |byte_vector| {
+            writer.print("{s}\n", .{byte_vector.values}) catch unreachable;
+        },
+
+        .Integer => |integer| {
+            writer.print("{d}\n", .{integer.value}) catch unreachable;
+        },
+
+        .FloatingPoint => |floating_point| {
+            writer.print("{d}\n", .{floating_point.value}) catch unreachable;
+        },
+
+        else => {
+            std.debug.panic("Unexpected object type {s} passed as the receiver of _PrintLine", .{@tagName(receiver.value.content)});
+        },
+    }
 
     receiver.unref();
 

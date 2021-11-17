@@ -37,6 +37,11 @@ pub fn deinit(self: *Self) void {
     self.value.unref();
 }
 
+pub fn copy(self: Self) !Self {
+    self.value.ref();
+    return init(self.allocator, self.is_mutable, self.is_parent, self.name, self.value);
+}
+
 allocator: *Allocator,
 is_mutable: bool,
 is_parent: bool,

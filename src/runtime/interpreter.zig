@@ -10,6 +10,7 @@ const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
 const Object = @import("./object.zig");
 const Slot = @import("./slot.zig");
 const primitives = @import("./primitives.zig");
+const basic_primitives = @import("./primitives/basic.zig");
 
 /// Executes a script node. `self_object` and `lobby` are ref'd for the function
 /// lifetime. The last expression result is returned, or if no statements were
@@ -185,10 +186,63 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, self_obje
             }
 
             return try primitives.callPrimitive(allocator, message.message_name, receiver, arguments.items, lobby);
+        } else {
+            std.debug.panic("Unknown primitive selector \"{s}\"\n", .{message.message_name});
         }
     }
 
-    @panic("Non-primitive messages not yet implemented");
+    // Non-primitive messages
+    var receiver = try executeExpression(allocator, message.receiver, self_object, lobby);
+    defer receiver.unref();
+
+    if (try receiver.value.lookup(message.message_name)) |lookup_result| {
+        switch (lookup_result.value.content) {
+            .Integer, .FloatingPoint, .ByteVector, .Slots, .Empty => {
+                lookup_result.ref();
+                return lookup_result;
+            },
+
+            .Method => |method| {
+                var arguments = try std.ArrayList(Object.Ref).initCapacity(allocator, message.arguments.len);
+                defer arguments.deinit();
+                errdefer {
+                    for (arguments.items) |*argument| {
+                        argument.unref();
+                    }
+                }
+
+                for (message.arguments) |argument| {
+                    var expression_result = try executeExpression(allocator, argument, self_object, lobby);
+                    errdefer expression_result.unref();
+
+                    try arguments.append(expression_result);
+                }
+
+                var method_activation = try lookup_result.value.activateMethod(arguments.items);
+                defer method_activation.unref();
+
+                var last_expression_result: ?Object.Ref = null;
+
+                for (method.statements) |statement| {
+                    if (last_expression_result) |last_result| {
+                        last_result.unref();
+                    }
+
+                    last_expression_result = try executeStatement(allocator, statement, method_activation, lobby);
+                }
+
+                if (last_expression_result) |last_result| {
+                    return last_result;
+                } else {
+                    // If there were no statements, return nil.
+                    lobby.ref();
+                    return basic_primitives.Nil(allocator, lobby, &[_]Object.Ref{}, lobby);
+                }
+            },
+        }
+    } else {
+        std.debug.panic("Unknown selector \"{s}\"", .{message.message_name});
+    }
 }
 
 pub fn executeReturn(allocator: *Allocator, return_node: AST.ReturnNode, self_object: Object.Ref) !Object.Ref {

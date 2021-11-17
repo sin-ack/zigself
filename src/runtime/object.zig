@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const AST = @import("../language/ast.zig");
+const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
 const ref_counted = @import("../utility/ref_counted.zig");
 const Slot = @import("./slot.zig");
 
@@ -49,6 +50,7 @@ pub fn createEmpty(allocator: *Allocator) !Ref {
     return try create(allocator, .{ .Empty = .{} });
 }
 
+/// Takes ownership of `slots`.
 pub fn createSlots(allocator: *Allocator, slots: []Slot) !Ref {
     return try create(allocator, .{ .Slots = .{ .slots = slots } });
 }
@@ -58,6 +60,7 @@ pub fn createMethod(allocator: *Allocator, arguments: [][]const u8, slots: []Slo
     return try create(allocator, .{ .Method = .{ .arguments = arguments, .slots = slots, .statements = statements } });
 }
 
+/// Dupes `contents`.
 pub fn createCopyFromStringLiteral(allocator: *Allocator, contents: []const u8, parent: Ref) !Ref {
     parent.ref();
     errdefer parent.unref();
@@ -211,4 +214,38 @@ fn lookup_internal(self: *Self, selector: []const u8, visited_objects: *VisitedO
             return try floating_point.parent.value.lookup_internal(selector, visited_objects);
         },
     }
+}
+
+pub fn activateMethod(self: *Self, arguments: []Ref) !Ref {
+    std.debug.assert(self.content == .Method);
+    std.debug.assert(self.content.Method.arguments.len == arguments.len);
+
+    var slots = try std.ArrayList(Slot).initCapacity(self.allocator, self.content.Method.slots.len + self.content.Method.arguments.len);
+    errdefer {
+        for (slots.items) |*slot| {
+            slot.deinit();
+        }
+        slots.deinit();
+    }
+
+    // Add argument slots first, as those are likely to be used
+    for (arguments) |argument, i| {
+        var new_slot = try Slot.init(self.allocator, false, false, self.content.Method.arguments[i], argument);
+        errdefer new_slot.deinit();
+
+        try slots.append(new_slot);
+    }
+
+    for (self.content.Method.slots) |slot| {
+        var slot_copy = try slot.copy();
+        errdefer slot_copy.deinit();
+
+        try slots.append(slot_copy);
+    }
+
+    return try createSlots(self.allocator, slots.toOwnedSlice());
+}
+
+pub fn is(self: *Self, tag: std.meta.Tag(ObjectContent)) bool {
+    return self.content == tag;
 }
