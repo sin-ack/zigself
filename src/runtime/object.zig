@@ -62,9 +62,6 @@ pub fn createMethod(allocator: *Allocator, arguments: [][]const u8, slots: []Slo
 
 /// Dupes `contents`.
 pub fn createCopyFromStringLiteral(allocator: *Allocator, contents: []const u8, parent: Ref) !Ref {
-    parent.ref();
-    errdefer parent.unref();
-
     const contents_copy = try allocator.dupe(u8, contents);
     errdefer allocator.free(contents_copy);
 
@@ -72,16 +69,10 @@ pub fn createCopyFromStringLiteral(allocator: *Allocator, contents: []const u8, 
 }
 
 pub fn createFromIntegerLiteral(allocator: *Allocator, value: u64, parent: Ref) !Ref {
-    parent.ref();
-    errdefer parent.unref();
-
     return try create(allocator, .{ .Integer = .{ .parent = parent, .value = value } });
 }
 
 pub fn createFromFloatingPointLiteral(allocator: *Allocator, value: f64, parent: Ref) !Ref {
-    parent.ref();
-    errdefer parent.unref();
-
     return try create(allocator, .{ .FloatingPoint = .{ .parent = parent, .value = value } });
 }
 

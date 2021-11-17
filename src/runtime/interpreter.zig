@@ -275,6 +275,8 @@ pub fn executeString(allocator: *Allocator, string: AST.StringNode, lobby: Objec
 
     if (try lobby.value.lookup("traits")) |traits| {
         if (try traits.value.lookup("string")) |traits_string| {
+            traits_string.ref();
+
             return Object.createCopyFromStringLiteral(allocator, string.value, traits_string);
         } else {
             @panic("Could not find string in traits");
@@ -292,6 +294,8 @@ pub fn executeNumber(allocator: *Allocator, number: AST.NumberNode, lobby: Objec
 
     if (try lobby.value.lookup("traits")) |traits| {
         if (try traits.value.lookup("number")) |traits_number| {
+            traits_number.ref();
+
             return switch (number) {
                 .Integer => Object.createFromIntegerLiteral(allocator, number.Integer, traits_number),
                 .FloatingPoint => Object.createFromFloatingPointLiteral(allocator, number.FloatingPoint, traits_number),
