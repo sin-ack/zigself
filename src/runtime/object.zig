@@ -222,7 +222,7 @@ const VisitedObjectsSet = std.AutoArrayHashMap(*Self, void);
 
 pub fn lookup(self: *Self, selector: []const u8) !?Ref {
     if (std.mem.eql(u8, selector, "self")) {
-        return Ref.adopt(self);
+        return Ref{ .value = self };
     }
 
     var visited_objects = VisitedObjectsSet.init(self.allocator);
