@@ -103,7 +103,7 @@ pub fn main() !u8 {
     var lobby = try environment.prepareRuntimeEnvironment(allocator);
     defer lobby.unref();
 
-    if (try interpreter.executeScript(allocator, script_node, lobby, lobby)) |result| {
+    if (try interpreter.executeScript(allocator, script_node, lobby)) |result| {
         defer result.unref();
     }
 
