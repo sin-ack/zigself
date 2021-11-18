@@ -6,12 +6,13 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Object = @import("../object.zig");
-
-const basic_primitives = @import("./basic.zig");
+const environment = @import("../environment.zig");
 
 /// Print the given ByteVector to stdout, followed by a newline.
 pub fn PrintLine(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) !Object.Ref {
+    _ = allocator;
     _ = arguments;
+    _ = lobby;
 
     const writer = std.io.getStdOut().writer();
 
@@ -36,6 +37,5 @@ pub fn PrintLine(allocator: *Allocator, receiver: Object.Ref, arguments: []Objec
 
     receiver.unref();
 
-    lobby.ref();
-    return basic_primitives.Nil(allocator, lobby, &[_]Object.Ref{}, lobby);
+    return environment.globalNil();
 }

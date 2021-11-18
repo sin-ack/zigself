@@ -11,7 +11,6 @@ const AST = @import("./language/ast.zig");
 const Object = @import("./runtime/object.zig");
 const interpreter = @import("./runtime/interpreter.zig");
 const environment = @import("./runtime/environment.zig");
-const primitives = @import("./runtime/primitives.zig");
 
 const ArgumentSpec = struct {
     help: bool = false,
@@ -47,8 +46,6 @@ pub fn main() !u8 {
     var general_purpose_allocator = Allocator{};
     defer _ = general_purpose_allocator.deinit();
     var allocator = &general_purpose_allocator.allocator;
-
-    defer primitives.deinit(allocator);
 
     const arguments = zig_args.parseForCurrentProcess(ArgumentSpec, allocator, .print) catch {
         try printUsage();
@@ -102,6 +99,7 @@ pub fn main() !u8 {
 
     var lobby = try environment.prepareRuntimeEnvironment(allocator);
     defer lobby.unref();
+    defer environment.teardownGlobalObjects();
 
     if (try interpreter.executeScript(allocator, script_node, lobby)) |result| {
         defer result.unref();

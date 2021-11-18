@@ -8,7 +8,8 @@ const Allocator = std.mem.Allocator;
 const AST = @import("../../language/ast.zig");
 const Object = @import("../object.zig");
 const primitives = @import("../primitives.zig");
-const basic_primitives = @import("../primitives/basic.zig");
+const environment = @import("../environment.zig");
+
 const root_interpreter = @import("../interpreter.zig");
 const InterpreterContext = root_interpreter.InterpreterContext;
 
@@ -97,9 +98,7 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, ast_argu
     if (last_expression_result) |last_result| {
         return last_result;
     } else {
-        // If there were no statements, return nil.
-        context.lobby.ref();
-        return basic_primitives.Nil(allocator, context.lobby, &[_]Object.Ref{}, context.lobby);
+        return environment.globalNil();
     }
 }
 
@@ -162,9 +161,7 @@ pub fn executeMethodMessage(
     if (last_expression_result) |last_result| {
         return last_result;
     } else {
-        // If there were no statements, return nil.
-        context.lobby.ref();
-        return basic_primitives.Nil(allocator, context.lobby, &[_]Object.Ref{}, context.lobby);
+        return environment.globalNil();
     }
 }
 

@@ -49,8 +49,3 @@ pub fn callPrimitive(allocator: *Allocator, selector: []const u8, receiver: Obje
 
     std.debug.panic("Unknown primitive \"{s}\" called\n", .{selector});
 }
-
-pub fn deinit(allocator: *Allocator) void {
-    basic_primitives.deinitPrimitives(allocator);
-    // Add more primitives here when they need global deconstruction.
-}
