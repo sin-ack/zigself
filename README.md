@@ -30,10 +30,10 @@ That's it!
 
 - [x] Lexer
 - [x] **Milestone 1:** Parser
-- [ ] Initial VM and runtime
+- [x] Initial VM and runtime
+- [ ] Standard library
 - [ ] **Milestone 2:** A REPL
 - [ ] World building script
-- [ ] Standard library
 - [ ] Transporter (Self modules)
 - [ ] Overlay system for Transporter (more on this later)
 - [ ] Foreign Function Interface, to use libraries from other languages like C
