@@ -234,7 +234,6 @@ pub fn executeBlock(allocator: *Allocator, block: AST.BlockNode, context: Interp
     bound_method.ref();
     errdefer bound_method.unref();
 
-    // std.debug.print("createBlock: Creating a block with bound method {*}\n", .{bound_method.value});
     return try Object.createBlock(allocator, arguments.toOwnedSlice(), slots.toOwnedSlice(), statements.toOwnedSlice(), bound_method);
 }
 
