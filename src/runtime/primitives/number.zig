@@ -9,8 +9,8 @@ const Object = @import("../object.zig");
 const environment = @import("../environment.zig");
 
 fn getNumberTraits(lobby: Object.Ref) !Object.Ref {
-    if (try lobby.value.lookup("traits")) |traits| {
-        if (try traits.value.lookup("number")) |traits_number| {
+    if (try lobby.value.lookup("traits", .Value)) |traits| {
+        if (try traits.value.lookup("number", .Value)) |traits_number| {
             return traits_number;
         } else {
             @panic("Could not find number in traits");

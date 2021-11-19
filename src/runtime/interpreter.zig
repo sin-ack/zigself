@@ -256,7 +256,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
         return try message_interpreter.executePrimitiveMessage(allocator, context.self_object, identifier.value, &[_]AST.ExpressionNode{}, context);
     }
 
-    if (try context.self_object.value.lookup(identifier.value)) |value| {
+    if (try context.self_object.value.lookup(identifier.value, .Value)) |value| {
         switch (value.value.content) {
             .Integer, .FloatingPoint, .ByteVector, .Slots, .Empty, .Block => {
                 value.ref();
@@ -280,8 +280,8 @@ pub fn executeString(allocator: *Allocator, string: AST.StringNode, context: Int
     context.lobby.ref();
     defer context.lobby.unref();
 
-    if (try context.lobby.value.lookup("traits")) |traits| {
-        if (try traits.value.lookup("string")) |traits_string| {
+    if (try context.lobby.value.lookup("traits", .Value)) |traits| {
+        if (try traits.value.lookup("string", .Value)) |traits_string| {
             traits_string.ref();
 
             return Object.createCopyFromStringLiteral(allocator, string.value, traits_string);
@@ -299,8 +299,8 @@ pub fn executeNumber(allocator: *Allocator, number: AST.NumberNode, context: Int
     context.lobby.ref();
     defer context.lobby.unref();
 
-    if (try context.lobby.value.lookup("traits")) |traits| {
-        if (try traits.value.lookup("number")) |traits_number| {
+    if (try context.lobby.value.lookup("traits", .Value)) |traits| {
+        if (try traits.value.lookup("number", .Value)) |traits_number| {
             traits_number.ref();
 
             return switch (number) {

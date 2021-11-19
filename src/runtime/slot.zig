@@ -42,6 +42,13 @@ pub fn copy(self: Self) !Self {
     return init(self.allocator, self.is_mutable, self.is_parent, self.name, self.value);
 }
 
+/// Assign a new value to the given slot object. The previous value is unref'd.
+/// The new value borrows a ref from the caller.
+pub fn assignNewValue(self: *Self, value: Object.Ref) void {
+    self.value.unref();
+    self.value = value;
+}
+
 allocator: *Allocator,
 is_mutable: bool,
 is_parent: bool,

@@ -219,20 +219,31 @@ fn deinitContent(self: *Self) void {
 }
 
 const VisitedObjectsSet = std.AutoArrayHashMap(*Self, void);
-
-pub fn lookup(self: *Self, selector: []const u8) !?Ref {
-    if (std.mem.eql(u8, selector, "self")) {
-        return Ref{ .value = self };
+const LookupType = enum { Value, Slot };
+pub fn lookup(self: *Self, selector: []const u8, comptime lookup_type: LookupType) t: {
+    if (lookup_type == .Value) {
+        break :t Allocator.Error!?Ref;
+    } else {
+        break :t Allocator.Error!?*Slot;
+    }
+} {
+    if (lookup_type == .Value) {
+        if (std.mem.eql(u8, selector, "self")) {
+            return Ref{ .value = self };
+        }
     }
 
     var visited_objects = VisitedObjectsSet.init(self.allocator);
     defer visited_objects.deinit();
 
-    return try self.lookup_internal(selector, &visited_objects);
+    return if (lookup_type == .Value)
+        try self.lookupValue(selector, &visited_objects)
+    else
+        try self.lookupSlot(selector, &visited_objects);
 }
 
-// Self Handbook, §3.3.8 The lookup algorithm
-fn lookup_internal(self: *Self, selector: []const u8, visited_objects: *VisitedObjectsSet) Allocator.Error!?Ref {
+/// Self Handbook, §3.3.8 The lookup algorithm
+fn lookupValue(self: *Self, selector: []const u8, visited_objects: *VisitedObjectsSet) Allocator.Error!?Ref {
     if (visited_objects.contains(self)) {
         return null;
     }
@@ -253,7 +264,7 @@ fn lookup_internal(self: *Self, selector: []const u8, visited_objects: *VisitedO
             // Parent lookup
             for (slots.slots) |slot| {
                 if (slot.is_parent) {
-                    if (try slot.value.value.lookup_internal(selector, visited_objects)) |found_object| {
+                    if (try slot.value.value.lookupValue(selector, visited_objects)) |found_object| {
                         return found_object;
                     }
                 }
@@ -280,7 +291,7 @@ fn lookup_internal(self: *Self, selector: []const u8, visited_objects: *VisitedO
                 return vector.parent;
             }
 
-            return try vector.parent.value.lookup_internal(selector, visited_objects);
+            return try vector.parent.value.lookupValue(selector, visited_objects);
         },
 
         .Integer => |integer| {
@@ -288,7 +299,7 @@ fn lookup_internal(self: *Self, selector: []const u8, visited_objects: *VisitedO
                 return integer.parent;
             }
 
-            return try integer.parent.value.lookup_internal(selector, visited_objects);
+            return try integer.parent.value.lookupValue(selector, visited_objects);
         },
 
         .FloatingPoint => |floating_point| {
@@ -296,8 +307,49 @@ fn lookup_internal(self: *Self, selector: []const u8, visited_objects: *VisitedO
                 return floating_point.parent;
             }
 
-            return try floating_point.parent.value.lookup_internal(selector, visited_objects);
+            return try floating_point.parent.value.lookupValue(selector, visited_objects);
         },
+    }
+}
+
+/// Self Handbook, §3.3.8 The lookup algorithm
+///
+/// Like lookupValue but finds slots instead of values.
+fn lookupSlot(self: *Self, selector: []const u8, visited_objects: *VisitedObjectsSet) Allocator.Error!?*Slot {
+    // I'd like this to not be duplicated but unfortunately I couldn't reconcile
+    // them.
+    if (visited_objects.contains(self)) {
+        return null;
+    }
+
+    try visited_objects.put(self, .{});
+
+    switch (self.content) {
+        .Empty, .Block, .ByteVector, .Integer, .FloatingPoint => return null,
+
+        .Slots => |slots| {
+            // Direct lookup
+            for (slots.slots) |*slot| {
+                if (std.mem.eql(u8, selector, slot.name)) {
+                    return slot;
+                }
+            }
+
+            // Parent lookup
+            for (slots.slots) |slot| {
+                if (slot.is_parent) {
+                    if (try slot.value.value.lookupSlot(selector, visited_objects)) |found_slot| {
+                        return found_slot;
+                    }
+                }
+            }
+
+            // Nope, not here
+            return null;
+        },
+
+        .Method => @panic("Attempting to perform lookup on method?!"),
+        .Activation, .NonlocalReturn => unreachable,
     }
 }
 
@@ -529,4 +581,20 @@ pub fn addSlots(self: *Self, new_slots: []Slot) !void {
     while (i < new_slots.len) : (i += 1) {
         slot_list[slot_offset + i] = new_slots[i];
     }
+}
+
+/// Looks for a message of the form "slotName:", where "slotName" exists as a
+/// mutable slot on the object. Returns the slot if it exists, or null when not
+/// found.
+pub fn getAssignableSlotForMessage(self: *Self, slot_name: []const u8) !?*Slot {
+    if (slot_name[slot_name.len - 1] != ':') {
+        return null;
+    }
+
+    const slot_name_without_colon = slot_name[0 .. slot_name.len - 1];
+    if (try self.lookup(slot_name_without_colon, .Slot)) |slot| {
+        if (slot.is_mutable) return slot;
+    }
+
+    return null;
 }

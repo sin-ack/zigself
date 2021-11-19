@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const AST = @import("../../language/ast.zig");
 const Object = @import("../object.zig");
+const Slot = @import("../slot.zig");
 const primitives = @import("../primitives.zig");
 const environment = @import("../environment.zig");
 
@@ -187,6 +188,21 @@ pub fn executePrimitiveMessage(
     }
 }
 
+/// The original value in `slot` is unref'd.
+pub fn executeAssignmentMessage(
+    allocator: *Allocator,
+    slot: *Slot,
+    ast_argument: AST.ExpressionNode,
+    context: InterpreterContext,
+) !Object.Ref {
+    var argument = try root_interpreter.executeExpression(allocator, ast_argument, context);
+    errdefer argument.unref();
+
+    slot.assignNewValue(argument);
+
+    return environment.globalNil();
+}
+
 /// Executes a message. All refs are forwarded.
 pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: InterpreterContext) !Object.Ref {
     var receiver = try root_interpreter.executeExpression(allocator, message.receiver, context);
@@ -202,7 +218,12 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
         return try executeBlockMessage(allocator, receiver, message.arguments, context);
     }
 
-    if (try receiver.value.lookup(message.message_name)) |lookup_result| {
+    // Check for assignable slots
+    if (try receiver.value.getAssignableSlotForMessage(message.message_name)) |slot| {
+        return try executeAssignmentMessage(allocator, slot, message.arguments[0], context);
+    }
+
+    if (try receiver.value.lookup(message.message_name, .Value)) |lookup_result| {
         switch (lookup_result.value.content) {
             .Integer, .FloatingPoint, .ByteVector, .Slots, .Empty, .Block => {
                 lookup_result.ref();
