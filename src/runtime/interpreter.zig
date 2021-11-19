@@ -40,6 +40,11 @@ pub fn executeScript(allocator: *Allocator, script: AST.ScriptNode, lobby: Objec
     var last_expression_result: ?Object.Ref = null;
     var activation_stack = std.ArrayList(Object.Ref).init(allocator);
     defer activation_stack.deinit();
+    errdefer {
+        for (activation_stack.items) |*activation| {
+            activation.unref();
+        }
+    }
 
     const context = InterpreterContext{
         .self_object = lobby,
