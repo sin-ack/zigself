@@ -252,6 +252,10 @@ pub fn executeReturn(allocator: *Allocator, return_node: AST.ReturnNode, context
 /// Executes an identifier expression. If the looked up value exists, the value
 /// gains a ref. `self_object` gains a ref during a method execution.
 pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, context: InterpreterContext) !Object.Ref {
+    if (identifier.value[0] == '_') {
+        return try message_interpreter.executePrimitiveMessage(allocator, context.self_object, identifier.value, &[_]AST.ExpressionNode{}, context);
+    }
+
     if (try context.self_object.value.lookup(identifier.value)) |value| {
         switch (value.value.content) {
             .Integer, .FloatingPoint, .ByteVector, .Slots, .Empty, .Block => {

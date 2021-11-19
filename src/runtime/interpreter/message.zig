@@ -165,33 +165,37 @@ pub fn executeMethodMessage(
     }
 }
 
-pub fn executePrimitiveMessage(allocator: *Allocator, message: AST.MessageNode, context: InterpreterContext) !Object.Ref {
+/// Refs `receiver`.
+pub fn executePrimitiveMessage(
+    allocator: *Allocator,
+    receiver: Object.Ref,
+    name: []const u8,
+    ast_arguments: []AST.ExpressionNode,
+    context: InterpreterContext,
+) !Object.Ref {
     // All primitives borrow a ref from the caller for the receiver and
     // each argument. It is the primitive's job to unref any argument after
     // its work is done.
-    if (primitives.hasPrimitive(message.message_name)) {
-        var receiver = try root_interpreter.executeExpression(allocator, message.receiver, context);
-        errdefer receiver.unref();
-
-        var arguments = try getMessageArguments(allocator, message.arguments, context);
+    if (primitives.hasPrimitive(name)) {
+        var arguments = try getMessageArguments(allocator, ast_arguments, context);
         defer allocator.free(arguments);
 
-        return try primitives.callPrimitive(allocator, message.message_name, receiver, arguments, context.lobby);
+        receiver.ref();
+        return try primitives.callPrimitive(allocator, name, receiver, arguments, context.lobby);
     } else {
-        std.debug.panic("Unknown primitive selector \"{s}\"\n", .{message.message_name});
+        std.debug.panic("Unknown primitive selector \"{s}\"\n", .{name});
     }
 }
 
 /// Executes a message. All refs are forwarded.
 pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: InterpreterContext) !Object.Ref {
-    // Primitive check
-    if (message.message_name[0] == '_') {
-        return try executePrimitiveMessage(allocator, message, context);
-    }
-
-    // Non-primitive messages
     var receiver = try root_interpreter.executeExpression(allocator, message.receiver, context);
     defer receiver.unref();
+
+    // Primitive check
+    if (message.message_name[0] == '_') {
+        return try executePrimitiveMessage(allocator, receiver, message.message_name, message.arguments, context);
+    }
 
     // Check for block activation
     if (receiver.value.is(.Block) and receiver.value.isCorrectMessageForBlockExecution(message.message_name)) {
