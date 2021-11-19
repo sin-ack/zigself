@@ -31,20 +31,19 @@ pub fn IntAdd(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.R
     if (!receiver.value.is(.Integer)) {
         std.debug.panic("Expected Integer as _IntAdd: receiver, got {s}", .{@tagName(receiver.value.content)});
     }
+    defer receiver.unref();
 
     var addend = arguments[0];
     if (!addend.value.is(.Integer)) {
         std.debug.panic("Expected Integer as _IntAdd: argument, got {s}", .{@tagName(addend.value.content)});
     }
+    defer addend.unref();
 
     const result = try makeInteger(
         allocator,
         receiver.value.content.Integer.value + addend.value.content.Integer.value,
         lobby,
     );
-
-    receiver.unref();
-    addend.unref();
 
     return result;
 }
@@ -58,19 +57,18 @@ pub fn IntLT(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Re
     if (!receiver.value.is(.Integer)) {
         std.debug.panic("Expected Integer as _IntLT: receiver, got {s}", .{@tagName(receiver.value.content)});
     }
+    defer receiver.unref();
 
     var argument = arguments[0];
     if (!argument.value.is(.Integer)) {
         std.debug.panic("Expected Integer as _IntLT: argument, got {s}", .{@tagName(argument.value.content)});
     }
+    defer argument.unref();
 
     const result = if (receiver.value.content.Integer.value < argument.value.content.Integer.value)
         environment.globalTrue()
     else
         environment.globalFalse();
-
-    receiver.unref();
-    argument.unref();
 
     return result;
 }
