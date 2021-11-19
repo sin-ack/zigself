@@ -19,6 +19,12 @@ fn getNumberTraits(lobby: Object.Ref) !Object.Ref {
     }
 }
 
+fn makeInteger(allocator: *Allocator, value: u64, lobby: Object.Ref) !Object.Ref {
+    var number_traits = try getNumberTraits(lobby);
+    number_traits.ref();
+    return try Object.createFromIntegerLiteral(allocator, value, number_traits);
+}
+
 /// Add two integer numbers. The returned value is an integer.
 pub fn IntAdd(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) !Object.Ref {
     if (!receiver.value.is(.Integer)) {
@@ -30,12 +36,10 @@ pub fn IntAdd(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.R
         std.debug.panic("Expected Integer as _IntAdd: argument, got {s}", .{@tagName(addend.value.content)});
     }
 
-    var number_traits = try getNumberTraits(lobby);
-    number_traits.ref();
-    var result = try Object.createFromIntegerLiteral(
+    const result = try makeInteger(
         allocator,
         receiver.value.content.Integer.value + addend.value.content.Integer.value,
-        number_traits,
+        lobby,
     );
 
     receiver.unref();
