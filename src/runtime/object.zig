@@ -608,7 +608,6 @@ pub fn addSlots(self: *Self, new_slots: []Slot) !void {
             else => unreachable,
         }
     };
-    std.debug.print("addSlots: Current slots list has {d} items\n", .{slot_list.len});
 
     const new_slots_offset = slot_list.len - new_slots.len;
     var i: usize = 0;
