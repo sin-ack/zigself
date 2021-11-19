@@ -97,6 +97,9 @@ pub fn main() !u8 {
         return 1;
     }
 
+    Object.setupObjectRefTracker(allocator);
+    defer Object.teardownObjectRefTrackerAndReportAliveRefs();
+
     var lobby = try environment.prepareRuntimeEnvironment(allocator);
     defer lobby.unref();
     defer environment.teardownGlobalObjects();

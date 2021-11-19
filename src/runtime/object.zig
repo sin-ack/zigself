@@ -13,6 +13,32 @@ const Slot = @import("./slot.zig");
 const Self = @This();
 pub const Ref = ref_counted.RefPtrWithoutTypeChecks(Self);
 
+const EnableObjectRefTracker = false;
+
+const ObjectMap = std.AutoArrayHashMap(*Self, void);
+var object_ref_tracker: ?ObjectMap = null;
+
+pub fn setupObjectRefTracker(allocator: *Allocator) void {
+    if (!EnableObjectRefTracker) return;
+
+    object_ref_tracker = ObjectMap.init(allocator);
+}
+
+pub fn teardownObjectRefTrackerAndReportAliveRefs() void {
+    if (!EnableObjectRefTracker) return;
+
+    if (object_ref_tracker.?.keys().len > 0) {
+        std.debug.print("Remaining object refs during teardown:\n", .{});
+
+        var iterator = object_ref_tracker.?.iterator();
+        while (iterator.next()) |item| {
+            std.debug.print("  {*} - {d} refs\n", .{ item.key_ptr.*, item.key_ptr.*.ref.ref_count });
+        }
+    }
+
+    object_ref_tracker.?.deinit();
+}
+
 const ObjectContent = union(enum) {
     Empty: void,
 
@@ -133,12 +159,15 @@ pub fn createBlock(allocator: *Allocator, arguments: [][]const u8, slots: []Slot
 
 pub fn destroy(self: *Self) void {
     self.deinitContent();
+    if (EnableObjectRefTracker) _ = object_ref_tracker.?.swapRemove(self);
     self.allocator.destroy(self);
 }
 
 fn create(allocator: *Allocator, content: ObjectContent) !Ref {
     const self = try allocator.create(Self);
     self.init(allocator, content);
+
+    if (EnableObjectRefTracker) try object_ref_tracker.?.put(self, .{});
     return Ref.adopt(self);
 }
 
