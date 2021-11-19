@@ -210,6 +210,12 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
 
     // Primitive check
     if (message.message_name[0] == '_') {
+        if (try receiver.value.findActivationReceiver()) |actual_receiver| {
+            actual_receiver.ref();
+            receiver.unref();
+            receiver = actual_receiver;
+        }
+
         return try executePrimitiveMessage(allocator, receiver, message.message_name, message.arguments, context);
     }
 

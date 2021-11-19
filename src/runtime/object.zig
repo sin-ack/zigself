@@ -598,3 +598,14 @@ pub fn getAssignableSlotForMessage(self: *Self, slot_name: []const u8) !?*Slot {
 
     return null;
 }
+
+/// This is used for primitives to find the actual value the primitive is
+/// supposed to send to. If the `_parent` slot exists, then that is returned as
+/// the activation target; otherwise null is returned.
+pub fn findActivationReceiver(self: *Self) !?Ref {
+    if (try self.lookup("_parent", .Value)) |parent| {
+        return parent;
+    } else {
+        return null;
+    }
+}
