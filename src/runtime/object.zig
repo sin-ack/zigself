@@ -561,25 +561,24 @@ pub fn addSlots(self: *Self, new_slots: []Slot) !void {
             .Empty => {
                 self.deinitContent();
 
-                var an_empty_slot_list_to_make_this_streamlined = try self.allocator.alloc(Slot, 0);
-                self.content = .{ .Slots = .{ .slots = an_empty_slot_list_to_make_this_streamlined } };
-                break :blk an_empty_slot_list_to_make_this_streamlined;
+                var new_slot_list = try self.allocator.alloc(Slot, new_slots.len);
+                self.content = .{ .Slots = .{ .slots = new_slot_list } };
+                break :blk new_slot_list;
             },
             .Slots => |slots| {
-                break :blk slots.slots;
+                var resized_slots_list = try self.allocator.realloc(slots.slots, slots.slots.len + new_slots.len);
+                self.content = .{ .Slots = .{ .slots = resized_slots_list } };
+                break :blk resized_slots_list;
             },
             else => unreachable,
         }
     };
+    std.debug.print("addSlots: Current slots list has {d} items\n", .{slot_list.len});
 
-    const slot_offset = slot_list.len;
-    // NOTE: No need to assign to self.content.Slots, resize is guaranteed not
-    //       to move.
-    slot_list = try self.allocator.resize(slot_list, slot_offset + new_slots.len);
-
+    const new_slots_offset = slot_list.len - new_slots.len;
     var i: usize = 0;
     while (i < new_slots.len) : (i += 1) {
-        slot_list[slot_offset + i] = new_slots[i];
+        slot_list[new_slots_offset + i] = new_slots[i];
     }
 }
 
