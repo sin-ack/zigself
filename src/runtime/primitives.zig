@@ -27,6 +27,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_PrintLine", .function = bytevector_primitives.PrintLine },
     // number primitives
     .{ .name = "_IntAdd:", .function = number_primitives.IntAdd },
+    .{ .name = "_IntLT:", .function = number_primitives.IntLT },
     // object primitives
     .{ .name = "_AddSlots:", .function = object_primitives.AddSlots },
 };

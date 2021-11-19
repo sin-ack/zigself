@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Object = @import("../object.zig");
+const environment = @import("../environment.zig");
 
 fn getNumberTraits(lobby: Object.Ref) !Object.Ref {
     if (try lobby.value.lookup("traits")) |traits| {
@@ -44,6 +45,32 @@ pub fn IntAdd(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.R
 
     receiver.unref();
     addend.unref();
+
+    return result;
+}
+
+/// Return whether the receiver is less than its argument. The return value is
+/// either "true" or "false".
+pub fn IntLT(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) !Object.Ref {
+    _ = allocator;
+    _ = lobby;
+
+    if (!receiver.value.is(.Integer)) {
+        std.debug.panic("Expected Integer as _IntLT: receiver, got {s}", .{@tagName(receiver.value.content)});
+    }
+
+    var argument = arguments[0];
+    if (!argument.value.is(.Integer)) {
+        std.debug.panic("Expected Integer as _IntLT: argument, got {s}", .{@tagName(argument.value.content)});
+    }
+
+    const result = if (receiver.value.content.Integer.value < argument.value.content.Integer.value)
+        environment.globalTrue()
+    else
+        environment.globalFalse();
+
+    receiver.unref();
+    argument.unref();
 
     return result;
 }
