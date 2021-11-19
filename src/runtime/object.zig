@@ -551,6 +551,12 @@ pub fn getBoundMethodForActivation(self: Self) Ref {
 /// objects allow this; otherwise, error.ObjectDoesNotAcceptSlots is returned.
 /// The slots' ownership is passed to the object.
 pub fn addSlots(self: *Self, new_slots: []Slot) !void {
+    errdefer {
+        for (new_slots) |*slot| {
+            slot.deinit();
+        }
+    }
+
     switch (self.content) {
         .Empty, .Slots => {},
         else => return error.ObjectDoesNotAcceptSlots,
