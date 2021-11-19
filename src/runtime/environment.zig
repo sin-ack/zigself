@@ -16,6 +16,13 @@ var global_false: ?Object.Ref = null;
 /// essentials, beyond even those which can be set up by the world script; i.e.
 /// required for basic objects and literal evaluation to function.
 pub fn prepareRuntimeEnvironment(allocator: *Allocator) !Object.Ref {
+    global_nil = try Object.createEmpty(allocator);
+    errdefer global_nil.?.unref();
+    global_true = try Object.createEmpty(allocator);
+    errdefer global_true.?.unref();
+    global_false = try Object.createEmpty(allocator);
+    errdefer global_false.?.unref();
+
     var lobby_slots = try makeLobbySlots(allocator);
     errdefer {
         for (lobby_slots) |*slot| {
@@ -23,13 +30,6 @@ pub fn prepareRuntimeEnvironment(allocator: *Allocator) !Object.Ref {
         }
         allocator.free(lobby_slots);
     }
-
-    global_nil = try Object.createEmpty(allocator);
-    errdefer global_nil.?.unref();
-    global_true = try Object.createEmpty(allocator);
-    errdefer global_true.?.unref();
-    global_false = try Object.createEmpty(allocator);
-    errdefer global_false.?.unref();
 
     return try Object.createSlots(allocator, lobby_slots);
 }
