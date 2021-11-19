@@ -132,7 +132,7 @@ pub fn createBlock(allocator: *Allocator, arguments: [][]const u8, slots: []Slot
 }
 
 pub fn destroy(self: *Self) void {
-    self.deinit();
+    self.deinitContent();
     self.allocator.destroy(self);
 }
 
@@ -149,7 +149,7 @@ fn init(self: *Self, allocator: *Allocator, content: ObjectContent) void {
     self.content = content;
 }
 
-fn deinit(self: *Self) void {
+fn deinitContent(self: *Self) void {
     switch (self.content) {
         .Empty => {},
         .Slots => |slots| {
@@ -493,4 +493,40 @@ pub fn getBoundMethodForActivation(self: Self) Ref {
         .Method => self.content.Activation.activation_object,
         .Block => |block_context| block_context.bound_method,
     };
+}
+
+/// Attempt to add the given slot objects to the content. Only Empty and Slots
+/// objects allow this; otherwise, error.ObjectDoesNotAcceptSlots is returned.
+/// The slots' ownership is passed to the object.
+pub fn addSlots(self: *Self, new_slots: []Slot) !void {
+    switch (self.content) {
+        .Empty, .Slots => {},
+        else => return error.ObjectDoesNotAcceptSlots,
+    }
+
+    var slot_list = blk: {
+        switch (self.content) {
+            .Empty => {
+                self.deinitContent();
+
+                var an_empty_slot_list_to_make_this_streamlined = try self.allocator.alloc(Slot, 0);
+                self.content = .{ .Slots = .{ .slots = an_empty_slot_list_to_make_this_streamlined } };
+                break :blk an_empty_slot_list_to_make_this_streamlined;
+            },
+            .Slots => |slots| {
+                break :blk slots.slots;
+            },
+            else => unreachable,
+        }
+    };
+
+    const slot_offset = slot_list.len;
+    // NOTE: No need to assign to self.content.Slots, resize is guaranteed not
+    //       to move.
+    slot_list = try self.allocator.resize(slot_list, slot_offset + new_slots.len);
+
+    var i: usize = 0;
+    while (i < new_slots.len) : (i += 1) {
+        slot_list[slot_offset + i] = new_slots[i];
+    }
 }
