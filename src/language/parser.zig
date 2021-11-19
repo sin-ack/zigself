@@ -284,6 +284,10 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
                 while (self.lexer.current_token != .Period and self.lexer.current_token != .Pipe) {
                     _ = try self.lexer.nextToken();
                 }
+
+                if (self.lexer.current_token == .Period) {
+                    _ = try self.lexer.nextToken();
+                }
             }
         }
 
