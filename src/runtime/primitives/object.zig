@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const Object = @import("../object.zig");
 const Slot = @import("../slot.zig");
 const environment = @import("../environment.zig");
+const object_inspector = @import("../object_inspector.zig");
 
 /// Adds the slots in the argument object to the receiver object. The slots
 /// are copied. The objects at each slot are not cloned, however.
@@ -45,6 +46,16 @@ pub fn AddSlots(allocator: *Allocator, receiver: Object.Ref, arguments: []Object
         },
         else => return @errSetCast(Allocator.Error, err),
     };
+
+    return receiver;
+}
+
+/// Inspect the receiver and print it to stderr. Return the receiver.
+pub fn Inspect(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) !Object.Ref {
+    _ = arguments;
+    _ = lobby;
+
+    try object_inspector.inspectObject(allocator, receiver, .Multiline);
 
     return receiver;
 }

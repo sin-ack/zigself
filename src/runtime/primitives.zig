@@ -30,6 +30,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_IntLT:", .function = number_primitives.IntLT },
     // object primitives
     .{ .name = "_AddSlots:", .function = object_primitives.AddSlots },
+    .{ .name = "_Inspect", .function = object_primitives.Inspect },
 };
 
 // FIXME: This is very naive! We shouldn't need to linear search every single
