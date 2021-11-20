@@ -46,7 +46,7 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
 
     // If the global objects are printed during inspect and they haven't been
     // printed directly, then print them as a summary.
-    if (!is_first_object_to_be_printed) {
+    if (!is_first_object_to_be_printed and !environment.hasBeenTornDown()) {
         const nil_object = environment.globalNil();
         defer nil_object.unref();
         if (object.value == nil_object.value) {

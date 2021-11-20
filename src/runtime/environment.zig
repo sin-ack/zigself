@@ -11,6 +11,7 @@ const Slot = @import("./slot.zig");
 var global_nil: ?Object.Ref = null;
 var global_true: ?Object.Ref = null;
 var global_false: ?Object.Ref = null;
+var has_been_torn_down = true;
 
 /// Prepares important objects in the runtime. Note that these are the bare
 /// essentials, beyond even those which can be set up by the world script; i.e.
@@ -31,6 +32,7 @@ pub fn prepareRuntimeEnvironment(allocator: *Allocator) !Object.Ref {
         allocator.free(lobby_slots);
     }
 
+    has_been_torn_down = false;
     return try Object.createSlots(allocator, lobby_slots);
 }
 
@@ -123,4 +125,10 @@ pub fn teardownGlobalObjects() void {
         nil_object.unref();
         global_nil = null;
     }
+
+    has_been_torn_down = true;
+}
+
+pub fn hasBeenTornDown() bool {
+    return has_been_torn_down;
 }
