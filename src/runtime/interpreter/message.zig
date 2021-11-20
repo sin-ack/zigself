@@ -38,16 +38,21 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
     // activation is currently on the stack.
     var i = @intCast(isize, context.activation_stack.items.len - 1);
     var did_find_activation_in_stack = false;
+    var bound_method: Object.Ref = undefined;
 
-    while (i >= 0) : (i -= 1) {
-        var activation_object: Object.Ref = context.activation_stack.items[@intCast(usize, i)];
-        std.debug.assert(activation_object.value.content == .Activation);
+    if (receiver.value.content.Block.bound_method.getPointer()) |bound_method_ptr| {
+        bound_method = .{ .value = bound_method_ptr };
 
-        if (activation_object.value.content.Activation.context == .Method and
-            activation_object.value.content.Activation.activation_object.value == receiver.value.content.Block.bound_method.value)
-        {
-            did_find_activation_in_stack = true;
-            break;
+        while (i >= 0) : (i -= 1) {
+            var activation_object: Object.Ref = context.activation_stack.items[@intCast(usize, i)];
+            std.debug.assert(activation_object.value.content == .Activation);
+
+            if (activation_object.value.content.Activation.context == .Method and
+                activation_object.value.content.Activation.activation_object.value == bound_method_ptr)
+            {
+                did_find_activation_in_stack = true;
+                break;
+            }
         }
     }
 
@@ -55,7 +60,6 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
         @panic("Attempted to execute a block after its enclosing method has returned. Use objects for closures.");
     }
 
-    const bound_method = receiver.value.content.Block.bound_method;
     bound_method.ref();
     var block_activation = try receiver.value.activateBlock(arguments, context.self_object, bound_method);
 

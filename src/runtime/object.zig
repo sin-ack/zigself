@@ -8,9 +8,12 @@ const Allocator = std.mem.Allocator;
 const AST = @import("../language/ast.zig");
 const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
 const ref_counted = @import("../utility/ref_counted.zig");
+const weak_ref = @import("../utility/weak_ref.zig");
 const Slot = @import("./slot.zig");
 
 const Self = @This();
+const WeakBlock = weak_ref.WeakPtrBlock(Self);
+const Weak = weak_ref.WeakPtr(Self);
 pub const Ref = ref_counted.RefPtrWithoutTypeChecks(Self);
 
 const EnableObjectRefTracker = false;
@@ -78,7 +81,7 @@ const ObjectContent = union(enum) {
 
         /// See `ObjectContent.Activation.context.Block.bound_method`'s
         /// documentation.
-        bound_method: Ref,
+        bound_method: Weak,
     },
 
     NonlocalReturn: struct {
@@ -105,6 +108,7 @@ const ObjectContent = union(enum) {
 };
 
 ref: ref_counted.RefCount,
+weak: WeakBlock,
 allocator: *Allocator,
 content: ObjectContent,
 
@@ -148,32 +152,38 @@ pub fn createFromFloatingPointLiteral(allocator: *Allocator, value: f64, parent:
 /// Takes ownership of `arguments`, `slots` and `statements`. Borrows a ref for
 /// `bound_method` from the caller.
 pub fn createBlock(allocator: *Allocator, arguments: [][]const u8, slots: []Slot, statements: []AST.StatementNode, bound_method: Ref) !Ref {
+    var bound_method_weak = Weak.init(bound_method.value);
+    errdefer bound_method_weak.deinit();
+
     return try create(allocator, .{
         .Block = .{
             .arguments = arguments,
             .slots = slots,
             .statements = statements,
-            .bound_method = bound_method,
+            .bound_method = bound_method_weak,
         },
     });
 }
 
 pub fn destroy(self: *Self) void {
     self.deinitContent();
+    self.weak.deinit();
+
     if (EnableObjectRefTracker) _ = object_ref_tracker.?.swapRemove(self);
     self.allocator.destroy(self);
 }
 
 fn create(allocator: *Allocator, content: ObjectContent) !Ref {
     const self = try allocator.create(Self);
-    self.init(allocator, content);
+    try self.init(allocator, content);
 
     if (EnableObjectRefTracker) try object_ref_tracker.?.put(self, .{});
     return Ref.adopt(self);
 }
 
-fn init(self: *Self, allocator: *Allocator, content: ObjectContent) void {
+fn init(self: *Self, allocator: *Allocator, content: ObjectContent) !void {
     self.ref = .{};
+    self.weak = try WeakBlock.init(allocator, self);
 
     self.allocator = allocator;
     self.content = content;
@@ -229,7 +239,7 @@ fn deinitContent(self: *Self) void {
             }
             self.allocator.free(block.statements);
 
-            block.bound_method.unref();
+            block.bound_method.deinit();
         },
         .NonlocalReturn => |nonlocal_return| {
             nonlocal_return.target_method.unref();

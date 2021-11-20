@@ -132,7 +132,14 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
         },
 
         .Block => |block| {
-            std.debug.print("<block object for {*} [", .{block.bound_method.value});
+            std.debug.print("<block object for ", .{});
+            if (block.bound_method.getPointer()) |ptr| {
+                std.debug.print("{*}", .{ptr});
+            } else {
+                std.debug.print("(gone)", .{});
+            }
+
+            std.debug.print(" [", .{});
             for (block.arguments) |argument, i| {
                 if (i > 0) std.debug.print(", ", .{});
                 std.debug.print("\"{s}\"", .{argument});

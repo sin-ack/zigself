@@ -236,8 +236,6 @@ pub fn executeBlock(allocator: *Allocator, block: AST.BlockNode, context: *Inter
 
     var latest_activation: Object.Ref = context.activation_stack.items[context.activation_stack.items.len - 1];
     const bound_method = latest_activation.value.getBoundMethodForActivation();
-    bound_method.ref();
-    errdefer bound_method.unref();
 
     return try Object.createBlock(allocator, arguments.toOwnedSlice(), slots.toOwnedSlice(), statements.toOwnedSlice(), bound_method);
 }
