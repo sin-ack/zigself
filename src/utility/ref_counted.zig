@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 const std = @import("std");
 
+const EnableRefCountDebugging = false;
+
 /// The inline struct that should be placed on structs which will be
 /// ref-counted. It must be placed as the `ref` member, and must be initialized
 /// with:
@@ -111,6 +113,7 @@ pub fn RefPtrWithoutTypeChecks(comptime T: type) type {
             }
 
             self.value.ref.ref_count += 1;
+            if (EnableRefCountDebugging) std.debug.print("Incrementing refcount on {*} - now {d} refs\n", .{ self.value, self.value.ref.ref_count });
         }
 
         /// Decrement the reference count on this object.
@@ -123,6 +126,7 @@ pub fn RefPtrWithoutTypeChecks(comptime T: type) type {
             }
 
             self.value.ref.ref_count -= 1;
+            if (EnableRefCountDebugging) std.debug.print("Decrementing refcount on {*} - now {d} refs\n", .{ self.value, self.value.ref.ref_count });
             if (self.value.ref.ref_count == 0) {
                 self.value.destroy();
             }
