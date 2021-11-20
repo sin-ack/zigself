@@ -5,7 +5,7 @@
 const std = @import("std");
 const zig_args = @import("zig-args");
 
-const Parser = @import("./language/parser.zig");
+const Script = @import("./language/script.zig");
 const AST = @import("./language/ast.zig");
 
 const Object = @import("./runtime/object.zig");
@@ -65,35 +65,25 @@ pub fn main() !u8 {
         return 1;
     }
 
-    const file_path = arguments.positionals[0];
+    const file_path_sentinel = arguments.positionals[0];
+    const file_path = std.mem.sliceTo(file_path_sentinel, 0);
 
-    var parser = Parser{};
-    try parser.initInPlaceFromFilePath(file_path, allocator);
-    defer parser.deinit();
+    var entrypoint_script = Script{};
+    try entrypoint_script.initInPlaceFromFilePath(file_path, allocator);
+    defer entrypoint_script.deinit();
 
-    var script_node = try parser.parse();
-    defer script_node.deinit(allocator);
-
-    const writer = std.io.getStdErr().writer();
-
-    for (parser.diagnostics.diagnostics.items) |diagnostic| {
-        const line = try parser.lexer.getLineForLocation(diagnostic.location);
-
-        std.debug.print("{s}:{}: {s}: {s}\n", .{ file_path, diagnostic.location.format(), @tagName(diagnostic.level), diagnostic.message });
-        std.debug.print("{s}\n", .{line});
-        try writer.writeByteNTimes(' ', diagnostic.location.column - 1);
-        try writer.writeAll("^\n");
-    }
+    const did_parse_without_errors = try entrypoint_script.parseScript();
+    try entrypoint_script.reportDiagnostics(std.io.getStdErr().writer());
 
     if (arguments.options.@"dump-ast") {
         var printer = AST.ASTPrinter.init(2, allocator);
         defer printer.deinit();
-        script_node.dumpTree(&printer);
+        entrypoint_script.ast_root.?.dumpTree(&printer);
         return 0;
     }
 
     // If we had parsing errors then we cannot proceed further.
-    if (parser.diagnostics.diagnostics.items.len > 0) {
+    if (!did_parse_without_errors) {
         return 1;
     }
 
@@ -104,7 +94,7 @@ pub fn main() !u8 {
     defer lobby.unref();
     defer environment.teardownGlobalObjects();
 
-    if (try interpreter.executeScript(allocator, script_node, lobby)) |result| {
+    if (try interpreter.executeScript(allocator, &entrypoint_script, lobby)) |result| {
         result.unref();
     }
 

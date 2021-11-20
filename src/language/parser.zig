@@ -35,7 +35,7 @@ const ParserFunctionErrorSet = (errorSetOf(Lexer.nextToken));
 
 // TODO: When Zig's RLS actually starts working properly, make this a static
 //       function.
-pub fn initInPlaceFromFilePath(self: *Self, file_path: [*:0]const u8, allocator: *std.mem.Allocator) !void {
+pub fn initInPlaceFromFilePath(self: *Self, file_path: []const u8, allocator: *std.mem.Allocator) !void {
     if (self.initialized)
         @panic("Attempting to initialize already-initialized parser");
 

@@ -71,6 +71,7 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
         .lobby = context.lobby,
         .self_object = block_activation_self_object,
         .activation_stack = context.activation_stack,
+        .script = context.script,
     };
 
     var last_expression_result: ?Object.Ref = null;
@@ -119,6 +120,7 @@ pub fn executeMethodMessage(
         .lobby = context.lobby,
         .self_object = method_activation_object,
         .activation_stack = context.activation_stack,
+        .script = context.script,
     };
     for (method_object.value.content.Method.statements) |statement| {
         if (last_expression_result) |last_result| {

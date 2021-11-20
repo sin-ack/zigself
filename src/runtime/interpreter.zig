@@ -9,6 +9,7 @@ const AST = @import("../language/ast.zig");
 const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
 const Object = @import("./object.zig");
 const Slot = @import("./slot.zig");
+const Script = @import("../language/script.zig");
 
 const message_interpreter = @import("./interpreter/message.zig");
 
@@ -28,12 +29,15 @@ pub const InterpreterContext = struct {
     /// popped; when a new activation occurs, it is pushed. Pushed objects must
     /// be pushed with the assumption that 1 ref is borrowed by this stack.
     activation_stack: *std.ArrayList(Object.Ref),
+    /// The script file that is currently executing, used to resolve the
+    /// relative paths of other script files.
+    script: *const Script,
 };
 
 /// Executes a script node. `lobby` is ref'd for the function lifetime. The last
 /// expression result is returned, or if no statements were available, null is
 /// returned.
-pub fn executeScript(allocator: *Allocator, script: AST.ScriptNode, lobby: Object.Ref) !?Object.Ref {
+pub fn executeScript(allocator: *Allocator, script: *const Script, lobby: Object.Ref) !?Object.Ref {
     lobby.ref();
     defer lobby.unref();
 
@@ -50,8 +54,9 @@ pub fn executeScript(allocator: *Allocator, script: AST.ScriptNode, lobby: Objec
         .self_object = lobby,
         .lobby = lobby,
         .activation_stack = &activation_stack,
+        .script = script,
     };
-    for (script.statements) |statement| {
+    for (script.ast_root.?.statements) |statement| {
         std.debug.assert(activation_stack.items.len == 0);
 
         if (last_expression_result) |*result| {

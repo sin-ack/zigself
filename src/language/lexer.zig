@@ -16,13 +16,13 @@ const PeekStreamType = std.io.PeekStream(.{ .Static = MaximumLookaheadLength }, 
 
 // TODO: When Zig's RLS actually starts working properly, make this a static
 //       function.
-pub fn initInPlaceFromFilePath(self: *Self, file_path: [*:0]const u8, allocator: *std.mem.Allocator) !void {
+pub fn initInPlaceFromFilePath(self: *Self, file_path: []const u8, allocator: *std.mem.Allocator) !void {
     if (self.initialized)
         @panic("Attempting to initialize already-initialized lexer");
 
     const current_working_directory = std.fs.cwd();
 
-    const file = try current_working_directory.openFileZ(file_path, .{});
+    const file = try current_working_directory.openFile(file_path, .{});
     defer file.close();
 
     var file_contents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
@@ -95,7 +95,7 @@ pub fn nextToken(self: *Self) !*tokens.Token {
 }
 
 /// Return the line from the file contents corresponding to the given location.
-pub fn getLineForLocation(self: *Self, location: Location) ![]const u8 {
+pub fn getLineForLocation(self: Self, location: Location) ![]const u8 {
     var start_offset = location.offset - (location.column - 1);
     var end_offset = start_offset + 1;
 
