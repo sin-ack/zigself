@@ -57,7 +57,6 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
 
     const bound_method = receiver.value.content.Block.bound_method;
     bound_method.ref();
-    context.self_object.ref();
     var block_activation = try receiver.value.activateBlock(arguments, context.self_object, bound_method);
 
     // Push it onto the activation stack. Borrows the ref from block_activation.
@@ -106,7 +105,6 @@ pub fn executeMethodMessage(
     arguments: []Object.Ref,
     context: *InterpreterContext,
 ) !Object.Ref {
-    receiver.ref();
     const method_activation = try method_object.value.activateMethod(arguments, receiver);
     try context.activation_stack.append(method_activation);
 

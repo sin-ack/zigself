@@ -540,6 +540,7 @@ fn activateCommon(allocator: *Allocator, arguments: []Ref, argument_names: [][]c
     if (try parent.value.findActivationReceiver()) |actual_parent| {
         the_parent = actual_parent;
     }
+    the_parent.ref();
 
     // _parent because Self code cannot create or reach slots with _ at start.
     var parent_slot = try Slot.init(allocator, false, true, "_parent", the_parent);
@@ -558,8 +559,8 @@ fn activateCommon(allocator: *Allocator, arguments: []Ref, argument_names: [][]c
 }
 
 /// Activate this block and return a slots object for it.
-/// Borrows 1 ref from each object in `arguments` and from `parent` and
-/// `bound_method`.
+/// Borrows 1 ref from each object in `arguments` and from `bound_method`.
+/// `parent` is ref'd internally.
 pub fn activateBlock(self: Self, arguments: []Ref, parent: Ref, bound_method: Ref) !Ref {
     std.debug.assert(self.content == .Block);
     const activation_object = try activateCommon(self.allocator, arguments, self.content.Block.arguments, self.content.Block.slots, parent);
@@ -569,7 +570,8 @@ pub fn activateBlock(self: Self, arguments: []Ref, parent: Ref, bound_method: Re
 }
 
 /// Activate this method and return a slots object for it.
-/// Borrows 1 ref from each object in `arguments` and from `parent`.
+/// Borrows 1 ref from each object in `arguments`.
+/// `parent` is ref'd internally.
 pub fn activateMethod(self: Self, arguments: []Ref, parent: Ref) !Ref {
     std.debug.assert(self.content == .Method);
     const activation_object = try activateCommon(self.allocator, arguments, self.content.Method.arguments, self.content.Method.slots, parent);
