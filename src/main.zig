@@ -105,7 +105,7 @@ pub fn main() !u8 {
     defer environment.teardownGlobalObjects();
 
     if (try interpreter.executeScript(allocator, script_node, lobby)) |result| {
-        defer result.unref();
+        result.unref();
     }
 
     return 0;
