@@ -28,7 +28,6 @@
     cleanupBasicEnvironment = (| fb <- _Nil |
         fb: [ 'Failed removing slots!\n' _StringPrint. _Exit: 1 ].
 
-        '' parent _RemoveSlot: 'print'     IfFail: fb.
         '' parent _RemoveSlot: 'printLine' IfFail: fb.
         0 parent  _RemoveSlot: '+'         IfFail: fb.
         0 parent  _RemoveSlot: '<'         IfFail: fb.
