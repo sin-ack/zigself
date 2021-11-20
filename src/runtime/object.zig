@@ -529,8 +529,20 @@ fn activateCommon(allocator: *Allocator, arguments: []Ref, argument_names: [][]c
         try slots_copy.append(new_slot);
     }
 
+    // NOTE: This is very important! When we're performing a method activation,
+    //       we must NOT parent previous method or block activation objects,
+    //       that would make their slots visible to us which we absolutely do
+    //       not want.
+    //
+    //       Not only that, but that would also cause the actual object to be
+    //       wrapped in multiple layers of activation objects like ogres.
+    var the_parent = parent;
+    if (try parent.value.findActivationReceiver()) |actual_parent| {
+        the_parent = actual_parent;
+    }
+
     // _parent because Self code cannot create or reach slots with _ at start.
-    var parent_slot = try Slot.init(allocator, false, true, "_parent", parent);
+    var parent_slot = try Slot.init(allocator, false, true, "_parent", the_parent);
     errdefer parent_slot.deinit();
 
     try slots_copy.append(parent_slot);
