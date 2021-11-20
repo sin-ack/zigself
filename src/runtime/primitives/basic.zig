@@ -18,3 +18,17 @@ pub fn Nil(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref,
 
     return environment.globalNil();
 }
+
+/// Exit with the given return code.
+pub fn Exit(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = allocator;
+    _ = receiver;
+    _ = context;
+
+    var status_code = arguments[0];
+    if (!status_code.value.is(.Integer)) {
+        std.debug.panic("Expected Integer for the status code argument of _Exit:, got {s}", .{@tagName(status_code.value.content)});
+    }
+
+    std.os.exit(@intCast(u8, status_code.value.content.Integer.value));
+}
