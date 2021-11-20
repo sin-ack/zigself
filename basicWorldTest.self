@@ -1,5 +1,8 @@
 (|
     lobby* = self.
+    "FIXME: Remove these _Nil calls by automatically evaluating to nil for
+            nil identifier slots. Alternatively have a specialized NilNode
+            which executes into globalNil."
     basicEnvironment* <- _Nil.
 
     createBasicEnvironment = (| t <- _Nil. f <- _Nil |
@@ -15,11 +18,22 @@
         true parent _AddSlots: (| ifTrue: tb False: fb = ( tb value ) |).
         false parent _AddSlots: (| ifTrue: tb False: fb = ( fb value ) |).
 
-        traits string _AddSlots: (| printLine = ( _StringPrint. '\n' _StringPrint ) |).
-        traits number _AddSlots: (|
+        '' parent _AddSlots: (| printLine = ( _StringPrint. '\n' _StringPrint ) |).
+        0 parent _AddSlots: (|
             + n = ( _IntAdd: n ).
             < n = ( _IntLT: n ).
         |).
+    ).
+
+    cleanupBasicEnvironment = (| fb <- _Nil |
+        fb: [ 'Failed removing slots!\n' _StringPrint. _Exit: 1 ].
+
+        '' parent _RemoveSlot: 'print'     IfFail: fb.
+        '' parent _RemoveSlot: 'printLine' IfFail: fb.
+        0 parent  _RemoveSlot: '+'         IfFail: fb.
+        0 parent  _RemoveSlot: '<'         IfFail: fb.
+        true      _RemoveSlot: 'parent'    IfFail: fb.
+        false     _RemoveSlot: 'parent'    IfFail: fb.
     ).
 
     checkIfWorldWorks = (
@@ -31,6 +45,7 @@
 
     main = (
         createBasicEnvironment.
-        checkIfWorldWorks.
+        checkIfWorldWorks printLine.
+        cleanupBasicEnvironment.
     )
-|) main _StringPrint.
+|) main.

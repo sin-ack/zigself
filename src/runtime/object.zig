@@ -628,6 +628,46 @@ pub fn addSlots(self: *Self, new_slots: []Slot) !void {
     }
 }
 
+/// Removes the given slot. Returns whether a slot was found and removed.
+/// Returns error.ObjectDoesNotAcceptSlots if the object isn't an Empty or a
+/// Slots.
+pub fn removeSlot(self: *Self, name: []const u8) !bool {
+    if (self.is(.Empty)) {
+        return false;
+    } else if (!self.is(.Slots)) {
+        return error.ObjectDoesNotAcceptSlots;
+    }
+
+    const slots = self.content.Slots.slots;
+    var slots_copy = try self.allocator.alloc(Slot, slots.len);
+    errdefer self.allocator.free(slots_copy);
+
+    var did_find_and_remove_slot = false;
+    var slots_copy_cursor: usize = 0;
+    for (slots) |*slot| {
+        if (std.mem.eql(u8, name, slot.name)) {
+            slot.deinit();
+            did_find_and_remove_slot = true;
+            continue;
+        }
+
+        slots_copy[slots_copy_cursor] = slot.*;
+        slots_copy_cursor += 1;
+    }
+
+    // NOTE: Can't use deinitContent here since that would also deinit the slots
+    self.allocator.free(slots);
+    if (slots_copy_cursor == 0) {
+        self.allocator.free(slots_copy);
+        self.content = .{ .Empty = .{} };
+    } else {
+        slots_copy = try self.allocator.realloc(slots_copy, slots_copy_cursor);
+        self.content = .{ .Slots = .{ .slots = slots_copy } };
+    }
+
+    return did_find_and_remove_slot;
+}
+
 /// Looks for a message of the form "slotName:", where "slotName" exists as a
 /// mutable slot on the object. Returns the slot if it exists, or null when not
 /// found.

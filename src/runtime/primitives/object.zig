@@ -10,6 +10,7 @@ const Object = @import("../object.zig");
 const environment = @import("../environment.zig");
 const object_inspector = @import("../object_inspector.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
+const message_interpreter = @import("../interpreter/message.zig");
 
 /// Adds the slots in the argument object to the receiver object. The slots
 /// are copied. The objects at each slot are not cloned, however.
@@ -49,6 +50,38 @@ pub fn AddSlots(allocator: *Allocator, receiver: Object.Ref, arguments: []Object
     };
 
     return receiver;
+}
+
+/// Removes the given slot. If the slot isn't found or otherwise cannot be
+/// removed, the second argument is evaluated as a block.
+pub fn RemoveSlot_IfFail(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    defer receiver.unref();
+
+    var slot_name = arguments[0];
+    if (!slot_name.value.is(.ByteVector)) {
+        std.debug.panic("Expected ByteVector for the slot name argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(slot_name.value.content)});
+    }
+    defer slot_name.unref();
+
+    var fail_block = arguments[1];
+    if (!fail_block.value.is(.Block)) {
+        std.debug.panic("Expected Block for the failure block argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(fail_block.value.content)});
+    }
+    defer fail_block.unref();
+
+    const did_remove_slot = receiver.value.removeSlot(slot_name.value.content.ByteVector.values) catch |err| switch (err) {
+        error.ObjectDoesNotAcceptSlots => {
+            @panic("Attempted to remove a slot from an object which does not accept slots");
+        },
+        else => return @errSetCast(Allocator.Error, err),
+    };
+
+    if (!did_remove_slot) {
+        const returned_value = try message_interpreter.executeBlockMessage(allocator, fail_block, &[_]Object.Ref{}, context);
+        returned_value.unref();
+    }
+
+    return environment.globalNil();
 }
 
 /// Inspect the receiver and print it to stderr. Return the receiver.
