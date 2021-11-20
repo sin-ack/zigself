@@ -9,14 +9,18 @@ const Object = @import("./object.zig");
 const environment = @import("./environment.zig");
 
 const VisitedObjectSet = std.AutoArrayHashMap(*Object, void);
+pub const InspectDisplayType = enum { Inline, Multiline };
 
-fn printWithIndent(indent: usize, comptime fmt: []const u8, args: anytype) void {
+fn printWithIndent(indent: usize, comptime display_type: InspectDisplayType, comptime fmt: []const u8, args: anytype) void {
     const writer = std.io.getStdErr().writer();
-    writer.writeByteNTimes(' ', indent) catch return;
+    switch (display_type) {
+        .Multiline => writer.writeByteNTimes(' ', indent) catch return,
+        .Inline => {},
+    }
+
     std.debug.print(fmt, args);
 }
 
-pub const InspectDisplayType = enum { Inline, Multiline };
 pub fn inspectObject(allocator: *Allocator, object: Object.Ref, comptime display_type: InspectDisplayType) !void {
     var visited_object_set = VisitedObjectSet.init(allocator);
     defer visited_object_set.deinit();
@@ -82,14 +86,14 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
             for (slots.slots) |slot| {
                 const parent_marker: []const u8 = if (slot.is_parent) "*" else "";
                 const mutability_marker: []const u8 = if (slot.is_mutable) "<-" else "=";
-                printWithIndent(indent + 2, "{s}{s} {s} ", .{ slot.name, parent_marker, mutability_marker });
+                printWithIndent(indent + 2, display_type, "{s}{s} {s} ", .{ slot.name, parent_marker, mutability_marker });
 
                 try inspectObjectInternal(slot.value, display_type, indent + 2, visited_object_set);
 
                 std.debug.print(".{s}", .{separator});
             }
 
-            printWithIndent(indent, "|)", .{});
+            printWithIndent(indent, display_type, "|)", .{});
         },
 
         .Activation => |activation| {
@@ -115,13 +119,13 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
                 for (method.slots) |slot| {
                     const parent_marker: []const u8 = if (slot.is_parent) "*" else "";
                     const mutability_marker: []const u8 = if (slot.is_mutable) "<-" else "=";
-                    printWithIndent(indent + 2, "{s}{s} {s} ", .{ slot.name, parent_marker, mutability_marker });
+                    printWithIndent(indent + 2, display_type, "{s}{s} {s} ", .{ slot.name, parent_marker, mutability_marker });
 
                     try inspectObjectInternal(slot.value, display_type, indent + 2, visited_object_set);
 
                     std.debug.print(".{s}", .{separator});
                 }
-                printWithIndent(indent, "|)", .{});
+                printWithIndent(indent, display_type, "|)", .{});
             } else {
                 std.debug.print("()", .{});
             }
@@ -140,13 +144,13 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
                 for (block.slots) |slot| {
                     const parent_marker: []const u8 = if (slot.is_parent) "*" else "";
                     const mutability_marker: []const u8 = if (slot.is_mutable) "<-" else "=";
-                    printWithIndent(indent + 2, "{s}{s} {s} ", .{ slot.name, parent_marker, mutability_marker });
+                    printWithIndent(indent + 2, display_type, "{s}{s} {s} ", .{ slot.name, parent_marker, mutability_marker });
 
                     try inspectObjectInternal(slot.value, display_type, indent + 2, visited_object_set);
 
                     std.debug.print(".{s}", .{separator});
                 }
-                printWithIndent(indent, "|)", .{});
+                printWithIndent(indent, display_type, "|)", .{});
             } else {
                 std.debug.print("()", .{});
             }
