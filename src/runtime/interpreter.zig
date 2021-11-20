@@ -46,7 +46,7 @@ pub fn executeScript(allocator: *Allocator, script: AST.ScriptNode, lobby: Objec
         }
     }
 
-    const context = InterpreterContext{
+    var context = InterpreterContext{
         .self_object = lobby,
         .lobby = lobby,
         .activation_stack = &activation_stack,
@@ -58,7 +58,7 @@ pub fn executeScript(allocator: *Allocator, script: AST.ScriptNode, lobby: Objec
             result.unref();
         }
 
-        const expression_result = try executeStatement(allocator, statement, context);
+        const expression_result = try executeStatement(allocator, statement, &context);
         if (expression_result.value.is(.NonlocalReturn)) {
             @panic("FIXME handle situation where a non-local return reaches top level");
         }
@@ -69,12 +69,12 @@ pub fn executeScript(allocator: *Allocator, script: AST.ScriptNode, lobby: Objec
 }
 
 /// Executes a statement. All refs are forwardded.
-pub fn executeStatement(allocator: *Allocator, statement: AST.StatementNode, context: InterpreterContext) !Object.Ref {
+pub fn executeStatement(allocator: *Allocator, statement: AST.StatementNode, context: *InterpreterContext) !Object.Ref {
     return try executeExpression(allocator, statement.expression, context);
 }
 
 /// Executes an expression. All refs are forwarded.
-pub fn executeExpression(allocator: *Allocator, expression: AST.ExpressionNode, context: InterpreterContext) Allocator.Error!Object.Ref {
+pub fn executeExpression(allocator: *Allocator, expression: AST.ExpressionNode, context: *InterpreterContext) Allocator.Error!Object.Ref {
     return switch (expression) {
         .Object => |object| try executeObject(allocator, object.*, context),
         .Block => |block| try executeBlock(allocator, block.*, context),
@@ -89,7 +89,7 @@ pub fn executeExpression(allocator: *Allocator, expression: AST.ExpressionNode, 
 
 /// Creates a new method object. All refs are forwarded. `arguments` and
 /// `object_node`'s statements are copied.
-fn executeMethod(allocator: *Allocator, object_node: AST.ObjectNode, arguments: [][]const u8, context: InterpreterContext) !Object.Ref {
+fn executeMethod(allocator: *Allocator, object_node: AST.ObjectNode, arguments: [][]const u8, context: *InterpreterContext) !Object.Ref {
     var arguments_copy = try std.ArrayList([]const u8).initCapacity(allocator, arguments.len);
     errdefer {
         for (arguments_copy.items) |argument| {
@@ -141,7 +141,7 @@ fn executeMethod(allocator: *Allocator, object_node: AST.ObjectNode, arguments: 
 }
 
 /// Creates a new slot. All refs are forwarded.
-pub fn executeSlot(allocator: *Allocator, slot_node: AST.SlotNode, context: InterpreterContext) Allocator.Error!Slot {
+pub fn executeSlot(allocator: *Allocator, slot_node: AST.SlotNode, context: *InterpreterContext) Allocator.Error!Slot {
     var value = blk: {
         if (slot_node.value == .Object and slot_node.value.Object.statements.len > 0) {
             break :blk try executeMethod(allocator, slot_node.value.Object.*, slot_node.arguments, context);
@@ -155,7 +155,7 @@ pub fn executeSlot(allocator: *Allocator, slot_node: AST.SlotNode, context: Inte
 }
 
 /// Creates a new slots object. All refs are forwarded.
-pub fn executeObject(allocator: *Allocator, object_node: AST.ObjectNode, context: InterpreterContext) !Object.Ref {
+pub fn executeObject(allocator: *Allocator, object_node: AST.ObjectNode, context: *InterpreterContext) !Object.Ref {
     // Verify that we are executing a slots object and not a method; methods
     // are created through executeSlot.
     if (object_node.statements.len > 0) {
@@ -186,7 +186,7 @@ pub fn executeObject(allocator: *Allocator, object_node: AST.ObjectNode, context
     return try Object.createSlots(allocator, slots.toOwnedSlice());
 }
 
-pub fn executeBlock(allocator: *Allocator, block: AST.BlockNode, context: InterpreterContext) !Object.Ref {
+pub fn executeBlock(allocator: *Allocator, block: AST.BlockNode, context: *InterpreterContext) !Object.Ref {
     var arguments = try std.ArrayList([]const u8).initCapacity(allocator, block.slots.len);
     errdefer {
         for (arguments.items) |argument| {
@@ -242,7 +242,7 @@ pub fn executeBlock(allocator: *Allocator, block: AST.BlockNode, context: Interp
     return try Object.createBlock(allocator, arguments.toOwnedSlice(), slots.toOwnedSlice(), statements.toOwnedSlice(), bound_method);
 }
 
-pub fn executeReturn(allocator: *Allocator, return_node: AST.ReturnNode, context: InterpreterContext) !Object.Ref {
+pub fn executeReturn(allocator: *Allocator, return_node: AST.ReturnNode, context: *InterpreterContext) !Object.Ref {
     const value = try executeExpression(allocator, return_node.expression, context);
     errdefer value.unref();
 
@@ -256,7 +256,7 @@ pub fn executeReturn(allocator: *Allocator, return_node: AST.ReturnNode, context
 
 /// Executes an identifier expression. If the looked up value exists, the value
 /// gains a ref. `self_object` gains a ref during a method execution.
-pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, context: InterpreterContext) !Object.Ref {
+pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, context: *InterpreterContext) !Object.Ref {
     if (identifier.value[0] == '_') {
         var receiver = context.self_object;
 
@@ -287,7 +287,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
 
 /// Executes a string literal expression. `lobby` gains a ref during the
 /// lifetime of the function.
-pub fn executeString(allocator: *Allocator, string: AST.StringNode, context: InterpreterContext) !Object.Ref {
+pub fn executeString(allocator: *Allocator, string: AST.StringNode, context: *InterpreterContext) !Object.Ref {
     context.lobby.ref();
     defer context.lobby.unref();
 
@@ -306,7 +306,7 @@ pub fn executeString(allocator: *Allocator, string: AST.StringNode, context: Int
 
 /// Executes a number literal expression. `lobby` gains a ref during the
 /// lifetime of the function.
-pub fn executeNumber(allocator: *Allocator, number: AST.NumberNode, context: InterpreterContext) !Object.Ref {
+pub fn executeNumber(allocator: *Allocator, number: AST.NumberNode, context: *InterpreterContext) !Object.Ref {
     context.lobby.ref();
     defer context.lobby.unref();
 

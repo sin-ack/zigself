@@ -7,11 +7,12 @@ const Allocator = std.mem.Allocator;
 
 const Object = @import("../object.zig");
 const environment = @import("../environment.zig");
+const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
 /// Return the static "nil" slots object.
-pub fn Nil(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) !Object.Ref {
+pub fn Nil(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = allocator;
-    _ = lobby;
+    _ = context;
     _ = arguments;
     receiver.unref();
 

@@ -7,12 +7,13 @@ const Allocator = std.mem.Allocator;
 
 const Object = @import("../object.zig");
 const environment = @import("../environment.zig");
+const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
 /// Print the given ByteVector to stdout, followed by a newline.
-pub fn StringPrint(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) !Object.Ref {
+pub fn StringPrint(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = allocator;
     _ = arguments;
-    _ = lobby;
+    _ = context;
 
     const writer = std.io.getStdOut().writer();
 

@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const Object = @import("../object.zig");
 const environment = @import("../environment.zig");
+const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
 fn getNumberTraits(lobby: Object.Ref) !Object.Ref {
     if (try lobby.value.lookup("traits", .Value)) |traits| {
@@ -27,7 +28,7 @@ fn makeInteger(allocator: *Allocator, value: u64, lobby: Object.Ref) !Object.Ref
 }
 
 /// Add two integer numbers. The returned value is an integer.
-pub fn IntAdd(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) !Object.Ref {
+pub fn IntAdd(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     if (!receiver.value.is(.Integer)) {
         std.debug.panic("Expected Integer as _IntAdd: receiver, got {s}", .{@tagName(receiver.value.content)});
     }
@@ -42,7 +43,7 @@ pub fn IntAdd(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.R
     const result = try makeInteger(
         allocator,
         receiver.value.content.Integer.value + addend.value.content.Integer.value,
-        lobby,
+        context.lobby,
     );
 
     return result;
@@ -50,9 +51,9 @@ pub fn IntAdd(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.R
 
 /// Return whether the receiver is less than its argument. The return value is
 /// either "true" or "false".
-pub fn IntLT(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) !Object.Ref {
+pub fn IntLT(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = allocator;
-    _ = lobby;
+    _ = context;
 
     if (!receiver.value.is(.Integer)) {
         std.debug.panic("Expected Integer as _IntLT: receiver, got {s}", .{@tagName(receiver.value.content)});

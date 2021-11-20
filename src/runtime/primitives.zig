@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Object = @import("./object.zig");
+const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 
 const basic_primitives = @import("./primitives/basic.zig");
 const bytevector_primitives = @import("./primitives/bytevector.zig");
@@ -17,7 +18,7 @@ const object_primitives = @import("./primitives/object.zig");
 /// `function` is the function which is called to execute the primitive.
 const PrimitiveSpec = struct {
     name: []const u8,
-    function: fn (allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) Allocator.Error!Object.Ref,
+    function: fn (allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) Allocator.Error!Object.Ref,
 };
 
 const PrimitiveRegistry = &[_]PrimitiveSpec{
@@ -45,10 +46,10 @@ pub fn hasPrimitive(selector: []const u8) bool {
     return false;
 }
 
-pub fn callPrimitive(allocator: *Allocator, selector: []const u8, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) !Object.Ref {
+pub fn callPrimitive(allocator: *Allocator, selector: []const u8, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     for (PrimitiveRegistry) |primitive| {
         if (std.mem.eql(u8, primitive.name, selector)) {
-            return try primitive.function(allocator, receiver, arguments, lobby);
+            return try primitive.function(allocator, receiver, arguments, context);
         }
     }
 
