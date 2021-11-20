@@ -32,7 +32,8 @@ pub fn teardownObjectRefTrackerAndReportAliveRefs() void {
 
         var iterator = object_ref_tracker.?.iterator();
         while (iterator.next()) |item| {
-            std.debug.print("  {*} - {d} refs\n", .{ item.key_ptr.*, item.key_ptr.*.ref.ref_count });
+            const object = item.key_ptr.*;
+            std.debug.print("  {*} (type {s}) - {d} refs\n", .{ object, @tagName(object.content), object.ref.ref_count });
         }
     }
 
