@@ -33,7 +33,7 @@ fn getMessageArguments(allocator: *Allocator, ast_arguments: []AST.ExpressionNod
     return arguments.toOwnedSlice();
 }
 
-pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, ast_arguments: []AST.ExpressionNode, context: *InterpreterContext) !Object.Ref {
+pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     // Check if this method can be executed, i.e. whether its enclosing
     // activation is currently on the stack.
     var i = @intCast(isize, context.activation_stack.items.len - 1);
@@ -54,11 +54,6 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, ast_argu
     if (!did_find_activation_in_stack) {
         @panic("Attempted to execute a block after its enclosing method has returned. Use objects for closures.");
     }
-
-    const arguments = try getMessageArguments(allocator, ast_arguments, context);
-    // NOTE: The block activation borrows refs from the arguments, so no need
-    //       to unref them.
-    defer allocator.free(arguments);
 
     const bound_method = receiver.value.content.Block.bound_method;
     bound_method.ref();
@@ -108,14 +103,9 @@ pub fn executeMethodMessage(
     allocator: *Allocator,
     receiver: Object.Ref,
     method_object: Object.Ref,
-    ast_arguments: []AST.ExpressionNode,
+    arguments: []Object.Ref,
     context: *InterpreterContext,
 ) !Object.Ref {
-    var arguments = try getMessageArguments(allocator, ast_arguments, context);
-    // NOTE: The method activation borrows refs from the arguments, so no need
-    //       to unref them.
-    defer allocator.free(arguments);
-
     receiver.ref();
     const method_activation = try method_object.value.activateMethod(arguments, receiver);
     try context.activation_stack.append(method_activation);
@@ -171,16 +161,13 @@ pub fn executePrimitiveMessage(
     allocator: *Allocator,
     receiver: Object.Ref,
     name: []const u8,
-    ast_arguments: []AST.ExpressionNode,
+    arguments: []Object.Ref,
     context: *InterpreterContext,
 ) !Object.Ref {
     // All primitives borrow a ref from the caller for the receiver and
     // each argument. It is the primitive's job to unref any argument after
     // its work is done.
     if (primitives.hasPrimitive(name)) {
-        var arguments = try getMessageArguments(allocator, ast_arguments, context);
-        defer allocator.free(arguments);
-
         receiver.ref();
         return try primitives.callPrimitive(allocator, name, receiver, arguments, context);
     } else {
@@ -215,18 +202,26 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
 
     // Primitive check
     if (message.message_name[0] == '_') {
+        const arguments = try getMessageArguments(allocator, message.arguments, context);
+        // NOTE: The activations borrow refs from the arguments, so no need to unref
+        //       them.
+        defer allocator.free(arguments);
+
         if (try receiver.value.findActivationReceiver()) |actual_receiver| {
             actual_receiver.ref();
             receiver.unref();
             receiver = actual_receiver;
         }
 
-        return try executePrimitiveMessage(allocator, receiver, message.message_name, message.arguments, context);
+        return try executePrimitiveMessage(allocator, receiver, message.message_name, arguments, context);
     }
 
     // Check for block activation
     if (receiver.value.is(.Block) and receiver.value.isCorrectMessageForBlockExecution(message.message_name)) {
-        return try executeBlockMessage(allocator, receiver, message.arguments, context);
+        const arguments = try getMessageArguments(allocator, message.arguments, context);
+        defer allocator.free(arguments);
+
+        return try executeBlockMessage(allocator, receiver, arguments, context);
     }
 
     if (try receiver.value.lookup(message.message_name, .Value)) |lookup_result| {
@@ -237,7 +232,10 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
             },
 
             .Method => {
-                return try executeMethodMessage(allocator, receiver, lookup_result, message.arguments, context);
+                const arguments = try getMessageArguments(allocator, message.arguments, context);
+                defer allocator.free(arguments);
+
+                return try executeMethodMessage(allocator, receiver, lookup_result, arguments, context);
             },
 
             else => unreachable,

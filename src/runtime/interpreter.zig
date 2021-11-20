@@ -264,7 +264,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
             receiver = actual_receiver;
         }
 
-        return try message_interpreter.executePrimitiveMessage(allocator, receiver, identifier.value, &[_]AST.ExpressionNode{}, context);
+        return try message_interpreter.executePrimitiveMessage(allocator, receiver, identifier.value, &[_]Object.Ref{}, context);
     }
 
     if (try context.self_object.value.lookup(identifier.value, .Value)) |value| {
@@ -275,7 +275,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
             },
 
             .Method => {
-                return try message_interpreter.executeMethodMessage(allocator, context.self_object, value, &[_]AST.ExpressionNode{}, context);
+                return try message_interpreter.executeMethodMessage(allocator, context.self_object, value, &[_]Object.Ref{}, context);
             },
 
             else => unreachable,
