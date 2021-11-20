@@ -9,7 +9,7 @@ const Object = @import("../object.zig");
 const environment = @import("../environment.zig");
 
 /// Print the given ByteVector to stdout, followed by a newline.
-pub fn PrintLine(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) !Object.Ref {
+pub fn StringPrint(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) !Object.Ref {
     _ = allocator;
     _ = arguments;
     _ = lobby;
@@ -19,19 +19,19 @@ pub fn PrintLine(allocator: *Allocator, receiver: Object.Ref, arguments: []Objec
     // FIXME: Don't ignore errors.
     switch (receiver.value.content) {
         .ByteVector => |byte_vector| {
-            writer.print("{s}\n", .{byte_vector.values}) catch unreachable;
+            writer.print("{s}", .{byte_vector.values}) catch unreachable;
         },
 
         .Integer => |integer| {
-            writer.print("{d}\n", .{integer.value}) catch unreachable;
+            writer.print("{d}", .{integer.value}) catch unreachable;
         },
 
         .FloatingPoint => |floating_point| {
-            writer.print("{d}\n", .{floating_point.value}) catch unreachable;
+            writer.print("{d}", .{floating_point.value}) catch unreachable;
         },
 
         else => {
-            std.debug.panic("Unexpected object type {s} passed as the receiver of _PrintLine", .{@tagName(receiver.value.content)});
+            std.debug.panic("Unexpected object type {s} passed as the receiver of _StringPrint", .{@tagName(receiver.value.content)});
         },
     }
 

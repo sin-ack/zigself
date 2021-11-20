@@ -13,8 +13,8 @@ const number_primitives = @import("./primitives/number.zig");
 const object_primitives = @import("./primitives/object.zig");
 
 /// A primitive specification. The `name` field specifies the exact selector the
-/// primitive uses (i.e. `_DoFoo:WithBar:`, or `_PrintLine`), and the `function`
-/// is the function which is called to execute the primitive.
+/// primitive uses (i.e. `_DoFoo:WithBar:`, or `_StringPrint`), and the
+/// `function` is the function which is called to execute the primitive.
 const PrimitiveSpec = struct {
     name: []const u8,
     function: fn (allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, lobby: Object.Ref) Allocator.Error!Object.Ref,
@@ -24,7 +24,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     // basic primitives
     .{ .name = "_Nil", .function = basic_primitives.Nil },
     // byte vector primitives
-    .{ .name = "_PrintLine", .function = bytevector_primitives.PrintLine },
+    .{ .name = "_StringPrint", .function = bytevector_primitives.StringPrint },
     // number primitives
     .{ .name = "_IntAdd:", .function = number_primitives.IntAdd },
     .{ .name = "_IntLT:", .function = number_primitives.IntLT },

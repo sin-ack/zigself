@@ -15,7 +15,7 @@
         true parent _AddSlots: (| ifTrue: tb False: fb = ( tb value ) |).
         false parent _AddSlots: (| ifTrue: tb False: fb = ( fb value ) |).
 
-        traits string _AddSlots: (| printLine = ( _PrintLine ) |).
+        traits string _AddSlots: (| printLine = ( _StringPrint. '\n' _StringPrint ) |).
         traits number _AddSlots: (|
             + n = ( _IntAdd: n ).
             < n = ( _IntLT: n ).
@@ -33,4 +33,4 @@
         createBasicEnvironment.
         checkIfWorldWorks.
     )
-|) main _PrintLine.
+|) main _StringPrint.
