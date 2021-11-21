@@ -25,6 +25,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     // basic primitives
     .{ .name = "_Nil", .function = basic_primitives.Nil },
     .{ .name = "_Exit:", .function = basic_primitives.Exit },
+    .{ .name = "_RunScript", .function = basic_primitives.RunScript },
     // byte vector primitives
     .{ .name = "_StringPrint", .function = bytevector_primitives.StringPrint },
     // number primitives
