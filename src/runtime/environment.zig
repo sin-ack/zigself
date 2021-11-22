@@ -64,13 +64,18 @@ fn makeTraitsObject(allocator: *Allocator) !Object.Ref {
 }
 
 fn makeTraitsSlots(allocator: *Allocator) ![]Slot {
-    var traits_slots = try std.ArrayList(Slot).initCapacity(allocator, 3);
+    var traits_slots = try std.ArrayList(Slot).initCapacity(allocator, 4);
     errdefer traits_slots.deinit();
 
-    var number_object = try Object.createEmpty(allocator);
-    errdefer number_object.unref();
-    var number_slot = try Slot.init(allocator, false, false, "number", number_object);
-    errdefer number_slot.deinit();
+    var integer_object = try Object.createEmpty(allocator);
+    errdefer integer_object.unref();
+    var integer_slot = try Slot.init(allocator, false, false, "integer", integer_object);
+    errdefer integer_slot.deinit();
+
+    var float_object = try Object.createEmpty(allocator);
+    errdefer float_object.unref();
+    var float_slot = try Slot.init(allocator, false, false, "float", float_object);
+    errdefer float_slot.deinit();
 
     var string_object = try Object.createEmpty(allocator);
     errdefer string_object.unref();
@@ -82,7 +87,8 @@ fn makeTraitsSlots(allocator: *Allocator) ![]Slot {
     var block_slot = try Slot.init(allocator, false, false, "block", block_object);
     errdefer block_slot.deinit();
 
-    try traits_slots.append(number_slot);
+    try traits_slots.append(integer_slot);
+    try traits_slots.append(float_slot);
     try traits_slots.append(string_slot);
     try traits_slots.append(block_slot);
 

@@ -6,10 +6,12 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const AST = @import("../language/ast.zig");
-const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
-const ref_counted = @import("../utility/ref_counted.zig");
-const weak_ref = @import("../utility/weak_ref.zig");
 const Slot = @import("./slot.zig");
+const weak_ref = @import("../utility/weak_ref.zig");
+const ref_counted = @import("../utility/ref_counted.zig");
+const runtime_error = @import("./error.zig");
+const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
+const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 
 const Self = @This();
 const WeakBlock = weak_ref.WeakPtrBlock(Self);
@@ -96,17 +98,14 @@ const ObjectContent = union(enum) {
     },
 
     ByteVector: struct {
-        parent: Ref,
         values: []const u8,
     },
 
     Integer: struct {
-        parent: Ref,
         value: u64,
     },
 
     FloatingPoint: struct {
-        parent: Ref,
         value: f64,
     },
 };
@@ -139,22 +138,20 @@ pub fn createNonlocalReturn(allocator: *Allocator, target_method: Ref, value: Re
     return try create(allocator, .{ .NonlocalReturn = .{ .target_method = target_method, .value = value } });
 }
 
-/// Dupes `contents`. Borrows a ref for `parent` from the caller.
-pub fn createCopyFromStringLiteral(allocator: *Allocator, contents: []const u8, parent: Ref) !Ref {
+/// Dupes `contents`.
+pub fn createCopyFromStringLiteral(allocator: *Allocator, contents: []const u8) !Ref {
     const contents_copy = try allocator.dupe(u8, contents);
     errdefer allocator.free(contents_copy);
 
-    return try create(allocator, .{ .ByteVector = .{ .parent = parent, .values = contents_copy } });
+    return try create(allocator, .{ .ByteVector = .{ .values = contents_copy } });
 }
 
-/// Borrows a ref for `parent` from the caller.
-pub fn createFromIntegerLiteral(allocator: *Allocator, value: u64, parent: Ref) !Ref {
-    return try create(allocator, .{ .Integer = .{ .parent = parent, .value = value } });
+pub fn createFromIntegerLiteral(allocator: *Allocator, value: u64) !Ref {
+    return try create(allocator, .{ .Integer = .{ .value = value } });
 }
 
-/// Borrows a ref for `parent` from the caller.
-pub fn createFromFloatingPointLiteral(allocator: *Allocator, value: f64, parent: Ref) !Ref {
-    return try create(allocator, .{ .FloatingPoint = .{ .parent = parent, .value = value } });
+pub fn createFromFloatingPointLiteral(allocator: *Allocator, value: f64) !Ref {
+    return try create(allocator, .{ .FloatingPoint = .{ .value = value } });
 }
 
 /// Takes ownership of `arguments`, `slots` and `statements`. Borrows a ref for
@@ -257,25 +254,20 @@ fn deinitContent(self: *Self) void {
             nonlocal_return.value.unref();
         },
         .ByteVector => |bytevector| {
-            bytevector.parent.unref();
             self.allocator.free(bytevector.values);
         },
-        .Integer => |integer| {
-            integer.parent.unref();
-        },
-        .FloatingPoint => |floating_point| {
-            floating_point.parent.unref();
-        },
+        .Integer, .FloatingPoint => {},
     }
 }
 
 const VisitedObjectsSet = std.AutoArrayHashMap(*Self, void);
 const LookupType = enum { Value, Slot };
-pub fn lookup(self: *Self, selector: []const u8, comptime lookup_type: LookupType) t: {
+const LookupError = Allocator.Error || runtime_error.SelfRuntimeError;
+pub fn lookup(self: *Self, context: ?*InterpreterContext, selector: []const u8, comptime lookup_type: LookupType) t: {
     if (lookup_type == .Value) {
-        break :t Allocator.Error!?Ref;
+        break :t LookupError!?Ref;
     } else {
-        break :t Allocator.Error!?*Slot;
+        break :t LookupError!?*Slot;
     }
 } {
     if (lookup_type == .Value) {
@@ -288,13 +280,13 @@ pub fn lookup(self: *Self, selector: []const u8, comptime lookup_type: LookupTyp
     defer visited_objects.deinit();
 
     return if (lookup_type == .Value)
-        try self.lookupValue(selector, &visited_objects)
+        try self.lookupValue(context, selector, &visited_objects)
     else
         try self.lookupSlot(selector, &visited_objects);
 }
 
 /// Self Handbook, §3.3.8 The lookup algorithm
-fn lookupValue(self: *Self, selector: []const u8, visited_objects: *VisitedObjectsSet) Allocator.Error!?Ref {
+fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8, visited_objects: *VisitedObjectsSet) LookupError!?Ref {
     if (visited_objects.contains(self)) {
         return null;
     }
@@ -315,7 +307,7 @@ fn lookupValue(self: *Self, selector: []const u8, visited_objects: *VisitedObjec
             // Parent lookup
             for (slots.slots) |slot| {
                 if (slot.is_parent) {
-                    if (try slot.value.value.lookupValue(selector, visited_objects)) |found_object| {
+                    if (try slot.value.value.lookupValue(context, selector, visited_objects)) |found_object| {
                         return found_object;
                     }
                 }
@@ -325,40 +317,85 @@ fn lookupValue(self: *Self, selector: []const u8, visited_objects: *VisitedObjec
             return null;
         },
 
-        .Method => @panic("Attempting to perform lookup on method?!"),
-        .Activation, .NonlocalReturn => unreachable,
+        .Method, .Activation, .NonlocalReturn => unreachable,
 
-        .Block => |block| {
+        // The 4 types below have an imaginary field called "parent" which
+        // refers to their respective traits objects.
+
+        .Block => {
             // NOTE: executeMessage will handle the execution of the block itself.
 
-            _ = block;
-            @panic("FIXME handle parent for block");
+            if (context) |ctx| {
+                if (try ctx.lobby.value.lookupValue(context, "traits", visited_objects)) |traits| {
+                    if (try traits.value.lookupValue(context, "block", visited_objects)) |traits_block| {
+                        if (std.mem.eql(u8, selector, "parent"))
+                            return traits_block;
+
+                        return try traits_block.value.lookupValue(ctx, selector, visited_objects);
+                    } else {
+                        return runtime_error.raiseError(self.allocator, ctx, "Could not find block in traits", .{});
+                    }
+                } else {
+                    return runtime_error.raiseError(self.allocator, ctx, "Could not find traits in lobby", .{});
+                }
+            } else {
+                @panic("Context MUST be passed for Block objects!");
+            }
+        },
+        .ByteVector => {
+            if (context) |ctx| {
+                if (try ctx.lobby.value.lookupValue(context, "traits", visited_objects)) |traits| {
+                    if (try traits.value.lookupValue(context, "string", visited_objects)) |traits_string| {
+                        if (std.mem.eql(u8, selector, "parent"))
+                            return traits_string;
+
+                        return try traits_string.value.lookupValue(ctx, selector, visited_objects);
+                    } else {
+                        return runtime_error.raiseError(self.allocator, ctx, "Could not find string in traits", .{});
+                    }
+                } else {
+                    return runtime_error.raiseError(self.allocator, ctx, "Could not find traits in lobby", .{});
+                }
+            } else {
+                @panic("Context MUST be passed for ByteVector objects!");
+            }
+        },
+        .Integer => {
+            if (context) |ctx| {
+                if (try ctx.lobby.value.lookupValue(context, "traits", visited_objects)) |traits| {
+                    if (try traits.value.lookupValue(context, "integer", visited_objects)) |traits_integer| {
+                        if (std.mem.eql(u8, selector, "parent"))
+                            return traits_integer;
+
+                        return try traits_integer.value.lookupValue(ctx, selector, visited_objects);
+                    } else {
+                        return runtime_error.raiseError(self.allocator, ctx, "Could not find integer in traits", .{});
+                    }
+                } else {
+                    return runtime_error.raiseError(self.allocator, ctx, "Could not find traits in lobby", .{});
+                }
+            } else {
+                @panic("Context MUST be passed for Integer objects!");
+            }
         },
 
-        // The 3 types below have an imaginary field called "parent" which contains
-        // the parent object ref.
-        .ByteVector => |vector| {
-            if (std.mem.eql(u8, selector, "parent")) {
-                return vector.parent;
+        .FloatingPoint => {
+            if (context) |ctx| {
+                if (try ctx.lobby.value.lookupValue(context, "traits", visited_objects)) |traits| {
+                    if (try traits.value.lookupValue(context, "float", visited_objects)) |traits_float| {
+                        if (std.mem.eql(u8, selector, "parent"))
+                            return traits_float;
+
+                        return try traits_float.value.lookupValue(ctx, selector, visited_objects);
+                    } else {
+                        return runtime_error.raiseError(self.allocator, ctx, "Could not find float in traits", .{});
+                    }
+                } else {
+                    return runtime_error.raiseError(self.allocator, ctx, "Could not find traits in lobby", .{});
+                }
+            } else {
+                @panic("Context MUST be passed for FloatingPoint objects!");
             }
-
-            return try vector.parent.value.lookupValue(selector, visited_objects);
-        },
-
-        .Integer => |integer| {
-            if (std.mem.eql(u8, selector, "parent")) {
-                return integer.parent;
-            }
-
-            return try integer.parent.value.lookupValue(selector, visited_objects);
-        },
-
-        .FloatingPoint => |floating_point| {
-            if (std.mem.eql(u8, selector, "parent")) {
-                return floating_point.parent;
-            }
-
-            return try floating_point.parent.value.lookupValue(selector, visited_objects);
         },
     }
 }
@@ -366,7 +403,7 @@ fn lookupValue(self: *Self, selector: []const u8, visited_objects: *VisitedObjec
 /// Self Handbook, §3.3.8 The lookup algorithm
 ///
 /// Like lookupValue but finds slots instead of values.
-fn lookupSlot(self: *Self, selector: []const u8, visited_objects: *VisitedObjectsSet) Allocator.Error!?*Slot {
+fn lookupSlot(self: *Self, selector: []const u8, visited_objects: *VisitedObjectsSet) LookupError!?*Slot {
     // I'd like this to not be duplicated but unfortunately I couldn't reconcile
     // them.
     if (visited_objects.contains(self)) {
@@ -480,18 +517,15 @@ pub fn copy(self: Self) !Ref {
         },
 
         .ByteVector => |vector| {
-            vector.parent.ref();
-            return try createCopyFromStringLiteral(self.allocator, vector.values, vector.parent);
+            return try createCopyFromStringLiteral(self.allocator, vector.values);
         },
 
         .Integer => |integer| {
-            integer.parent.ref();
-            return try createFromIntegerLiteral(self.allocator, integer.value, integer.parent);
+            return try createFromIntegerLiteral(self.allocator, integer.value);
         },
 
         .FloatingPoint => |floating_point| {
-            floating_point.parent.ref();
-            return try createFromFloatingPointLiteral(self.allocator, floating_point.value, floating_point.parent);
+            return try createFromFloatingPointLiteral(self.allocator, floating_point.value);
         },
 
         .NonlocalReturn, .Activation, .Method => unreachable,
@@ -561,7 +595,7 @@ fn createMessageNameForBlock(self: Self) ![]const u8 {
     return message_name;
 }
 
-fn activateCommon(allocator: *Allocator, arguments: []Ref, argument_names: [][]const u8, slots: []Slot, parent: Ref) !Ref {
+fn activateCommon(allocator: *Allocator, context: *InterpreterContext, arguments: []Ref, argument_names: [][]const u8, slots: []Slot, parent: Ref) !Ref {
     std.debug.assert(arguments.len == argument_names.len);
 
     var slots_copy = try std.ArrayList(Slot).initCapacity(allocator, slots.len + arguments.len + 1);
@@ -588,7 +622,7 @@ fn activateCommon(allocator: *Allocator, arguments: []Ref, argument_names: [][]c
     //       Not only that, but that would also cause the actual object to be
     //       wrapped in multiple layers of activation objects like ogres.
     var the_parent = parent;
-    if (try parent.value.findActivationReceiver()) |actual_parent| {
+    if (try parent.value.findActivationReceiver(context)) |actual_parent| {
         the_parent = actual_parent;
     }
     the_parent.ref();
@@ -612,9 +646,9 @@ fn activateCommon(allocator: *Allocator, arguments: []Ref, argument_names: [][]c
 /// Activate this block and return a slots object for it.
 /// Borrows 1 ref from each object in `arguments` and from `bound_method`.
 /// `parent` is ref'd internally.
-pub fn activateBlock(self: Self, arguments: []Ref, parent: Ref, bound_method: Ref) !Ref {
+pub fn activateBlock(self: Self, context: *InterpreterContext, arguments: []Ref, parent: Ref, bound_method: Ref) !Ref {
     std.debug.assert(self.content == .Block);
-    const activation_object = try activateCommon(self.allocator, arguments, self.content.Block.arguments, self.content.Block.slots, parent);
+    const activation_object = try activateCommon(self.allocator, context, arguments, self.content.Block.arguments, self.content.Block.slots, parent);
     errdefer activation_object.unref();
 
     var message_name = try self.createMessageNameForBlock();
@@ -632,9 +666,9 @@ pub fn activateBlock(self: Self, arguments: []Ref, parent: Ref, bound_method: Re
 /// Activate this method and return a slots object for it.
 /// Borrows 1 ref from each object in `arguments`.
 /// `parent` is ref'd internally.
-pub fn activateMethod(self: Self, arguments: []Ref, parent: Ref) !Ref {
+pub fn activateMethod(self: Self, context: *InterpreterContext, arguments: []Ref, parent: Ref) !Ref {
     std.debug.assert(self.content == .Method);
-    const activation_object = try activateCommon(self.allocator, arguments, self.content.Method.arguments, self.content.Method.slots, parent);
+    const activation_object = try activateCommon(self.allocator, context, arguments, self.content.Method.arguments, self.content.Method.slots, parent);
     errdefer activation_object.unref();
 
     var message_name_copy = try self.allocator.dupe(u8, self.content.Method.message_name);
@@ -748,7 +782,7 @@ pub fn getAssignableSlotForMessage(self: *Self, slot_name: []const u8) !?*Slot {
     }
 
     const slot_name_without_colon = slot_name[0 .. slot_name.len - 1];
-    if (try self.lookup(slot_name_without_colon, .Slot)) |slot| {
+    if (try self.lookup(null, slot_name_without_colon, .Slot)) |slot| {
         if (slot.is_mutable) return slot;
     }
 
@@ -758,8 +792,8 @@ pub fn getAssignableSlotForMessage(self: *Self, slot_name: []const u8) !?*Slot {
 /// This is used for primitives to find the actual value the primitive is
 /// supposed to send to. If the `_parent` slot exists, then that is returned as
 /// the activation target; otherwise null is returned.
-pub fn findActivationReceiver(self: *Self) !?Ref {
-    if (try self.lookup("_parent", .Value)) |parent| {
+pub fn findActivationReceiver(self: *Self, context: *InterpreterContext) !?Ref {
+    if (try self.lookup(context, "_parent", .Value)) |parent| {
         return parent;
     } else {
         return null;

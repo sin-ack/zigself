@@ -62,7 +62,7 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
     }
 
     bound_method.ref();
-    var block_activation = try receiver.value.activateBlock(arguments, context.self_object, bound_method);
+    var block_activation = try receiver.value.activateBlock(context, arguments, context.self_object, bound_method);
 
     // Push it onto the activation stack. Borrows the ref from block_activation.
     try context.activation_stack.append(block_activation);
@@ -122,7 +122,7 @@ pub fn executeMethodMessage(
     arguments: []Object.Ref,
     context: *InterpreterContext,
 ) !Object.Ref {
-    const method_activation = try method_object.value.activateMethod(arguments, receiver);
+    const method_activation = try method_object.value.activateMethod(context, arguments, receiver);
     try context.activation_stack.append(method_activation);
 
     var last_expression_result: ?Object.Ref = null;
@@ -234,7 +234,7 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
         //       them.
         defer allocator.free(arguments);
 
-        if (try receiver.value.findActivationReceiver()) |actual_receiver| {
+        if (try receiver.value.findActivationReceiver(context)) |actual_receiver| {
             actual_receiver.ref();
             receiver.unref();
             receiver = actual_receiver;
@@ -251,7 +251,7 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
         return try executeBlockMessage(allocator, receiver, arguments, context);
     }
 
-    if (try receiver.value.lookup(message.message_name, .Value)) |lookup_result| {
+    if (try receiver.value.lookup(context, message.message_name, .Value)) |lookup_result| {
         switch (lookup_result.value.content) {
             .Integer, .FloatingPoint, .ByteVector, .Slots, .Empty, .Block => {
                 lookup_result.ref();

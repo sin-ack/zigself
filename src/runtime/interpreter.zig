@@ -332,14 +332,14 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
     if (identifier.value[0] == '_') {
         var receiver = context.self_object;
 
-        if (try receiver.value.findActivationReceiver()) |actual_receiver| {
+        if (try receiver.value.findActivationReceiver(context)) |actual_receiver| {
             receiver = actual_receiver;
         }
 
         return try message_interpreter.executePrimitiveMessage(allocator, receiver, identifier.value, &[_]Object.Ref{}, context);
     }
 
-    if (try context.self_object.value.lookup(identifier.value, .Value)) |value| {
+    if (try context.self_object.value.lookup(context, identifier.value, .Value)) |value| {
         switch (value.value.content) {
             .Integer, .FloatingPoint, .ByteVector, .Slots, .Empty, .Block => {
                 value.ref();
@@ -360,40 +360,18 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
 /// Executes a string literal expression. `lobby` gains a ref during the
 /// lifetime of the function.
 pub fn executeString(allocator: *Allocator, string: AST.StringNode, context: *InterpreterContext) InterpreterError!Object.Ref {
-    context.lobby.ref();
-    defer context.lobby.unref();
+    _ = context;
 
-    if (try context.lobby.value.lookup("traits", .Value)) |traits| {
-        if (try traits.value.lookup("string", .Value)) |traits_string| {
-            traits_string.ref();
-
-            return Object.createCopyFromStringLiteral(allocator, string.value, traits_string);
-        } else {
-            @panic("Could not find string in traits");
-        }
-    } else {
-        @panic("Could not find traits in lobby");
-    }
+    return Object.createCopyFromStringLiteral(allocator, string.value);
 }
 
 /// Executes a number literal expression. `lobby` gains a ref during the
 /// lifetime of the function.
 pub fn executeNumber(allocator: *Allocator, number: AST.NumberNode, context: *InterpreterContext) InterpreterError!Object.Ref {
-    context.lobby.ref();
-    defer context.lobby.unref();
+    _ = context;
 
-    if (try context.lobby.value.lookup("traits", .Value)) |traits| {
-        if (try traits.value.lookup("number", .Value)) |traits_number| {
-            traits_number.ref();
-
-            return switch (number) {
-                .Integer => Object.createFromIntegerLiteral(allocator, number.Integer, traits_number),
-                .FloatingPoint => Object.createFromFloatingPointLiteral(allocator, number.FloatingPoint, traits_number),
-            };
-        } else {
-            @panic("Could not find number in traits");
-        }
-    } else {
-        @panic("Could not find traits in lobby");
-    }
+    return switch (number) {
+        .Integer => Object.createFromIntegerLiteral(allocator, number.Integer),
+        .FloatingPoint => Object.createFromFloatingPointLiteral(allocator, number.FloatingPoint),
+    };
 }

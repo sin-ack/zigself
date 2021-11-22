@@ -10,23 +10,8 @@ const environment = @import("../environment.zig");
 const runtime_error = @import("../error.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
-fn getNumberTraits(lobby: Object.Ref) !Object.Ref {
-    // FIXME: Convert these panics into runtime errors
-    if (try lobby.value.lookup("traits", .Value)) |traits| {
-        if (try traits.value.lookup("number", .Value)) |traits_number| {
-            return traits_number;
-        } else {
-            @panic("Could not find number in traits");
-        }
-    } else {
-        @panic("Could not find traits in lobby");
-    }
-}
-
-fn makeInteger(allocator: *Allocator, value: u64, lobby: Object.Ref) !Object.Ref {
-    var number_traits = try getNumberTraits(lobby);
-    number_traits.ref();
-    return try Object.createFromIntegerLiteral(allocator, value, number_traits);
+fn makeInteger(allocator: *Allocator, value: u64) !Object.Ref {
+    return try Object.createFromIntegerLiteral(allocator, value);
 }
 
 /// Add two integer numbers. The returned value is an integer.
@@ -45,7 +30,6 @@ pub fn IntAdd(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.R
     const result = try makeInteger(
         allocator,
         receiver.value.content.Integer.value + addend.value.content.Integer.value,
-        context.lobby,
     );
 
     return result;
@@ -67,7 +51,6 @@ pub fn IntSub(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.R
     const result = try makeInteger(
         allocator,
         receiver.value.content.Integer.value - term.value.content.Integer.value,
-        context.lobby,
     );
 
     return result;

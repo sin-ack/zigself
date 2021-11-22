@@ -27,7 +27,7 @@ pub fn printTraceFromActivationStack(stack: []Object.Ref) void {
         const activation = stack[@intCast(usize, i)];
         const message_name = activation.value.content.Activation.message_name;
         const activation_object = activation.value.content.Activation.activation_object;
-        const receiver = activation_object.value.lookup("_parent", .Value) catch unreachable;
+        const receiver = activation_object.value.lookup(null, "_parent", .Value) catch unreachable;
 
         std.debug.print("  at {s} (receiver is ", .{message_name});
         if (receiver) |obj| {
