@@ -326,12 +326,12 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8,
             // NOTE: executeMessage will handle the execution of the block itself.
 
             if (context) |ctx| {
-                if (try ctx.lobby.value.lookupValue(context, "traits", visited_objects)) |traits| {
-                    if (try traits.value.lookupValue(context, "block", visited_objects)) |traits_block| {
+                if (try ctx.lobby.value.lookup(context, "traits", .Value)) |traits| {
+                    if (try traits.value.lookup(context, "block", .Value)) |traits_block| {
                         if (std.mem.eql(u8, selector, "parent"))
                             return traits_block;
 
-                        return try traits_block.value.lookupValue(ctx, selector, visited_objects);
+                        return try traits_block.value.lookup(ctx, selector, .Value);
                     } else {
                         return runtime_error.raiseError(self.allocator, ctx, "Could not find block in traits", .{});
                     }
@@ -344,12 +344,12 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8,
         },
         .ByteVector => {
             if (context) |ctx| {
-                if (try ctx.lobby.value.lookupValue(context, "traits", visited_objects)) |traits| {
-                    if (try traits.value.lookupValue(context, "string", visited_objects)) |traits_string| {
+                if (try ctx.lobby.value.lookup(context, "traits", .Value)) |traits| {
+                    if (try traits.value.lookup(context, "string", .Value)) |traits_string| {
                         if (std.mem.eql(u8, selector, "parent"))
                             return traits_string;
 
-                        return try traits_string.value.lookupValue(ctx, selector, visited_objects);
+                        return try traits_string.value.lookup(ctx, selector, .Value);
                     } else {
                         return runtime_error.raiseError(self.allocator, ctx, "Could not find string in traits", .{});
                     }
@@ -362,12 +362,12 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8,
         },
         .Integer => {
             if (context) |ctx| {
-                if (try ctx.lobby.value.lookupValue(context, "traits", visited_objects)) |traits| {
-                    if (try traits.value.lookupValue(context, "integer", visited_objects)) |traits_integer| {
+                if (try ctx.lobby.value.lookup(context, "traits", .Value)) |traits| {
+                    if (try traits.value.lookup(context, "integer", .Value)) |traits_integer| {
                         if (std.mem.eql(u8, selector, "parent"))
                             return traits_integer;
 
-                        return try traits_integer.value.lookupValue(ctx, selector, visited_objects);
+                        return try traits_integer.value.lookup(ctx, selector, .Value);
                     } else {
                         return runtime_error.raiseError(self.allocator, ctx, "Could not find integer in traits", .{});
                     }
@@ -381,12 +381,12 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8,
 
         .FloatingPoint => {
             if (context) |ctx| {
-                if (try ctx.lobby.value.lookupValue(context, "traits", visited_objects)) |traits| {
-                    if (try traits.value.lookupValue(context, "float", visited_objects)) |traits_float| {
+                if (try ctx.lobby.value.lookup(context, "traits", .Value)) |traits| {
+                    if (try traits.value.lookup(context, "float", .Value)) |traits_float| {
                         if (std.mem.eql(u8, selector, "parent"))
                             return traits_float;
 
-                        return try traits_float.value.lookupValue(ctx, selector, visited_objects);
+                        return try traits_float.value.lookup(ctx, selector, .Value);
                     } else {
                         return runtime_error.raiseError(self.allocator, ctx, "Could not find float in traits", .{});
                     }
