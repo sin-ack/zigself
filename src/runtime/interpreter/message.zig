@@ -63,8 +63,11 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
 
     var block_activation = try receiver.value.activateBlock(context, arguments, bound_method);
 
-    // Push it onto the activation stack. Borrows the ref from block_activation.
-    try context.activation_stack.append(block_activation);
+    {
+        errdefer block_activation.unref();
+        // Push it onto the activation stack. Borrows the ref from block_activation.
+        try context.activation_stack.append(block_activation);
+    }
 
     const block_activation_self_object = block_activation.value.content.Activation.activation_object;
     var block_context = InterpreterContext{
@@ -122,7 +125,10 @@ pub fn executeMethodMessage(
     context: *InterpreterContext,
 ) !Object.Ref {
     const method_activation = try method_object.value.activateMethod(context, arguments, receiver);
-    try context.activation_stack.append(method_activation);
+    {
+        errdefer method_activation.unref();
+        try context.activation_stack.append(method_activation);
+    }
 
     var last_expression_result: ?Object.Ref = null;
 
