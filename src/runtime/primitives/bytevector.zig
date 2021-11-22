@@ -39,3 +39,15 @@ pub fn StringPrint(allocator: *Allocator, receiver: Object.Ref, arguments: []Obj
 
     return environment.globalNil();
 }
+
+/// Return the size of the byte vector in bytes.
+pub fn ByteVectorSize(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = arguments;
+
+    if (!receiver.value.is(.ByteVector)) {
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteVectorSize receiver, got {s}", .{@tagName(receiver.value.content)});
+    }
+    defer receiver.unref();
+
+    return Object.createFromIntegerLiteral(allocator, receiver.value.content.ByteVector.values.len);
+}
