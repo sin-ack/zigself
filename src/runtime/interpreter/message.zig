@@ -254,8 +254,6 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
     {
         var block_receiver = receiver;
         if (try block_receiver.value.findActivationReceiver(context)) |actual_receiver| {
-            actual_receiver.ref();
-            block_receiver.unref();
             block_receiver = actual_receiver;
         }
 
