@@ -45,11 +45,11 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
         bound_method = .{ .value = bound_method_ptr };
 
         while (i >= 0) : (i -= 1) {
-            var activation_object: Object.Ref = context.activation_stack.items[@intCast(usize, i)];
-            std.debug.assert(activation_object.value.content == .Activation);
+            var activation: Object.Ref = context.activation_stack.items[@intCast(usize, i)];
+            std.debug.assert(activation.value.content == .Activation);
 
-            if (activation_object.value.content.Activation.context == .Method and
-                activation_object.value.content.Activation.activation_object.value == bound_method_ptr)
+            if (activation.value.content.Activation.context == .Method and
+                activation.value.content.Activation.activation_object.value == bound_method_ptr)
             {
                 did_find_activation_in_stack = true;
                 break;
