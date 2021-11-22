@@ -22,6 +22,10 @@ pub fn raiseError(allocator: *Allocator, context: *InterpreterContext, comptime 
 /// Using the given activation object stack, print a stack trace to stderr.
 /// The stack trace is indented with two spaces.
 pub fn printTraceFromActivationStack(stack: []Object.Ref) void {
+    if (stack.len == 0) {
+        return;
+    }
+
     var i = @intCast(isize, stack.len - 1);
     while (i >= 0) : (i -= 1) {
         const activation = stack[@intCast(usize, i)];
