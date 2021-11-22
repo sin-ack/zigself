@@ -39,6 +39,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_AddSlots:", .function = object_primitives.AddSlots },
     .{ .name = "_RemoveSlot:IfFail:", .function = object_primitives.RemoveSlot_IfFail },
     .{ .name = "_Inspect", .function = object_primitives.Inspect },
+    .{ .name = "_Clone", .function = object_primitives.Clone },
 };
 
 // FIXME: This is very naive! We shouldn't need to linear search every single

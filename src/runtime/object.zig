@@ -404,7 +404,6 @@ fn lookupSlot(self: *Self, selector: []const u8, visited_objects: *VisitedObject
     }
 }
 
-// NOTE: This is currently unused but will become used once _Clone is available.
 pub fn copy(self: Self) !Ref {
     switch (self.content) {
         .Empty => return createEmpty(self.allocator),
@@ -428,8 +427,8 @@ pub fn copy(self: Self) !Ref {
             return try createSlots(self.allocator, slots_copy.toOwnedSlice());
         },
 
-        .Method => |method| {
-            var arguments_copy = try std.ArrayList([]const u8).initCapacity(self.allocator, method.arguments.len);
+        .Block => |block| {
+            var arguments_copy = try std.ArrayList([]const u8).initCapacity(self.allocator, block.arguments.len);
             errdefer {
                 for (arguments_copy.items) |argument| {
                     self.allocator.free(argument);
@@ -437,7 +436,7 @@ pub fn copy(self: Self) !Ref {
                 arguments_copy.deinit();
             }
 
-            var slots_copy = try std.ArrayList(Slot).initCapacity(self.allocator, method.slots.len);
+            var slots_copy = try std.ArrayList(Slot).initCapacity(self.allocator, block.slots.len);
             errdefer {
                 for (slots_copy.items) |*slot| {
                     slot.deinit();
@@ -445,7 +444,7 @@ pub fn copy(self: Self) !Ref {
                 slots_copy.deinit();
             }
 
-            var statements_copy = try std.ArrayList(AST.StatementNode).initCapacity(self.allocator, method.statements.len);
+            var statements_copy = try std.ArrayList(AST.StatementNode).initCapacity(self.allocator, block.statements.len);
             errdefer {
                 for (statements_copy.items) |*statement| {
                     statement.deinit(self.allocator);
@@ -453,28 +452,31 @@ pub fn copy(self: Self) !Ref {
                 statements_copy.deinit();
             }
 
-            for (method.arguments) |argument| {
+            for (block.arguments) |argument| {
                 var argument_copy = try self.allocator.dupe(u8, argument);
                 errdefer self.allocator.free(argument_copy);
 
                 try arguments_copy.append(argument_copy);
             }
 
-            for (method.slots) |slot| {
+            for (block.slots) |slot| {
                 var slot_copy = try slot.copy();
                 errdefer slot_copy.deinit();
 
                 try slots_copy.append(slot_copy);
             }
 
-            for (method.statements) |statement| {
+            for (block.statements) |statement| {
                 var statement_copy = try ASTCopyVisitor.visitStatement(statement, self.allocator);
                 errdefer statement_copy.deinit(self.allocator);
 
                 try statements_copy.append(statement_copy);
             }
 
-            return try createMethod(self.allocator, arguments_copy.toOwnedSlice(), slots_copy.toOwnedSlice(), statements_copy.toOwnedSlice());
+            // FIXME: The bound method might be gone at this point, just copy the
+            //        weak ref here instead.
+            var bound_method_ref = Ref{ .value = block.bound_method.getPointer().? };
+            return try createBlock(self.allocator, arguments_copy.toOwnedSlice(), slots_copy.toOwnedSlice(), statements_copy.toOwnedSlice(), bound_method_ref);
         },
 
         .ByteVector => |vector| {
@@ -491,6 +493,8 @@ pub fn copy(self: Self) !Ref {
             floating_point.parent.ref();
             return try createFromFloatingPointLiteral(self.allocator, floating_point.value, floating_point.parent);
         },
+
+        .NonlocalReturn, .Activation, .Method => unreachable,
     }
 }
 

@@ -92,3 +92,13 @@ pub fn Inspect(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.
 
     return receiver;
 }
+
+/// Make an identical shallow copy of the receiver and return it.
+pub fn Clone(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = allocator;
+    _ = arguments;
+    _ = context;
+
+    defer receiver.unref();
+    return try receiver.value.copy();
+}
