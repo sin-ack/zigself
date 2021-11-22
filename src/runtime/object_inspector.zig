@@ -107,7 +107,7 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
         },
 
         .Method => |method| {
-            std.debug.print("<method object [", .{});
+            std.debug.print("<method object \"{s}\" [", .{method.message_name});
             for (method.arguments) |argument, i| {
                 if (i > 0) std.debug.print(", ", .{});
                 std.debug.print("\"{s}\"", .{argument});
