@@ -51,6 +51,28 @@ pub fn IntAdd(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.R
     return result;
 }
 
+/// Subtract the argument from the receiver. The returned value is an integer.
+pub fn IntSub(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    if (!receiver.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntSub: receiver, got {s}", .{@tagName(receiver.value.content)});
+    }
+    defer receiver.unref();
+
+    var term = arguments[0];
+    if (!term.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntSub: argument, got {s}", .{@tagName(term.value.content)});
+    }
+    defer term.unref();
+
+    const result = try makeInteger(
+        allocator,
+        receiver.value.content.Integer.value - term.value.content.Integer.value,
+        context.lobby,
+    );
+
+    return result;
+}
+
 /// Return whether the receiver is less than its argument. The return value is
 /// either "true" or "false".
 pub fn IntLT(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
