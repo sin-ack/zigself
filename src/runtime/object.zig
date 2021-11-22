@@ -805,12 +805,17 @@ pub fn getAssignableSlotForMessage(self: *Self, slot_name: []const u8) !?*Slot {
     return null;
 }
 
+const FindActivationReceiverError = LookupError;
 /// This is used for primitives to find the actual value the primitive is
 /// supposed to send to. If the `_parent` slot exists, then that is returned as
 /// the activation target; otherwise null is returned.
-pub fn findActivationReceiver(self: *Self, context: *InterpreterContext) !?Ref {
+pub fn findActivationReceiver(self: *Self, context: *InterpreterContext) FindActivationReceiverError!?Ref {
     if (try self.lookup(context, "_parent", .Value)) |parent| {
-        return parent;
+        if (try parent.value.findActivationReceiver(context)) |even_more_parent| {
+            return even_more_parent;
+        } else {
+            return parent;
+        }
     } else {
         return null;
     }
