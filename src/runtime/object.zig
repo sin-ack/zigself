@@ -38,7 +38,7 @@ pub fn teardownObjectRefTrackerAndReportAliveRefs() void {
         var iterator = object_ref_tracker.?.iterator();
         while (iterator.next()) |item| {
             const object = item.key_ptr.*;
-            std.debug.print("  {*} (type {s}) - {d} refs\n", .{ object, @tagName(object.content), object.ref.ref_count });
+            std.debug.print("  <*{d}> (type {s}) - {d} refs\n", .{ object.id, @tagName(object.content), object.ref.ref_count });
         }
     }
 
@@ -110,10 +110,13 @@ const ObjectContent = union(enum) {
     },
 };
 
+var current_id: usize = 0;
+
 ref: ref_counted.RefCount,
 weak: WeakBlock,
 allocator: *Allocator,
 content: ObjectContent,
+id: usize,
 
 pub fn createEmpty(allocator: *Allocator) !Ref {
     return try create(allocator, .{ .Empty = .{} });
@@ -187,6 +190,8 @@ fn create(allocator: *Allocator, content: ObjectContent) !Ref {
 }
 
 fn init(self: *Self, allocator: *Allocator, content: ObjectContent) !void {
+    self.id = current_id;
+    current_id += 1;
     self.ref = .{};
     self.weak = try WeakBlock.init(allocator, self);
 

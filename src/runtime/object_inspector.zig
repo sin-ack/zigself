@@ -134,9 +134,9 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
         .Block => |block| {
             std.debug.print("<block object for ", .{});
             if (block.bound_method.getPointer()) |ptr| {
-                std.debug.print("{*}", .{ptr});
+                std.debug.print("<*{d}>", .{ptr.id});
             } else {
-                std.debug.print("(gone)", .{});
+                std.debug.print("<gone>", .{});
             }
 
             std.debug.print(" [", .{});
@@ -164,7 +164,7 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
         },
 
         .NonlocalReturn => |nonlocal_return| {
-            std.debug.print("<non-local return for {*}> ", .{nonlocal_return.target_method.value});
+            std.debug.print("<non-local return for <*{d}>> ", .{nonlocal_return.target_method.value.id});
             try inspectObjectInternal(nonlocal_return.value, display_type, indent, visited_object_set);
         },
 

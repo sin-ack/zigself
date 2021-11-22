@@ -35,7 +35,7 @@ pub fn printTraceFromActivationStack(stack: []Object.Ref) void {
 
         std.debug.print("  at {s} (receiver is ", .{message_name});
         if (receiver) |obj| {
-            std.debug.print("{*}", .{obj.value});
+            std.debug.print("<*{d}>", .{obj.value.id});
         } else {
             std.debug.print("<gone>", .{});
         }
