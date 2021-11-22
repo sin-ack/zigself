@@ -7,13 +7,12 @@ const Allocator = std.mem.Allocator;
 
 const Object = @import("../object.zig");
 const environment = @import("../environment.zig");
+const runtime_error = @import("../error.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
 /// Print the given ByteVector to stdout, followed by a newline.
 pub fn StringPrint(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
-    _ = allocator;
     _ = arguments;
-    _ = context;
 
     const writer = std.io.getStdOut().writer();
 
@@ -32,7 +31,7 @@ pub fn StringPrint(allocator: *Allocator, receiver: Object.Ref, arguments: []Obj
         },
 
         else => {
-            std.debug.panic("Unexpected object type {s} passed as the receiver of _StringPrint", .{@tagName(receiver.value.content)});
+            return runtime_error.raiseError(allocator, context, "Unexpected object type {s} passed as the receiver of _StringPrint", .{@tagName(receiver.value.content)});
         },
     }
 

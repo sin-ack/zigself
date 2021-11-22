@@ -10,6 +10,7 @@ const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
 const Object = @import("./object.zig");
 const Slot = @import("./slot.zig");
 const Script = @import("../language/script.zig");
+const runtime_error = @import("./error.zig");
 
 const message_interpreter = @import("./interpreter/message.zig");
 
@@ -32,12 +33,17 @@ pub const InterpreterContext = struct {
     /// The script file that is currently executing, used to resolve the
     /// relative paths of other script files.
     script: *const Script,
+    /// The current error message value. executeScript catches this and displays
+    /// the error with a stack trace. The user must free it.
+    current_error: ?[]const u8,
 };
+
+pub const InterpreterError = Allocator.Error || runtime_error.SelfRuntimeError;
 
 /// Executes a script node. `lobby` is ref'd for the function lifetime. The last
 /// expression result is returned, or if no statements were available, null is
 /// returned.
-pub fn executeScript(allocator: *Allocator, script: *const Script, lobby: Object.Ref) !?Object.Ref {
+pub fn executeScript(allocator: *Allocator, script: *const Script, lobby: Object.Ref) InterpreterError!?Object.Ref {
     lobby.ref();
     defer lobby.unref();
 
@@ -55,6 +61,7 @@ pub fn executeScript(allocator: *Allocator, script: *const Script, lobby: Object
         .lobby = lobby,
         .activation_stack = &activation_stack,
         .script = script,
+        .current_error = null,
     };
     for (script.ast_root.?.statements) |statement| {
         std.debug.assert(activation_stack.items.len == 0);
@@ -63,7 +70,69 @@ pub fn executeScript(allocator: *Allocator, script: *const Script, lobby: Object
             result.unref();
         }
 
-        const expression_result = try executeStatement(allocator, statement, &context);
+        const expression_result = executeStatement(allocator, statement, &context) catch |err| {
+            switch (err) {
+                runtime_error.SelfRuntimeError.RuntimeError => {
+                    var error_message = context.current_error.?;
+                    defer allocator.free(error_message);
+
+                    std.debug.print("Received error at top level: {s}\n", .{error_message});
+                    runtime_error.printTraceFromActivationStack(activation_stack.items);
+
+                    // Since the execution was abruptly stopped the activation
+                    // stack wasn't properly unwound, so let's do that now.
+                    for (activation_stack.items) |*activation| {
+                        activation.unref();
+                    }
+
+                    return null;
+                },
+                else => return err,
+            }
+        };
+
+        if (expression_result.value.is(.NonlocalReturn)) {
+            @panic("FIXME handle situation where a non-local return reaches top level");
+        }
+        last_expression_result = expression_result;
+    }
+
+    return last_expression_result;
+}
+
+/// Execute a script object as a child script of the root script. The root
+/// interpreter context is passed in order to preserve the activation stack and
+/// various other context objects.
+pub fn executeSubScript(allocator: *Allocator, script: *const Script, parent_context: *InterpreterContext) InterpreterError!?Object.Ref {
+    parent_context.lobby.ref();
+    defer parent_context.lobby.unref();
+
+    var last_expression_result: ?Object.Ref = null;
+
+    var child_context = InterpreterContext{
+        .self_object = parent_context.lobby,
+        .lobby = parent_context.lobby,
+        .activation_stack = parent_context.activation_stack,
+        .script = script,
+        .current_error = null,
+    };
+    for (script.ast_root.?.statements) |statement| {
+        if (last_expression_result) |*result| {
+            result.unref();
+        }
+
+        const expression_result = executeStatement(allocator, statement, &child_context) catch |err| {
+            switch (err) {
+                runtime_error.SelfRuntimeError.RuntimeError => {
+                    // Pass the error message up the script chain.
+                    parent_context.current_error = child_context.current_error;
+                    // Allow the error to keep bubbling up.
+                    return err;
+                },
+                else => return err,
+            }
+        };
+
         if (expression_result.value.is(.NonlocalReturn)) {
             @panic("FIXME handle situation where a non-local return reaches top level");
         }
@@ -74,12 +143,12 @@ pub fn executeScript(allocator: *Allocator, script: *const Script, lobby: Object
 }
 
 /// Executes a statement. All refs are forwardded.
-pub fn executeStatement(allocator: *Allocator, statement: AST.StatementNode, context: *InterpreterContext) !Object.Ref {
+pub fn executeStatement(allocator: *Allocator, statement: AST.StatementNode, context: *InterpreterContext) InterpreterError!Object.Ref {
     return try executeExpression(allocator, statement.expression, context);
 }
 
 /// Executes an expression. All refs are forwarded.
-pub fn executeExpression(allocator: *Allocator, expression: AST.ExpressionNode, context: *InterpreterContext) Allocator.Error!Object.Ref {
+pub fn executeExpression(allocator: *Allocator, expression: AST.ExpressionNode, context: *InterpreterContext) InterpreterError!Object.Ref {
     return switch (expression) {
         .Object => |object| try executeObject(allocator, object.*, context),
         .Block => |block| try executeBlock(allocator, block.*, context),
@@ -94,7 +163,7 @@ pub fn executeExpression(allocator: *Allocator, expression: AST.ExpressionNode, 
 
 /// Creates a new method object. All refs are forwarded. `arguments` and
 /// `object_node`'s statements are copied.
-fn executeMethod(allocator: *Allocator, object_node: AST.ObjectNode, arguments: [][]const u8, context: *InterpreterContext) !Object.Ref {
+fn executeMethod(allocator: *Allocator, name: []const u8, object_node: AST.ObjectNode, arguments: [][]const u8, context: *InterpreterContext) InterpreterError!Object.Ref {
     var arguments_copy = try std.ArrayList([]const u8).initCapacity(allocator, arguments.len);
     errdefer {
         for (arguments_copy.items) |argument| {
@@ -142,14 +211,14 @@ fn executeMethod(allocator: *Allocator, object_node: AST.ObjectNode, arguments: 
         try statements.append(statement_copy);
     }
 
-    return try Object.createMethod(allocator, arguments_copy.toOwnedSlice(), slots.toOwnedSlice(), statements.toOwnedSlice());
+    return try Object.createMethod(allocator, name, arguments_copy.toOwnedSlice(), slots.toOwnedSlice(), statements.toOwnedSlice());
 }
 
 /// Creates a new slot. All refs are forwarded.
-pub fn executeSlot(allocator: *Allocator, slot_node: AST.SlotNode, context: *InterpreterContext) Allocator.Error!Slot {
+pub fn executeSlot(allocator: *Allocator, slot_node: AST.SlotNode, context: *InterpreterContext) InterpreterError!Slot {
     var value = blk: {
         if (slot_node.value == .Object and slot_node.value.Object.statements.len > 0) {
-            break :blk try executeMethod(allocator, slot_node.value.Object.*, slot_node.arguments, context);
+            break :blk try executeMethod(allocator, slot_node.name, slot_node.value.Object.*, slot_node.arguments, context);
         } else {
             break :blk try executeExpression(allocator, slot_node.value, context);
         }
@@ -160,7 +229,7 @@ pub fn executeSlot(allocator: *Allocator, slot_node: AST.SlotNode, context: *Int
 }
 
 /// Creates a new slots object. All refs are forwarded.
-pub fn executeObject(allocator: *Allocator, object_node: AST.ObjectNode, context: *InterpreterContext) !Object.Ref {
+pub fn executeObject(allocator: *Allocator, object_node: AST.ObjectNode, context: *InterpreterContext) InterpreterError!Object.Ref {
     // Verify that we are executing a slots object and not a method; methods
     // are created through executeSlot.
     if (object_node.statements.len > 0) {
@@ -191,7 +260,7 @@ pub fn executeObject(allocator: *Allocator, object_node: AST.ObjectNode, context
     return try Object.createSlots(allocator, slots.toOwnedSlice());
 }
 
-pub fn executeBlock(allocator: *Allocator, block: AST.BlockNode, context: *InterpreterContext) !Object.Ref {
+pub fn executeBlock(allocator: *Allocator, block: AST.BlockNode, context: *InterpreterContext) InterpreterError!Object.Ref {
     var arguments = try std.ArrayList([]const u8).initCapacity(allocator, block.slots.len);
     errdefer {
         for (arguments.items) |argument| {
@@ -245,7 +314,7 @@ pub fn executeBlock(allocator: *Allocator, block: AST.BlockNode, context: *Inter
     return try Object.createBlock(allocator, arguments.toOwnedSlice(), slots.toOwnedSlice(), statements.toOwnedSlice(), bound_method);
 }
 
-pub fn executeReturn(allocator: *Allocator, return_node: AST.ReturnNode, context: *InterpreterContext) !Object.Ref {
+pub fn executeReturn(allocator: *Allocator, return_node: AST.ReturnNode, context: *InterpreterContext) InterpreterError!Object.Ref {
     const value = try executeExpression(allocator, return_node.expression, context);
     errdefer value.unref();
 
@@ -259,7 +328,7 @@ pub fn executeReturn(allocator: *Allocator, return_node: AST.ReturnNode, context
 
 /// Executes an identifier expression. If the looked up value exists, the value
 /// gains a ref. `self_object` gains a ref during a method execution.
-pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, context: *InterpreterContext) !Object.Ref {
+pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, context: *InterpreterContext) InterpreterError!Object.Ref {
     if (identifier.value[0] == '_') {
         var receiver = context.self_object;
 
@@ -290,7 +359,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
 
 /// Executes a string literal expression. `lobby` gains a ref during the
 /// lifetime of the function.
-pub fn executeString(allocator: *Allocator, string: AST.StringNode, context: *InterpreterContext) !Object.Ref {
+pub fn executeString(allocator: *Allocator, string: AST.StringNode, context: *InterpreterContext) InterpreterError!Object.Ref {
     context.lobby.ref();
     defer context.lobby.unref();
 
@@ -309,7 +378,7 @@ pub fn executeString(allocator: *Allocator, string: AST.StringNode, context: *In
 
 /// Executes a number literal expression. `lobby` gains a ref during the
 /// lifetime of the function.
-pub fn executeNumber(allocator: *Allocator, number: AST.NumberNode, context: *InterpreterContext) !Object.Ref {
+pub fn executeNumber(allocator: *Allocator, number: AST.NumberNode, context: *InterpreterContext) InterpreterError!Object.Ref {
     context.lobby.ref();
     defer context.lobby.unref();
 

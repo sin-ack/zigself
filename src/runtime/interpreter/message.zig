@@ -10,11 +10,12 @@ const Object = @import("../object.zig");
 const Slot = @import("../slot.zig");
 const primitives = @import("../primitives.zig");
 const environment = @import("../environment.zig");
+const runtime_error = @import("../error.zig");
 
 const root_interpreter = @import("../interpreter.zig");
 const InterpreterContext = root_interpreter.InterpreterContext;
 
-fn getMessageArguments(allocator: *Allocator, ast_arguments: []AST.ExpressionNode, context: *InterpreterContext) ![]Object.Ref {
+fn getMessageArguments(allocator: *Allocator, ast_arguments: []AST.ExpressionNode, context: *InterpreterContext) root_interpreter.InterpreterError![]Object.Ref {
     var arguments = try std.ArrayList(Object.Ref).initCapacity(allocator, ast_arguments.len);
     errdefer {
         for (arguments.items) |*argument| {
@@ -33,7 +34,7 @@ fn getMessageArguments(allocator: *Allocator, ast_arguments: []AST.ExpressionNod
     return arguments.toOwnedSlice();
 }
 
-pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) root_interpreter.InterpreterError!Object.Ref {
     // Check if this method can be executed, i.e. whether its enclosing
     // activation is currently on the stack.
     var i = @intCast(isize, context.activation_stack.items.len - 1);
@@ -57,7 +58,7 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
     }
 
     if (!did_find_activation_in_stack) {
-        @panic("Attempted to execute a block after its enclosing method has returned. Use objects for closures.");
+        return runtime_error.raiseError(allocator, context, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
     }
 
     bound_method.ref();
@@ -72,6 +73,7 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
         .self_object = block_activation_self_object,
         .activation_stack = context.activation_stack,
         .script = context.script,
+        .current_error = null,
     };
 
     var last_expression_result: ?Object.Ref = null;
@@ -80,7 +82,17 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
             last_result.unref();
         }
 
-        const expression_result = try root_interpreter.executeStatement(allocator, statement, &block_context);
+        const expression_result = root_interpreter.executeStatement(allocator, statement, &block_context) catch |err| {
+            switch (err) {
+                runtime_error.SelfRuntimeError.RuntimeError => {
+                    // Pass the error message up the script chain.
+                    context.current_error = block_context.current_error;
+                    // Allow the error to keep bubbling up.
+                    return err;
+                },
+                else => return err,
+            }
+        };
         if (expression_result.value.is(.NonlocalReturn)) {
             // Looks like a non-local return is bubbling up. This cannot
             // target us, as we're a block, so let it bubble.
@@ -121,13 +133,24 @@ pub fn executeMethodMessage(
         .self_object = method_activation_object,
         .activation_stack = context.activation_stack,
         .script = context.script,
+        .current_error = null,
     };
     for (method_object.value.content.Method.statements) |statement| {
         if (last_expression_result) |last_result| {
             last_result.unref();
         }
 
-        const expression_result = try root_interpreter.executeStatement(allocator, statement, &method_context);
+        const expression_result = root_interpreter.executeStatement(allocator, statement, &method_context) catch |err| {
+            switch (err) {
+                runtime_error.SelfRuntimeError.RuntimeError => {
+                    // Pass the error message up the script chain.
+                    context.current_error = method_context.current_error;
+                    // Allow the error to keep bubbling up.
+                    return err;
+                },
+                else => return err,
+            }
+        };
         if (expression_result.value.is(.NonlocalReturn)) {
             // A non-local return has bubbled up to us. If it belongs to us, we
             // can unwrap it to reach the expression inside and use it as our
@@ -167,7 +190,7 @@ pub fn executePrimitiveMessage(
     name: []const u8,
     arguments: []Object.Ref,
     context: *InterpreterContext,
-) !Object.Ref {
+) root_interpreter.InterpreterError!Object.Ref {
     // All primitives borrow a ref from the caller for the receiver and
     // each argument. It is the primitive's job to unref any argument after
     // its work is done.
@@ -175,7 +198,7 @@ pub fn executePrimitiveMessage(
         receiver.ref();
         return try primitives.callPrimitive(allocator, name, receiver, arguments, context);
     } else {
-        std.debug.panic("Unknown primitive selector \"{s}\"\n", .{name});
+        return runtime_error.raiseError(allocator, context, "Unknown primitive selector \"{s}\"", .{name});
     }
 }
 
@@ -185,7 +208,7 @@ pub fn executeAssignmentMessage(
     slot: *Slot,
     ast_argument: AST.ExpressionNode,
     context: *InterpreterContext,
-) !Object.Ref {
+) root_interpreter.InterpreterError!Object.Ref {
     var argument = try root_interpreter.executeExpression(allocator, ast_argument, context);
     errdefer argument.unref();
 
@@ -195,7 +218,7 @@ pub fn executeAssignmentMessage(
 }
 
 /// Executes a message. All refs are forwarded.
-pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: *InterpreterContext) !Object.Ref {
+pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: *InterpreterContext) root_interpreter.InterpreterError!Object.Ref {
     var receiver = try root_interpreter.executeExpression(allocator, message.receiver, context);
     defer receiver.unref();
 
@@ -245,6 +268,6 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
             else => unreachable,
         }
     } else {
-        std.debug.panic("Unknown selector \"{s}\"", .{message.message_name});
+        return runtime_error.raiseError(allocator, context, "Unknown selector \"{s}\"", .{message.message_name});
     }
 }

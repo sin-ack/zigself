@@ -52,6 +52,7 @@ const ObjectContent = union(enum) {
 
     Activation: struct {
         activation_object: Ref,
+        message_name: []const u8,
         context: union(enum) {
             Method: void,
             Block: struct {
@@ -66,6 +67,9 @@ const ObjectContent = union(enum) {
     },
 
     Method: struct {
+        /// Used for stack traces.
+        message_name: []const u8,
+
         arguments: [][]const u8,
         slots: []Slot,
         statements: []AST.StatementNode,
@@ -122,8 +126,12 @@ pub fn createSlots(allocator: *Allocator, slots: []Slot) !Ref {
 }
 
 /// Takes ownership of `arguments`, `slots` and `statements`.
-pub fn createMethod(allocator: *Allocator, arguments: [][]const u8, slots: []Slot, statements: []AST.StatementNode) !Ref {
-    return try create(allocator, .{ .Method = .{ .arguments = arguments, .slots = slots, .statements = statements } });
+/// `message_name` is duped.
+pub fn createMethod(allocator: *Allocator, message_name: []const u8, arguments: [][]const u8, slots: []Slot, statements: []AST.StatementNode) !Ref {
+    var message_name_copy = try allocator.dupe(u8, message_name);
+    errdefer allocator.free(message_name_copy);
+
+    return try create(allocator, .{ .Method = .{ .message_name = message_name_copy, .arguments = arguments, .slots = slots, .statements = statements } });
 }
 
 /// Takes ownership of `target_method` and `value`.
@@ -200,6 +208,7 @@ fn deinitContent(self: *Self) void {
         },
         .Activation => |activation| {
             activation.activation_object.unref();
+            self.allocator.free(activation.message_name);
             switch (activation.context) {
                 .Method => {},
                 .Block => |block_context| {
@@ -208,6 +217,8 @@ fn deinitContent(self: *Self) void {
             }
         },
         .Method => |method| {
+            self.allocator.free(method.message_name);
+
             for (method.arguments) |argument| {
                 self.allocator.free(argument);
             }
@@ -521,6 +532,31 @@ pub fn isCorrectMessageForBlockExecution(self: Self, message: []const u8) bool {
     return remaining_message.len == 0;
 }
 
+fn createMessageNameForBlock(self: Self) ![]const u8 {
+    std.debug.assert(self.content == .Block);
+
+    var needed_space: usize = 5; // value
+    if (self.content.Block.arguments.len > 0) {
+        needed_space += 1; // :
+        needed_space += 5 * (self.content.Block.arguments.len - 1); // Any other With:s needed
+    }
+
+    var message_name = try self.allocator.alloc(u8, needed_space);
+    std.mem.copy(u8, message_name, "value");
+
+    if (self.content.Block.arguments.len > 0) {
+        message_name[5] = ':';
+
+        var remaining_buffer = message_name[6..];
+        while (remaining_buffer.len > 0) {
+            std.mem.copy(u8, remaining_buffer, "With:");
+            remaining_buffer = remaining_buffer[5..];
+        }
+    }
+
+    return message_name;
+}
+
 fn activateCommon(allocator: *Allocator, arguments: []Ref, argument_names: [][]const u8, slots: []Slot, parent: Ref) !Ref {
     std.debug.assert(arguments.len == argument_names.len);
 
@@ -577,7 +613,16 @@ pub fn activateBlock(self: Self, arguments: []Ref, parent: Ref, bound_method: Re
     const activation_object = try activateCommon(self.allocator, arguments, self.content.Block.arguments, self.content.Block.slots, parent);
     errdefer activation_object.unref();
 
-    return try create(self.allocator, .{ .Activation = .{ .activation_object = activation_object, .context = .{ .Block = .{ .bound_method = bound_method } } } });
+    var message_name = try self.createMessageNameForBlock();
+    errdefer self.allocator.free(message_name);
+
+    return try create(self.allocator, .{
+        .Activation = .{
+            .activation_object = activation_object,
+            .message_name = message_name,
+            .context = .{ .Block = .{ .bound_method = bound_method } },
+        },
+    });
 }
 
 /// Activate this method and return a slots object for it.
@@ -588,7 +633,16 @@ pub fn activateMethod(self: Self, arguments: []Ref, parent: Ref) !Ref {
     const activation_object = try activateCommon(self.allocator, arguments, self.content.Method.arguments, self.content.Method.slots, parent);
     errdefer activation_object.unref();
 
-    return try create(self.allocator, .{ .Activation = .{ .activation_object = activation_object, .context = .{ .Method = .{} } } });
+    var message_name_copy = try self.allocator.dupe(u8, self.content.Method.message_name);
+    errdefer self.allocator.free(message_name_copy);
+
+    return try create(self.allocator, .{
+        .Activation = .{
+            .activation_object = activation_object,
+            .message_name = message_name_copy,
+            .context = .{ .Method = .{} },
+        },
+    });
 }
 
 /// Return the method that should be bound for the non-local return.

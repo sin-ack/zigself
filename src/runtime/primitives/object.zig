@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const Slot = @import("../slot.zig");
 const Object = @import("../object.zig");
 const environment = @import("../environment.zig");
+const runtime_error = @import("../error.zig");
 const object_inspector = @import("../object_inspector.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 const message_interpreter = @import("../interpreter/message.zig");
@@ -15,15 +16,13 @@ const message_interpreter = @import("../interpreter/message.zig");
 /// Adds the slots in the argument object to the receiver object. The slots
 /// are copied. The objects at each slot are not cloned, however.
 pub fn AddSlots(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
-    _ = context;
-
     const argument = arguments[0];
     defer argument.unref();
 
     if (argument.value.is(.Empty)) {
         return receiver;
     } else if (!argument.value.is(.Slots)) {
-        std.debug.panic("Expected Empty or Slots object as argument of _AddSlots:, got {s}", .{@tagName(argument.value.content)});
+        return runtime_error.raiseError(allocator, context, "Expected Empty or Slots object as argument of _AddSlots:, got {s}", .{@tagName(argument.value.content)});
     }
 
     const argument_slots = argument.value.content.Slots.slots;
@@ -44,7 +43,7 @@ pub fn AddSlots(allocator: *Allocator, receiver: Object.Ref, arguments: []Object
 
     receiver.value.addSlots(slots_copy.items) catch |err| switch (err) {
         error.ObjectDoesNotAcceptSlots => {
-            @panic("Attempted to add slots to an object which doesn't accept slots");
+            return runtime_error.raiseError(allocator, context, "Attempted to add slots to an object which doesn't accept slots", .{});
         },
         else => return @errSetCast(Allocator.Error, err),
     };
@@ -59,19 +58,19 @@ pub fn RemoveSlot_IfFail(allocator: *Allocator, receiver: Object.Ref, arguments:
 
     var slot_name = arguments[0];
     if (!slot_name.value.is(.ByteVector)) {
-        std.debug.panic("Expected ByteVector for the slot name argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(slot_name.value.content)});
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector for the slot name argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(slot_name.value.content)});
     }
     defer slot_name.unref();
 
     var fail_block = arguments[1];
     if (!fail_block.value.is(.Block)) {
-        std.debug.panic("Expected Block for the failure block argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(fail_block.value.content)});
+        return runtime_error.raiseError(allocator, context, "Expected Block for the failure block argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(fail_block.value.content)});
     }
     defer fail_block.unref();
 
     const did_remove_slot = receiver.value.removeSlot(slot_name.value.content.ByteVector.values) catch |err| switch (err) {
         error.ObjectDoesNotAcceptSlots => {
-            @panic("Attempted to remove a slot from an object which does not accept slots");
+            return runtime_error.raiseError(allocator, context, "Attempted to remove a slot from an object which does not accept slots", .{});
         },
         else => return @errSetCast(Allocator.Error, err),
     };

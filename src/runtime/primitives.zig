@@ -7,18 +7,22 @@ const Allocator = std.mem.Allocator;
 
 const Object = @import("./object.zig");
 const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
+const runtime_error = @import("./error.zig");
 
 const basic_primitives = @import("./primitives/basic.zig");
 const bytevector_primitives = @import("./primitives/bytevector.zig");
 const number_primitives = @import("./primitives/number.zig");
 const object_primitives = @import("./primitives/object.zig");
 
+/// The list of errors allowed to be raised by primitives.
+const PrimitiveError = Allocator.Error || runtime_error.SelfRuntimeError;
+
 /// A primitive specification. The `name` field specifies the exact selector the
 /// primitive uses (i.e. `_DoFoo:WithBar:`, or `_StringPrint`), and the
 /// `function` is the function which is called to execute the primitive.
 const PrimitiveSpec = struct {
     name: []const u8,
-    function: fn (allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) Allocator.Error!Object.Ref,
+    function: fn (allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) PrimitiveError!Object.Ref,
 };
 
 const PrimitiveRegistry = &[_]PrimitiveSpec{
@@ -56,5 +60,5 @@ pub fn callPrimitive(allocator: *Allocator, selector: []const u8, receiver: Obje
         }
     }
 
-    std.debug.panic("Unknown primitive \"{s}\" called\n", .{selector});
+    return runtime_error.raiseError(allocator, context, "Unknown primitive \"{s}\" called", .{selector});
 }
