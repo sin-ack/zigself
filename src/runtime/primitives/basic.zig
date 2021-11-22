@@ -97,3 +97,13 @@ pub fn RunScript(allocator: *Allocator, receiver: Object.Ref, arguments: []Objec
 
     return result_value;
 }
+
+/// Return the receiver's global ID.
+pub fn ID(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = context;
+    _ = arguments;
+
+    defer receiver.unref();
+
+    return try Object.createFromIntegerLiteral(allocator, receiver.value.id);
+}
