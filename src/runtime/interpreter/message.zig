@@ -61,8 +61,7 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
         return runtime_error.raiseError(allocator, context, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
     }
 
-    bound_method.ref();
-    var block_activation = try receiver.value.activateBlock(context, arguments, context.self_object, bound_method);
+    var block_activation = try receiver.value.activateBlock(context, arguments, bound_method);
 
     // Push it onto the activation stack. Borrows the ref from block_activation.
     try context.activation_stack.append(block_activation);

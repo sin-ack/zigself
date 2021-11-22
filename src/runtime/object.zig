@@ -595,7 +595,15 @@ fn createMessageNameForBlock(self: Self) ![]const u8 {
     return message_name;
 }
 
-fn activateCommon(allocator: *Allocator, context: *InterpreterContext, arguments: []Ref, argument_names: [][]const u8, slots: []Slot, parent: Ref) !Ref {
+fn activateCommon(
+    allocator: *Allocator,
+    context: *InterpreterContext,
+    arguments: []Ref,
+    argument_names: [][]const u8,
+    slots: []Slot,
+    parent: Ref,
+    check_activation_receiver: bool,
+) !Ref {
     std.debug.assert(arguments.len == argument_names.len);
 
     var slots_copy = try std.ArrayList(Slot).initCapacity(allocator, slots.len + arguments.len + 1);
@@ -622,8 +630,10 @@ fn activateCommon(allocator: *Allocator, context: *InterpreterContext, arguments
     //       Not only that, but that would also cause the actual object to be
     //       wrapped in multiple layers of activation objects like ogres.
     var the_parent = parent;
-    if (try parent.value.findActivationReceiver(context)) |actual_parent| {
-        the_parent = actual_parent;
+    if (check_activation_receiver) {
+        if (try parent.value.findActivationReceiver(context)) |actual_parent| {
+            the_parent = actual_parent;
+        }
     }
     the_parent.ref();
 
@@ -644,16 +654,17 @@ fn activateCommon(allocator: *Allocator, context: *InterpreterContext, arguments
 }
 
 /// Activate this block and return a slots object for it.
-/// Borrows 1 ref from each object in `arguments` and from `bound_method`.
-/// `parent` is ref'd internally.
-pub fn activateBlock(self: Self, context: *InterpreterContext, arguments: []Ref, parent: Ref, bound_method: Ref) !Ref {
+/// Borrows 1 ref from each object in `arguments`.
+/// `bound_method` is ref'd internally.
+pub fn activateBlock(self: Self, context: *InterpreterContext, arguments: []Ref, bound_method: Ref) !Ref {
     std.debug.assert(self.content == .Block);
-    const activation_object = try activateCommon(self.allocator, context, arguments, self.content.Block.arguments, self.content.Block.slots, parent);
+    const activation_object = try activateCommon(self.allocator, context, arguments, self.content.Block.arguments, self.content.Block.slots, bound_method, false);
     errdefer activation_object.unref();
 
     var message_name = try self.createMessageNameForBlock();
     errdefer self.allocator.free(message_name);
 
+    bound_method.ref();
     return try create(self.allocator, .{
         .Activation = .{
             .activation_object = activation_object,
@@ -668,7 +679,7 @@ pub fn activateBlock(self: Self, context: *InterpreterContext, arguments: []Ref,
 /// `parent` is ref'd internally.
 pub fn activateMethod(self: Self, context: *InterpreterContext, arguments: []Ref, parent: Ref) !Ref {
     std.debug.assert(self.content == .Method);
-    const activation_object = try activateCommon(self.allocator, context, arguments, self.content.Method.arguments, self.content.Method.slots, parent);
+    const activation_object = try activateCommon(self.allocator, context, arguments, self.content.Method.arguments, self.content.Method.slots, parent, true);
     errdefer activation_object.unref();
 
     var message_name_copy = try self.allocator.dupe(u8, self.content.Method.message_name);
