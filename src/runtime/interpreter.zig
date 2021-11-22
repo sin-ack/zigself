@@ -353,7 +353,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
             else => unreachable,
         }
     } else {
-        std.debug.panic("Failed looking up \"{s}\" on {any}", .{ identifier.value, context.self_object });
+        return runtime_error.raiseError(allocator, context, "Failed looking up \"{s}\"", .{identifier.value});
     }
 }
 
