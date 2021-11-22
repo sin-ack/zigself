@@ -550,7 +550,7 @@ pub fn isCorrectMessageForBlockExecution(self: Self, message: []const u8) bool {
         return true;
     }
 
-    if (!std.mem.eql(u8, message[0..6], "value:")) {
+    if (message.len < 6 or !std.mem.eql(u8, message[0..6], "value:")) {
         return false;
     }
 
