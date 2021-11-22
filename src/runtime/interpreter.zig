@@ -339,6 +339,20 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
         return try message_interpreter.executePrimitiveMessage(allocator, receiver, identifier.value, &[_]Object.Ref{}, context);
     }
 
+    // Check for block activation. Note that this isn't the same as calling a
+    // method on traits block, this is actually executing the block itself via
+    // the virtual method.
+    {
+        var receiver = context.self_object;
+        if (try receiver.value.findActivationReceiver(context)) |actual_receiver| {
+            receiver = actual_receiver;
+        }
+
+        if (receiver.value.is(.Block) and receiver.value.isCorrectMessageForBlockExecution(identifier.value)) {
+            return try message_interpreter.executeBlockMessage(allocator, receiver, &[_]Object.Ref{}, context);
+        }
+    }
+
     if (try context.self_object.value.lookup(context, identifier.value, .Value)) |value| {
         switch (value.value.content) {
             .Integer, .FloatingPoint, .ByteVector, .Slots, .Empty, .Block => {

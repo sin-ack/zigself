@@ -242,12 +242,23 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
         return try executePrimitiveMessage(allocator, receiver, message.message_name, arguments, context);
     }
 
-    // Check for block activation
-    if (receiver.value.is(.Block) and receiver.value.isCorrectMessageForBlockExecution(message.message_name)) {
-        const arguments = try getMessageArguments(allocator, message.arguments, context);
-        defer allocator.free(arguments);
+    // Check for block activation. Note that this isn't the same as calling a
+    // method on traits block, this is actually executing the block itself via
+    // the virtual method.
+    {
+        var block_receiver = receiver;
+        if (try block_receiver.value.findActivationReceiver(context)) |actual_receiver| {
+            actual_receiver.ref();
+            block_receiver.unref();
+            block_receiver = actual_receiver;
+        }
 
-        return try executeBlockMessage(allocator, receiver, arguments, context);
+        if (block_receiver.value.is(.Block) and block_receiver.value.isCorrectMessageForBlockExecution(message.message_name)) {
+            const arguments = try getMessageArguments(allocator, message.arguments, context);
+            defer allocator.free(arguments);
+
+            return try executeBlockMessage(allocator, block_receiver, arguments, context);
+        }
     }
 
     if (try receiver.value.lookup(context, message.message_name, .Value)) |lookup_result| {
