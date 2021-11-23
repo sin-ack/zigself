@@ -31,7 +31,7 @@ That's it!
 - [x] Lexer
 - [x] **Milestone 1:** Parser
 - [x] Initial VM and runtime
-- [-] Standard library
+- [ ] Standard library
 - [ ] **Milestone 2:** A REPL
 - [ ] World building script
 - [ ] Transporter (Self modules)
