@@ -53,7 +53,7 @@ traits string _AddSlots: (|
     at: index = ( _ByteAt: index ).
     at: index PutByte: value = ( _ByteAt: index Put: value ).
     do: block = (
-        0 to: size Do: [| :i | block value: at: i With: i ].
+        0 to: size Do: [| :i | block value: (at: i) With: i ].
     ).
 
     findFirst: block IfPresent: presentBlock IfAbsent: absentBlock = (
