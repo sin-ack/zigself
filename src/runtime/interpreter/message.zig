@@ -69,10 +69,22 @@ pub fn executeBlockMessage(
     // This is done so that we never hold an Activation in value form, and
     // always refer to the in-place version in the activation stack.
     const block_activation = try block_object.value.activateBlock(context, message_range, arguments, parent_activation.activation_object);
+    var did_execute_normally = false;
 
     {
         errdefer block_activation.destroy();
         try context.activation_stack.append(block_activation);
+    }
+
+    // NOTE: We shouldn't pop from the activation stack if we didn't execute
+    //       normally and didn't non-local return.
+    var did_nonlocal_return = false;
+    defer {
+        if (did_execute_normally or did_nonlocal_return) {
+            const popped_activation = context.activation_stack.pop();
+            std.debug.assert(popped_activation == block_activation);
+            popped_activation.destroy();
+        }
     }
 
     const previous_script = context.script;
@@ -83,7 +95,6 @@ pub fn executeBlockMessage(
     context.script = block_script;
     context.self_object = block_activation_object;
 
-    var did_execute_normally = false;
     // NOTE: We don't care about this if an error is bubbling up.
     defer {
         if (did_execute_normally) {
@@ -98,12 +109,16 @@ pub fn executeBlockMessage(
             last_result.unref();
         }
 
-        last_expression_result = try root_interpreter.executeStatement(allocator, statement, context);
+        last_expression_result = root_interpreter.executeStatement(allocator, statement, context) catch |err|
+            switch (err) {
+            root_interpreter.NonlocalReturnError.NonlocalReturn => |e| {
+                did_nonlocal_return = true;
+                return e;
+            },
+            else => |e| return e,
+        };
     }
 
-    const popped_activation = context.activation_stack.pop();
-    std.debug.assert(popped_activation == block_activation);
-    popped_activation.destroy();
     did_execute_normally = true;
 
     if (last_expression_result) |last_result| {
@@ -125,10 +140,22 @@ pub fn executeMethodMessage(
     // NOTE: This is done so that we never hold an Activation in value form, and
     //       always refer to the in-place version in the activation stack.
     const method_activation = try method_object.value.activateMethod(context, message_range, arguments, receiver);
+    var did_execute_normally = false;
 
     {
         errdefer method_activation.destroy();
         try context.activation_stack.append(method_activation);
+    }
+
+    // NOTE: We shouldn't pop from the activation stack if we didn't execute
+    //       normally and didn't non-local return.
+    var did_nonlocal_return = false;
+    defer {
+        if (did_execute_normally or did_nonlocal_return) {
+            const popped_activation = context.activation_stack.pop();
+            std.debug.assert(popped_activation == method_activation);
+            popped_activation.destroy();
+        }
     }
 
     const previous_script = context.script;
@@ -139,7 +166,6 @@ pub fn executeMethodMessage(
     context.script = method_script;
     context.self_object = method_activation_object;
 
-    var did_execute_normally = false;
     // NOTE: We don't care about this if an error is bubbling up.
     defer {
         if (did_execute_normally) {
@@ -167,6 +193,7 @@ pub fn executeMethodMessage(
 
                     // The target of the non-local return wasn't us. Allow the
                     // error to keep bubbling up.
+                    did_nonlocal_return = true;
                     return err;
                 },
                 else => return err,
@@ -176,9 +203,6 @@ pub fn executeMethodMessage(
         last_expression_result = expression_result;
     }
 
-    const popped_activation = context.activation_stack.pop();
-    std.debug.assert(popped_activation == method_activation);
-    popped_activation.destroy();
     did_execute_normally = true;
 
     if (last_expression_result) |last_result| {
