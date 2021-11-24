@@ -27,7 +27,7 @@ traits string _AddSlots: (|
         "Find and append all the substrings."
         index: 0.
         [ index < (indicesList size prec) ] whileTrue: [
-            substringsList add: (copyFrom: (indicesList at: index) + substring size Until: (indicesList at: index succ)).
+            substringsList append: (copyFrom: ((indicesList at: index) + substring size) Until: (indicesList at: index succ)).
             index: index succ.
         ].
 
