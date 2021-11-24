@@ -5,6 +5,8 @@ SPDX-License-Identifier: GPL-3.0-only
 "
 
 traits integer _AddSlots: (|
+    parent* = traits clonable.
+
     succ = (self + 1).
     prec = (self - 1).
 
