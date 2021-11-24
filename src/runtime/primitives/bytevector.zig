@@ -129,3 +129,28 @@ pub fn ByteAt_Put(allocator: *Allocator, message_range: Range, receiver: Object.
 
     return receiver;
 }
+
+/// Copy the byte vector receiver with a new size. Size cannot exceed the
+/// receiver's size.
+pub fn ByteVectorCopySize(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = message_range;
+
+    defer receiver.unref();
+    if (!receiver.value.is(.ByteVector)) {
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteVectorCopySize: receiver, got {s}", .{@tagName(receiver.value.content)});
+    }
+
+    var argument = arguments[0];
+    defer argument.unref();
+    if (!argument.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _ByteVectorCopySize: argument, got {s}", .{@tagName(argument.value.content)});
+    }
+
+    const values = receiver.value.content.ByteVector.values;
+    const size = argument.value.content.Integer.value;
+    if (size >= values.len) {
+        return runtime_error.raiseError(allocator, context, "_ByteVectorCopySize: argument exceeds receiver's size", .{});
+    }
+
+    return try Object.createCopyFromStringLiteral(allocator, values[0..size]);
+}
