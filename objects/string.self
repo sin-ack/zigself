@@ -81,4 +81,20 @@ traits string _AddSlots: (|
 
         targetBuffer
     ).
+
+    copySize: size = ( _ByteVectorCopySize: size ).
+|).
+
+traits string _AddSlots: (|
+    toInteger = (| value. zeroByte = '0' at: 0. nineByte = '9' at: 0 |
+        (size = 0) ifTrue: [ _Error: 'empty string cannot be converted to integer' ].
+
+        value: 0.
+        do: [| :byte |
+            ((byte > zeroByte) && [ byte < nineByte ]) ifTrue: [
+            ] False: [ _Error: 'string with non-digit characters cannot be converted to integer' ].
+        ].
+
+        value
+    ).
 |)
