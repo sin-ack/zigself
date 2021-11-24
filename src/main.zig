@@ -6,7 +6,7 @@ const std = @import("std");
 const zig_args = @import("zig-args");
 
 const Script = @import("./language/script.zig");
-const AST = @import("./language/ast.zig");
+const ASTPrinter = @import("./language/ast_printer.zig");
 
 const Object = @import("./runtime/object.zig");
 const interpreter = @import("./runtime/interpreter.zig");
@@ -76,9 +76,9 @@ pub fn main() !u8 {
     try entrypoint_script.reportDiagnostics(std.io.getStdErr().writer());
 
     if (arguments.options.@"dump-ast") {
-        var printer = AST.ASTPrinter.init(2, allocator);
+        var printer = ASTPrinter.init(2, allocator);
         defer printer.deinit();
-        entrypoint_script.ast_root.?.dumpTree(&printer);
+        printer.dumpScript(entrypoint_script.ast_root.?);
         return 0;
     }
 
