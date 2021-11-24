@@ -54,7 +54,8 @@ pub fn printTraceFromActivationStack(stack: []Object.Ref) void {
         if (message_range.start.line == message_range.end.line) {
             writer.writeByteNTimes('^', std.math.max(1, message_range.end.column - message_range.start.column)) catch unreachable;
         } else {
-            writer.writeByteNTimes('^', std.math.max(1, source_line.len - message_range.start.column)) catch unreachable;
+            writer.writeByteNTimes('^', source_line.len - message_range.start.column + 1) catch unreachable;
+            writer.writeByteNTimes('.', 3) catch unreachable;
         }
         std.debug.print("\x1b[0m\n", .{});
     }
