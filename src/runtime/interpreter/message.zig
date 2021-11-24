@@ -217,6 +217,15 @@ pub fn executeAssignmentMessage(
     var argument = try root_interpreter.executeExpression(allocator, ast_argument, context);
     errdefer argument.unref();
 
+    // NOTE: This is required, for instance, when we are assigning `self` to
+    //       a slot (happens more often than you might think!). We need to strip
+    //       the activation object to get to the actual value inside.
+    if (try argument.value.findActivationReceiver(context)) |actual_argument| {
+        actual_argument.ref();
+        argument.unref();
+        argument = actual_argument;
+    }
+
     slot.assignNewValue(argument);
 
     return environment.globalNil();
