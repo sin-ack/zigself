@@ -44,6 +44,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_IntAdd:", .function = number_primitives.IntAdd },
     .{ .name = "_IntSub:", .function = number_primitives.IntSub },
     .{ .name = "_IntLT:", .function = number_primitives.IntLT },
+    .{ .name = "_IntEq:", .function = number_primitives.IntEq },
     // object primitives
     .{ .name = "_AddSlots:", .function = object_primitives.AddSlots },
     .{ .name = "_RemoveSlot:IfFail:", .function = object_primitives.RemoveSlot_IfFail },

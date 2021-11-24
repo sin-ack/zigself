@@ -84,3 +84,27 @@ pub fn IntLT(allocator: *Allocator, message_range: Range, receiver: Object.Ref, 
 
     return result;
 }
+
+/// Return whether the receiver is less than its argument. The return value is
+/// either "true" or "false".
+pub fn IntEq(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = message_range;
+
+    defer receiver.unref();
+    if (!receiver.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntEq: receiver, got {s}", .{@tagName(receiver.value.content)});
+    }
+
+    var argument = arguments[0];
+    defer argument.unref();
+    if (!argument.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntEq: argument, got {s}", .{@tagName(argument.value.content)});
+    }
+
+    const result = if (receiver.value.content.Integer.value == argument.value.content.Integer.value)
+        environment.globalTrue()
+    else
+        environment.globalFalse();
+
+    return result;
+}
