@@ -88,7 +88,11 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
                 const mutability_marker: []const u8 = if (slot.is_mutable) "<-" else "=";
                 printWithIndent(indent + 2, display_type, "{s}{s} {s} ", .{ slot.name, parent_marker, mutability_marker });
 
-                try inspectObjectInternal(slot.value, display_type, indent + 2, visited_object_set);
+                if (slot.is_parent) {
+                    std.debug.print("<*{d}>", .{slot.value.value.id});
+                } else {
+                    try inspectObjectInternal(slot.value, display_type, indent + 2, visited_object_set);
+                }
 
                 std.debug.print(".{s}", .{separator});
             }
