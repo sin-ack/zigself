@@ -16,6 +16,8 @@ traits integer _AddSlots: (|
     = n  = (_IntEq: n).
     != n = ((self = n) not).
 
+    max: n = ((self < n) ifTrue: [ n ] False: [ self ]).
+
     to: upper Do: block = (| i |
         (self < upper) ifFalse: [ ^ nil ].
 
