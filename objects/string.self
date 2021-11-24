@@ -63,7 +63,7 @@ traits string _AddSlots: (|
 
     copyFrom: start Until: end = (
         (start = end) ifTrue: [ ^ '' ].
-        (start < end) ifTrue: [ ^ copyFrom: end Until: start ].
+        (start < end) ifFalse: [ ^ copyFrom: end Until: start ].
 
         copyFrom: start Size: (end - start).
     ).
