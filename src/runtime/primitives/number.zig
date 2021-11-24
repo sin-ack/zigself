@@ -19,16 +19,18 @@ fn makeInteger(allocator: *Allocator, value: u64) !Object.Ref {
 pub fn IntAdd(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    if (!receiver.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntAdd: receiver, got {s}", .{@tagName(receiver.value.content)});
-    }
     defer receiver.unref();
 
     var addend = arguments[0];
+    defer addend.unref();
+
+    if (!receiver.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntAdd: receiver, got {s}", .{@tagName(receiver.value.content)});
+    }
+
     if (!addend.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntAdd: argument, got {s}", .{@tagName(addend.value.content)});
     }
-    defer addend.unref();
 
     const result = try makeInteger(
         allocator,
@@ -42,16 +44,18 @@ pub fn IntAdd(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
 pub fn IntSub(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    if (!receiver.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntSub: receiver, got {s}", .{@tagName(receiver.value.content)});
-    }
     defer receiver.unref();
 
     var term = arguments[0];
+    defer term.unref();
+
+    if (!receiver.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntSub: receiver, got {s}", .{@tagName(receiver.value.content)});
+    }
+
     if (!term.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntSub: argument, got {s}", .{@tagName(term.value.content)});
     }
-    defer term.unref();
 
     const result = try makeInteger(
         allocator,
@@ -66,16 +70,18 @@ pub fn IntSub(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
 pub fn IntLT(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    if (!receiver.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntLT: receiver, got {s}", .{@tagName(receiver.value.content)});
-    }
     defer receiver.unref();
 
     var argument = arguments[0];
+    defer argument.unref();
+
+    if (!receiver.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntLT: receiver, got {s}", .{@tagName(receiver.value.content)});
+    }
+
     if (!argument.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntLT: argument, got {s}", .{@tagName(argument.value.content)});
     }
-    defer argument.unref();
 
     const result = if (receiver.value.content.Integer.value < argument.value.content.Integer.value)
         environment.globalTrue()
@@ -91,12 +97,14 @@ pub fn IntEq(allocator: *Allocator, message_range: Range, receiver: Object.Ref, 
     _ = message_range;
 
     defer receiver.unref();
+
+    var argument = arguments[0];
+    defer argument.unref();
+
     if (!receiver.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntEq: receiver, got {s}", .{@tagName(receiver.value.content)});
     }
 
-    var argument = arguments[0];
-    defer argument.unref();
     if (!argument.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntEq: argument, got {s}", .{@tagName(argument.value.content)});
     }

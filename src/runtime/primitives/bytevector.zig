@@ -16,6 +16,8 @@ pub fn StringPrint(allocator: *Allocator, message_range: Range, receiver: Object
     _ = arguments;
     _ = message_range;
 
+    defer receiver.unref();
+
     const writer = std.io.getStdOut().writer();
 
     // FIXME: Don't ignore errors.
@@ -37,8 +39,6 @@ pub fn StringPrint(allocator: *Allocator, message_range: Range, receiver: Object
         },
     }
 
-    receiver.unref();
-
     return environment.globalNil();
 }
 
@@ -47,10 +47,11 @@ pub fn ByteVectorSize(allocator: *Allocator, message_range: Range, receiver: Obj
     _ = arguments;
     _ = message_range;
 
+    defer receiver.unref();
+
     if (!receiver.value.is(.ByteVector)) {
         return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteVectorSize receiver, got {s}", .{@tagName(receiver.value.content)});
     }
-    defer receiver.unref();
 
     return Object.createFromIntegerLiteral(allocator, receiver.value.content.ByteVector.values.len);
 }
@@ -62,12 +63,14 @@ pub fn ByteAt(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
     _ = message_range;
 
     defer receiver.unref();
+
+    var argument = arguments[0];
+    defer argument.unref();
+
     if (!receiver.value.is(.ByteVector)) {
         return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteAt: receiver, got {s}", .{@tagName(receiver.value.content)});
     }
 
-    var argument = arguments[0];
-    defer argument.unref();
     if (!argument.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _ByteAt: argument, got {s}", .{@tagName(argument.value.content)});
     }
@@ -83,7 +86,7 @@ pub fn ByteAt(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
         );
     }
 
-    return Object.createFromIntegerLiteral(allocator, values[position]);
+    return try Object.createFromIntegerLiteral(allocator, values[position]);
 }
 
 /// Place the second argument at the position given by the first argument on the
@@ -92,18 +95,21 @@ pub fn ByteAt(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
 pub fn ByteAt_Put(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
+    errdefer receiver.unref();
+
+    var first_argument = arguments[0];
+    defer first_argument.unref();
+
+    var second_argument = arguments[1];
+    defer second_argument.unref();
+
     if (!receiver.value.is(.ByteVector)) {
         return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteAt:Put: receiver, got {s}", .{@tagName(receiver.value.content)});
     }
 
-    var first_argument = arguments[0];
-    defer first_argument.unref();
     if (!first_argument.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as first _ByteAt:Put: argument, got {s}", .{@tagName(first_argument.value.content)});
     }
-
-    var second_argument = arguments[1];
-    defer second_argument.unref();
     if (!second_argument.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as second _ByteAt:Put: argument, got {s}", .{@tagName(second_argument.value.content)});
     }
@@ -136,12 +142,13 @@ pub fn ByteVectorCopySize(allocator: *Allocator, message_range: Range, receiver:
     _ = message_range;
 
     defer receiver.unref();
-    if (!receiver.value.is(.ByteVector)) {
-        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteVectorCopySize: receiver, got {s}", .{@tagName(receiver.value.content)});
-    }
 
     var argument = arguments[0];
     defer argument.unref();
+
+    if (!receiver.value.is(.ByteVector)) {
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteVectorCopySize: receiver, got {s}", .{@tagName(receiver.value.content)});
+    }
     if (!argument.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _ByteVectorCopySize: argument, got {s}", .{@tagName(argument.value.content)});
     }

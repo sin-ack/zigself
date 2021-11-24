@@ -19,6 +19,8 @@ const message_interpreter = @import("../interpreter/message.zig");
 pub fn AddSlots(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
+    errdefer receiver.unref();
+
     const argument = arguments[0];
     defer argument.unref();
 
@@ -60,16 +62,18 @@ pub fn RemoveSlot_IfFail(allocator: *Allocator, message_range: Range, receiver: 
     defer receiver.unref();
 
     var slot_name = arguments[0];
-    if (!slot_name.value.is(.ByteVector)) {
-        return runtime_error.raiseError(allocator, context, "Expected ByteVector for the slot name argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(slot_name.value.content)});
-    }
     defer slot_name.unref();
 
     var fail_block = arguments[1];
+    defer fail_block.unref();
+
+    if (!slot_name.value.is(.ByteVector)) {
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector for the slot name argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(slot_name.value.content)});
+    }
+
     if (!fail_block.value.is(.Block)) {
         return runtime_error.raiseError(allocator, context, "Expected Block for the failure block argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(fail_block.value.content)});
     }
-    defer fail_block.unref();
 
     const did_remove_slot = receiver.value.removeSlot(slot_name.value.content.ByteVector.values) catch |err| switch (err) {
         error.ObjectDoesNotAcceptSlots => {
@@ -92,6 +96,7 @@ pub fn Inspect(allocator: *Allocator, message_range: Range, receiver: Object.Ref
     _ = arguments;
     _ = message_range;
 
+    errdefer receiver.unref();
     try object_inspector.inspectObject(allocator, receiver, .Multiline);
 
     return receiver;

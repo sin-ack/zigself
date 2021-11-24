@@ -21,8 +21,8 @@ pub fn Nil(allocator: *Allocator, message_range: Range, receiver: Object.Ref, ar
     _ = allocator;
     _ = arguments;
     _ = message_range;
-    receiver.unref();
 
+    receiver.unref();
     return environment.globalNil();
 }
 
@@ -36,6 +36,7 @@ pub fn Exit(allocator: *Allocator, message_range: Range, receiver: Object.Ref, a
         return runtime_error.raiseError(allocator, context, "Expected Integer for the status code argument of _Exit:, got {s}", .{@tagName(status_code.value.content)});
     }
 
+    // The ultimate in garbage collection, no need to unref.
     std.os.exit(@intCast(u8, status_code.value.content.Integer.value));
 }
 
@@ -118,6 +119,7 @@ pub fn Error(allocator: *Allocator, message_range: Range, receiver: Object.Ref, 
 
     var argument = arguments[0];
     defer argument.unref();
+
     if (!argument.value.is(.ByteVector)) {
         return runtime_error.raiseError(allocator, context, "Expected ByteVector as _Error: argument, got {s}", .{@tagName(argument.value.content)});
     }
