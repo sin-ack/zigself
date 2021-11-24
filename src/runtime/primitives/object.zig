@@ -107,3 +107,17 @@ pub fn Clone(allocator: *Allocator, message_range: Range, receiver: Object.Ref, 
     defer receiver.unref();
     return try receiver.value.copy();
 }
+
+/// Return whether the receiver and argument are identical. Returns either
+/// the global "true" or "false" object.
+pub fn Eq(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) error{}!Object.Ref {
+    _ = context;
+    _ = allocator;
+    _ = message_range;
+
+    defer receiver.unref();
+    var argument = arguments[0];
+    defer argument.unref();
+
+    return if (receiver.value == argument.value) environment.globalTrue() else environment.globalFalse();
+}
