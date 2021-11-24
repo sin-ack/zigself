@@ -24,7 +24,7 @@ pub fn visitScript(script: AST.ScriptNode, allocator: *Allocator) !AST.ScriptNod
 }
 
 pub fn visitStatement(statement: AST.StatementNode, allocator: *Allocator) !AST.StatementNode {
-    return AST.StatementNode{ .expression = try visitExpression(statement.expression, allocator) };
+    return AST.StatementNode{ .expression = try visitExpression(statement.expression, allocator), .range = statement.range };
 }
 
 pub fn visitExpression(expression: AST.ExpressionNode, allocator: *Allocator) Allocator.Error!AST.ExpressionNode {
@@ -61,6 +61,8 @@ pub fn visitSlot(slot: AST.SlotNode, allocator: *Allocator) !AST.SlotNode {
         .name = try allocator.dupe(u8, slot.name),
         .arguments = arguments.toOwnedSlice(),
         .value = try visitExpression(slot.value, allocator),
+
+        .range = slot.range,
     };
 }
 
@@ -109,6 +111,7 @@ pub fn visitObject(object: AST.ObjectNode, allocator: *Allocator) !*AST.ObjectNo
     try visitSlotsStatementsCommon(object.slots, object.statements, &slots, &statements, allocator);
     object_copy.slots = slots;
     object_copy.statements = statements;
+    object_copy.range = object.range;
 
     return object_copy;
 }
@@ -123,6 +126,7 @@ pub fn visitBlock(block: AST.BlockNode, allocator: *Allocator) !*AST.BlockNode {
     try visitSlotsStatementsCommon(block.slots, block.statements, &slots, &statements, allocator);
     block_copy.slots = slots;
     block_copy.statements = statements;
+    block_copy.range = block.range;
 
     return block_copy;
 }
@@ -150,6 +154,7 @@ pub fn visitMessage(message: AST.MessageNode, allocator: *Allocator) !*AST.Messa
     message_copy.receiver = receiver_copy;
     message_copy.message_name = message_name_copy;
     message_copy.arguments = arguments.toOwnedSlice();
+    message_copy.range = message.range;
 
     return message_copy;
 }
@@ -158,16 +163,17 @@ pub fn visitReturn(return_node: AST.ReturnNode, allocator: *Allocator) !*AST.Ret
     var return_copy = try allocator.create(AST.ReturnNode);
     errdefer allocator.destroy(return_copy);
     return_copy.expression = try visitExpression(return_node.expression, allocator);
+    return_copy.range = return_node.range;
 
     return return_copy;
 }
 
 pub fn visitIdentifier(identifier: AST.IdentifierNode, allocator: *Allocator) !AST.IdentifierNode {
-    return AST.IdentifierNode{ .value = try allocator.dupe(u8, identifier.value) };
+    return AST.IdentifierNode{ .value = try allocator.dupe(u8, identifier.value), .range = identifier.range };
 }
 
 pub fn visitString(string: AST.StringNode, allocator: *Allocator) !AST.StringNode {
-    return AST.StringNode{ .value = try allocator.dupe(u8, string.value) };
+    return AST.StringNode{ .value = try allocator.dupe(u8, string.value), .range = string.range };
 }
 
 pub fn visitNumber(number: AST.NumberNode, allocator: *Allocator) AST.NumberNode {

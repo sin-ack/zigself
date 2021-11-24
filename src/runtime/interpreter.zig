@@ -384,8 +384,8 @@ pub fn executeString(allocator: *Allocator, string: AST.StringNode, context: *In
 pub fn executeNumber(allocator: *Allocator, number: AST.NumberNode, context: *InterpreterContext) InterpreterError!Object.Ref {
     _ = context;
 
-    return switch (number) {
-        .Integer => Object.createFromIntegerLiteral(allocator, number.Integer),
-        .FloatingPoint => Object.createFromFloatingPointLiteral(allocator, number.FloatingPoint),
+    return switch (number.value) {
+        .Integer => Object.createFromIntegerLiteral(allocator, number.value.Integer),
+        .FloatingPoint => Object.createFromFloatingPointLiteral(allocator, number.value.FloatingPoint),
     };
 }

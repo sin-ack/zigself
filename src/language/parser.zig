@@ -102,6 +102,8 @@ fn expectToken(self: *Self, token_type: std.meta.Tag(tokens.Token), action: Expe
 }
 
 fn parseStatement(self: *Self, alternative_terminator: std.meta.Tag(tokens.Token)) ParserFunctionErrorSet!?AST.StatementNode {
+    const start = self.lexer.token_start;
+
     if (try self.parseExpression()) |*expression| {
         if (self.lexer.current_token == .Period) {
             _ = try self.lexer.nextToken();
@@ -126,7 +128,7 @@ fn parseStatement(self: *Self, alternative_terminator: std.meta.Tag(tokens.Token
             return null;
         }
 
-        return AST.StatementNode{ .expression = expression.* };
+        return AST.StatementNode{ .expression = expression.*, .range = .{ .start = start, .end = self.lexer.token_start } };
     } else {
         // Attempt to recover by consuming up to the next statement or end of scope
         while (self.lexer.current_token != .Period and self.lexer.current_token != alternative_terminator and self.lexer.current_token != .EOF) {
@@ -233,6 +235,8 @@ fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.Expr
 }
 
 fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
+    const start = self.lexer.token_start;
+
     if (!try self.expectToken(.ParenOpen, .Consume))
         return null;
 
@@ -308,11 +312,14 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
     const object_node = try self.allocator.create(AST.ObjectNode);
     object_node.slots = slots.toOwnedSlice();
     object_node.statements = statements.toOwnedSlice();
+    object_node.range = .{ .start = start, .end = self.lexer.token_start };
 
     return object_node;
 }
 
 fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
+    const start = self.lexer.token_start;
+
     if (!try self.expectToken(.BracketOpen, .Consume))
         return null;
 
@@ -400,9 +407,10 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
             if (did_use_return) {
                 const return_node = try self.allocator.create(AST.ReturnNode);
                 return_node.expression = statement.expression;
+                return_node.range = .{ .start = start, .end = self.lexer.token_start };
                 errdefer return_node.destroy(self.allocator);
 
-                try statements.append(AST.StatementNode{ .expression = AST.ExpressionNode{ .Return = return_node } });
+                try statements.append(AST.StatementNode{ .expression = AST.ExpressionNode{ .Return = return_node }, .range = return_node.range });
             } else {
                 try statements.append(statement.*);
             }
@@ -414,12 +422,15 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
     const block_node = try self.allocator.create(AST.BlockNode);
     block_node.slots = slots.toOwnedSlice();
     block_node.statements = statements.toOwnedSlice();
+    block_node.range = .{ .start = start, .end = self.lexer.token_start };
 
     return block_node;
 }
 
 const SlotParsingMode = enum { Object, Block };
 fn parseSlot(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionErrorSet!?AST.SlotNode {
+    const start = self.lexer.token_start;
+
     var is_mutable = true;
     var is_parent = false;
     var is_argument = false;
@@ -525,7 +536,12 @@ fn parseSlot(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionErrorSet!
 
                 // TODO: Intern these
                 const nil_identifier = try self.allocator.dupe(u8, "nil");
-                break :value_parsing AST.ExpressionNode{ .Identifier = AST.IdentifierNode{ .value = nil_identifier } };
+                break :value_parsing AST.ExpressionNode{
+                    .Identifier = AST.IdentifierNode{
+                        .value = nil_identifier,
+                        .range = .{ .start = start, .end = self.lexer.token_start },
+                    },
+                };
             }
         };
 
@@ -536,6 +552,7 @@ fn parseSlot(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionErrorSet!
             .name = slot_name.name,
             .arguments = slot_name.arguments,
             .value = value,
+            .range = .{ .start = start, .end = self.lexer.token_start },
         };
     }
 
@@ -668,7 +685,7 @@ fn parseKeywordMessageToSelf(self: *Self, identifier: AST.IdentifierNode) Parser
     // NOTE: We transfer the ownership to parseMessageCommon at call time, so it
     //       will clean up the receiver and identifier on failure.
 
-    const receiver = AST.ExpressionNode{ .Identifier = AST.IdentifierNode{ .value = self_identifier } };
+    const receiver = AST.ExpressionNode{ .Identifier = AST.IdentifierNode{ .value = self_identifier, .range = identifier.range } };
     return try self.parseMessageCommon(receiver, identifier);
 }
 
@@ -681,6 +698,7 @@ fn parseMessageToReceiver(self: *Self, receiver: AST.ExpressionNode) ParserFunct
         return null;
     }
 
+    const identifier_start = self.lexer.token_start;
     const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
 
     // Determine whether this identifier can be a message. Normally
@@ -701,7 +719,7 @@ fn parseMessageToReceiver(self: *Self, receiver: AST.ExpressionNode) ParserFunct
         _ = try self.lexer.nextToken();
     }
 
-    const identifier = AST.IdentifierNode{ .value = identifier_copy };
+    const identifier = AST.IdentifierNode{ .value = identifier_copy, .range = .{ .start = identifier_start, .end = self.lexer.token_start } };
     return try self.parseMessageCommon(receiver, identifier);
 }
 
@@ -711,6 +729,7 @@ fn parseMessageCommon(
     receiver: AST.ExpressionNode,
     first_identifier: AST.IdentifierNode,
 ) ParserFunctionErrorSet!?AST.ExpressionNode {
+    const start = self.lexer.token_start;
     // At this part of message parsing, we're going to be at one of these two
     // points:
     // 1) It was a keyword message. We are at a Colon token, and will start
@@ -756,6 +775,8 @@ fn parseMessageCommon(
         // NOTE: We now take ownership of the first identifier's string
         message_node.message_name = first_identifier.value;
         message_node.arguments = try self.allocator.alloc(AST.ExpressionNode, 0);
+        message_node.range = .{ .start = start, .end = self.lexer.token_start };
+
         current_receiver = AST.ExpressionNode{ .Message = message_node };
 
         should_use_passover_as_first_identifier = true;
@@ -797,6 +818,7 @@ fn parseMessageCommon(
                     message_node.receiver = current_receiver;
                     message_node.message_name = identifier_copy;
                     message_node.arguments = try self.allocator.alloc(AST.ExpressionNode, 0);
+                    message_node.range = .{ .start = start, .end = self.lexer.token_start };
                     current_receiver = AST.ExpressionNode{ .Message = message_node };
                 } else {
                     // We let the statement parser throw any errors related
@@ -898,6 +920,7 @@ fn parseMessageCommon(
             // NOTE: We now take ownership of the first identifier's string
             message_node.message_name = current_message_name.toOwnedSlice();
             message_node.arguments = parameters.toOwnedSlice();
+            message_node.range = .{ .start = start, .end = self.lexer.token_start };
 
             return AST.ExpressionNode{ .Message = message_node };
         },
@@ -905,6 +928,7 @@ fn parseMessageCommon(
 }
 
 fn parseBinaryMessage(self: *Self, receiver: AST.ExpressionNode) ParserFunctionErrorSet!?AST.ExpressionNode {
+    const start = self.lexer.token_start;
     // Arguments aren't mutable in Zig.
     var receiver_mut = receiver;
     errdefer receiver_mut.deinit(self.allocator);
@@ -955,6 +979,8 @@ fn parseBinaryMessage(self: *Self, receiver: AST.ExpressionNode) ParserFunctionE
         message_node.arguments = try self.allocator.alloc(AST.ExpressionNode, 1);
         message_node.arguments[0] = expression.*;
         message_node.receiver = receiver;
+        message_node.range = .{ .start = start, .end = self.lexer.token_start };
+
         return AST.ExpressionNode{ .Message = message_node };
     } else {
         receiver_mut.deinit(self.allocator);
@@ -963,6 +989,9 @@ fn parseBinaryMessage(self: *Self, receiver: AST.ExpressionNode) ParserFunctionE
 }
 
 fn parseIdentifier(self: *Self) ParserFunctionErrorSet!?AST.IdentifierNode {
+    const start = self.lexer.token_start;
+    const end = self.lexer.token_end;
+
     if (!try self.expectToken(.Identifier, .DontConsume))
         return null;
 
@@ -971,13 +1000,16 @@ fn parseIdentifier(self: *Self) ParserFunctionErrorSet!?AST.IdentifierNode {
     errdefer self.allocator.free(identifier_copy);
 
     _ = try self.lexer.nextToken();
-    return AST.IdentifierNode{ .value = identifier_copy };
+    return AST.IdentifierNode{ .value = identifier_copy, .range = .{ .start = start, .end = end } };
 }
 
 fn parseNumber(self: *Self) ParserFunctionErrorSet!?AST.NumberNode {
+    const start = self.lexer.token_start;
+    const end = self.lexer.token_end;
+
     const value = switch (self.lexer.current_token) {
-        .Integer => AST.NumberNode{ .Integer = self.lexer.current_token.Integer },
-        .FloatingPoint => AST.NumberNode{ .FloatingPoint = self.lexer.current_token.FloatingPoint },
+        .Integer => AST.NumberNode{ .value = .{ .Integer = self.lexer.current_token.Integer }, .range = .{ .start = start, .end = end } },
+        .FloatingPoint => AST.NumberNode{ .value = .{ .FloatingPoint = self.lexer.current_token.FloatingPoint }, .range = .{ .start = start, .end = end } },
         else => {
             try self.diagnostics.reportDiagnosticFormatted(
                 .Error,
@@ -994,10 +1026,13 @@ fn parseNumber(self: *Self) ParserFunctionErrorSet!?AST.NumberNode {
 }
 
 fn parseString(self: *Self) ParserFunctionErrorSet!?AST.StringNode {
+    const start = self.lexer.token_start;
+    const end = self.lexer.token_end;
+
     if (!try self.expectToken(.String, .DontConsume))
         return null;
 
-    const value = AST.StringNode{ .value = self.lexer.current_token.String };
+    const value = AST.StringNode{ .value = self.lexer.current_token.String, .range = .{ .start = start, .end = end } };
 
     _ = try self.lexer.nextToken();
     return value;

@@ -5,6 +5,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Range = @import("./location_range.zig");
+
 /// A node which describes a single script.
 pub const ScriptNode = struct {
     statements: []StatementNode,
@@ -20,6 +22,8 @@ pub const ScriptNode = struct {
 /// A single statement.
 pub const StatementNode = struct {
     expression: ExpressionNode,
+
+    range: Range,
 
     pub fn deinit(self: *StatementNode, allocator: *Allocator) void {
         self.expression.deinit(allocator);
@@ -55,6 +59,8 @@ pub const ObjectNode = struct {
     slots: []SlotNode,
     statements: []StatementNode,
 
+    range: Range,
+
     pub fn deinit(self: *ObjectNode, allocator: *Allocator) void {
         for (self.slots) |*slot| {
             slot.deinit(allocator);
@@ -83,6 +89,8 @@ pub const SlotNode = struct {
     arguments: [][]const u8,
     value: ExpressionNode,
 
+    range: Range,
+
     pub fn deinit(self: *SlotNode, allocator: *Allocator) void {
         allocator.free(self.name);
 
@@ -98,6 +106,8 @@ pub const SlotNode = struct {
 pub const BlockNode = struct {
     slots: []SlotNode,
     statements: []StatementNode,
+
+    range: Range,
 
     pub fn deinit(self: *BlockNode, allocator: *Allocator) void {
         for (self.slots) |*slot| {
@@ -120,6 +130,8 @@ pub const BlockNode = struct {
 pub const IdentifierNode = struct {
     value: []u8,
 
+    range: Range,
+
     pub fn deinit(self: *IdentifierNode, allocator: *Allocator) void {
         allocator.free(self.value);
     }
@@ -129,6 +141,8 @@ pub const MessageNode = struct {
     receiver: ExpressionNode,
     message_name: []const u8,
     arguments: []ExpressionNode,
+
+    range: Range,
 
     pub fn deinit(self: *MessageNode, allocator: *Allocator) void {
         self.receiver.deinit(allocator);
@@ -151,6 +165,8 @@ pub const MessageNode = struct {
 pub const ReturnNode = struct {
     expression: ExpressionNode,
 
+    range: Range,
+
     pub fn deinit(self: *ReturnNode, allocator: *Allocator) void {
         self.expression.deinit(allocator);
     }
@@ -164,12 +180,18 @@ pub const ReturnNode = struct {
 pub const StringNode = struct {
     value: []const u8,
 
+    range: Range,
+
     pub fn deinit(self: *StringNode, allocator: *Allocator) void {
         allocator.free(self.value);
     }
 };
 
-pub const NumberNode = union(enum) {
-    Integer: u64,
-    FloatingPoint: f64,
+pub const NumberNode = struct {
+    value: union(enum) {
+        Integer: u64,
+        FloatingPoint: f64,
+    },
+
+    range: Range,
 };

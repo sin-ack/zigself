@@ -269,8 +269,8 @@ pub fn dumpString(self: *Self, string: AST.StringNode) void {
 
 pub fn dumpNumber(self: *Self, number: AST.NumberNode) void {
     self.print(CYAN ++ "NumberNode " ++ CLEAR, .{});
-    switch (number) {
-        .Integer => std.debug.print("{}\n", .{number.Integer}),
-        .FloatingPoint => std.debug.print("{}\n", .{number.FloatingPoint}),
+    switch (number.value) {
+        .Integer => |integer| std.debug.print("{}\n", .{integer}),
+        .FloatingPoint => |floating_point| std.debug.print("{}\n", .{floating_point}),
     }
 }
