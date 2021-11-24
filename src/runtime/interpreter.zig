@@ -32,7 +32,7 @@ pub const InterpreterContext = struct {
     activation_stack: *std.ArrayList(Object.Ref),
     /// The script file that is currently executing, used to resolve the
     /// relative paths of other script files.
-    script: *const Script,
+    script: Script.Ref,
     /// The current error message value. executeScript catches this and displays
     /// the error with a stack trace. The user must free it.
     current_error: ?[]const u8,
@@ -43,7 +43,11 @@ pub const InterpreterError = Allocator.Error || runtime_error.SelfRuntimeError;
 /// Executes a script node. `lobby` is ref'd for the function lifetime. The last
 /// expression result is returned, or if no statements were available, null is
 /// returned.
-pub fn executeScript(allocator: *Allocator, script: *const Script, lobby: Object.Ref) InterpreterError!?Object.Ref {
+///
+/// Borrows a ref for `script` from the caller.
+pub fn executeScript(allocator: *Allocator, script: Script.Ref, lobby: Object.Ref) InterpreterError!?Object.Ref {
+    defer script.unref();
+
     lobby.ref();
     defer lobby.unref();
 
@@ -63,7 +67,7 @@ pub fn executeScript(allocator: *Allocator, script: *const Script, lobby: Object
         .script = script,
         .current_error = null,
     };
-    for (script.ast_root.?.statements) |statement| {
+    for (script.value.ast_root.?.statements) |statement| {
         std.debug.assert(activation_stack.items.len == 0);
 
         if (last_expression_result) |*result| {
@@ -103,7 +107,11 @@ pub fn executeScript(allocator: *Allocator, script: *const Script, lobby: Object
 /// Execute a script object as a child script of the root script. The root
 /// interpreter context is passed in order to preserve the activation stack and
 /// various other context objects.
-pub fn executeSubScript(allocator: *Allocator, script: *const Script, parent_context: *InterpreterContext) InterpreterError!?Object.Ref {
+///
+/// Borrows a ref for `script` from the caller.
+pub fn executeSubScript(allocator: *Allocator, script: Script.Ref, parent_context: *InterpreterContext) InterpreterError!?Object.Ref {
+    defer script.unref();
+
     parent_context.lobby.ref();
     defer parent_context.lobby.unref();
 
@@ -116,7 +124,7 @@ pub fn executeSubScript(allocator: *Allocator, script: *const Script, parent_con
         .script = script,
         .current_error = null,
     };
-    for (script.ast_root.?.statements) |statement| {
+    for (script.value.ast_root.?.statements) |statement| {
         if (last_expression_result) |*result| {
             result.unref();
         }
@@ -211,7 +219,9 @@ fn executeMethod(allocator: *Allocator, name: []const u8, object_node: AST.Objec
         try statements.append(statement_copy);
     }
 
-    return try Object.createMethod(allocator, name, arguments_copy.toOwnedSlice(), slots.toOwnedSlice(), statements.toOwnedSlice());
+    context.script.ref();
+    errdefer context.script.unref();
+    return try Object.createMethod(allocator, name, arguments_copy.toOwnedSlice(), slots.toOwnedSlice(), statements.toOwnedSlice(), context.script);
 }
 
 /// Creates a new slot. All refs are forwarded.
@@ -311,7 +321,9 @@ pub fn executeBlock(allocator: *Allocator, block: AST.BlockNode, context: *Inter
     var latest_activation: Object.Ref = context.activation_stack.items[context.activation_stack.items.len - 1];
     const bound_method = latest_activation.value.getBoundMethodForActivation();
 
-    return try Object.createBlock(allocator, arguments.toOwnedSlice(), slots.toOwnedSlice(), statements.toOwnedSlice(), bound_method);
+    context.script.ref();
+    errdefer context.script.unref();
+    return try Object.createBlock(allocator, arguments.toOwnedSlice(), slots.toOwnedSlice(), statements.toOwnedSlice(), bound_method, context.script);
 }
 
 pub fn executeReturn(allocator: *Allocator, return_node: AST.ReturnNode, context: *InterpreterContext) InterpreterError!Object.Ref {
@@ -336,7 +348,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
             receiver = actual_receiver;
         }
 
-        return try message_interpreter.executePrimitiveMessage(allocator, receiver, identifier.value, &[_]Object.Ref{}, context);
+        return try message_interpreter.executePrimitiveMessage(allocator, identifier.range, receiver, identifier.value, &[_]Object.Ref{}, context);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
@@ -349,7 +361,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
         }
 
         if (receiver.value.is(.Block) and receiver.value.isCorrectMessageForBlockExecution(identifier.value)) {
-            return try message_interpreter.executeBlockMessage(allocator, receiver, &[_]Object.Ref{}, context);
+            return try message_interpreter.executeBlockMessage(allocator, identifier.range, receiver, &[_]Object.Ref{}, context);
         }
     }
 
@@ -361,7 +373,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
             },
 
             .Method => {
-                return try message_interpreter.executeMethodMessage(allocator, context.self_object, value, &[_]Object.Ref{}, context);
+                return try message_interpreter.executeMethodMessage(allocator, identifier.range, context.self_object, value, &[_]Object.Ref{}, context);
             },
 
             else => unreachable,

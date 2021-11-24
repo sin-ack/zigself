@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Range = @import("../../language/location_range.zig");
 const Object = @import("../object.zig");
 const environment = @import("../environment.zig");
 const runtime_error = @import("../error.zig");
@@ -15,7 +16,9 @@ fn makeInteger(allocator: *Allocator, value: u64) !Object.Ref {
 }
 
 /// Add two integer numbers. The returned value is an integer.
-pub fn IntAdd(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn IntAdd(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = message_range;
+
     if (!receiver.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntAdd: receiver, got {s}", .{@tagName(receiver.value.content)});
     }
@@ -36,7 +39,9 @@ pub fn IntAdd(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.R
 }
 
 /// Subtract the argument from the receiver. The returned value is an integer.
-pub fn IntSub(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn IntSub(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = message_range;
+
     if (!receiver.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntSub: receiver, got {s}", .{@tagName(receiver.value.content)});
     }
@@ -58,7 +63,9 @@ pub fn IntSub(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.R
 
 /// Return whether the receiver is less than its argument. The return value is
 /// either "true" or "false".
-pub fn IntLT(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn IntLT(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = message_range;
+
     if (!receiver.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntLT: receiver, got {s}", .{@tagName(receiver.value.content)});
     }

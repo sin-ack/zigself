@@ -7,6 +7,8 @@ const Allocator = std.mem.Allocator;
 
 const AST = @import("../language/ast.zig");
 const Slot = @import("./slot.zig");
+const Range = @import("../language/location_range.zig");
+const Script = @import("../language/script.zig");
 const weak_ref = @import("../utility/weak_ref.zig");
 const ref_counted = @import("../utility/ref_counted.zig");
 const runtime_error = @import("./error.zig");
@@ -52,9 +54,17 @@ const ObjectContent = union(enum) {
         slots: []Slot,
     },
 
+    // FIXME: Extract this into its own struct. There's no reason this should
+    //        be an Object, it's never used during execution (the activation
+    //        object is).
     Activation: struct {
         activation_object: Ref,
+
+        // Debug context
         message_name: []const u8,
+        message_range: Range,
+        message_script: Script.Ref,
+
         context: union(enum) {
             Method: void,
             Block: struct {
@@ -69,6 +79,9 @@ const ObjectContent = union(enum) {
     },
 
     Method: struct {
+        // Debug context
+        /// The script in which this method was defined.
+        script: Script.Ref,
         /// Used for stack traces.
         message_name: []const u8,
 
@@ -88,6 +101,10 @@ const ObjectContent = union(enum) {
         /// See `ObjectContent.Activation.context.Block.bound_method`'s
         /// documentation.
         bound_method: Weak,
+
+        // Debug context
+        /// The script in which this block was defined.
+        script: Script.Ref,
     },
 
     NonlocalReturn: struct {
@@ -129,11 +146,20 @@ pub fn createSlots(allocator: *Allocator, slots: []Slot) !Ref {
 
 /// Takes ownership of `arguments`, `slots` and `statements`.
 /// `message_name` is duped.
-pub fn createMethod(allocator: *Allocator, message_name: []const u8, arguments: [][]const u8, slots: []Slot, statements: []AST.StatementNode) !Ref {
+/// Borrows a ref for `script` from the caller.
+pub fn createMethod(allocator: *Allocator, message_name: []const u8, arguments: [][]const u8, slots: []Slot, statements: []AST.StatementNode, script: Script.Ref) !Ref {
     var message_name_copy = try allocator.dupe(u8, message_name);
     errdefer allocator.free(message_name_copy);
 
-    return try create(allocator, .{ .Method = .{ .message_name = message_name_copy, .arguments = arguments, .slots = slots, .statements = statements } });
+    return try create(allocator, .{
+        .Method = .{
+            .message_name = message_name_copy,
+            .arguments = arguments,
+            .slots = slots,
+            .statements = statements,
+            .script = script,
+        },
+    });
 }
 
 /// Takes ownership of `target_method` and `value`.
@@ -158,8 +184,8 @@ pub fn createFromFloatingPointLiteral(allocator: *Allocator, value: f64) !Ref {
 }
 
 /// Takes ownership of `arguments`, `slots` and `statements`. Borrows a ref for
-/// `bound_method` from the caller.
-pub fn createBlock(allocator: *Allocator, arguments: [][]const u8, slots: []Slot, statements: []AST.StatementNode, bound_method: Ref) !Ref {
+/// `bound_method` and `script` from the caller.
+pub fn createBlock(allocator: *Allocator, arguments: [][]const u8, slots: []Slot, statements: []AST.StatementNode, bound_method: Ref, script: Script.Ref) !Ref {
     var bound_method_weak = Weak.init(bound_method.value);
     errdefer bound_method_weak.deinit();
 
@@ -169,6 +195,7 @@ pub fn createBlock(allocator: *Allocator, arguments: [][]const u8, slots: []Slot
             .slots = slots,
             .statements = statements,
             .bound_method = bound_method_weak,
+            .script = script,
         },
     });
 }
@@ -211,6 +238,7 @@ fn deinitContent(self: *Self) void {
         .Activation => |activation| {
             activation.activation_object.unref();
             self.allocator.free(activation.message_name);
+            activation.message_script.unref();
             switch (activation.context) {
                 .Method => {},
                 .Block => |block_context| {
@@ -220,6 +248,7 @@ fn deinitContent(self: *Self) void {
         },
         .Method => |method| {
             self.allocator.free(method.message_name);
+            method.script.unref();
 
             for (method.arguments) |argument| {
                 self.allocator.free(argument);
@@ -237,6 +266,8 @@ fn deinitContent(self: *Self) void {
             self.allocator.free(method.statements);
         },
         .Block => |block| {
+            block.script.unref();
+
             for (block.arguments) |argument| {
                 self.allocator.free(argument);
             }
@@ -515,10 +546,13 @@ pub fn copy(self: Self) !Ref {
                 try statements_copy.append(statement_copy);
             }
 
+            block.script.ref();
+            errdefer block.script.unref();
+
             // FIXME: The bound method might be gone at this point, just copy the
             //        weak ref here instead.
             var bound_method_ref = Ref{ .value = block.bound_method.getPointer().? };
-            return try createBlock(self.allocator, arguments_copy.toOwnedSlice(), slots_copy.toOwnedSlice(), statements_copy.toOwnedSlice(), bound_method_ref);
+            return try createBlock(self.allocator, arguments_copy.toOwnedSlice(), slots_copy.toOwnedSlice(), statements_copy.toOwnedSlice(), bound_method_ref, block.script);
         },
 
         .ByteVector => |vector| {
@@ -661,7 +695,8 @@ fn activateCommon(
 /// Activate this block and return a slots object for it.
 /// Borrows 1 ref from each object in `arguments`.
 /// `bound_method` is ref'd internally.
-pub fn activateBlock(self: Self, context: *InterpreterContext, arguments: []Ref, bound_method: Ref) !Ref {
+/// `context.script` is ref'd once.
+pub fn activateBlock(self: Self, context: *InterpreterContext, message_range: Range, arguments: []Ref, bound_method: Ref) !Ref {
     std.debug.assert(self.content == .Block);
     const activation_object = try activateCommon(self.allocator, context, arguments, self.content.Block.arguments, self.content.Block.slots, bound_method, false);
     errdefer activation_object.unref();
@@ -669,11 +704,17 @@ pub fn activateBlock(self: Self, context: *InterpreterContext, arguments: []Ref,
     var message_name = try self.createMessageNameForBlock();
     errdefer self.allocator.free(message_name);
 
+    context.script.ref();
+    errdefer context.script.unref();
+
     bound_method.ref();
+    errdefer bound_method.unref();
     return try create(self.allocator, .{
         .Activation = .{
             .activation_object = activation_object,
             .message_name = message_name,
+            .message_range = message_range,
+            .message_script = context.script,
             .context = .{ .Block = .{ .bound_method = bound_method } },
         },
     });
@@ -682,7 +723,8 @@ pub fn activateBlock(self: Self, context: *InterpreterContext, arguments: []Ref,
 /// Activate this method and return a slots object for it.
 /// Borrows 1 ref from each object in `arguments`.
 /// `parent` is ref'd internally.
-pub fn activateMethod(self: Self, context: *InterpreterContext, arguments: []Ref, parent: Ref) !Ref {
+/// `context.script` is ref'd once.
+pub fn activateMethod(self: Self, context: *InterpreterContext, message_range: Range, arguments: []Ref, parent: Ref) !Ref {
     std.debug.assert(self.content == .Method);
     const activation_object = try activateCommon(self.allocator, context, arguments, self.content.Method.arguments, self.content.Method.slots, parent, true);
     errdefer activation_object.unref();
@@ -690,10 +732,15 @@ pub fn activateMethod(self: Self, context: *InterpreterContext, arguments: []Ref
     var message_name_copy = try self.allocator.dupe(u8, self.content.Method.message_name);
     errdefer self.allocator.free(message_name_copy);
 
+    context.script.ref();
+    errdefer context.script.unref();
+
     return try create(self.allocator, .{
         .Activation = .{
             .activation_object = activation_object,
             .message_name = message_name_copy,
+            .message_range = message_range,
+            .message_script = context.script,
             .context = .{ .Method = .{} },
         },
     });

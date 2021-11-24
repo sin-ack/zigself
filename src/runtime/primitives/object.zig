@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Slot = @import("../slot.zig");
+const Range = @import("../../language/location_range.zig");
 const Object = @import("../object.zig");
 const environment = @import("../environment.zig");
 const runtime_error = @import("../error.zig");
@@ -15,7 +16,9 @@ const message_interpreter = @import("../interpreter/message.zig");
 
 /// Adds the slots in the argument object to the receiver object. The slots
 /// are copied. The objects at each slot are not cloned, however.
-pub fn AddSlots(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn AddSlots(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = message_range;
+
     const argument = arguments[0];
     defer argument.unref();
 
@@ -53,7 +56,7 @@ pub fn AddSlots(allocator: *Allocator, receiver: Object.Ref, arguments: []Object
 
 /// Removes the given slot. If the slot isn't found or otherwise cannot be
 /// removed, the second argument is evaluated as a block.
-pub fn RemoveSlot_IfFail(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn RemoveSlot_IfFail(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     defer receiver.unref();
 
     var slot_name = arguments[0];
@@ -76,7 +79,7 @@ pub fn RemoveSlot_IfFail(allocator: *Allocator, receiver: Object.Ref, arguments:
     };
 
     if (!did_remove_slot) {
-        const returned_value = try message_interpreter.executeBlockMessage(allocator, fail_block, &[_]Object.Ref{}, context);
+        const returned_value = try message_interpreter.executeBlockMessage(allocator, message_range, fail_block, &[_]Object.Ref{}, context);
         returned_value.unref();
     }
 
@@ -84,9 +87,10 @@ pub fn RemoveSlot_IfFail(allocator: *Allocator, receiver: Object.Ref, arguments:
 }
 
 /// Inspect the receiver and print it to stderr. Return the receiver.
-pub fn Inspect(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
-    _ = arguments;
+pub fn Inspect(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = context;
+    _ = arguments;
+    _ = message_range;
 
     try object_inspector.inspectObject(allocator, receiver, .Multiline);
 
@@ -94,10 +98,11 @@ pub fn Inspect(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.
 }
 
 /// Make an identical shallow copy of the receiver and return it.
-pub fn Clone(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn Clone(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = context;
     _ = allocator;
     _ = arguments;
-    _ = context;
+    _ = message_range;
 
     defer receiver.unref();
     return try receiver.value.copy();

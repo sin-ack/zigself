@@ -5,9 +5,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Range = @import("../language/location_range.zig");
 const Object = @import("./object.zig");
-const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 const runtime_error = @import("./error.zig");
+const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 
 const basic_primitives = @import("./primitives/basic.zig");
 const bytevector_primitives = @import("./primitives/bytevector.zig");
@@ -22,7 +23,7 @@ const PrimitiveError = Allocator.Error || runtime_error.SelfRuntimeError;
 /// `function` is the function which is called to execute the primitive.
 const PrimitiveSpec = struct {
     name: []const u8,
-    function: fn (allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) PrimitiveError!Object.Ref,
+    function: fn (allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) PrimitiveError!Object.Ref,
 };
 
 const PrimitiveRegistry = &[_]PrimitiveSpec{
@@ -58,10 +59,17 @@ pub fn hasPrimitive(selector: []const u8) bool {
     return false;
 }
 
-pub fn callPrimitive(allocator: *Allocator, selector: []const u8, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn callPrimitive(
+    allocator: *Allocator,
+    message_range: Range,
+    selector: []const u8,
+    receiver: Object.Ref,
+    arguments: []Object.Ref,
+    context: *InterpreterContext,
+) !Object.Ref {
     for (PrimitiveRegistry) |primitive| {
         if (std.mem.eql(u8, primitive.name, selector)) {
-            return try primitive.function(allocator, receiver, arguments, context);
+            return try primitive.function(allocator, message_range, receiver, arguments, context);
         }
     }
 

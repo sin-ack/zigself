@@ -6,8 +6,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const AST = @import("../../language/ast.zig");
-const Object = @import("../object.zig");
 const Slot = @import("../slot.zig");
+const Range = @import("../../language/location_range.zig");
+const Object = @import("../object.zig");
 const primitives = @import("../primitives.zig");
 const environment = @import("../environment.zig");
 const runtime_error = @import("../error.zig");
@@ -34,7 +35,13 @@ fn getMessageArguments(allocator: *Allocator, ast_arguments: []AST.ExpressionNod
     return arguments.toOwnedSlice();
 }
 
-pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) root_interpreter.InterpreterError!Object.Ref {
+pub fn executeBlockMessage(
+    allocator: *Allocator,
+    message_range: Range,
+    receiver: Object.Ref,
+    arguments: []Object.Ref,
+    context: *InterpreterContext,
+) root_interpreter.InterpreterError!Object.Ref {
     // Check if this method can be executed, i.e. whether its enclosing
     // activation is currently on the stack.
     var i = @intCast(isize, context.activation_stack.items.len - 1);
@@ -61,7 +68,7 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
         return runtime_error.raiseError(allocator, context, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
     }
 
-    var block_activation = try receiver.value.activateBlock(context, arguments, bound_method);
+    var block_activation = try receiver.value.activateBlock(context, message_range, arguments, bound_method);
 
     {
         errdefer block_activation.unref();
@@ -69,12 +76,13 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
         try context.activation_stack.append(block_activation);
     }
 
+    const block_script = receiver.value.content.Block.script;
     const block_activation_self_object = block_activation.value.content.Activation.activation_object;
     var block_context = InterpreterContext{
         .lobby = context.lobby,
         .self_object = block_activation_self_object,
         .activation_stack = context.activation_stack,
-        .script = context.script,
+        .script = block_script,
         .current_error = null,
     };
 
@@ -119,12 +127,13 @@ pub fn executeBlockMessage(allocator: *Allocator, receiver: Object.Ref, argument
 /// `receiver` handles its own refs. `method_object` is forwarded.
 pub fn executeMethodMessage(
     allocator: *Allocator,
+    message_range: Range,
     receiver: Object.Ref,
     method_object: Object.Ref,
     arguments: []Object.Ref,
     context: *InterpreterContext,
 ) !Object.Ref {
-    const method_activation = try method_object.value.activateMethod(context, arguments, receiver);
+    const method_activation = try method_object.value.activateMethod(context, message_range, arguments, receiver);
     {
         errdefer method_activation.unref();
         try context.activation_stack.append(method_activation);
@@ -132,12 +141,13 @@ pub fn executeMethodMessage(
 
     var last_expression_result: ?Object.Ref = null;
 
+    const method_script = method_object.value.content.Method.script;
     const method_activation_object = method_activation.value.content.Activation.activation_object;
     var method_context = InterpreterContext{
         .lobby = context.lobby,
         .self_object = method_activation_object,
         .activation_stack = context.activation_stack,
-        .script = context.script,
+        .script = method_script,
         .current_error = null,
     };
     for (method_object.value.content.Method.statements) |statement| {
@@ -191,6 +201,7 @@ pub fn executeMethodMessage(
 /// Refs `receiver`.
 pub fn executePrimitiveMessage(
     allocator: *Allocator,
+    message_range: Range,
     receiver: Object.Ref,
     name: []const u8,
     arguments: []Object.Ref,
@@ -201,7 +212,7 @@ pub fn executePrimitiveMessage(
     // its work is done.
     if (primitives.hasPrimitive(name)) {
         receiver.ref();
-        return try primitives.callPrimitive(allocator, name, receiver, arguments, context);
+        return try primitives.callPrimitive(allocator, message_range, name, receiver, arguments, context);
     } else {
         return runtime_error.raiseError(allocator, context, "Unknown primitive selector \"{s}\"", .{name});
     }
@@ -254,7 +265,7 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
             receiver = actual_receiver;
         }
 
-        return try executePrimitiveMessage(allocator, receiver, message.message_name, arguments, context);
+        return try executePrimitiveMessage(allocator, message.range, receiver, message.message_name, arguments, context);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
@@ -270,7 +281,7 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
             const arguments = try getMessageArguments(allocator, message.arguments, context);
             defer allocator.free(arguments);
 
-            return try executeBlockMessage(allocator, block_receiver, arguments, context);
+            return try executeBlockMessage(allocator, message.range, block_receiver, arguments, context);
         }
     }
 
@@ -285,7 +296,7 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
                 const arguments = try getMessageArguments(allocator, message.arguments, context);
                 defer allocator.free(arguments);
 
-                return try executeMethodMessage(allocator, receiver, lookup_result, arguments, context);
+                return try executeMethodMessage(allocator, message.range, receiver, lookup_result, arguments, context);
             },
 
             else => unreachable,

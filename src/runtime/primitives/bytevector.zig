@@ -5,14 +5,16 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Range = @import("../../language/location_range.zig");
 const Object = @import("../object.zig");
 const environment = @import("../environment.zig");
 const runtime_error = @import("../error.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
 /// Print the given ByteVector to stdout, followed by a newline.
-pub fn StringPrint(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn StringPrint(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = arguments;
+    _ = message_range;
 
     const writer = std.io.getStdOut().writer();
 
@@ -41,8 +43,9 @@ pub fn StringPrint(allocator: *Allocator, receiver: Object.Ref, arguments: []Obj
 }
 
 /// Return the size of the byte vector in bytes.
-pub fn ByteVectorSize(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn ByteVectorSize(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = arguments;
+    _ = message_range;
 
     if (!receiver.value.is(.ByteVector)) {
         return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteVectorSize receiver, got {s}", .{@tagName(receiver.value.content)});
@@ -55,7 +58,9 @@ pub fn ByteVectorSize(allocator: *Allocator, receiver: Object.Ref, arguments: []
 /// Return a byte at the given (integer) position of the receiver, which is a
 /// byte vector. Fails if the index is out of bounds or if the receiver is not a
 /// byte vector.
-pub fn ByteAt(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn ByteAt(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = message_range;
+
     defer receiver.unref();
     if (!receiver.value.is(.ByteVector)) {
         return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteAt: receiver, got {s}", .{@tagName(receiver.value.content)});
