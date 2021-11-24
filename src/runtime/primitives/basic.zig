@@ -109,3 +109,18 @@ pub fn ID(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arg
 
     return try Object.createFromIntegerLiteral(allocator, receiver.value.id);
 }
+
+/// Raise the argument as an error. The argument must be a byte vector.
+pub fn Error(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = message_range;
+
+    defer receiver.unref();
+
+    var argument = arguments[0];
+    defer argument.unref();
+    if (!argument.value.is(.ByteVector)) {
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _Error: argument, got {s}", .{@tagName(argument.value.content)});
+    }
+
+    return runtime_error.raiseError(allocator, context, "Error raised in Self code: {s}", .{argument.value.content.ByteVector.values});
+}

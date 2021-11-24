@@ -36,6 +36,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_Exit:", .function = basic_primitives.Exit },
     .{ .name = "_RunScript", .function = basic_primitives.RunScript },
     .{ .name = "_ID", .function = basic_primitives.ID },
+    .{ .name = "_Error:", .function = basic_primitives.Error },
     // byte vector primitives
     .{ .name = "_StringPrint", .function = bytevector_primitives.StringPrint },
     .{ .name = "_ByteVectorSize", .function = bytevector_primitives.ByteVectorSize },
