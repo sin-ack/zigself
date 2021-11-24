@@ -34,6 +34,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     // byte vector primitives
     .{ .name = "_StringPrint", .function = bytevector_primitives.StringPrint },
     .{ .name = "_ByteVectorSize", .function = bytevector_primitives.ByteVectorSize },
+    .{ .name = "_ByteAt:", .function = bytevector_primitives.ByteAt },
     // number primitives
     .{ .name = "_IntAdd:", .function = number_primitives.IntAdd },
     .{ .name = "_IntSub:", .function = number_primitives.IntSub },

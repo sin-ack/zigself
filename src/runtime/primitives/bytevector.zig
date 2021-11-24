@@ -51,3 +51,32 @@ pub fn ByteVectorSize(allocator: *Allocator, receiver: Object.Ref, arguments: []
 
     return Object.createFromIntegerLiteral(allocator, receiver.value.content.ByteVector.values.len);
 }
+
+/// Return a byte at the given (integer) position of the receiver, which is a
+/// byte vector. Fails if the index is out of bounds or if the receiver is not a
+/// byte vector.
+pub fn ByteAt(allocator: *Allocator, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    defer receiver.unref();
+    if (!receiver.value.is(.ByteVector)) {
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteAt: receiver, got {s}", .{@tagName(receiver.value.content)});
+    }
+
+    var argument = arguments[0];
+    defer argument.unref();
+    if (!argument.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _ByteAt: argument, got {s}", .{@tagName(argument.value.content)});
+    }
+
+    const values = receiver.value.content.ByteVector.values;
+    const position = argument.value.content.Integer.value;
+    if (position < 0 or position >= values.len) {
+        return runtime_error.raiseError(
+            allocator,
+            context,
+            "Argument passed to _ByteAt: is out of bounds for this receiver (passed {d}, size {d})",
+            .{ position, values.len },
+        );
+    }
+
+    return Object.createFromIntegerLiteral(allocator, values[position]);
+}
