@@ -89,7 +89,7 @@ const ObjectContent = union(enum) {
     },
 
     ByteVector: struct {
-        values: []const u8,
+        values: []u8,
     },
 
     Integer: struct {

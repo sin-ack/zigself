@@ -85,3 +85,47 @@ pub fn ByteAt(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
 
     return Object.createFromIntegerLiteral(allocator, values[position]);
 }
+
+/// Place the second argument at the position given by the first argument on the
+/// byte vector receiver. Fails if the index is out of bounds or if the receiver
+/// is not a byte vector.
+pub fn ByteAt_Put(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = message_range;
+
+    if (!receiver.value.is(.ByteVector)) {
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteAt:Put: receiver, got {s}", .{@tagName(receiver.value.content)});
+    }
+
+    var first_argument = arguments[0];
+    defer first_argument.unref();
+    if (!first_argument.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as first _ByteAt:Put: argument, got {s}", .{@tagName(first_argument.value.content)});
+    }
+
+    var second_argument = arguments[1];
+    defer second_argument.unref();
+    if (!second_argument.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as second _ByteAt:Put: argument, got {s}", .{@tagName(second_argument.value.content)});
+    }
+
+    var values = receiver.value.content.ByteVector.values;
+    const position = first_argument.value.content.Integer.value;
+    const new_value = second_argument.value.content.Integer.value;
+
+    if (position < 0 or position >= values.len) {
+        return runtime_error.raiseError(
+            allocator,
+            context,
+            "First argument passed to _ByteAt:Put: is out of bounds for this receiver (passed {d}, size {d})",
+            .{ position, values.len },
+        );
+    }
+
+    if (new_value < 0 or new_value > 255) {
+        return runtime_error.raiseError(allocator, context, "New value passed to _ByteAt:Put: cannot be cast to a byte", .{});
+    }
+
+    values[position] = @intCast(u8, new_value);
+
+    return receiver;
+}
