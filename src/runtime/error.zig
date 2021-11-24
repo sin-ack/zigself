@@ -5,7 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Object = @import("./object.zig");
+const Activation = @import("./activation.zig");
 const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 
 pub const SelfRuntimeError = error{RuntimeError};
@@ -21,7 +21,7 @@ pub fn raiseError(allocator: *Allocator, context: *InterpreterContext, comptime 
 
 /// Using the given activation object stack, print a stack trace to stderr.
 /// The stack trace is indented with two spaces.
-pub fn printTraceFromActivationStack(stack: []Object.Ref) void {
+pub fn printTraceFromActivationStack(stack: []*Activation) void {
     if (stack.len == 0) {
         return;
     }
@@ -29,13 +29,12 @@ pub fn printTraceFromActivationStack(stack: []Object.Ref) void {
     var i = @intCast(isize, stack.len - 1);
     while (i >= 0) : (i -= 1) {
         const activation = stack[@intCast(usize, i)];
-        const message_name = activation.value.content.Activation.message_name;
-        const message_script = activation.value.content.Activation.message_script;
-        const message_range = activation.value.content.Activation.message_range;
-        const activation_object = activation.value.content.Activation.activation_object;
+        const context = activation.creation_context;
+
+        const activation_object = activation.activation_object;
         const receiver = activation_object.value.lookup(null, "_parent", .Value) catch unreachable;
 
-        std.debug.print("  at {s} ({s}:{}) (receiver is ", .{ message_name, message_script.value.file_path, message_range.format() });
+        std.debug.print("  at {s} ({s}:{}) (receiver is ", .{ context.message, context.script.value.file_path, context.range.format() });
         if (receiver) |obj| {
             std.debug.print("<*{d}>", .{obj.value.id});
         } else {
@@ -43,18 +42,18 @@ pub fn printTraceFromActivationStack(stack: []Object.Ref) void {
         }
         std.debug.print(")\n", .{});
 
-        const source_line = message_script.value.parser.lexer.getLineForLocation(message_range.start) catch unreachable;
+        const source_line = context.script.value.parser.lexer.getLineForLocation(context.range.start) catch unreachable;
         // NOTE: The spaces are to get the arrow aligned with the source code
-        std.debug.print("  \x1b[37m{d:<3} |\x1b[0m {s}\n\x1b[92m        ", .{ message_range.start.line, source_line });
+        std.debug.print("  \x1b[37m{d:<3} |\x1b[0m {s}\n\x1b[92m        ", .{ context.range.start.line, source_line });
 
         // FIXME: Make this nicer
         const writer = std.io.getStdErr().writer();
 
-        writer.writeByteNTimes(' ', message_range.start.column - 1) catch unreachable;
-        if (message_range.start.line == message_range.end.line) {
-            writer.writeByteNTimes('^', std.math.max(1, message_range.end.column - message_range.start.column)) catch unreachable;
+        writer.writeByteNTimes(' ', context.range.start.column - 1) catch unreachable;
+        if (context.range.start.line == context.range.end.line) {
+            writer.writeByteNTimes('^', std.math.max(1, context.range.end.column - context.range.start.column)) catch unreachable;
         } else {
-            writer.writeByteNTimes('^', source_line.len - message_range.start.column + 1) catch unreachable;
+            writer.writeByteNTimes('^', source_line.len - context.range.start.column + 1) catch unreachable;
             writer.writeByteNTimes('.', 3) catch unreachable;
         }
         std.debug.print("\x1b[0m\n", .{});

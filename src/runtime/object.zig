@@ -10,6 +10,7 @@ const Slot = @import("./slot.zig");
 const Range = @import("../language/location_range.zig");
 const Script = @import("../language/script.zig");
 const weak_ref = @import("../utility/weak_ref.zig");
+const Activation = @import("./activation.zig");
 const ref_counted = @import("../utility/ref_counted.zig");
 const runtime_error = @import("./error.zig");
 const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
@@ -54,30 +55,6 @@ const ObjectContent = union(enum) {
         slots: []Slot,
     },
 
-    // FIXME: Extract this into its own struct. There's no reason this should
-    //        be an Object, it's never used during execution (the activation
-    //        object is).
-    Activation: struct {
-        activation_object: Ref,
-
-        // Debug context
-        message_name: []const u8,
-        message_range: Range,
-        message_script: Script.Ref,
-
-        context: union(enum) {
-            Method: void,
-            Block: struct {
-                /// A reference to the method activation that this block is
-                /// bound to. This is used for non-local returns. When a
-                /// non-local return happens, the returned expression is raised
-                /// through all the blocks it is within until the bound method
-                /// is reached.
-                bound_method: Ref,
-            },
-        },
-    },
-
     Method: struct {
         // Debug context
         /// The script in which this method was defined.
@@ -98,20 +75,17 @@ const ObjectContent = union(enum) {
         /// Statements to be executed once the block activates.
         statements: []AST.StatementNode,
 
-        /// See `ObjectContent.Activation.context.Block.bound_method`'s
-        /// documentation.
-        bound_method: Weak,
+        /// The activation for the method that this block was created in and
+        /// belongs to.
+        parent_activation: Activation.Weak,
+        /// The activation to which any non-local returns should bubble up to.
+        /// In other words, it is the method in which this block was eventually
+        /// instantiated.
+        nonlocal_return_target_activation: Activation.Weak,
 
         // Debug context
         /// The script in which this block was defined.
         script: Script.Ref,
-    },
-
-    NonlocalReturn: struct {
-        /// The target method activation object this non-local return targets.
-        target_method: Ref,
-        /// The value to be returned.
-        value: Ref,
     },
 
     ByteVector: struct {
@@ -162,11 +136,6 @@ pub fn createMethod(allocator: *Allocator, message_name: []const u8, arguments: 
     });
 }
 
-/// Takes ownership of `target_method` and `value`.
-pub fn createNonlocalReturn(allocator: *Allocator, target_method: Ref, value: Ref) !Ref {
-    return try create(allocator, .{ .NonlocalReturn = .{ .target_method = target_method, .value = value } });
-}
-
 /// Dupes `contents`.
 pub fn createCopyFromStringLiteral(allocator: *Allocator, contents: []const u8) !Ref {
     const contents_copy = try allocator.dupe(u8, contents);
@@ -183,18 +152,32 @@ pub fn createFromFloatingPointLiteral(allocator: *Allocator, value: f64) !Ref {
     return try create(allocator, .{ .FloatingPoint = .{ .value = value } });
 }
 
-/// Takes ownership of `arguments`, `slots` and `statements`. Borrows a ref for
-/// `bound_method` and `script` from the caller.
-pub fn createBlock(allocator: *Allocator, arguments: [][]const u8, slots: []Slot, statements: []AST.StatementNode, bound_method: Ref, script: Script.Ref) !Ref {
-    var bound_method_weak = Weak.init(bound_method.value);
-    errdefer bound_method_weak.deinit();
+/// Takes ownership of `arguments`, `slots` and `statements`.
+/// Borrows a ref for `script` from the caller.
+/// `parent_activation` and `nonlocal_return_target_activation` are weakly
+/// ref'd.
+pub fn createBlock(
+    allocator: *Allocator,
+    arguments: [][]const u8,
+    slots: []Slot,
+    statements: []AST.StatementNode,
+    parent_activation: *Activation,
+    nonlocal_return_target_activation: *Activation,
+    script: Script.Ref,
+) !Ref {
+    var parent_weak = parent_activation.makeWeakRef();
+    errdefer parent_weak.deinit();
+
+    var target_weak = nonlocal_return_target_activation.makeWeakRef();
+    errdefer target_weak.deinit();
 
     return try create(allocator, .{
         .Block = .{
             .arguments = arguments,
             .slots = slots,
             .statements = statements,
-            .bound_method = bound_method_weak,
+            .parent_activation = parent_weak,
+            .nonlocal_return_target_activation = target_weak,
             .script = script,
         },
     });
@@ -235,17 +218,6 @@ fn deinitContent(self: *Self) void {
             }
             self.allocator.free(slots.slots);
         },
-        .Activation => |activation| {
-            activation.activation_object.unref();
-            self.allocator.free(activation.message_name);
-            activation.message_script.unref();
-            switch (activation.context) {
-                .Method => {},
-                .Block => |block_context| {
-                    block_context.bound_method.unref();
-                },
-            }
-        },
         .Method => |method| {
             self.allocator.free(method.message_name);
             method.script.unref();
@@ -283,11 +255,8 @@ fn deinitContent(self: *Self) void {
             }
             self.allocator.free(block.statements);
 
-            block.bound_method.deinit();
-        },
-        .NonlocalReturn => |nonlocal_return| {
-            nonlocal_return.target_method.unref();
-            nonlocal_return.value.unref();
+            block.parent_activation.deinit();
+            block.nonlocal_return_target_activation.deinit();
         },
         .ByteVector => |bytevector| {
             self.allocator.free(bytevector.values);
@@ -353,7 +322,7 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8,
             return null;
         },
 
-        .Method, .Activation, .NonlocalReturn => unreachable,
+        .Method => unreachable,
 
         // The 4 types below have an imaginary field called "parent" which
         // refers to their respective traits objects.
@@ -473,7 +442,6 @@ fn lookupSlot(self: *Self, selector: []const u8, visited_objects: *VisitedObject
         },
 
         .Method => @panic("Attempting to perform lookup on method?!"),
-        .Activation, .NonlocalReturn => unreachable,
     }
 }
 
@@ -549,10 +517,17 @@ pub fn copy(self: Self) !Ref {
             block.script.ref();
             errdefer block.script.unref();
 
-            // FIXME: The bound method might be gone at this point, just copy the
-            //        weak ref here instead.
-            var bound_method_ref = Ref{ .value = block.bound_method.getPointer().? };
-            return try createBlock(self.allocator, arguments_copy.toOwnedSlice(), slots_copy.toOwnedSlice(), statements_copy.toOwnedSlice(), bound_method_ref, block.script);
+            // FIXME: The activations might be gone at this point, handle that
+            //        case.
+            return try createBlock(
+                self.allocator,
+                arguments_copy.toOwnedSlice(),
+                slots_copy.toOwnedSlice(),
+                statements_copy.toOwnedSlice(),
+                block.parent_activation.getPointer().?,
+                block.nonlocal_return_target_activation.getPointer().?,
+                block.script,
+            );
         },
 
         .ByteVector => |vector| {
@@ -567,7 +542,7 @@ pub fn copy(self: Self) !Ref {
             return try createFromFloatingPointLiteral(self.allocator, floating_point.value);
         },
 
-        .NonlocalReturn, .Activation, .Method => unreachable,
+        .Method => unreachable,
     }
 }
 
@@ -634,7 +609,7 @@ fn createMessageNameForBlock(self: Self) ![]const u8 {
     return message_name;
 }
 
-fn activateCommon(
+fn createActivationObject(
     allocator: *Allocator,
     context: *InterpreterContext,
     arguments: []Ref,
@@ -694,11 +669,20 @@ fn activateCommon(
 
 /// Activate this block and return a slots object for it.
 /// Borrows 1 ref from each object in `arguments`.
-/// `bound_method` is ref'd internally.
+/// `parent_activation_object` is ref'd internally.
 /// `context.script` is ref'd once.
-pub fn activateBlock(self: Self, context: *InterpreterContext, message_range: Range, arguments: []Ref, bound_method: Ref) !Ref {
+pub fn activateBlock(self: Self, context: *InterpreterContext, message_range: Range, arguments: []Ref, parent_activation_object: Ref) !*Activation {
     std.debug.assert(self.content == .Block);
-    const activation_object = try activateCommon(self.allocator, context, arguments, self.content.Block.arguments, self.content.Block.slots, bound_method, false);
+
+    const activation_object = try createActivationObject(
+        self.allocator,
+        context,
+        arguments,
+        self.content.Block.arguments,
+        self.content.Block.slots,
+        parent_activation_object,
+        false,
+    );
     errdefer activation_object.unref();
 
     var message_name = try self.createMessageNameForBlock();
@@ -707,26 +691,30 @@ pub fn activateBlock(self: Self, context: *InterpreterContext, message_range: Ra
     context.script.ref();
     errdefer context.script.unref();
 
-    bound_method.ref();
-    errdefer bound_method.unref();
-    return try create(self.allocator, .{
-        .Activation = .{
-            .activation_object = activation_object,
-            .message_name = message_name,
-            .message_range = message_range,
-            .message_script = context.script,
-            .context = .{ .Block = .{ .bound_method = bound_method } },
-        },
-    });
+    var activation = try Activation.create(self.allocator, activation_object, message_name, context.script, message_range);
+    // If we got here then the parent and non-local return target activations
+    // must exist.
+    activation.parent_activation = self.content.Block.parent_activation.getPointer().?;
+    activation.nonlocal_return_target_activation = self.content.Block.nonlocal_return_target_activation.getPointer().?;
+    return activation;
 }
 
 /// Activate this method and return a slots object for it.
 /// Borrows 1 ref from each object in `arguments`.
 /// `parent` is ref'd internally.
 /// `context.script` is ref'd once.
-pub fn activateMethod(self: Self, context: *InterpreterContext, message_range: Range, arguments: []Ref, parent: Ref) !Ref {
+pub fn activateMethod(self: Self, context: *InterpreterContext, message_range: Range, arguments: []Ref, parent: Ref) !*Activation {
     std.debug.assert(self.content == .Method);
-    const activation_object = try activateCommon(self.allocator, context, arguments, self.content.Method.arguments, self.content.Method.slots, parent, true);
+
+    const activation_object = try createActivationObject(
+        self.allocator,
+        context,
+        arguments,
+        self.content.Method.arguments,
+        self.content.Method.slots,
+        parent,
+        true,
+    );
     errdefer activation_object.unref();
 
     var message_name_copy = try self.allocator.dupe(u8, self.content.Method.message_name);
@@ -735,25 +723,7 @@ pub fn activateMethod(self: Self, context: *InterpreterContext, message_range: R
     context.script.ref();
     errdefer context.script.unref();
 
-    return try create(self.allocator, .{
-        .Activation = .{
-            .activation_object = activation_object,
-            .message_name = message_name_copy,
-            .message_range = message_range,
-            .message_script = context.script,
-            .context = .{ .Method = .{} },
-        },
-    });
-}
-
-/// Return the method that should be bound for the non-local return.
-pub fn getBoundMethodForActivation(self: Self) Ref {
-    std.debug.assert(self.content == .Activation);
-
-    return switch (self.content.Activation.context) {
-        .Method => self.content.Activation.activation_object,
-        .Block => |block_context| block_context.bound_method,
-    };
+    return try Activation.create(self.allocator, activation_object, message_name_copy, context.script, message_range);
 }
 
 /// Attempt to add the given slot objects to the content. Only Empty and Slots

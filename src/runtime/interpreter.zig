@@ -6,11 +6,12 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const AST = @import("../language/ast.zig");
-const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
-const Object = @import("./object.zig");
 const Slot = @import("./slot.zig");
+const Object = @import("./object.zig");
 const Script = @import("../language/script.zig");
+const Activation = @import("./activation.zig");
 const runtime_error = @import("./error.zig");
+const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
 
 const message_interpreter = @import("./interpreter/message.zig");
 
@@ -21,24 +22,31 @@ pub const InterpreterContext = struct {
     /// The root of the current Self world.
     lobby: Object.Ref,
     /// The method/block activation stack. This is used with blocks in order to
-    /// verify that the block is executed within its enclosing method, and in
-    /// order to select the correct non-local return target; the block's "bound
-    /// method" (the method activation in which the block object was
-    /// instantiated) becomes the target of the non-local return. (The parser
-    /// ensures that a non-local return is always the last statement directly
-    /// under a block.) When the activation completes, the activation object is
+    /// verify that the block is executed within its enclosing method and for
+    /// stack traces. When the activation completes, the activation object is
     /// popped; when a new activation occurs, it is pushed. Pushed objects must
     /// be pushed with the assumption that 1 ref is borrowed by this stack.
-    activation_stack: *std.ArrayList(Object.Ref),
+    activation_stack: *std.ArrayList(*Activation),
     /// The script file that is currently executing, used to resolve the
     /// relative paths of other script files.
     script: Script.Ref,
     /// The current error message value. executeScript catches this and displays
     /// the error with a stack trace. The user must free it.
     current_error: ?[]const u8,
+    /// The current non-local return value. Should *NOT* rise to executeScript.
+    current_nonlocal_return: ?struct {
+        /// The activation at which this non-local return should become the
+        /// regular return value.
+        target_activation: Activation.Weak,
+        /// The value that should be returned when the non-local return reaches
+        /// its destination.
+        value: Object.Ref,
+    },
 };
 
-pub const InterpreterError = Allocator.Error || runtime_error.SelfRuntimeError;
+// FIXME: These aren't very nice. Collect them into a single place.
+pub const NonlocalReturnError = error{NonlocalReturn};
+pub const InterpreterError = Allocator.Error || runtime_error.SelfRuntimeError || NonlocalReturnError;
 
 /// Executes a script node. `lobby` is ref'd for the function lifetime. The last
 /// expression result is returned, or if no statements were available, null is
@@ -52,11 +60,11 @@ pub fn executeScript(allocator: *Allocator, script: Script.Ref, lobby: Object.Re
     defer lobby.unref();
 
     var last_expression_result: ?Object.Ref = null;
-    var activation_stack = std.ArrayList(Object.Ref).init(allocator);
+    var activation_stack = std.ArrayList(*Activation).init(allocator);
     defer activation_stack.deinit();
     errdefer {
-        for (activation_stack.items) |*activation| {
-            activation.unref();
+        for (activation_stack.items) |activation| {
+            activation.destroy();
         }
     }
 
@@ -66,6 +74,7 @@ pub fn executeScript(allocator: *Allocator, script: Script.Ref, lobby: Object.Re
         .activation_stack = &activation_stack,
         .script = script,
         .current_error = null,
+        .current_nonlocal_return = null,
     };
     for (script.value.ast_root.?.statements) |statement| {
         std.debug.assert(activation_stack.items.len == 0);
@@ -85,8 +94,21 @@ pub fn executeScript(allocator: *Allocator, script: Script.Ref, lobby: Object.Re
 
                     // Since the execution was abruptly stopped the activation
                     // stack wasn't properly unwound, so let's do that now.
-                    for (activation_stack.items) |*activation| {
-                        activation.unref();
+                    for (activation_stack.items) |activation| {
+                        activation.destroy();
+                    }
+
+                    return null;
+                },
+                NonlocalReturnError.NonlocalReturn => {
+                    std.debug.print("A non-local return has bubbled up to the top! This is likely a bug!", .{});
+                    runtime_error.printTraceFromActivationStack(activation_stack.items);
+                    context.current_nonlocal_return.?.value.unref();
+
+                    // Since the execution was abruptly stopped the activation
+                    // stack wasn't properly unwound, so let's do that now.
+                    for (activation_stack.items) |activation| {
+                        activation.destroy();
                     }
 
                     return null;
@@ -95,9 +117,6 @@ pub fn executeScript(allocator: *Allocator, script: Script.Ref, lobby: Object.Re
             }
         };
 
-        if (expression_result.value.is(.NonlocalReturn)) {
-            @panic("FIXME handle situation where a non-local return reaches top level");
-        }
         last_expression_result = expression_result;
     }
 
@@ -123,6 +142,7 @@ pub fn executeSubScript(allocator: *Allocator, script: Script.Ref, parent_contex
         .activation_stack = parent_context.activation_stack,
         .script = script,
         .current_error = null,
+        .current_nonlocal_return = null,
     };
     for (script.value.ast_root.?.statements) |statement| {
         if (last_expression_result) |*result| {
@@ -137,13 +157,12 @@ pub fn executeSubScript(allocator: *Allocator, script: Script.Ref, parent_contex
                     // Allow the error to keep bubbling up.
                     return err;
                 },
+                NonlocalReturnError.NonlocalReturn => {
+                    return runtime_error.raiseError(allocator, parent_context, "A non-local return has bubbled up to the top of a sub-script! This is likely a bug!", .{});
+                },
                 else => return err,
             }
         };
-
-        if (expression_result.value.is(.NonlocalReturn)) {
-            @panic("FIXME handle situation where a non-local return reaches top level");
-        }
         last_expression_result = expression_result;
     }
 
@@ -161,7 +180,7 @@ pub fn executeExpression(allocator: *Allocator, expression: AST.ExpressionNode, 
         .Object => |object| try executeObject(allocator, object.*, context),
         .Block => |block| try executeBlock(allocator, block.*, context),
         .Message => |message| try message_interpreter.executeMessage(allocator, message.*, context),
-        .Return => |return_node| try executeReturn(allocator, return_node.*, context),
+        .Return => |return_node| return executeReturn(allocator, return_node.*, context),
 
         .Identifier => |identifier| try executeIdentifier(allocator, identifier, context),
         .String => |string| try executeString(allocator, string, context),
@@ -318,24 +337,46 @@ pub fn executeBlock(allocator: *Allocator, block: AST.BlockNode, context: *Inter
         try statements.append(statement_copy);
     }
 
-    var latest_activation: Object.Ref = context.activation_stack.items[context.activation_stack.items.len - 1];
-    const bound_method = latest_activation.value.getBoundMethodForActivation();
+    // The latest activation is where the block was created, so it will always
+    // be the parent activation (i.e., where we look for parent blocks' and the
+    // method's slots).
+    const parent_activation = context.activation_stack.items[context.activation_stack.items.len - 1];
+    // However, we want the _method_ as the non-local return target; because the
+    // non-local return can only be returned by the method in which the block
+    // making the non-local return was defined, this needs to be separate from
+    // parent_activation. If the parent activation is a block, it will also
+    // contain a target activation; if it's a method the target activation _is_
+    // the parent.
+    const nonlocal_return_target_activation = if (parent_activation.nonlocal_return_target_activation) |target| target else parent_activation;
+    std.debug.assert(nonlocal_return_target_activation.nonlocal_return_target_activation == null);
 
     context.script.ref();
     errdefer context.script.unref();
-    return try Object.createBlock(allocator, arguments.toOwnedSlice(), slots.toOwnedSlice(), statements.toOwnedSlice(), bound_method, context.script);
+    return try Object.createBlock(
+        allocator,
+        arguments.toOwnedSlice(),
+        slots.toOwnedSlice(),
+        statements.toOwnedSlice(),
+        parent_activation,
+        nonlocal_return_target_activation,
+        context.script,
+    );
 }
 
-pub fn executeReturn(allocator: *Allocator, return_node: AST.ReturnNode, context: *InterpreterContext) InterpreterError!Object.Ref {
-    const value = try executeExpression(allocator, return_node.expression, context);
-    errdefer value.unref();
+pub fn executeReturn(allocator: *Allocator, return_node: AST.ReturnNode, context: *InterpreterContext) InterpreterError {
+    const latest_activation = context.activation_stack.items[context.activation_stack.items.len - 1];
+    const target_activation = latest_activation.nonlocal_return_target_activation.?;
+    std.debug.assert(target_activation.nonlocal_return_target_activation == null);
 
-    const latest_activation: Object.Ref = context.activation_stack.items[context.activation_stack.items.len - 1];
-    const activation_target_method = latest_activation.value.getBoundMethodForActivation();
-    activation_target_method.ref();
-    errdefer activation_target_method.unref();
+    {
+        const value = try executeExpression(allocator, return_node.expression, context);
+        errdefer value.unref();
 
-    return try Object.createNonlocalReturn(allocator, activation_target_method, value);
+        const target_activation_weak = target_activation.makeWeakRef();
+        context.current_nonlocal_return = .{ .target_activation = target_activation_weak, .value = value };
+    }
+
+    return NonlocalReturnError.NonlocalReturn;
 }
 
 /// Executes an identifier expression. If the looked up value exists, the value
@@ -375,8 +416,6 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
             .Method => {
                 return try message_interpreter.executeMethodMessage(allocator, identifier.range, context.self_object, value, &[_]Object.Ref{}, context);
             },
-
-            else => unreachable,
         }
     } else {
         return runtime_error.raiseError(allocator, context, "Failed looking up \"{s}\"", .{identifier.value});

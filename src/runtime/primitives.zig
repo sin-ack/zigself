@@ -8,22 +8,26 @@ const Allocator = std.mem.Allocator;
 const Range = @import("../language/location_range.zig");
 const Object = @import("./object.zig");
 const runtime_error = @import("./error.zig");
-const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
+const interpreter = @import("./interpreter.zig");
+const InterpreterContext = interpreter.InterpreterContext;
 
 const basic_primitives = @import("./primitives/basic.zig");
 const bytevector_primitives = @import("./primitives/bytevector.zig");
 const number_primitives = @import("./primitives/number.zig");
 const object_primitives = @import("./primitives/object.zig");
 
-/// The list of errors allowed to be raised by primitives.
-const PrimitiveError = Allocator.Error || runtime_error.SelfRuntimeError;
-
 /// A primitive specification. The `name` field specifies the exact selector the
 /// primitive uses (i.e. `_DoFoo:WithBar:`, or `_StringPrint`), and the
 /// `function` is the function which is called to execute the primitive.
 const PrimitiveSpec = struct {
     name: []const u8,
-    function: fn (allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) PrimitiveError!Object.Ref,
+    function: fn (
+        allocator: *Allocator,
+        message_range: Range,
+        receiver: Object.Ref,
+        arguments: []Object.Ref,
+        context: *InterpreterContext,
+    ) interpreter.InterpreterError!Object.Ref,
 };
 
 const PrimitiveRegistry = &[_]PrimitiveSpec{

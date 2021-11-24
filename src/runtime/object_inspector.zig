@@ -96,16 +96,6 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
             printWithIndent(indent, display_type, "|)", .{});
         },
 
-        .Activation => |activation| {
-            const activation_type: []const u8 = switch (activation.context) {
-                .Method => "method",
-                .Block => "block",
-            };
-
-            std.debug.print("<{s} activation> ", .{activation_type});
-            try inspectObjectInternal(activation.activation_object, display_type, indent, visited_object_set);
-        },
-
         .Method => |method| {
             std.debug.print("<method object \"{s}\" [", .{method.message_name});
             for (method.arguments) |argument, i| {
@@ -133,8 +123,8 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
 
         .Block => |block| {
             std.debug.print("<block object for ", .{});
-            if (block.bound_method.getPointer()) |ptr| {
-                std.debug.print("<*{d}>", .{ptr.id});
+            if (block.nonlocal_return_target_activation.getPointer()) |target_activation| {
+                std.debug.print("<*{d}>", .{target_activation.activation_object.value.id});
             } else {
                 std.debug.print("<gone>", .{});
             }
@@ -161,11 +151,6 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
             } else {
                 std.debug.print("()", .{});
             }
-        },
-
-        .NonlocalReturn => |nonlocal_return| {
-            std.debug.print("<non-local return for <*{d}>> ", .{nonlocal_return.target_method.value.id});
-            try inspectObjectInternal(nonlocal_return.value, display_type, indent, visited_object_set);
         },
 
         .ByteVector => |vector| {

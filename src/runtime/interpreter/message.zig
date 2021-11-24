@@ -9,6 +9,7 @@ const AST = @import("../../language/ast.zig");
 const Slot = @import("../slot.zig");
 const Range = @import("../../language/location_range.zig");
 const Object = @import("../object.zig");
+const Activation = @import("../activation.zig");
 const primitives = @import("../primitives.zig");
 const environment = @import("../environment.zig");
 const runtime_error = @import("../error.zig");
@@ -38,26 +39,23 @@ fn getMessageArguments(allocator: *Allocator, ast_arguments: []AST.ExpressionNod
 pub fn executeBlockMessage(
     allocator: *Allocator,
     message_range: Range,
-    receiver: Object.Ref,
+    block_object: Object.Ref,
     arguments: []Object.Ref,
     context: *InterpreterContext,
 ) root_interpreter.InterpreterError!Object.Ref {
+    var did_find_activation_in_stack = false;
+    var parent_activation: *Activation = undefined;
+
     // Check if this method can be executed, i.e. whether its enclosing
     // activation is currently on the stack.
-    var i = @intCast(isize, context.activation_stack.items.len - 1);
-    var did_find_activation_in_stack = false;
-    var bound_method: Object.Ref = undefined;
+    if (block_object.value.content.Block.parent_activation.getPointer()) |parent_activation_ptr| {
+        parent_activation = parent_activation_ptr;
 
-    if (receiver.value.content.Block.bound_method.getPointer()) |bound_method_ptr| {
-        bound_method = .{ .value = bound_method_ptr };
-
+        var i = @intCast(isize, context.activation_stack.items.len - 1);
         while (i >= 0) : (i -= 1) {
-            var activation: Object.Ref = context.activation_stack.items[@intCast(usize, i)];
-            std.debug.assert(activation.value.content == .Activation);
+            const activation = context.activation_stack.items[@intCast(usize, i)];
 
-            if (activation.value.content.Activation.context == .Method and
-                activation.value.content.Activation.activation_object.value == bound_method_ptr)
-            {
+            if (activation == parent_activation) {
                 did_find_activation_in_stack = true;
                 break;
             }
@@ -68,54 +66,45 @@ pub fn executeBlockMessage(
         return runtime_error.raiseError(allocator, context, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
     }
 
-    var block_activation = try receiver.value.activateBlock(context, message_range, arguments, bound_method);
+    // This is done so that we never hold an Activation in value form, and
+    // always refer to the in-place version in the activation stack.
+    const block_activation = try block_object.value.activateBlock(context, message_range, arguments, parent_activation.activation_object);
 
     {
-        errdefer block_activation.unref();
-        // Push it onto the activation stack. Borrows the ref from block_activation.
+        errdefer block_activation.destroy();
         try context.activation_stack.append(block_activation);
     }
 
-    const block_script = receiver.value.content.Block.script;
-    const block_activation_self_object = block_activation.value.content.Activation.activation_object;
-    var block_context = InterpreterContext{
-        .lobby = context.lobby,
-        .self_object = block_activation_self_object,
-        .activation_stack = context.activation_stack,
-        .script = block_script,
-        .current_error = null,
-    };
+    const previous_script = context.script;
+    const previous_self_object = context.self_object;
+
+    const block_script = block_object.value.content.Block.script;
+    const block_activation_object = block_activation.activation_object;
+    context.script = block_script;
+    context.self_object = block_activation_object;
+
+    var did_execute_normally = false;
+    // NOTE: We don't care about this if an error is bubbling up.
+    defer {
+        if (did_execute_normally) {
+            context.script = previous_script;
+            context.self_object = previous_self_object;
+        }
+    }
 
     var last_expression_result: ?Object.Ref = null;
-    for (receiver.value.content.Block.statements) |statement| {
+    for (block_object.value.content.Block.statements) |statement| {
         if (last_expression_result) |last_result| {
             last_result.unref();
         }
 
-        const expression_result = root_interpreter.executeStatement(allocator, statement, &block_context) catch |err| {
-            switch (err) {
-                runtime_error.SelfRuntimeError.RuntimeError => {
-                    // Pass the error message up the script chain.
-                    context.current_error = block_context.current_error;
-                    // Allow the error to keep bubbling up.
-                    return err;
-                },
-                else => return err,
-            }
-        };
-        if (expression_result.value.is(.NonlocalReturn)) {
-            // Looks like a non-local return is bubbling up. This cannot
-            // target us, as we're a block, so let it bubble.
-            last_expression_result = expression_result;
-            break;
-        }
-
-        last_expression_result = expression_result;
+        last_expression_result = try root_interpreter.executeStatement(allocator, statement, context);
     }
 
     const popped_activation = context.activation_stack.pop();
-    std.debug.assert(popped_activation.value == block_activation.value);
-    popped_activation.unref();
+    std.debug.assert(popped_activation == block_activation);
+    popped_activation.destroy();
+    did_execute_normally = true;
 
     if (last_expression_result) |last_result| {
         return last_result;
@@ -133,63 +122,64 @@ pub fn executeMethodMessage(
     arguments: []Object.Ref,
     context: *InterpreterContext,
 ) !Object.Ref {
+    // NOTE: This is done so that we never hold an Activation in value form, and
+    //       always refer to the in-place version in the activation stack.
     const method_activation = try method_object.value.activateMethod(context, message_range, arguments, receiver);
+
     {
-        errdefer method_activation.unref();
+        errdefer method_activation.destroy();
         try context.activation_stack.append(method_activation);
     }
 
-    var last_expression_result: ?Object.Ref = null;
+    const previous_script = context.script;
+    const previous_self_object = context.self_object;
 
     const method_script = method_object.value.content.Method.script;
-    const method_activation_object = method_activation.value.content.Activation.activation_object;
-    var method_context = InterpreterContext{
-        .lobby = context.lobby,
-        .self_object = method_activation_object,
-        .activation_stack = context.activation_stack,
-        .script = method_script,
-        .current_error = null,
-    };
+    const method_activation_object = method_activation.activation_object;
+    context.script = method_script;
+    context.self_object = method_activation_object;
+
+    var did_execute_normally = false;
+    // NOTE: We don't care about this if an error is bubbling up.
+    defer {
+        if (did_execute_normally) {
+            context.script = previous_script;
+            context.self_object = previous_self_object;
+        }
+    }
+
+    var last_expression_result: ?Object.Ref = null;
     for (method_object.value.content.Method.statements) |statement| {
         if (last_expression_result) |last_result| {
             last_result.unref();
         }
 
-        const expression_result = root_interpreter.executeStatement(allocator, statement, &method_context) catch |err| {
+        const expression_result = root_interpreter.executeStatement(allocator, statement, context) catch |err| {
             switch (err) {
-                runtime_error.SelfRuntimeError.RuntimeError => {
-                    // Pass the error message up the script chain.
-                    context.current_error = method_context.current_error;
-                    // Allow the error to keep bubbling up.
+                root_interpreter.NonlocalReturnError.NonlocalReturn => {
+                    if (context.current_nonlocal_return.?.target_activation.getPointer()) |target_activation| {
+                        if (target_activation == method_activation) {
+                            last_expression_result = context.current_nonlocal_return.?.value;
+                            context.current_nonlocal_return = null;
+                            break;
+                        }
+                    }
+
+                    // The target of the non-local return wasn't us. Allow the
+                    // error to keep bubbling up.
                     return err;
                 },
                 else => return err,
             }
         };
-        if (expression_result.value.is(.NonlocalReturn)) {
-            // A non-local return has bubbled up to us. If it belongs to us, we
-            // can unwrap it to reach the expression inside and use it as our
-            // return value; if it belongs to someone else, we just let it
-            // bubble up further.
-            if (expression_result.value.content.NonlocalReturn.target_method.value == method_activation_object.value) {
-                const returned_value = expression_result.value.content.NonlocalReturn.value;
-
-                returned_value.ref();
-                expression_result.unref();
-                last_expression_result = returned_value;
-                break;
-            } else {
-                last_expression_result = expression_result;
-                break;
-            }
-        }
 
         last_expression_result = expression_result;
     }
 
-    var popped_activation = context.activation_stack.pop();
-    std.debug.assert(popped_activation.value == method_activation.value);
-    popped_activation.unref();
+    const popped_activation = context.activation_stack.pop();
+    std.debug.assert(popped_activation == method_activation);
+    popped_activation.destroy();
+    did_execute_normally = true;
 
     if (last_expression_result) |last_result| {
         return last_result;
@@ -298,8 +288,6 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
 
                 return try executeMethodMessage(allocator, message.range, receiver, lookup_result, arguments, context);
             },
-
-            else => unreachable,
         }
     } else {
         return runtime_error.raiseError(allocator, context, "Unknown selector \"{s}\"", .{message.message_name});
