@@ -118,7 +118,7 @@ pub const Token = union(enum) {
 
     String: []const u8,
     Identifier: [MaximumIdentifierLength:0]u8,
-    Integer: u64,
+    Integer: i64,
     FloatingPoint: f64,
 
     pub fn toString(self: Token) []const u8 {

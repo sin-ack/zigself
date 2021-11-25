@@ -93,7 +93,7 @@ const ObjectContent = union(enum) {
     },
 
     Integer: struct {
-        value: u64,
+        value: i64,
     },
 
     FloatingPoint: struct {
@@ -144,7 +144,7 @@ pub fn createCopyFromStringLiteral(allocator: *Allocator, contents: []const u8) 
     return try create(allocator, .{ .ByteVector = .{ .values = contents_copy } });
 }
 
-pub fn createFromIntegerLiteral(allocator: *Allocator, value: u64) !Ref {
+pub fn createFromIntegerLiteral(allocator: *Allocator, value: i64) !Ref {
     return try create(allocator, .{ .Integer = .{ .value = value } });
 }
 

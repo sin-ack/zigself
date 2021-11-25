@@ -11,10 +11,6 @@ const environment = @import("../environment.zig");
 const runtime_error = @import("../error.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
-fn makeInteger(allocator: *Allocator, value: u64) !Object.Ref {
-    return try Object.createFromIntegerLiteral(allocator, value);
-}
-
 /// Add two integer numbers. The returned value is an integer.
 pub fn IntAdd(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
@@ -32,7 +28,7 @@ pub fn IntAdd(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntAdd: argument, got {s}", .{@tagName(addend.value.content)});
     }
 
-    const result = try makeInteger(
+    const result = try Object.createFromIntegerLiteral(
         allocator,
         receiver.value.content.Integer.value + addend.value.content.Integer.value,
     );
@@ -57,7 +53,7 @@ pub fn IntSub(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntSub: argument, got {s}", .{@tagName(term.value.content)});
     }
 
-    const result = try makeInteger(
+    const result = try Object.createFromIntegerLiteral(
         allocator,
         receiver.value.content.Integer.value - term.value.content.Integer.value,
     );

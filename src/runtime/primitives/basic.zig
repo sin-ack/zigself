@@ -108,7 +108,7 @@ pub fn ID(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arg
 
     defer receiver.unref();
 
-    return try Object.createFromIntegerLiteral(allocator, receiver.value.id);
+    return try Object.createFromIntegerLiteral(allocator, @intCast(i64, receiver.value.id));
 }
 
 /// Raise the argument as an error. The argument must be a byte vector.

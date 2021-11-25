@@ -53,7 +53,7 @@ pub fn ByteVectorSize(allocator: *Allocator, message_range: Range, receiver: Obj
         return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteVectorSize receiver, got {s}", .{@tagName(receiver.value.content)});
     }
 
-    return Object.createFromIntegerLiteral(allocator, receiver.value.content.ByteVector.values.len);
+    return Object.createFromIntegerLiteral(allocator, @intCast(i64, receiver.value.content.ByteVector.values.len));
 }
 
 /// Return a byte at the given (integer) position of the receiver, which is a
@@ -76,7 +76,7 @@ pub fn ByteAt(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
     }
 
     const values = receiver.value.content.ByteVector.values;
-    const position = argument.value.content.Integer.value;
+    const position = @intCast(usize, argument.value.content.Integer.value);
     if (position < 0 or position >= values.len) {
         return runtime_error.raiseError(
             allocator,
@@ -115,7 +115,7 @@ pub fn ByteAt_Put(allocator: *Allocator, message_range: Range, receiver: Object.
     }
 
     var values = receiver.value.content.ByteVector.values;
-    const position = first_argument.value.content.Integer.value;
+    const position = @intCast(usize, first_argument.value.content.Integer.value);
     const new_value = second_argument.value.content.Integer.value;
 
     if (position < 0 or position >= values.len) {
@@ -159,5 +159,9 @@ pub fn ByteVectorCopySize(allocator: *Allocator, message_range: Range, receiver:
         return runtime_error.raiseError(allocator, context, "_ByteVectorCopySize: argument exceeds receiver's size", .{});
     }
 
-    return try Object.createCopyFromStringLiteral(allocator, values[0..size]);
+    if (size < 0) {
+        return runtime_error.raiseError(allocator, context, "_ByteVectorCopySize: argument must be positive", .{});
+    }
+
+    return try Object.createCopyFromStringLiteral(allocator, values[0..@intCast(usize, size)]);
 }

@@ -189,7 +189,7 @@ pub const StringNode = struct {
 
 pub const NumberNode = struct {
     value: union(enum) {
-        Integer: u64,
+        Integer: i64,
         FloatingPoint: f64,
     },
 

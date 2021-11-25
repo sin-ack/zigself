@@ -236,7 +236,7 @@ fn lexNumber(self: *Self) !?tokens.Token {
     }
 
     var parser_state: NumberParserState = .Initial;
-    var integer: u64 = 0;
+    var integer: i64 = 0;
     var floating_point: f64 = 0.0;
     var fraction_counter: usize = 0;
     var did_finish_number = false;
@@ -294,7 +294,7 @@ fn lexNumber(self: *Self) !?tokens.Token {
                     break :outer;
                 }
 
-                if (@shlWithOverflow(u64, integer, 1, &integer)) {
+                if (@shlWithOverflow(i64, integer, 1, &integer)) {
                     return error.NumberLiteralTooLarge;
                 }
 
@@ -308,7 +308,7 @@ fn lexNumber(self: *Self) !?tokens.Token {
                     break :outer;
                 }
 
-                if (@shlWithOverflow(u64, integer, 4, &integer)) {
+                if (@shlWithOverflow(i64, integer, 4, &integer)) {
                     return error.NumberLiteralTooLarge;
                 }
 
@@ -335,11 +335,11 @@ fn lexNumber(self: *Self) !?tokens.Token {
                         break :outer;
                     }
                 } else if (std.ascii.isDigit(c)) {
-                    if (@mulWithOverflow(u64, integer, 10, &integer)) {
+                    if (@mulWithOverflow(i64, integer, 10, &integer)) {
                         return error.NumberLiteralTooLarge;
                     }
 
-                    if (@addWithOverflow(u64, integer, c - '0', &integer)) {
+                    if (@addWithOverflow(i64, integer, c - '0', &integer)) {
                         return error.NumberLiteralTooLarge;
                     }
                 } else {
