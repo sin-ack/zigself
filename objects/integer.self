@@ -12,8 +12,12 @@ traits integer _AddSlots: (|
 
     + n  = (_IntAdd: n).
     - n  = (_IntSub: n).
+    * n  = (_IntMul: n).
     < n  = (_IntLT: n).
+    > n  = (_IntGT: n).
     = n  = (_IntEq: n).
+    >= n = ((self > n) or: [ self = n ]).
+    <= n = ((self < n) or: [ self = n ]).
     != n = ((self = n) not).
 
     max: n = ((self < n) ifTrue: [ n ] False: [ self ]).

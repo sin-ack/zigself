@@ -11,6 +11,8 @@ const environment = @import("../environment.zig");
 const runtime_error = @import("../error.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
+// FIXME: Add overflow checks here
+
 /// Add two integer numbers. The returned value is an integer.
 pub fn IntAdd(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
@@ -61,6 +63,31 @@ pub fn IntSub(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
     return result;
 }
 
+/// Multiply the argument with the receiver. The returned value is an integer.
+pub fn IntMul(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = message_range;
+
+    defer receiver.unref();
+
+    var term = arguments[0];
+    defer term.unref();
+
+    if (!receiver.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntMul: receiver, got {s}", .{@tagName(receiver.value.content)});
+    }
+
+    if (!term.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntMul: argument, got {s}", .{@tagName(term.value.content)});
+    }
+
+    const result = try Object.createFromIntegerLiteral(
+        allocator,
+        receiver.value.content.Integer.value * term.value.content.Integer.value,
+    );
+
+    return result;
+}
+
 /// Return whether the receiver is less than its argument. The return value is
 /// either "true" or "false".
 pub fn IntLT(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
@@ -106,6 +133,32 @@ pub fn IntEq(allocator: *Allocator, message_range: Range, receiver: Object.Ref, 
     }
 
     const result = if (receiver.value.content.Integer.value == argument.value.content.Integer.value)
+        environment.globalTrue()
+    else
+        environment.globalFalse();
+
+    return result;
+}
+
+/// Return whether the receiver is greater than its argument. The return value
+/// is either "true" or "false".
+pub fn IntGT(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+    _ = message_range;
+
+    defer receiver.unref();
+
+    var argument = arguments[0];
+    defer argument.unref();
+
+    if (!receiver.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntGT: receiver, got {s}", .{@tagName(receiver.value.content)});
+    }
+
+    if (!argument.value.is(.Integer)) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntGT: argument, got {s}", .{@tagName(argument.value.content)});
+    }
+
+    const result = if (receiver.value.content.Integer.value > argument.value.content.Integer.value)
         environment.globalTrue()
     else
         environment.globalFalse();
