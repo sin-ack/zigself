@@ -28,6 +28,10 @@ SPDX-License-Identifier: GPL-3.0-only
 
             ifTrue: tb False: fb = (tb value).
             not = false.
+            && b = (b value).
+            "Short circuits its argument."
+            "FIXME: allow | as operator argument"
+            or: b = (self).
         |).
 
         false parent _AddSlots: (|
@@ -35,6 +39,11 @@ SPDX-License-Identifier: GPL-3.0-only
 
             ifTrue: tb False: fb = (fb value).
             not = true.
+
+            "Short circuits its argument."
+            && b = (self).
+            "FIXME: allow | as operator argument"
+            or: b = (b value).
         |).
     ).
 |) addBooleanCapabilities.
