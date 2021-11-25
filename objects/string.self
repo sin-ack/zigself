@@ -94,7 +94,8 @@ traits string _AddSlots: (|
 
         value: 0.
         do: [| :byte |
-            ((byte > zeroByte) && [ byte < nineByte ]) ifTrue: [
+            ((byte >= zeroByte) && [ byte <= nineByte ]) ifTrue: [
+                   value: (value * 10) + (byte - zeroByte).
             ] False: [ _Error: 'string with non-digit characters cannot be converted to integer' ].
         ].
 
