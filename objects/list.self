@@ -40,6 +40,23 @@ traits _AddSlots: (|
 
             self
         ).
+
+        "Iterate over all nodes except this one in reverse order, calling the
+         block in the process."
+        reverseDo: block = (| head. current. |
+            head: self.
+            current: prev.
+
+            "Note that we need to save the previous value here because the block
+             might remove the current node when called."
+            [ head == current ] whileFalse: [| savedPrevItem |
+                savedPrevItem: current prev.
+                block value: current.
+                current: savedPrevItem.
+            ].
+
+            self
+        ).
     |).
 
     "A linked list object."
@@ -77,9 +94,17 @@ traits _AddSlots: (|
             self
         ).
 
+        "Iterate over all the items in the list in reverse order."
+        reverseDo: block = (| i |
+            i: size prec.
+            nodes reverseDo: [| :node | block value: node With: i. i: i prec ].
+            self
+        ).
+
         "Return the item at the given position."
-        at: index = (
-            do: [| :node. :i | (i = index) ifTrue: [ ^ node value ] ].
+        at: index = (| b |
+            b: [| :node. :i | (i = index) ifTrue: [ ^ node value ] ].
+            ((index * 2) > size) ifFalse: [ do: b ] True: [ reverseDo: b ].
             "FIXME: Return an error here"
             nil
         ).
