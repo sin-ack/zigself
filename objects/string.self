@@ -9,7 +9,6 @@ traits string _AddSlots: (|
 
     splitOn: substring = (| indicesList. substringsList. index |
         indicesList: list copyRemoveAll.
-        indicesList append: 0.
         index: 0.
 
         [ index < size ] whileTrue: [
@@ -17,12 +16,16 @@ traits string _AddSlots: (|
                 FromIndex: index
                 IfPresent: [| :substringIndex |
                     indicesList append: substringIndex.
-                    index: substringIndex + 1.
+                    index: substringIndex succ.
                 ]
-                 IfAbsent: [ index: size ].
+                IfAbsent: [ index: size ].
         ].
 
+        indicesList append: size.
         substringsList: list copyRemoveAll.
+
+        "The first substring must be appended outside because we do not want to add the substring length."
+        substringsList append: (copyFrom: 0 Until: (indicesList at: 0)).
 
         "Find and append all the substrings."
         index: 0.
