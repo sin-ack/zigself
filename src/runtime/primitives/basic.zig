@@ -78,17 +78,21 @@ pub fn RunScript(allocator: *Allocator, message_range: Range, receiver: Object.R
         return runtime_error.raiseError(allocator, context, "An unexpected error was raised from script.initInPlaceFromFilePath: {s}", .{@errorName(err)});
     };
 
-    const did_parse_without_errors = script.value.parseScript() catch |err|
-        if (error_set_utils.errSetContains(Allocator.Error, err))
     {
-        return @errSetCast(Allocator.Error, err);
-    } else {
-        return runtime_error.raiseError(allocator, context, "An unexpected error was raised from script.parseScript: {s}", .{@errorName(err)});
-    };
-    script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
+        errdefer script.unref();
 
-    if (!did_parse_without_errors) {
-        return runtime_error.raiseError(allocator, context, "Failed parsing the script passed to _RunScript", .{});
+        const did_parse_without_errors = script.value.parseScript() catch |err|
+            if (error_set_utils.errSetContains(Allocator.Error, err))
+        {
+            return @errSetCast(Allocator.Error, err);
+        } else {
+            return runtime_error.raiseError(allocator, context, "An unexpected error was raised from script.parseScript: {s}", .{@errorName(err)});
+        };
+        script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
+
+        if (!did_parse_without_errors) {
+            return runtime_error.raiseError(allocator, context, "Failed parsing the script passed to _RunScript", .{});
+        }
     }
 
     var result_value = environment.globalNil();
