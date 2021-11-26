@@ -17,6 +17,8 @@ const runtime_error = @import("../error.zig");
 const root_interpreter = @import("../interpreter.zig");
 const InterpreterContext = root_interpreter.InterpreterContext;
 
+const MaximumStackDepth = 2048;
+
 fn getMessageArguments(allocator: *Allocator, ast_arguments: []AST.ExpressionNode, context: *InterpreterContext) root_interpreter.InterpreterError![]Object.Ref {
     var arguments = try std.ArrayList(Object.Ref).initCapacity(allocator, ast_arguments.len);
     errdefer {
@@ -66,7 +68,7 @@ pub fn executeBlockMessage(
         return runtime_error.raiseError(allocator, context, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
     }
 
-    if (context.activation_stack.items.len >= 512) {
+    if (context.activation_stack.items.len >= MaximumStackDepth) {
         return runtime_error.raiseError(allocator, context, "Maximum stack size reached", .{});
     }
 
@@ -141,7 +143,7 @@ pub fn executeMethodMessage(
     arguments: []Object.Ref,
     context: *InterpreterContext,
 ) !Object.Ref {
-    if (context.activation_stack.items.len >= 512) {
+    if (context.activation_stack.items.len >= MaximumStackDepth) {
         return runtime_error.raiseError(allocator, context, "Maximum stack size reached", .{});
     }
 
