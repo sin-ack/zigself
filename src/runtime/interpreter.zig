@@ -408,7 +408,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
 
     if (try context.self_object.value.lookup(context, identifier.value, .Value)) |value| {
         switch (value.value.content) {
-            .Integer, .FloatingPoint, .ByteVector, .Slots, .Empty, .Block, .Activation => {
+            .Integer, .FloatingPoint, .ByteVector, .Vector, .Slots, .Empty, .Block, .Activation => {
                 value.ref();
                 return value;
             },

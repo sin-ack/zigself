@@ -80,6 +80,10 @@ const ObjectContent = union(enum) {
         values: []u8,
     },
 
+    Vector: struct {
+        values: []Ref,
+    },
+
     Integer: struct {
         value: i64,
     },
@@ -130,6 +134,18 @@ pub fn createFromIntegerLiteral(allocator: *Allocator, value: i64) !Ref {
 
 pub fn createFromFloatingPointLiteral(allocator: *Allocator, value: f64) !Ref {
     return try create(allocator, .{ .FloatingPoint = .{ .value = value } });
+}
+
+pub fn createEmptyVector(allocator: *Allocator) !Ref {
+    var values = try allocator.alloc(Ref, 0);
+    errdefer allocator.free(values);
+
+    return try create(allocator, .{ .Vector = .{ .values = values } });
+}
+
+/// Takes ownership of `values`. Borrows one ref for each object in `values`.
+pub fn createVectorFromValues(allocator: *Allocator, values: []Ref) !Ref {
+    return try create(allocator, .{ .Vector = .{ .values = values } });
 }
 
 /// Takes ownership of `arguments`, `slots` and `statements`.
@@ -249,6 +265,10 @@ fn deinitContent(self: *Self) void {
         .ByteVector => |bytevector| {
             self.allocator.free(bytevector.values);
         },
+        .Vector => |vector| {
+            for (vector.values) |v| v.unref();
+            self.allocator.free(vector.values);
+        },
         .Integer, .FloatingPoint => {},
     }
 }
@@ -355,6 +375,20 @@ pub fn copy(self: Self) !Ref {
 
         .FloatingPoint => |floating_point| {
             return try createFromFloatingPointLiteral(self.allocator, floating_point.value);
+        },
+
+        .Vector => |vector| {
+            var values_copy = try self.allocator.alloc(Ref, vector.values.len);
+            errdefer self.allocator.free(values_copy);
+
+            for (values_copy) |*v, i| {
+                const value = vector.values[i];
+                value.ref();
+                v.* = value;
+            }
+            errdefer for (values_copy) |v| v.unref();
+
+            return try create(self.allocator, .{ .Vector = .{ .values = values_copy } });
         },
 
         .Method => unreachable,

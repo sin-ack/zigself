@@ -153,6 +153,24 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
             std.debug.print("<byte vector size: {d}> \"{s}\"", .{ vector.values.len, vector.values });
         },
 
+        .Vector => |vector| {
+            std.debug.print("<vector size: {d}> ", .{vector.values.len});
+            if (vector.values.len == 0) {
+                std.debug.print("[]", .{});
+            } else {
+                std.debug.print("[{s}", .{separator});
+                for (vector.values) |v, i| {
+                    printWithIndent(indent + 2, display_type, "", .{});
+
+                    try inspectObjectInternal(v, display_type, indent + 2, visited_object_set);
+
+                    if (i < vector.values.len - 1) std.debug.print(",", .{});
+                    std.debug.print(separator, .{});
+                }
+                printWithIndent(indent, display_type, "]", .{});
+            }
+        },
+
         .Integer => |integer| {
             std.debug.print("<integer> {d}", .{integer.value});
         },

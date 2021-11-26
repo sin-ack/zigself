@@ -100,6 +100,7 @@ fn lookupValue(self: *Object, context: ?*InterpreterContext, selector_hash: u32,
                 @panic("Context MUST be passed for Block objects!");
             }
         },
+
         .ByteVector => {
             if (context) |ctx| {
                 const traits_string = try lookupTraitsObject(self.allocator, ctx, "string");
@@ -111,6 +112,19 @@ fn lookupValue(self: *Object, context: ?*InterpreterContext, selector_hash: u32,
                 @panic("Context MUST be passed for ByteVector objects!");
             }
         },
+
+        .Vector => {
+            if (context) |ctx| {
+                const traits_vector = try lookupTraitsObject(self.allocator, ctx, "vector");
+                if (selector_hash == parent_hash)
+                    return traits_vector;
+
+                return try lookupHash(traits_vector.value, ctx, selector_hash, .Value);
+            } else {
+                @panic("Context MUST be passed for Vector objects!");
+            }
+        },
+
         .Integer => {
             if (context) |ctx| {
                 const traits_integer = try lookupTraitsObject(self.allocator, ctx, "integer");
@@ -156,7 +170,7 @@ fn lookupSlot(self: *Object, selector_hash: u32, previously_visited: ?*const Vis
     const currently_visited = VisitedObjectLink{ .previous = previously_visited, .object = self };
 
     switch (self.content) {
-        .Empty, .Block, .ByteVector, .Integer, .FloatingPoint => return null,
+        .Empty, .Block, .ByteVector, .Vector, .Integer, .FloatingPoint => return null,
 
         .Slots => |slots| {
             return try slotsLookup(slots.slots, selector_hash, &currently_visited);

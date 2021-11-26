@@ -7,7 +7,7 @@ SPDX-License-Identifier: GPL-3.0-only
 traits string _AddSlots: (|
     parent* = traits clonable.
 
-    splitOn: substring = (| indicesList. substringsList. index |
+    splitOn: substring = (| indicesList. substrings. index |
         indicesList: list copyRemoveAll.
         index: 0.
 
@@ -22,19 +22,19 @@ traits string _AddSlots: (|
         ].
 
         indicesList append: size.
-        substringsList: list copyRemoveAll.
+        substrings: vector copySize: indicesList size prec.
 
         "The first substring must be appended outside because we do not want to add the substring length."
-        substringsList append: (copyFrom: 0 Until: (indicesList at: 0)).
+        substrings at: 0 Put: (copyFrom: 0 Until: (indicesList at: 0)).
 
         "Find and append all the substrings."
         index: 0.
         [ index < (indicesList size prec) ] whileTrue: [
-            substringsList append: (copyFrom: ((indicesList at: index) + substring size) Until: (indicesList at: index succ)).
+            substrings at: index Put: (copyFrom: ((indicesList at: index) + substring size) Until: (indicesList at: index succ)).
             index: index succ.
         ].
 
-        substringsList
+        substrings
     ).
 
     print = (_StringPrint).

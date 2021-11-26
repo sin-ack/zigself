@@ -301,7 +301,7 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
 
     if (try receiver.value.lookup(context, message.message_name, .Value)) |lookup_result| {
         switch (lookup_result.value.content) {
-            .Integer, .FloatingPoint, .ByteVector, .Slots, .Empty, .Block => {
+            .Integer, .FloatingPoint, .ByteVector, .Vector, .Slots, .Empty, .Block => {
                 lookup_result.ref();
                 return lookup_result;
             },

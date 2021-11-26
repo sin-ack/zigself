@@ -13,6 +13,7 @@ const InterpreterContext = interpreter.InterpreterContext;
 
 const basic_primitives = @import("./primitives/basic.zig");
 const bytevector_primitives = @import("./primitives/bytevector.zig");
+const vector_primitives = @import("./primitives/vector.zig");
 const number_primitives = @import("./primitives/number.zig");
 const object_primitives = @import("./primitives/object.zig");
 
@@ -43,6 +44,11 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_ByteAt:", .function = bytevector_primitives.ByteAt },
     .{ .name = "_ByteAt:Put:", .function = bytevector_primitives.ByteAt_Put },
     .{ .name = "_ByteVectorCopySize:", .function = bytevector_primitives.ByteVectorCopySize },
+    // vector primitives
+    .{ .name = "_VectorCopySize:FillingExtrasWith:", .function = vector_primitives.VectorCopySize_FillingExtrasWith },
+    .{ .name = "_VectorSize", .function = vector_primitives.VectorSize },
+    .{ .name = "_VectorAt:", .function = vector_primitives.VectorAt },
+    .{ .name = "_VectorAt:Put:", .function = vector_primitives.VectorAt_Put },
     // number primitives
     .{ .name = "_IntAdd:", .function = number_primitives.IntAdd },
     .{ .name = "_IntSub:", .function = number_primitives.IntSub },

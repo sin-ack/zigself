@@ -64,7 +64,7 @@ fn makeTraitsObject(allocator: *Allocator) !Object.Ref {
 }
 
 fn makeTraitsSlots(allocator: *Allocator) ![]Slot {
-    var traits_slots = try std.ArrayList(Slot).initCapacity(allocator, 4);
+    var traits_slots = try std.ArrayList(Slot).initCapacity(allocator, 5);
     errdefer traits_slots.deinit();
 
     var integer_object = try Object.createEmpty(allocator);
@@ -87,10 +87,16 @@ fn makeTraitsSlots(allocator: *Allocator) ![]Slot {
     var block_slot = try Slot.init(allocator, false, false, "block", block_object);
     errdefer block_slot.deinit();
 
+    var vector_object = try Object.createEmpty(allocator);
+    errdefer vector_object.unref();
+    var vector_slot = try Slot.init(allocator, false, false, "vector", vector_object);
+    errdefer vector_slot.deinit();
+
     try traits_slots.append(integer_slot);
     try traits_slots.append(float_slot);
     try traits_slots.append(string_slot);
     try traits_slots.append(block_slot);
+    try traits_slots.append(vector_slot);
 
     return traits_slots.toOwnedSlice();
 }
