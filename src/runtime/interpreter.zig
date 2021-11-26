@@ -103,6 +103,7 @@ pub fn executeScript(allocator: *Allocator, script: Script.Ref, lobby: Object.Re
                 NonlocalReturnError.NonlocalReturn => {
                     std.debug.print("A non-local return has bubbled up to the top! This is likely a bug!", .{});
                     runtime_error.printTraceFromActivationStack(activation_stack.items);
+                    context.current_nonlocal_return.?.target_activation.deinit();
                     context.current_nonlocal_return.?.value.unref();
 
                     // Since the execution was abruptly stopped the activation

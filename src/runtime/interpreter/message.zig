@@ -193,6 +193,7 @@ pub fn executeMethodMessage(
                 root_interpreter.NonlocalReturnError.NonlocalReturn => {
                     if (context.current_nonlocal_return.?.target_activation.getPointer()) |target_activation| {
                         if (target_activation == method_activation) {
+                            context.current_nonlocal_return.?.target_activation.deinit();
                             last_expression_result = context.current_nonlocal_return.?.value;
                             context.current_nonlocal_return = null;
                             break;
