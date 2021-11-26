@@ -25,7 +25,7 @@ fn WeakHandle(comptime T: type) type {
 /// the object is deinitialized, the `deinit` method should be called.
 pub fn WeakPtrBlock(comptime T: type) type {
     const Handle = WeakHandle(T);
-    const Ref = ref_counted.RefPtrWithoutTypeChecks(Handle);
+    const Ref = ref_counted.RefPtr(Handle);
 
     return struct {
         handle: Ref,
@@ -55,7 +55,7 @@ pub fn WeakPtrBlock(comptime T: type) type {
 ///
 /// The passed type must have a `WeakPtrBlock(T)` object as its `weak` member.
 pub fn WeakPtr(comptime T: type) type {
-    const HandleRef = ref_counted.RefPtrWithoutTypeChecks(WeakHandle(T));
+    const HandleRef = ref_counted.RefPtr(WeakHandle(T));
 
     return struct {
         handle: HandleRef,

@@ -42,44 +42,6 @@ pub const RefCount = struct {
 ///
 /// Construct using `adopt`.
 pub fn RefPtr(comptime T: type) type {
-    const typeInfo = @typeInfo(T);
-    if (typeInfo != .Struct) {
-        @compileError("The type passed to RefPtr must be a struct");
-    }
-
-    var did_find_ref = false;
-    for (typeInfo.Struct.fields) |field| {
-        if (std.mem.eql(u8, field.name, "ref") and field.field_type == RefCount) {
-            did_find_ref = true;
-            break;
-        }
-    }
-
-    if (!did_find_ref) {
-        @compileError("The type passed to RefPtr must contain a field named `ref` which is of type RefCount");
-    }
-
-    var did_find_destroy = false;
-    for (typeInfo.Struct.decls) |decl| {
-        if (std.mem.eql(u8, decl.name, "destroy") and decl.data == .Fn) {
-            if (decl.data.Fn.return_type != void) {
-                @compileError("The return type on the `destroy` method of the type passed to RefPtr must be void");
-            }
-
-            did_find_destroy = true;
-            break;
-        }
-    }
-
-    if (!did_find_destroy) {
-        @compileError("The type passed to RefPtr must contain a method named `destroy`");
-    }
-
-    return RefPtrWithoutTypeChecks(T);
-}
-
-/// Like RefPtr, but skips the struct checks that prevent cyclic structs.
-pub fn RefPtrWithoutTypeChecks(comptime T: type) type {
     return struct {
         value: *T,
 

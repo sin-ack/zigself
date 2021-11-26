@@ -12,7 +12,7 @@ const hash = @import("../utility/hash.zig");
 const Self = @This();
 
 // Cannot use Object.Ref because it creates a cycle.
-const ObjectRef = ref_counted.RefPtrWithoutTypeChecks(Object);
+const ObjectRef = ref_counted.RefPtr(Object);
 
 /// Initialize a slot. The slot borrows a ref from the caller for `value`.
 /// `name` is duped internally.

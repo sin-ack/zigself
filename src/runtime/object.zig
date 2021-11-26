@@ -27,7 +27,7 @@ id: usize,
 const Self = @This();
 const WeakBlock = weak_ref.WeakPtrBlock(Self);
 const Weak = weak_ref.WeakPtr(Self);
-pub const Ref = ref_counted.RefPtrWithoutTypeChecks(Self);
+pub const Ref = ref_counted.RefPtr(Self);
 
 var current_id: usize = 0;
 

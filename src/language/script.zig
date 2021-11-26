@@ -11,7 +11,7 @@ const Parser = @import("./parser.zig");
 const Diagnostics = @import("./diagnostics.zig");
 
 const Self = @This();
-pub const Ref = ref_counted.RefPtrWithoutTypeChecks(Self);
+pub const Ref = ref_counted.RefPtr(Self);
 
 ast_root: ?AST.ScriptNode = null,
 
