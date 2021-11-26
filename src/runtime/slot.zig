@@ -29,6 +29,8 @@ pub fn init(
         .allocator = allocator,
         .is_mutable = is_mutable,
         .is_parent = is_parent,
+        // FIXME: Avoid duping like this, it's horrible. This would normally
+        //        go in the byte-vector space if we had that set up.
         .name = try allocator.dupe(u8, name),
         .name_hash = name_hash,
         .value = value,
@@ -43,7 +45,16 @@ pub fn deinit(self: *Self) void {
 
 pub fn copy(self: Self) !Self {
     self.value.ref();
-    return init(self.allocator, self.is_mutable, self.is_parent, self.name, self.value);
+    return Self{
+        .allocator = self.allocator,
+        .is_mutable = self.is_mutable,
+        .is_parent = self.is_parent,
+        // FIXME: Avoid duping like this, it's horrible. This would normally
+        //        go in the byte-vector space if we had that set up.
+        .name = try self.allocator.dupe(u8, self.name),
+        .name_hash = self.name_hash,
+        .value = self.value,
+    };
 }
 
 /// Assign a new value to the given slot object. The previous value is unref'd.
