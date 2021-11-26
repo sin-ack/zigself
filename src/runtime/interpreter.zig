@@ -385,7 +385,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
     if (identifier.value[0] == '_') {
         var receiver = context.self_object;
 
-        if (try receiver.value.findActivationReceiver(context)) |actual_receiver| {
+        if (try receiver.value.findActivationReceiver()) |actual_receiver| {
             receiver = actual_receiver;
         }
 
@@ -397,7 +397,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
     // the virtual method.
     {
         var receiver = context.self_object;
-        if (try receiver.value.findActivationReceiver(context)) |actual_receiver| {
+        if (try receiver.value.findActivationReceiver()) |actual_receiver| {
             receiver = actual_receiver;
         }
 
@@ -408,7 +408,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
 
     if (try context.self_object.value.lookup(context, identifier.value, .Value)) |value| {
         switch (value.value.content) {
-            .Integer, .FloatingPoint, .ByteVector, .Slots, .Empty, .Block => {
+            .Integer, .FloatingPoint, .ByteVector, .Slots, .Empty, .Block, .Activation => {
                 value.ref();
                 return value;
             },

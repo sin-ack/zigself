@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const Object = @import("./object.zig");
 const ref_counted = @import("../utility/ref_counted.zig");
+const hash = @import("../utility/hash.zig");
 
 const Self = @This();
 
@@ -22,11 +23,14 @@ pub fn init(
     name: []const u8,
     value: ObjectRef,
 ) !Self {
+    const name_hash = hash.stringHash(name);
+
     return Self{
         .allocator = allocator,
         .is_mutable = is_mutable,
         .is_parent = is_parent,
         .name = try allocator.dupe(u8, name),
+        .name_hash = name_hash,
         .value = value,
     };
 }
@@ -53,4 +57,5 @@ allocator: *Allocator,
 is_mutable: bool,
 is_parent: bool,
 name: []const u8,
+name_hash: u32,
 value: ObjectRef,

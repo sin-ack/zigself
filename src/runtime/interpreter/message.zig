@@ -245,7 +245,7 @@ pub fn executeAssignmentMessage(
     // NOTE: This is required, for instance, when we are assigning `self` to
     //       a slot (happens more often than you might think!). We need to strip
     //       the activation object to get to the actual value inside.
-    if (try argument.value.findActivationReceiver(context)) |actual_argument| {
+    if (try argument.value.findActivationReceiver()) |actual_argument| {
         actual_argument.ref();
         argument.unref();
         argument = actual_argument;
@@ -273,7 +273,7 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
         //       them.
         defer allocator.free(arguments);
 
-        if (try receiver.value.findActivationReceiver(context)) |actual_receiver| {
+        if (try receiver.value.findActivationReceiver()) |actual_receiver| {
             actual_receiver.ref();
             receiver.unref();
             receiver = actual_receiver;
@@ -287,7 +287,7 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
     // the virtual method.
     {
         var block_receiver = receiver;
-        if (try block_receiver.value.findActivationReceiver(context)) |actual_receiver| {
+        if (try block_receiver.value.findActivationReceiver()) |actual_receiver| {
             block_receiver = actual_receiver;
         }
 
@@ -312,6 +312,8 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
 
                 return try executeMethodMessage(allocator, message.range, receiver, lookup_result, arguments, context);
             },
+
+            .Activation => unreachable,
         }
     } else {
         return runtime_error.raiseError(allocator, context, "Unknown selector \"{s}\"", .{message.message_name});

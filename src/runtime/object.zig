@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const AST = @import("../language/ast.zig");
 const Slot = @import("./slot.zig");
+const hash = @import("../utility/hash.zig");
 const Range = @import("../language/location_range.zig");
 const Script = @import("../language/script.zig");
 const weak_ref = @import("../utility/weak_ref.zig");
@@ -53,6 +54,11 @@ const ObjectContent = union(enum) {
 
     Slots: struct {
         slots: []Slot,
+    },
+
+    Activation: struct {
+        slots: []Slot,
+        receiver: Ref,
     },
 
     Method: struct {
@@ -218,6 +224,13 @@ fn deinitContent(self: *Self) void {
             }
             self.allocator.free(slots.slots);
         },
+        .Activation => |activation| {
+            for (activation.slots) |*slot| {
+                slot.deinit();
+            }
+            self.allocator.free(activation.slots);
+            activation.receiver.unref();
+        },
         .Method => |method| {
             self.allocator.free(method.message_name);
             method.script.unref();
@@ -268,15 +281,25 @@ fn deinitContent(self: *Self) void {
 const VisitedObjectsSet = std.AutoArrayHashMap(*Self, void);
 const LookupType = enum { Value, Slot };
 const LookupError = Allocator.Error || runtime_error.SelfRuntimeError;
-pub fn lookup(self: *Self, context: ?*InterpreterContext, selector: []const u8, comptime lookup_type: LookupType) t: {
+fn lookupReturnType(comptime lookup_type: LookupType) type {
     if (lookup_type == .Value) {
-        break :t LookupError!?Ref;
+        return LookupError!?Ref;
     } else {
-        break :t LookupError!?*Slot;
+        return LookupError!?*Slot;
     }
-} {
+}
+
+pub fn lookup(self: *Self, context: ?*InterpreterContext, selector: []const u8, comptime lookup_type: LookupType) lookupReturnType(lookup_type) {
+    const selector_hash = hash.stringHash(selector);
+    return self.lookupHash(context, selector_hash, lookup_type);
+}
+
+const self_hash = hash.stringHash("self");
+const parent_hash = hash.stringHash("parent");
+
+fn lookupHash(self: *Self, context: ?*InterpreterContext, selector_hash: u32, comptime lookup_type: LookupType) lookupReturnType(lookup_type) {
     if (lookup_type == .Value) {
-        if (std.mem.eql(u8, selector, "self")) {
+        if (selector_hash == self_hash) {
             return Ref{ .value = self };
         }
     }
@@ -285,13 +308,13 @@ pub fn lookup(self: *Self, context: ?*InterpreterContext, selector: []const u8, 
     defer visited_objects.deinit();
 
     return if (lookup_type == .Value)
-        try self.lookupValue(context, selector, &visited_objects)
+        try self.lookupValue(context, selector_hash, &visited_objects)
     else
-        try self.lookupSlot(selector, &visited_objects);
+        try self.lookupSlot(selector_hash, &visited_objects);
 }
 
 /// Self Handbook, §3.3.8 The lookup algorithm
-fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8, visited_objects: *VisitedObjectsSet) LookupError!?Ref {
+fn lookupValue(self: *Self, context: ?*InterpreterContext, selector_hash: u32, visited_objects: *VisitedObjectsSet) LookupError!?Ref {
     if (visited_objects.contains(self)) {
         return null;
     }
@@ -304,7 +327,7 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8,
         .Slots => |slots| {
             // Direct lookup
             for (slots.slots) |slot| {
-                if (std.mem.eql(u8, selector, slot.name)) {
+                if (slot.name_hash == selector_hash) {
                     return slot.value;
                 }
             }
@@ -312,10 +335,37 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8,
             // Parent lookup
             for (slots.slots) |slot| {
                 if (slot.is_parent) {
-                    if (try slot.value.value.lookupValue(context, selector, visited_objects)) |found_object| {
+                    if (try slot.value.value.lookupValue(context, selector_hash, visited_objects)) |found_object| {
                         return found_object;
                     }
                 }
+            }
+
+            // Nope, not here
+            return null;
+        },
+
+        // FIXME: Don't repeat this code with .Slots
+        .Activation => |activation| {
+            // Direct lookup
+            for (activation.slots) |slot| {
+                if (slot.name_hash == selector_hash) {
+                    return slot.value;
+                }
+            }
+
+            // Parent lookup
+            for (activation.slots) |slot| {
+                if (slot.is_parent) {
+                    if (try slot.value.value.lookupValue(context, selector_hash, visited_objects)) |found_object| {
+                        return found_object;
+                    }
+                }
+            }
+
+            // Receiver lookup
+            if (try activation.receiver.value.lookupValue(context, selector_hash, visited_objects)) |found_object| {
+                return found_object;
             }
 
             // Nope, not here
@@ -333,10 +383,10 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8,
             if (context) |ctx| {
                 if (try ctx.lobby.value.lookup(context, "traits", .Value)) |traits| {
                     if (try traits.value.lookup(context, "block", .Value)) |traits_block| {
-                        if (std.mem.eql(u8, selector, "parent"))
+                        if (selector_hash == parent_hash)
                             return traits_block;
 
-                        return try traits_block.value.lookup(ctx, selector, .Value);
+                        return try traits_block.value.lookupHash(ctx, selector_hash, .Value);
                     } else {
                         return runtime_error.raiseError(self.allocator, ctx, "Could not find block in traits", .{});
                     }
@@ -351,10 +401,10 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8,
             if (context) |ctx| {
                 if (try ctx.lobby.value.lookup(context, "traits", .Value)) |traits| {
                     if (try traits.value.lookup(context, "string", .Value)) |traits_string| {
-                        if (std.mem.eql(u8, selector, "parent"))
+                        if (selector_hash == parent_hash)
                             return traits_string;
 
-                        return try traits_string.value.lookup(ctx, selector, .Value);
+                        return try traits_string.value.lookupHash(ctx, selector_hash, .Value);
                     } else {
                         return runtime_error.raiseError(self.allocator, ctx, "Could not find string in traits", .{});
                     }
@@ -369,10 +419,10 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8,
             if (context) |ctx| {
                 if (try ctx.lobby.value.lookup(context, "traits", .Value)) |traits| {
                     if (try traits.value.lookup(context, "integer", .Value)) |traits_integer| {
-                        if (std.mem.eql(u8, selector, "parent"))
+                        if (selector_hash == parent_hash)
                             return traits_integer;
 
-                        return try traits_integer.value.lookup(ctx, selector, .Value);
+                        return try traits_integer.value.lookupHash(ctx, selector_hash, .Value);
                     } else {
                         return runtime_error.raiseError(self.allocator, ctx, "Could not find integer in traits", .{});
                     }
@@ -388,10 +438,10 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8,
             if (context) |ctx| {
                 if (try ctx.lobby.value.lookup(context, "traits", .Value)) |traits| {
                     if (try traits.value.lookup(context, "float", .Value)) |traits_float| {
-                        if (std.mem.eql(u8, selector, "parent"))
+                        if (selector_hash == parent_hash)
                             return traits_float;
 
-                        return try traits_float.value.lookup(ctx, selector, .Value);
+                        return try traits_float.value.lookupHash(ctx, selector_hash, .Value);
                     } else {
                         return runtime_error.raiseError(self.allocator, ctx, "Could not find float in traits", .{});
                     }
@@ -408,7 +458,7 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector: []const u8,
 /// Self Handbook, §3.3.8 The lookup algorithm
 ///
 /// Like lookupValue but finds slots instead of values.
-fn lookupSlot(self: *Self, selector: []const u8, visited_objects: *VisitedObjectsSet) LookupError!?*Slot {
+fn lookupSlot(self: *Self, selector_hash: u32, visited_objects: *VisitedObjectsSet) LookupError!?*Slot {
     // I'd like this to not be duplicated but unfortunately I couldn't reconcile
     // them.
     if (visited_objects.contains(self)) {
@@ -423,7 +473,7 @@ fn lookupSlot(self: *Self, selector: []const u8, visited_objects: *VisitedObject
         .Slots => |slots| {
             // Direct lookup
             for (slots.slots) |*slot| {
-                if (std.mem.eql(u8, selector, slot.name)) {
+                if (slot.name_hash == selector_hash) {
                     return slot;
                 }
             }
@@ -431,10 +481,37 @@ fn lookupSlot(self: *Self, selector: []const u8, visited_objects: *VisitedObject
             // Parent lookup
             for (slots.slots) |slot| {
                 if (slot.is_parent) {
-                    if (try slot.value.value.lookupSlot(selector, visited_objects)) |found_slot| {
+                    if (try slot.value.value.lookupSlot(selector_hash, visited_objects)) |found_slot| {
                         return found_slot;
                     }
                 }
+            }
+
+            // Nope, not here
+            return null;
+        },
+
+        // FIXME: Don't repeat this code
+        .Activation => |activation| {
+            // Direct lookup
+            for (activation.slots) |*slot| {
+                if (slot.name_hash == selector_hash) {
+                    return slot;
+                }
+            }
+
+            // Parent lookup
+            for (activation.slots) |slot| {
+                if (slot.is_parent) {
+                    if (try slot.value.value.lookupSlot(selector_hash, visited_objects)) |found_slot| {
+                        return found_slot;
+                    }
+                }
+            }
+
+            // Receiver lookup
+            if (try activation.receiver.value.lookupSlot(selector_hash, visited_objects)) |found_slot| {
+                return found_slot;
             }
 
             // Nope, not here
@@ -467,6 +544,9 @@ pub fn copy(self: Self) !Ref {
 
             return try createSlots(self.allocator, slots_copy.toOwnedSlice());
         },
+
+        // We should _never_ want to actually copy an activation object.
+        .Activation => unreachable,
 
         .Block => |block| {
             var arguments_copy = try std.ArrayList([]const u8).initCapacity(self.allocator, block.arguments.len);
@@ -611,16 +691,15 @@ fn createMessageNameForBlock(self: Self) ![]const u8 {
 
 fn createActivationObject(
     allocator: *Allocator,
-    context: *InterpreterContext,
     arguments: []Ref,
     argument_names: [][]const u8,
     slots: []Slot,
-    parent: Ref,
+    receiver: Ref,
     check_activation_receiver: bool,
 ) !Ref {
     std.debug.assert(arguments.len == argument_names.len);
 
-    var slots_copy = try std.ArrayList(Slot).initCapacity(allocator, slots.len + arguments.len + 1);
+    var slots_copy = try std.ArrayList(Slot).initCapacity(allocator, slots.len + arguments.len);
     errdefer {
         for (slots_copy.items) |*slot| {
             slot.deinit();
@@ -636,27 +715,6 @@ fn createActivationObject(
         try slots_copy.append(new_slot);
     }
 
-    // NOTE: This is very important! When we're performing a method activation,
-    //       we must NOT parent previous method or block activation objects,
-    //       that would make their slots visible to us which we absolutely do
-    //       not want.
-    //
-    //       Not only that, but that would also cause the actual object to be
-    //       wrapped in multiple layers of activation objects like ogres.
-    var the_parent = parent;
-    if (check_activation_receiver) {
-        if (try parent.value.findActivationReceiver(context)) |actual_parent| {
-            the_parent = actual_parent;
-        }
-    }
-    the_parent.ref();
-
-    // _parent because Self code cannot create or reach slots with _ at start.
-    var parent_slot = try Slot.init(allocator, false, true, "_parent", the_parent);
-    errdefer parent_slot.deinit();
-
-    try slots_copy.append(parent_slot);
-
     for (slots) |slot| {
         var slot_copy = try slot.copy();
         errdefer slot_copy.deinit();
@@ -664,7 +722,22 @@ fn createActivationObject(
         try slots_copy.append(slot_copy);
     }
 
-    return try createSlots(allocator, slots_copy.toOwnedSlice());
+    // NOTE: This is very important! When we're performing a method activation,
+    //       we must NOT select previous method or block activation objects as
+    //       receiver, that would make their slots visible to us which we
+    //       absolutely do not want.
+    //
+    //       Not only that, but that would also cause the actual object to be
+    //       wrapped in multiple layers of activation objects like ogres.
+    var the_receiver = receiver;
+    if (check_activation_receiver) {
+        if (try receiver.value.findActivationReceiver()) |actual_receiver| {
+            the_receiver = actual_receiver;
+        }
+    }
+    the_receiver.ref();
+
+    return try create(allocator, .{ .Activation = .{ .slots = slots_copy.toOwnedSlice(), .receiver = the_receiver } });
 }
 
 /// Activate this block and return a slots object for it.
@@ -676,7 +749,6 @@ pub fn activateBlock(self: Self, context: *InterpreterContext, message_range: Ra
 
     const activation_object = try createActivationObject(
         self.allocator,
-        context,
         arguments,
         self.content.Block.arguments,
         self.content.Block.slots,
@@ -708,7 +780,6 @@ pub fn activateMethod(self: Self, context: *InterpreterContext, message_range: R
 
     const activation_object = try createActivationObject(
         self.allocator,
-        context,
         arguments,
         self.content.Method.arguments,
         self.content.Method.slots,
@@ -826,14 +897,15 @@ const FindActivationReceiverError = LookupError;
 /// This is used for primitives to find the actual value the primitive is
 /// supposed to send to. If the `_parent` slot exists, then that is returned as
 /// the activation target; otherwise null is returned.
-pub fn findActivationReceiver(self: *Self, context: *InterpreterContext) FindActivationReceiverError!?Ref {
-    if (try self.lookup(context, "_parent", .Value)) |parent| {
-        if (try parent.value.findActivationReceiver(context)) |even_more_parent| {
-            return even_more_parent;
-        } else {
-            return parent;
+pub fn findActivationReceiver(self: *Self) FindActivationReceiverError!?Ref {
+    if (self.is(.Activation)) {
+        var receiver = self;
+        while (receiver.is(.Activation)) {
+            receiver = receiver.content.Activation.receiver.value;
         }
-    } else {
-        return null;
+
+        return Ref{ .value = receiver };
     }
+
+    return null;
 }

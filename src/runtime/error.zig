@@ -32,15 +32,9 @@ pub fn printTraceFromActivationStack(stack: []*Activation) void {
         const context = activation.creation_context;
 
         const activation_object = activation.activation_object;
-        const receiver = activation_object.value.lookup(null, "_parent", .Value) catch unreachable;
+        const receiver = activation_object.value.content.Activation.receiver;
 
-        std.debug.print("  at {s} ({s}:{}) (receiver is ", .{ context.message, context.script.value.file_path, context.range.format() });
-        if (receiver) |obj| {
-            std.debug.print("<*{d}>", .{obj.value.id});
-        } else {
-            std.debug.print("<gone>", .{});
-        }
-        std.debug.print(")\n", .{});
+        std.debug.print("  at {s} ({s}:{}) (receiver is <*{d}>)\n", .{ context.message, context.script.value.file_path, context.range.format(), receiver.value.id });
 
         const source_line = context.script.value.parser.lexer.getLineForLocation(context.range.start) catch unreachable;
         // NOTE: The spaces are to get the arrow aligned with the source code

@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Slot = @import("./slot.zig");
 const Object = @import("./object.zig");
 const environment = @import("./environment.zig");
 
@@ -75,27 +76,18 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
         },
 
         .Slots => |slots| {
-            for (slots.slots) |slot| {
-                if (std.mem.eql(u8, slot.name, "_parent")) {
-                    std.debug.print("<activation object> ", .{});
-                }
-            }
-
             std.debug.print("(|{s}", .{separator});
 
-            for (slots.slots) |slot| {
-                const parent_marker: []const u8 = if (slot.is_parent) "*" else "";
-                const mutability_marker: []const u8 = if (slot.is_mutable) "<-" else "=";
-                printWithIndent(indent + 2, display_type, "{s}{s} {s} ", .{ slot.name, parent_marker, mutability_marker });
+            try inspectSlots(slots.slots, display_type, indent + 2, separator, visited_object_set);
 
-                if (slot.is_parent) {
-                    std.debug.print("<*{d}>", .{slot.value.value.id});
-                } else {
-                    try inspectObjectInternal(slot.value, display_type, indent + 2, visited_object_set);
-                }
+            printWithIndent(indent, display_type, "|)", .{});
+        },
 
-                std.debug.print(".{s}", .{separator});
-            }
+        // FIXME: avoid repeating code
+        .Activation => |activation| {
+            std.debug.print("<activation object> (|{s}", .{separator});
+
+            try inspectSlots(activation.slots, display_type, indent + 2, separator, visited_object_set);
 
             printWithIndent(indent, display_type, "|)", .{});
         },
@@ -168,5 +160,21 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
         .FloatingPoint => |floating_point| {
             std.debug.print("<floating point> {d}", .{floating_point.value});
         },
+    }
+}
+
+fn inspectSlots(slots: []Slot, comptime display_type: InspectDisplayType, indent: usize, separator: []const u8, visited_object_set: *VisitedObjectSet) !void {
+    for (slots) |slot| {
+        const parent_marker: []const u8 = if (slot.is_parent) "*" else "";
+        const mutability_marker: []const u8 = if (slot.is_mutable) "<-" else "=";
+        printWithIndent(indent, display_type, "{s}{s} {s} ", .{ slot.name, parent_marker, mutability_marker });
+
+        if (slot.is_parent) {
+            std.debug.print("<*{d}>", .{slot.value.value.id});
+        } else {
+            try inspectObjectInternal(slot.value, display_type, indent, visited_object_set);
+        }
+
+        std.debug.print(".{s}", .{separator});
     }
 }
