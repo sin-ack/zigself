@@ -278,9 +278,9 @@ fn deinitContent(self: *Self) void {
     }
 }
 
-const VisitedObjectsSet = std.AutoArrayHashMap(*Self, void);
 const LookupType = enum { Value, Slot };
 const LookupError = Allocator.Error || runtime_error.SelfRuntimeError;
+const VisitedObjectLink = struct { previous: ?*const VisitedObjectLink = null, object: *Self };
 fn lookupReturnType(comptime lookup_type: LookupType) type {
     if (lookup_type == .Value) {
         return LookupError!?Ref;
@@ -304,22 +304,27 @@ fn lookupHash(self: *Self, context: ?*InterpreterContext, selector_hash: u32, co
         }
     }
 
-    var visited_objects = VisitedObjectsSet.init(self.allocator);
-    defer visited_objects.deinit();
-
     return if (lookup_type == .Value)
-        try self.lookupValue(context, selector_hash, &visited_objects)
+        try self.lookupValue(context, selector_hash, null)
     else
-        try self.lookupSlot(selector_hash, &visited_objects);
+        try self.lookupSlot(selector_hash, null);
 }
 
 /// Self Handbook, §3.3.8 The lookup algorithm
-fn lookupValue(self: *Self, context: ?*InterpreterContext, selector_hash: u32, visited_objects: *VisitedObjectsSet) LookupError!?Ref {
-    if (visited_objects.contains(self)) {
-        return null;
+fn lookupValue(self: *Self, context: ?*InterpreterContext, selector_hash: u32, previously_visited: ?*const VisitedObjectLink) LookupError!?Ref {
+    if (previously_visited) |visited| {
+        var link: ?*const VisitedObjectLink = visited;
+        while (link) |l| {
+            if (l.object == self) {
+                // Cyclic reference
+                return null;
+            }
+
+            link = l.previous;
+        }
     }
 
-    try visited_objects.put(self, .{});
+    const currently_visited = VisitedObjectLink{ .previous = previously_visited, .object = self };
 
     switch (self.content) {
         .Empty => return null,
@@ -335,7 +340,7 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector_hash: u32, v
             // Parent lookup
             for (slots.slots) |slot| {
                 if (slot.is_parent) {
-                    if (try slot.value.value.lookupValue(context, selector_hash, visited_objects)) |found_object| {
+                    if (try slot.value.value.lookupValue(context, selector_hash, &currently_visited)) |found_object| {
                         return found_object;
                     }
                 }
@@ -357,14 +362,14 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector_hash: u32, v
             // Parent lookup
             for (activation.slots) |slot| {
                 if (slot.is_parent) {
-                    if (try slot.value.value.lookupValue(context, selector_hash, visited_objects)) |found_object| {
+                    if (try slot.value.value.lookupValue(context, selector_hash, &currently_visited)) |found_object| {
                         return found_object;
                     }
                 }
             }
 
             // Receiver lookup
-            if (try activation.receiver.value.lookupValue(context, selector_hash, visited_objects)) |found_object| {
+            if (try activation.receiver.value.lookupValue(context, selector_hash, &currently_visited)) |found_object| {
                 return found_object;
             }
 
@@ -458,14 +463,22 @@ fn lookupValue(self: *Self, context: ?*InterpreterContext, selector_hash: u32, v
 /// Self Handbook, §3.3.8 The lookup algorithm
 ///
 /// Like lookupValue but finds slots instead of values.
-fn lookupSlot(self: *Self, selector_hash: u32, visited_objects: *VisitedObjectsSet) LookupError!?*Slot {
+fn lookupSlot(self: *Self, selector_hash: u32, previously_visited: ?*const VisitedObjectLink) LookupError!?*Slot {
     // I'd like this to not be duplicated but unfortunately I couldn't reconcile
     // them.
-    if (visited_objects.contains(self)) {
-        return null;
+    if (previously_visited) |visited| {
+        var link: ?*const VisitedObjectLink = visited;
+        while (link) |l| {
+            if (l.object == self) {
+                // Cyclic reference
+                return null;
+            }
+
+            link = l.previous;
+        }
     }
 
-    try visited_objects.put(self, .{});
+    const currently_visited = VisitedObjectLink{ .previous = previously_visited, .object = self };
 
     switch (self.content) {
         .Empty, .Block, .ByteVector, .Integer, .FloatingPoint => return null,
@@ -481,7 +494,7 @@ fn lookupSlot(self: *Self, selector_hash: u32, visited_objects: *VisitedObjectsS
             // Parent lookup
             for (slots.slots) |slot| {
                 if (slot.is_parent) {
-                    if (try slot.value.value.lookupSlot(selector_hash, visited_objects)) |found_slot| {
+                    if (try slot.value.value.lookupSlot(selector_hash, &currently_visited)) |found_slot| {
                         return found_slot;
                     }
                 }
@@ -503,14 +516,14 @@ fn lookupSlot(self: *Self, selector_hash: u32, visited_objects: *VisitedObjectsS
             // Parent lookup
             for (activation.slots) |slot| {
                 if (slot.is_parent) {
-                    if (try slot.value.value.lookupSlot(selector_hash, visited_objects)) |found_slot| {
+                    if (try slot.value.value.lookupSlot(selector_hash, &currently_visited)) |found_slot| {
                         return found_slot;
                     }
                 }
             }
 
             // Receiver lookup
-            if (try activation.receiver.value.lookupSlot(selector_hash, visited_objects)) |found_slot| {
+            if (try activation.receiver.value.lookupSlot(selector_hash, &currently_visited)) |found_slot| {
                 return found_slot;
             }
 
