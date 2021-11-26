@@ -66,6 +66,10 @@ pub fn executeBlockMessage(
         return runtime_error.raiseError(allocator, context, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
     }
 
+    if (context.activation_stack.items.len >= 512) {
+        return runtime_error.raiseError(allocator, context, "Maximum stack size reached", .{});
+    }
+
     // This is done so that we never hold an Activation in value form, and
     // always refer to the in-place version in the activation stack.
     const block_activation = try block_object.value.activateBlock(context, message_range, arguments, parent_activation.activation_object);
@@ -137,6 +141,10 @@ pub fn executeMethodMessage(
     arguments: []Object.Ref,
     context: *InterpreterContext,
 ) !Object.Ref {
+    if (context.activation_stack.items.len >= 512) {
+        return runtime_error.raiseError(allocator, context, "Maximum stack size reached", .{});
+    }
+
     // NOTE: This is done so that we never hold an Activation in value form, and
     //       always refer to the in-place version in the activation stack.
     const method_activation = try method_object.value.activateMethod(context, message_range, arguments, receiver);
