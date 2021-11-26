@@ -105,8 +105,7 @@ traits _AddSlots: (|
         at: index = (| b |
             b: [| :node. :i | (i = index) ifTrue: [ ^ node value ] ].
             ((index * 2) > size) ifFalse: [ do: b ] True: [ reverseDo: b ].
-            "FIXME: Return an error here"
-            nil
+            _Error: 'Could not find the item at the given index'.
         ).
     |).
 |).
