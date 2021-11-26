@@ -189,7 +189,15 @@ pub fn create(allocator: *Allocator, content: ObjectContent) !Ref {
 }
 
 pub fn destroy(self: *Self) void {
-    self.deinitContent();
+    self.destroyOptions(false);
+}
+
+/// If `avoid_object_unref` is true, avoids calling `unref` on object
+/// references. This is used by the object reference tracker to clean up all
+/// object references in one go, so that the GeneralPurposeAllocator leak
+/// detector shows only actual leaks and not those caused by reference cycles.
+pub fn destroyOptions(self: *Self, comptime avoid_object_unref: bool) void {
+    self.deinitContent(avoid_object_unref);
     self.weak.deinit();
 
     self.removeObjectFromRefTracker();
@@ -206,18 +214,18 @@ fn init(self: *Self, allocator: *Allocator, content: ObjectContent) !void {
     self.content = content;
 }
 
-fn deinitContent(self: *Self) void {
+fn deinitContent(self: *Self, comptime avoid_object_unref: bool) void {
     switch (self.content) {
         .Empty => {},
         .Slots => |slots| {
             for (slots.slots) |*slot| {
-                slot.deinit();
+                slot.deinitOptions(avoid_object_unref);
             }
             self.allocator.free(slots.slots);
         },
         .Activation => |activation| {
             for (activation.slots) |*slot| {
-                slot.deinit();
+                slot.deinitOptions(avoid_object_unref);
             }
             self.allocator.free(activation.slots);
             activation.receiver.unref();
@@ -232,7 +240,7 @@ fn deinitContent(self: *Self) void {
             self.allocator.free(method.arguments);
 
             for (method.slots) |*slot| {
-                slot.deinit();
+                slot.deinitOptions(avoid_object_unref);
             }
             self.allocator.free(method.slots);
 
@@ -250,7 +258,7 @@ fn deinitContent(self: *Self) void {
             self.allocator.free(block.arguments);
 
             for (block.slots) |*slot| {
-                slot.deinit();
+                slot.deinitOptions(avoid_object_unref);
             }
             self.allocator.free(block.slots);
 
@@ -266,7 +274,7 @@ fn deinitContent(self: *Self) void {
             self.allocator.free(bytevector.values);
         },
         .Vector => |vector| {
-            for (vector.values) |v| v.unref();
+            if (!avoid_object_unref) for (vector.values) |v| v.unref();
             self.allocator.free(vector.values);
         },
         .Integer, .FloatingPoint => {},
@@ -413,7 +421,7 @@ pub fn addSlots(self: *Self, new_slots: []Slot) !void {
     var slot_list = blk: {
         switch (self.content) {
             .Empty => {
-                self.deinitContent();
+                self.deinitContent(false);
 
                 var new_slot_list = try self.allocator.alloc(Slot, new_slots.len);
                 self.content = .{ .Slots = .{ .slots = new_slot_list } };

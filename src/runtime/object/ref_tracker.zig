@@ -30,6 +30,8 @@ pub fn teardownObjectRefTrackerAndReportAliveRefs() void {
             const object = item.key_ptr.*;
             std.debug.print("  <*{d}> (type {s}) - {d} refs\n", .{ object.id, @tagName(object.content), object.ref.ref_count });
         }
+
+        cleanupObjectRefs();
     }
 
     object_ref_tracker.?.deinit();
@@ -42,5 +44,14 @@ pub fn addObjectToRefTracker(object: *Object) !void {
 
 pub fn removeObjectFromRefTracker(object: *Object) void {
     if (!EnableObjectRefTracker) return;
-    object_ref_tracker.?.swapRemove(object);
+    _ = object_ref_tracker.?.swapRemove(object);
+}
+
+fn cleanupObjectRefs() void {
+    std.debug.print("Cleaning up all object references to make the leak checker useful...\n", .{});
+
+    while (object_ref_tracker.?.count() > 0) {
+        const first_object = object_ref_tracker.?.keys()[0];
+        first_object.destroyOptions(true);
+    }
 }

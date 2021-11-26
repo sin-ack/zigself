@@ -39,8 +39,12 @@ pub fn init(
 
 /// Deinitialize the slot, and unref the value.
 pub fn deinit(self: *Self) void {
+    self.deinitOptions(false);
+}
+
+pub fn deinitOptions(self: *Self, comptime avoid_unref: bool) void {
     self.allocator.free(self.name);
-    self.value.unref();
+    if (!avoid_unref) self.value.unref();
 }
 
 pub fn copy(self: Self) !Self {
