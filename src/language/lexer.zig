@@ -50,6 +50,10 @@ pub fn nextToken(self: *Self) !*tokens.Token {
     if (!self.initialized)
         @panic("Attempting to call Lexer.nextToken on uninitialized lexer");
 
+    if (self.current_token == .String) {
+        self.allocator.free(self.current_token.String);
+    }
+
     self.consumed_whitespace = 0;
 
     while (true) {

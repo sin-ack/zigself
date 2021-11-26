@@ -1032,7 +1032,9 @@ fn parseString(self: *Self) ParserFunctionErrorSet!?AST.StringNode {
     if (!try self.expectToken(.String, .DontConsume))
         return null;
 
-    const value = AST.StringNode{ .value = self.lexer.current_token.String, .range = .{ .start = start, .end = end } };
+    const string_copy = try self.allocator.dupe(u8, self.lexer.current_token.String);
+    errdefer self.allocator.free(string_copy);
+    const value = AST.StringNode{ .value = string_copy, .range = .{ .start = start, .end = end } };
 
     _ = try self.lexer.nextToken();
     return value;
