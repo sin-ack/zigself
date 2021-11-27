@@ -7,7 +7,7 @@ SPDX-License-Identifier: GPL-3.0-only
 traits string _AddSlots: (|
     parent* = traits clonable.
 
-    splitOn: substring = (| indicesList. substrings. index |
+    splitOn: substring = (| indicesList. substrings. head. index |
         indicesList: list copyRemoveAll.
         index: 0.
 
@@ -29,8 +29,10 @@ traits string _AddSlots: (|
 
         "Find and append all the substrings."
         index: 0.
-        [ index < (indicesList size prec) ] whileTrue: [
-            substrings at: index Put: (copyFrom: ((indicesList at: index) + substring size) Until: (indicesList at: index succ)).
+        head: indicesList nodes.
+        indicesList nodes do: [| :node |
+            (node next == head) ifTrue: [ ^ substrings ].
+            substrings at: index Put: (copyFrom: (node value + substring size) Until: (node next value)).
             index: index succ.
         ].
 
@@ -53,6 +55,7 @@ traits string _AddSlots: (|
     ).
 
     size = (_ByteVectorSize).
+    isEmpty = (size = 0).
     at: index = ( _ByteAt: index ).
     at: index PutByte: value = ( _ByteAt: index Put: value ).
     do: block = (
@@ -90,15 +93,21 @@ traits string _AddSlots: (|
 
 traits string _AddSlots: (|
     toInteger = (| value. zeroByte = '0' at: 0. nineByte = '9' at: 0 |
-        (size = 0) ifTrue: [ _Error: 'empty string cannot be converted to integer' ].
+        isEmpty ifTrue: [ _Error: 'empty string cannot be converted to integer' ].
 
         value: 0.
         do: [| :byte |
-            ((byte >= zeroByte) && [ byte <= nineByte ]) ifTrue: [
-                   value: (value * 10) + (byte - zeroByte).
-            ] False: [ _Error: 'string with non-digit characters cannot be converted to integer' ].
+            ((byte >= zeroByte) && [byte <= nineByte]) ifTrue: [
+                value: (value * 10) + (byte - zeroByte).
+            ] False: [
+                _Error: 'string with non-digit characters cannot be converted to integer'
+            ].
         ].
 
         value
     ).
-|)
+|).
+
+globals _AddSlots: (|
+    string = ''.
+|).
