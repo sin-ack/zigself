@@ -45,7 +45,7 @@ pub fn isCorrectMessageForBlockExecution(self: Object, message: []const u8) bool
     return remaining_message.len == 0;
 }
 
-fn createMessageNameForBlock(self: Object) ![]const u8 {
+fn createMessageNameForBlock(self: Object, allocator: *Allocator) ![]const u8 {
     std.debug.assert(self.is(.Block));
 
     var needed_space: usize = 5; // value
@@ -54,7 +54,7 @@ fn createMessageNameForBlock(self: Object) ![]const u8 {
         needed_space += 5 * (self.content.Block.arguments.len - 1); // Any other With:s needed
     }
 
-    var message_name = try self.allocator.alloc(u8, needed_space);
+    var message_name = try allocator.alloc(u8, needed_space);
     std.mem.copy(u8, message_name, "value");
 
     if (self.content.Block.arguments.len > 0) {
@@ -83,7 +83,7 @@ fn createActivationObject(
     var slots_copy = try std.ArrayList(Slot).initCapacity(allocator, slots.len + arguments.len);
     errdefer {
         for (slots_copy.items) |*slot| {
-            slot.deinit();
+            slot.deinit(allocator);
         }
         slots_copy.deinit();
     }
@@ -91,14 +91,14 @@ fn createActivationObject(
     // Add argument slots first, as those are more likely to be used
     for (arguments) |argument, i| {
         var new_slot = try Slot.init(allocator, false, false, argument_names[i], argument);
-        errdefer new_slot.deinit();
+        errdefer new_slot.deinit(allocator);
 
         try slots_copy.append(new_slot);
     }
 
     for (slots) |slot| {
-        var slot_copy = try slot.copy();
-        errdefer slot_copy.deinit();
+        var slot_copy = try slot.copy(allocator);
+        errdefer slot_copy.deinit(allocator);
 
         try slots_copy.append(slot_copy);
     }
@@ -125,26 +125,33 @@ fn createActivationObject(
 /// Borrows 1 ref from each object in `arguments`.
 /// `parent_activation_object` is ref'd internally.
 /// `context.script` is ref'd once.
-pub fn activateBlock(self: Object, context: *InterpreterContext, message_range: Range, arguments: []Object.Ref, parent_activation_object: Object.Ref) !*Activation {
+pub fn activateBlock(
+    self: Object,
+    allocator: *Allocator,
+    context: *InterpreterContext,
+    message_range: Range,
+    arguments: []Object.Ref,
+    parent_activation_object: Object.Ref,
+) !*Activation {
     std.debug.assert(self.is(.Block));
 
     const activation_object = try createActivationObject(
-        self.allocator,
+        allocator,
         arguments,
         self.content.Block.arguments,
         self.content.Block.slots,
         parent_activation_object,
         false,
     );
-    errdefer activation_object.unref();
+    errdefer activation_object.unrefWithAllocator(allocator);
 
-    var message_name = try createMessageNameForBlock(self);
-    errdefer self.allocator.free(message_name);
+    var message_name = try createMessageNameForBlock(self, allocator);
+    errdefer allocator.free(message_name);
 
     context.script.ref();
     errdefer context.script.unref();
 
-    var activation = try Activation.create(self.allocator, activation_object, message_name, context.script, message_range);
+    var activation = try Activation.create(allocator, activation_object, message_name, context.script, message_range);
     // If we got here then the parent and non-local return target activations
     // must exist.
     activation.parent_activation = self.content.Block.parent_activation.getPointer().?;
@@ -156,24 +163,31 @@ pub fn activateBlock(self: Object, context: *InterpreterContext, message_range: 
 /// Borrows 1 ref from each object in `arguments`.
 /// `parent` is ref'd internally.
 /// `context.script` is ref'd once.
-pub fn activateMethod(self: Object, context: *InterpreterContext, message_range: Range, arguments: []Object.Ref, parent: Object.Ref) !*Activation {
+pub fn activateMethod(
+    self: Object,
+    allocator: *Allocator,
+    context: *InterpreterContext,
+    message_range: Range,
+    arguments: []Object.Ref,
+    parent: Object.Ref,
+) !*Activation {
     std.debug.assert(self.is(.Method));
 
     const activation_object = try createActivationObject(
-        self.allocator,
+        allocator,
         arguments,
         self.content.Method.arguments,
         self.content.Method.slots,
         parent,
         true,
     );
-    errdefer activation_object.unref();
+    errdefer activation_object.unrefWithAllocator(allocator);
 
-    var message_name_copy = try self.allocator.dupe(u8, self.content.Method.message_name);
-    errdefer self.allocator.free(message_name_copy);
+    var message_name_copy = try allocator.dupe(u8, self.content.Method.message_name);
+    errdefer allocator.free(message_name_copy);
 
     context.script.ref();
     errdefer context.script.unref();
 
-    return try Activation.create(self.allocator, activation_object, message_name_copy, context.script, message_range);
+    return try Activation.create(allocator, activation_object, message_name_copy, context.script, message_range);
 }

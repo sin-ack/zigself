@@ -20,7 +20,6 @@ pub usingnamespace @import("./object/ref_tracker.zig");
 
 ref: ref_counted.RefCount,
 weak: WeakBlock,
-allocator: *Allocator,
 content: ObjectContent,
 id: usize,
 
@@ -188,20 +187,20 @@ pub fn create(allocator: *Allocator, content: ObjectContent) !Ref {
     return Ref.adopt(self);
 }
 
-pub fn destroy(self: *Self) void {
-    self.destroyOptions(false);
+pub fn destroy(self: *Self, allocator: *Allocator) void {
+    self.destroyOptions(allocator, false);
 }
 
 /// If `avoid_object_unref` is true, avoids calling `unref` on object
 /// references. This is used by the object reference tracker to clean up all
 /// object references in one go, so that the GeneralPurposeAllocator leak
 /// detector shows only actual leaks and not those caused by reference cycles.
-pub fn destroyOptions(self: *Self, comptime avoid_object_unref: bool) void {
-    self.deinitContent(avoid_object_unref);
+pub fn destroyOptions(self: *Self, allocator: *Allocator, comptime avoid_object_unref: bool) void {
+    self.deinitContent(allocator, avoid_object_unref);
     self.weak.deinit();
 
     self.removeObjectFromRefTracker();
-    self.allocator.destroy(self);
+    allocator.destroy(self);
 }
 
 fn init(self: *Self, allocator: *Allocator, content: ObjectContent) !void {
@@ -210,72 +209,71 @@ fn init(self: *Self, allocator: *Allocator, content: ObjectContent) !void {
     self.ref = .{};
     self.weak = try WeakBlock.init(allocator, self);
 
-    self.allocator = allocator;
     self.content = content;
 }
 
-fn deinitContent(self: *Self, comptime avoid_object_unref: bool) void {
+fn deinitContent(self: *Self, allocator: *Allocator, comptime avoid_object_unref: bool) void {
     switch (self.content) {
         .Empty => {},
         .Slots => |slots| {
             for (slots.slots) |*slot| {
-                slot.deinitOptions(avoid_object_unref);
+                slot.deinitOptions(allocator, avoid_object_unref);
             }
-            self.allocator.free(slots.slots);
+            allocator.free(slots.slots);
         },
         .Activation => |activation| {
             for (activation.slots) |*slot| {
-                slot.deinitOptions(avoid_object_unref);
+                slot.deinitOptions(allocator, avoid_object_unref);
             }
-            self.allocator.free(activation.slots);
-            activation.receiver.unref();
+            allocator.free(activation.slots);
+            activation.receiver.unrefWithAllocator(allocator);
         },
         .Method => |method| {
-            self.allocator.free(method.message_name);
+            allocator.free(method.message_name);
             method.script.unref();
 
             for (method.arguments) |argument| {
-                self.allocator.free(argument);
+                allocator.free(argument);
             }
-            self.allocator.free(method.arguments);
+            allocator.free(method.arguments);
 
             for (method.slots) |*slot| {
-                slot.deinitOptions(avoid_object_unref);
+                slot.deinitOptions(allocator, avoid_object_unref);
             }
-            self.allocator.free(method.slots);
+            allocator.free(method.slots);
 
             for (method.statements) |*statement| {
-                statement.deinit(self.allocator);
+                statement.deinit(allocator);
             }
-            self.allocator.free(method.statements);
+            allocator.free(method.statements);
         },
         .Block => |block| {
             block.script.unref();
 
             for (block.arguments) |argument| {
-                self.allocator.free(argument);
+                allocator.free(argument);
             }
-            self.allocator.free(block.arguments);
+            allocator.free(block.arguments);
 
             for (block.slots) |*slot| {
-                slot.deinitOptions(avoid_object_unref);
+                slot.deinitOptions(allocator, avoid_object_unref);
             }
-            self.allocator.free(block.slots);
+            allocator.free(block.slots);
 
             for (block.statements) |*statement| {
-                statement.deinit(self.allocator);
+                statement.deinit(allocator);
             }
-            self.allocator.free(block.statements);
+            allocator.free(block.statements);
 
             block.parent_activation.deinit();
             block.nonlocal_return_target_activation.deinit();
         },
         .ByteVector => |bytevector| {
-            self.allocator.free(bytevector.values);
+            allocator.free(bytevector.values);
         },
         .Vector => |vector| {
-            if (!avoid_object_unref) for (vector.values) |v| v.unref();
-            self.allocator.free(vector.values);
+            if (!avoid_object_unref) for (vector.values) |v| v.unrefWithAllocator(allocator);
+            allocator.free(vector.values);
         },
         .Integer, .FloatingPoint => {},
     }
@@ -285,74 +283,74 @@ pub fn is(self: Self, tag: std.meta.Tag(ObjectContent)) bool {
     return self.content == tag;
 }
 
-pub fn copy(self: Self) !Ref {
+pub fn copy(self: Self, allocator: *Allocator) !Ref {
     switch (self.content) {
-        .Empty => return createEmpty(self.allocator),
+        .Empty => return createEmpty(allocator),
 
         .Slots => |slots| {
-            var slots_copy = try std.ArrayList(Slot).initCapacity(self.allocator, slots.slots.len);
+            var slots_copy = try std.ArrayList(Slot).initCapacity(allocator, slots.slots.len);
             errdefer {
                 for (slots_copy.items) |*slot| {
-                    slot.deinit();
+                    slot.deinit(allocator);
                 }
                 slots_copy.deinit();
             }
 
             for (slots.slots) |slot| {
-                var slot_copy = try slot.copy();
-                errdefer slot_copy.deinit();
+                var slot_copy = try slot.copy(allocator);
+                errdefer slot_copy.deinit(allocator);
 
                 try slots_copy.append(slot_copy);
             }
 
-            return try createSlots(self.allocator, slots_copy.toOwnedSlice());
+            return try createSlots(allocator, slots_copy.toOwnedSlice());
         },
 
         // We should _never_ want to actually copy an activation object.
         .Activation => unreachable,
 
         .Block => |block| {
-            var arguments_copy = try std.ArrayList([]const u8).initCapacity(self.allocator, block.arguments.len);
+            var arguments_copy = try std.ArrayList([]const u8).initCapacity(allocator, block.arguments.len);
             errdefer {
                 for (arguments_copy.items) |argument| {
-                    self.allocator.free(argument);
+                    allocator.free(argument);
                 }
                 arguments_copy.deinit();
             }
 
-            var slots_copy = try std.ArrayList(Slot).initCapacity(self.allocator, block.slots.len);
+            var slots_copy = try std.ArrayList(Slot).initCapacity(allocator, block.slots.len);
             errdefer {
                 for (slots_copy.items) |*slot| {
-                    slot.deinit();
+                    slot.deinit(allocator);
                 }
                 slots_copy.deinit();
             }
 
-            var statements_copy = try std.ArrayList(AST.StatementNode).initCapacity(self.allocator, block.statements.len);
+            var statements_copy = try std.ArrayList(AST.StatementNode).initCapacity(allocator, block.statements.len);
             errdefer {
                 for (statements_copy.items) |*statement| {
-                    statement.deinit(self.allocator);
+                    statement.deinit(allocator);
                 }
                 statements_copy.deinit();
             }
 
             for (block.arguments) |argument| {
-                var argument_copy = try self.allocator.dupe(u8, argument);
-                errdefer self.allocator.free(argument_copy);
+                var argument_copy = try allocator.dupe(u8, argument);
+                errdefer allocator.free(argument_copy);
 
                 try arguments_copy.append(argument_copy);
             }
 
             for (block.slots) |slot| {
-                var slot_copy = try slot.copy();
-                errdefer slot_copy.deinit();
+                var slot_copy = try slot.copy(allocator);
+                errdefer slot_copy.deinit(allocator);
 
                 try slots_copy.append(slot_copy);
             }
 
             for (block.statements) |statement| {
-                var statement_copy = try ASTCopyVisitor.visitStatement(statement, self.allocator);
-                errdefer statement_copy.deinit(self.allocator);
+                var statement_copy = try ASTCopyVisitor.visitStatement(statement, allocator);
+                errdefer statement_copy.deinit(allocator);
 
                 try statements_copy.append(statement_copy);
             }
@@ -363,7 +361,7 @@ pub fn copy(self: Self) !Ref {
             // FIXME: The activations might be gone at this point, handle that
             //        case.
             return try createBlock(
-                self.allocator,
+                allocator,
                 arguments_copy.toOwnedSlice(),
                 slots_copy.toOwnedSlice(),
                 statements_copy.toOwnedSlice(),
@@ -374,29 +372,29 @@ pub fn copy(self: Self) !Ref {
         },
 
         .ByteVector => |vector| {
-            return try createCopyFromStringLiteral(self.allocator, vector.values);
+            return try createCopyFromStringLiteral(allocator, vector.values);
         },
 
         .Integer => |integer| {
-            return try createFromIntegerLiteral(self.allocator, integer.value);
+            return try createFromIntegerLiteral(allocator, integer.value);
         },
 
         .FloatingPoint => |floating_point| {
-            return try createFromFloatingPointLiteral(self.allocator, floating_point.value);
+            return try createFromFloatingPointLiteral(allocator, floating_point.value);
         },
 
         .Vector => |vector| {
-            var values_copy = try self.allocator.alloc(Ref, vector.values.len);
-            errdefer self.allocator.free(values_copy);
+            var values_copy = try allocator.alloc(Ref, vector.values.len);
+            errdefer allocator.free(values_copy);
 
             for (values_copy) |*v, i| {
                 const value = vector.values[i];
                 value.ref();
                 v.* = value;
             }
-            errdefer for (values_copy) |v| v.unref();
+            errdefer for (values_copy) |v| v.unrefWithAllocator(allocator);
 
-            return try create(self.allocator, .{ .Vector = .{ .values = values_copy } });
+            return try create(allocator, .{ .Vector = .{ .values = values_copy } });
         },
 
         .Method => unreachable,
@@ -406,10 +404,10 @@ pub fn copy(self: Self) !Ref {
 /// Attempt to add the given slot objects to the content. Only Empty and Slots
 /// objects allow this; otherwise, error.ObjectDoesNotAcceptSlots is returned.
 /// The slots' ownership is passed to the object.
-pub fn addSlots(self: *Self, new_slots: []Slot) !void {
+pub fn addSlots(self: *Self, allocator: *Allocator, new_slots: []Slot) !void {
     errdefer {
         for (new_slots) |*slot| {
-            slot.deinit();
+            slot.deinit(allocator);
         }
     }
 
@@ -421,14 +419,14 @@ pub fn addSlots(self: *Self, new_slots: []Slot) !void {
     var slot_list = blk: {
         switch (self.content) {
             .Empty => {
-                self.deinitContent(false);
+                self.deinitContent(allocator, false);
 
-                var new_slot_list = try self.allocator.alloc(Slot, new_slots.len);
+                var new_slot_list = try allocator.alloc(Slot, new_slots.len);
                 self.content = .{ .Slots = .{ .slots = new_slot_list } };
                 break :blk new_slot_list;
             },
             .Slots => |slots| {
-                var resized_slots_list = try self.allocator.realloc(slots.slots, slots.slots.len + new_slots.len);
+                var resized_slots_list = try allocator.realloc(slots.slots, slots.slots.len + new_slots.len);
                 self.content = .{ .Slots = .{ .slots = resized_slots_list } };
                 break :blk resized_slots_list;
             },
@@ -446,7 +444,7 @@ pub fn addSlots(self: *Self, new_slots: []Slot) !void {
 /// Removes the given slot. Returns whether a slot was found and removed.
 /// Returns error.ObjectDoesNotAcceptSlots if the object isn't an Empty or a
 /// Slots.
-pub fn removeSlot(self: *Self, name: []const u8) !bool {
+pub fn removeSlot(self: *Self, allocator: *Allocator, name: []const u8) !bool {
     if (self.is(.Empty)) {
         return false;
     } else if (!self.is(.Slots)) {
@@ -454,14 +452,14 @@ pub fn removeSlot(self: *Self, name: []const u8) !bool {
     }
 
     const slots = self.content.Slots.slots;
-    var slots_copy = try self.allocator.alloc(Slot, slots.len);
-    errdefer self.allocator.free(slots_copy);
+    var slots_copy = try allocator.alloc(Slot, slots.len);
+    errdefer allocator.free(slots_copy);
 
     var did_find_and_remove_slot = false;
     var slots_copy_cursor: usize = 0;
     for (slots) |*slot| {
         if (std.mem.eql(u8, name, slot.name)) {
-            slot.deinit();
+            slot.deinit(allocator);
             did_find_and_remove_slot = true;
             continue;
         }
@@ -471,12 +469,12 @@ pub fn removeSlot(self: *Self, name: []const u8) !bool {
     }
 
     // NOTE: Can't use deinitContent here since that would also deinit the slots
-    self.allocator.free(slots);
+    allocator.free(slots);
     if (slots_copy_cursor == 0) {
-        self.allocator.free(slots_copy);
+        allocator.free(slots_copy);
         self.content = .{ .Empty = .{} };
     } else {
-        slots_copy = try self.allocator.realloc(slots_copy, slots_copy_cursor);
+        slots_copy = try allocator.realloc(slots_copy, slots_copy_cursor);
         self.content = .{ .Slots = .{ .slots = slots_copy } };
     }
 
@@ -486,13 +484,13 @@ pub fn removeSlot(self: *Self, name: []const u8) !bool {
 /// Looks for a message of the form "slotName:", where "slotName" exists as a
 /// mutable slot on the object. Returns the slot if it exists, or null when not
 /// found.
-pub fn getAssignableSlotForMessage(self: *Self, slot_name: []const u8) !?*Slot {
+pub fn getAssignableSlotForMessage(self: Self, slot_name: []const u8) !?*Slot {
     if (slot_name[slot_name.len - 1] != ':') {
         return null;
     }
 
     const slot_name_without_colon = slot_name[0 .. slot_name.len - 1];
-    if (try self.lookup(null, slot_name_without_colon, .Slot)) |slot| {
+    if (try self.lookup(null, null, slot_name_without_colon, .Slot)) |slot| {
         if (slot.is_mutable) return slot;
     }
 

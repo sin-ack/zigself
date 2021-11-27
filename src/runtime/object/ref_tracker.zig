@@ -19,7 +19,7 @@ pub fn setupObjectRefTracker(allocator: *Allocator) void {
     object_ref_tracker = ObjectMap.init(allocator);
 }
 
-pub fn teardownObjectRefTrackerAndReportAliveRefs() void {
+pub fn teardownObjectRefTrackerAndReportAliveRefs(allocator: *Allocator) void {
     if (!EnableObjectRefTracker) return;
 
     if (object_ref_tracker.?.keys().len > 0) {
@@ -31,7 +31,7 @@ pub fn teardownObjectRefTrackerAndReportAliveRefs() void {
             std.debug.print("  <*{d}> (type {s}) - {d} refs\n", .{ object.id, @tagName(object.content), object.ref.ref_count });
         }
 
-        cleanupObjectRefs();
+        cleanupObjectRefs(allocator);
     }
 
     object_ref_tracker.?.deinit();
@@ -47,11 +47,11 @@ pub fn removeObjectFromRefTracker(object: *Object) void {
     _ = object_ref_tracker.?.swapRemove(object);
 }
 
-fn cleanupObjectRefs() void {
+fn cleanupObjectRefs(allocator: *Allocator) void {
     std.debug.print("Cleaning up all object references to make the leak checker useful...\n", .{});
 
     while (object_ref_tracker.?.count() > 0) {
         const first_object = object_ref_tracker.?.keys()[0];
-        first_object.destroyOptions(true);
+        first_object.destroyOptions(allocator, true);
     }
 }

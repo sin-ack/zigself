@@ -13,7 +13,7 @@ const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
 const LookupType = enum { Value, Slot };
 const LookupError = Allocator.Error || runtime_error.SelfRuntimeError;
-const VisitedObjectLink = struct { previous: ?*const VisitedObjectLink = null, object: *Object };
+const VisitedObjectLink = struct { previous: ?*const VisitedObjectLink = null, object: *const Object };
 
 fn lookupReturnType(comptime lookup_type: LookupType) type {
     if (lookup_type == .Value) {
@@ -23,28 +23,28 @@ fn lookupReturnType(comptime lookup_type: LookupType) type {
     }
 }
 
-pub fn lookup(self: *Object, context: ?*InterpreterContext, selector: []const u8, comptime lookup_type: LookupType) lookupReturnType(lookup_type) {
+pub fn lookup(self: *const Object, allocator: ?*Allocator, context: ?*InterpreterContext, selector: []const u8, comptime lookup_type: LookupType) lookupReturnType(lookup_type) {
     const selector_hash = hash.stringHash(selector);
-    return lookupHash(self, context, selector_hash, lookup_type);
+    return lookupHash(self, allocator, context, selector_hash, lookup_type);
 }
 
 const self_hash = hash.stringHash("self");
 const parent_hash = hash.stringHash("parent");
 
-fn lookupHash(self: *Object, context: ?*InterpreterContext, selector_hash: u32, comptime lookup_type: LookupType) lookupReturnType(lookup_type) {
+fn lookupHash(self: *const Object, allocator: ?*Allocator, context: ?*InterpreterContext, selector_hash: u32, comptime lookup_type: LookupType) lookupReturnType(lookup_type) {
     if (lookup_type == .Value) {
         if (selector_hash == self_hash) {
-            return Object.Ref{ .value = self };
+            return Object.Ref{ .value = @intToPtr(*Object, @ptrToInt(self)) };
         }
     }
 
     return if (lookup_type == .Value)
-        try lookupValue(self, context, selector_hash, null)
+        try lookupValue(self, allocator, context, selector_hash, null)
     else
         try lookupSlot(self, selector_hash, null);
 }
 
-fn lookupValue(self: *Object, context: ?*InterpreterContext, selector_hash: u32, previously_visited: ?*const VisitedObjectLink) LookupError!?Object.Ref {
+fn lookupValue(self: *const Object, allocator: ?*Allocator, context: ?*InterpreterContext, selector_hash: u32, previously_visited: ?*const VisitedObjectLink) LookupError!?Object.Ref {
     if (previously_visited) |visited| {
         var link: ?*const VisitedObjectLink = visited;
         while (link) |l| {
@@ -76,7 +76,7 @@ fn lookupValue(self: *Object, context: ?*InterpreterContext, selector_hash: u32,
             }
 
             // Receiver lookup
-            if (try lookupValue(activation.receiver.value, context, selector_hash, &currently_visited)) |found_object| {
+            if (try lookupValue(activation.receiver.value, allocator, context, selector_hash, &currently_visited)) |found_object| {
                 return found_object;
             }
 
@@ -91,11 +91,11 @@ fn lookupValue(self: *Object, context: ?*InterpreterContext, selector_hash: u32,
         .Block => {
             // NOTE: executeMessage will handle the execution of the block itself.
             if (context) |ctx| {
-                const traits_block = try lookupTraitsObject(self.allocator, ctx, "block");
+                const traits_block = try lookupTraitsObject(allocator.?, ctx, "block");
                 if (selector_hash == parent_hash)
                     return traits_block;
 
-                return try lookupHash(traits_block.value, ctx, selector_hash, .Value);
+                return try lookupHash(traits_block.value, allocator, ctx, selector_hash, .Value);
             } else {
                 @panic("Context MUST be passed for Block objects!");
             }
@@ -103,11 +103,11 @@ fn lookupValue(self: *Object, context: ?*InterpreterContext, selector_hash: u32,
 
         .ByteVector => {
             if (context) |ctx| {
-                const traits_string = try lookupTraitsObject(self.allocator, ctx, "string");
+                const traits_string = try lookupTraitsObject(allocator.?, ctx, "string");
                 if (selector_hash == parent_hash)
                     return traits_string;
 
-                return try lookupHash(traits_string.value, ctx, selector_hash, .Value);
+                return try lookupHash(traits_string.value, allocator, ctx, selector_hash, .Value);
             } else {
                 @panic("Context MUST be passed for ByteVector objects!");
             }
@@ -115,11 +115,11 @@ fn lookupValue(self: *Object, context: ?*InterpreterContext, selector_hash: u32,
 
         .Vector => {
             if (context) |ctx| {
-                const traits_vector = try lookupTraitsObject(self.allocator, ctx, "vector");
+                const traits_vector = try lookupTraitsObject(allocator.?, ctx, "vector");
                 if (selector_hash == parent_hash)
                     return traits_vector;
 
-                return try lookupHash(traits_vector.value, ctx, selector_hash, .Value);
+                return try lookupHash(traits_vector.value, allocator, ctx, selector_hash, .Value);
             } else {
                 @panic("Context MUST be passed for Vector objects!");
             }
@@ -127,11 +127,11 @@ fn lookupValue(self: *Object, context: ?*InterpreterContext, selector_hash: u32,
 
         .Integer => {
             if (context) |ctx| {
-                const traits_integer = try lookupTraitsObject(self.allocator, ctx, "integer");
+                const traits_integer = try lookupTraitsObject(allocator.?, ctx, "integer");
                 if (selector_hash == parent_hash)
                     return traits_integer;
 
-                return try lookupHash(traits_integer.value, ctx, selector_hash, .Value);
+                return try lookupHash(traits_integer.value, allocator, ctx, selector_hash, .Value);
             } else {
                 @panic("Context MUST be passed for Integer objects!");
             }
@@ -139,11 +139,11 @@ fn lookupValue(self: *Object, context: ?*InterpreterContext, selector_hash: u32,
 
         .FloatingPoint => {
             if (context) |ctx| {
-                const traits_float = try lookupTraitsObject(self.allocator, ctx, "float");
+                const traits_float = try lookupTraitsObject(allocator.?, ctx, "float");
                 if (selector_hash == parent_hash)
                     return traits_float;
 
-                return try lookupHash(traits_float.value, ctx, selector_hash, .Value);
+                return try lookupHash(traits_float.value, allocator, ctx, selector_hash, .Value);
             } else {
                 @panic("Context MUST be passed for FloatingPoint objects!");
             }
@@ -152,7 +152,7 @@ fn lookupValue(self: *Object, context: ?*InterpreterContext, selector_hash: u32,
 }
 
 /// Like lookupValue but finds slots instead of values.
-fn lookupSlot(self: *Object, selector_hash: u32, previously_visited: ?*const VisitedObjectLink) LookupError!?*Slot {
+fn lookupSlot(self: *const Object, selector_hash: u32, previously_visited: ?*const VisitedObjectLink) LookupError!?*Slot {
     // I'd like this to not be duplicated but unfortunately I couldn't reconcile
     // them.
     if (previously_visited) |visited| {
@@ -195,8 +195,8 @@ fn lookupSlot(self: *Object, selector_hash: u32, previously_visited: ?*const Vis
 }
 
 fn lookupTraitsObject(allocator: *Allocator, context: *InterpreterContext, comptime selector: []const u8) !Object.Ref {
-    if (try context.lobby.value.lookup(context, "traits", .Value)) |traits| {
-        if (try traits.value.lookup(context, selector, .Value)) |traits_object| {
+    if (try context.lobby.value.lookup(allocator, context, "traits", .Value)) |traits| {
+        if (try traits.value.lookup(allocator, context, selector, .Value)) |traits_object| {
             return traits_object;
         } else {
             return runtime_error.raiseError(allocator, context, "Could not find " ++ selector ++ " in traits", .{});

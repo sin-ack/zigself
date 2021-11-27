@@ -23,14 +23,14 @@ fn getMessageArguments(allocator: *Allocator, ast_arguments: []AST.ExpressionNod
     var arguments = try std.ArrayList(Object.Ref).initCapacity(allocator, ast_arguments.len);
     errdefer {
         for (arguments.items) |*argument| {
-            argument.unref();
+            argument.unrefWithAllocator(allocator);
         }
         arguments.deinit();
     }
 
     for (ast_arguments) |argument| {
         var expression_result = try root_interpreter.executeExpression(allocator, argument, context);
-        errdefer expression_result.unref();
+        errdefer expression_result.unrefWithAllocator(allocator);
 
         try arguments.append(expression_result);
     }
@@ -74,7 +74,7 @@ pub fn executeBlockMessage(
 
     // This is done so that we never hold an Activation in value form, and
     // always refer to the in-place version in the activation stack.
-    const block_activation = try block_object.value.activateBlock(context, message_range, arguments, parent_activation.activation_object);
+    const block_activation = try block_object.value.activateBlock(allocator, context, message_range, arguments, parent_activation.activation_object);
     var did_execute_normally = false;
 
     {
@@ -112,7 +112,7 @@ pub fn executeBlockMessage(
     var last_expression_result: ?Object.Ref = null;
     for (block_object.value.content.Block.statements) |statement| {
         if (last_expression_result) |last_result| {
-            last_result.unref();
+            last_result.unrefWithAllocator(allocator);
         }
 
         last_expression_result = root_interpreter.executeStatement(allocator, statement, context) catch |err|
@@ -149,7 +149,7 @@ pub fn executeMethodMessage(
 
     // NOTE: This is done so that we never hold an Activation in value form, and
     //       always refer to the in-place version in the activation stack.
-    const method_activation = try method_object.value.activateMethod(context, message_range, arguments, receiver);
+    const method_activation = try method_object.value.activateMethod(allocator, context, message_range, arguments, receiver);
     var did_execute_normally = false;
 
     {
@@ -187,7 +187,7 @@ pub fn executeMethodMessage(
     var last_expression_result: ?Object.Ref = null;
     for (method_object.value.content.Method.statements) |statement| {
         if (last_expression_result) |last_result| {
-            last_result.unref();
+            last_result.unrefWithAllocator(allocator);
         }
 
         const expression_result = root_interpreter.executeStatement(allocator, statement, context) catch |err| {
@@ -251,18 +251,18 @@ pub fn executeAssignmentMessage(
     context: *InterpreterContext,
 ) root_interpreter.InterpreterError!Object.Ref {
     var argument = try root_interpreter.executeExpression(allocator, ast_argument, context);
-    errdefer argument.unref();
+    errdefer argument.unrefWithAllocator(allocator);
 
     // NOTE: This is required, for instance, when we are assigning `self` to
     //       a slot (happens more often than you might think!). We need to strip
     //       the activation object to get to the actual value inside.
     if (try argument.value.findActivationReceiver()) |actual_argument| {
         actual_argument.ref();
-        argument.unref();
+        argument.unrefWithAllocator(allocator);
         argument = actual_argument;
     }
 
-    slot.assignNewValue(argument);
+    slot.assignNewValue(allocator, argument);
 
     return environment.globalNil();
 }
@@ -270,7 +270,7 @@ pub fn executeAssignmentMessage(
 /// Executes a message. All refs are forwarded.
 pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: *InterpreterContext) root_interpreter.InterpreterError!Object.Ref {
     var receiver = try root_interpreter.executeExpression(allocator, message.receiver, context);
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     // Check for assignable slots
     if (try receiver.value.getAssignableSlotForMessage(message.message_name)) |slot| {
@@ -286,7 +286,7 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
 
         if (try receiver.value.findActivationReceiver()) |actual_receiver| {
             actual_receiver.ref();
-            receiver.unref();
+            receiver.unrefWithAllocator(allocator);
             receiver = actual_receiver;
         }
 
@@ -310,7 +310,7 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
         }
     }
 
-    if (try receiver.value.lookup(context, message.message_name, .Value)) |lookup_result| {
+    if (try receiver.value.lookup(allocator, context, message.message_name, .Value)) |lookup_result| {
         switch (lookup_result.value.content) {
             .Integer, .FloatingPoint, .ByteVector, .Vector, .Slots, .Empty, .Block => {
                 lookup_result.ref();

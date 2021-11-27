@@ -26,7 +26,6 @@ pub fn init(
     const name_hash = hash.stringHash(name);
 
     return Self{
-        .allocator = allocator,
         .is_mutable = is_mutable,
         .is_parent = is_parent,
         // FIXME: Avoid duping like this, it's horrible. This would normally
@@ -38,24 +37,23 @@ pub fn init(
 }
 
 /// Deinitialize the slot, and unref the value.
-pub fn deinit(self: *Self) void {
-    self.deinitOptions(false);
+pub fn deinit(self: *Self, allocator: *Allocator) void {
+    self.deinitOptions(allocator, false);
 }
 
-pub fn deinitOptions(self: *Self, comptime avoid_unref: bool) void {
-    self.allocator.free(self.name);
-    if (!avoid_unref) self.value.unref();
+pub fn deinitOptions(self: *Self, allocator: *Allocator, comptime avoid_unref: bool) void {
+    allocator.free(self.name);
+    if (!avoid_unref) self.value.unrefWithAllocator(allocator);
 }
 
-pub fn copy(self: Self) !Self {
+pub fn copy(self: Self, allocator: *Allocator) !Self {
     self.value.ref();
     return Self{
-        .allocator = self.allocator,
         .is_mutable = self.is_mutable,
         .is_parent = self.is_parent,
         // FIXME: Avoid duping like this, it's horrible. This would normally
         //        go in the byte-vector space if we had that set up.
-        .name = try self.allocator.dupe(u8, self.name),
+        .name = try allocator.dupe(u8, self.name),
         .name_hash = self.name_hash,
         .value = self.value,
     };
@@ -63,12 +61,11 @@ pub fn copy(self: Self) !Self {
 
 /// Assign a new value to the given slot object. The previous value is unref'd.
 /// The new value borrows a ref from the caller.
-pub fn assignNewValue(self: *Self, value: Object.Ref) void {
-    self.value.unref();
+pub fn assignNewValue(self: *Self, allocator: *Allocator, value: Object.Ref) void {
+    self.value.unrefWithAllocator(allocator);
     self.value = value;
 }
 
-allocator: *Allocator,
 is_mutable: bool,
 is_parent: bool,
 name: []const u8,

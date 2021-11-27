@@ -26,13 +26,13 @@ pub fn VectorCopySize_FillingExtrasWith(
 ) !Object.Ref {
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     const size_object = arguments[0];
-    defer size_object.unref();
+    defer size_object.unrefWithAllocator(allocator);
 
     const filler = arguments[1];
-    defer filler.unref();
+    defer filler.unrefWithAllocator(allocator);
 
     if (!size_object.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as the first argument of _VectorCopySize:FillingExtrasWith:, got {s}", .{@tagName(size_object.value.content)});
@@ -62,7 +62,7 @@ pub fn VectorCopySize_FillingExtrasWith(
                 v.* = receiver_value;
             }
         }
-        errdefer for (values) |v| v.unref();
+        errdefer for (values) |v| v.unrefWithAllocator(allocator);
 
         return Object.createVectorFromValues(allocator, values);
     }
@@ -73,7 +73,7 @@ pub fn VectorSize(allocator: *Allocator, message_range: Range, receiver: Object.
     _ = message_range;
     _ = arguments;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.Vector)) {
         return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorSize, got {s}", .{@tagName(receiver.value.content)});
@@ -88,10 +88,10 @@ pub fn VectorSize(allocator: *Allocator, message_range: Range, receiver: Object.
 pub fn VectorAt(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     const position_object = arguments[0];
-    defer position_object.unref();
+    defer position_object.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.Vector)) {
         return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorAt:, got {s}", .{@tagName(receiver.value.content)});
@@ -118,13 +118,13 @@ pub fn VectorAt(allocator: *Allocator, message_range: Range, receiver: Object.Re
 pub fn VectorAt_Put(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    errdefer receiver.unref();
+    errdefer receiver.unrefWithAllocator(allocator);
 
     const position_object = arguments[0];
-    defer position_object.unref();
+    defer position_object.unrefWithAllocator(allocator);
 
     const value = arguments[1];
-    errdefer value.unref();
+    errdefer value.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.Vector)) {
         return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorAt:Put:, got {s}", .{@tagName(receiver.value.content)});

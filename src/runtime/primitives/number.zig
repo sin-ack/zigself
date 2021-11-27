@@ -17,10 +17,10 @@ const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 pub fn IntAdd(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     var addend = arguments[0];
-    defer addend.unref();
+    defer addend.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntAdd: receiver, got {s}", .{@tagName(receiver.value.content)});
@@ -42,10 +42,10 @@ pub fn IntAdd(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
 pub fn IntSub(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     var term = arguments[0];
-    defer term.unref();
+    defer term.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntSub: receiver, got {s}", .{@tagName(receiver.value.content)});
@@ -67,10 +67,10 @@ pub fn IntSub(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
 pub fn IntMul(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     var term = arguments[0];
-    defer term.unref();
+    defer term.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntMul: receiver, got {s}", .{@tagName(receiver.value.content)});
@@ -93,10 +93,10 @@ pub fn IntMul(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
 pub fn IntLT(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     var argument = arguments[0];
-    defer argument.unref();
+    defer argument.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntLT: receiver, got {s}", .{@tagName(receiver.value.content)});
@@ -119,10 +119,10 @@ pub fn IntLT(allocator: *Allocator, message_range: Range, receiver: Object.Ref, 
 pub fn IntEq(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     var argument = arguments[0];
-    defer argument.unref();
+    defer argument.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntEq: receiver, got {s}", .{@tagName(receiver.value.content)});
@@ -145,10 +145,10 @@ pub fn IntEq(allocator: *Allocator, message_range: Range, receiver: Object.Ref, 
 pub fn IntGT(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     var argument = arguments[0];
-    defer argument.unref();
+    defer argument.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.Integer)) {
         return runtime_error.raiseError(allocator, context, "Expected Integer as _IntGT: receiver, got {s}", .{@tagName(receiver.value.content)});

@@ -18,11 +18,10 @@ const InterpreterContext = interpreter.InterpreterContext;
 /// Return the static "nil" slots object.
 pub fn Nil(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = context;
-    _ = allocator;
     _ = arguments;
     _ = message_range;
 
-    receiver.unref();
+    receiver.unrefWithAllocator(allocator);
     return environment.globalNil();
 }
 
@@ -45,7 +44,7 @@ pub fn RunScript(allocator: *Allocator, message_range: Range, receiver: Object.R
     _ = arguments;
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.ByteVector)) {
         return runtime_error.raiseError(allocator, context, "Expected ByteVector for the receiver of _RunScript, got {s}", .{@tagName(receiver.value.content)});
@@ -97,7 +96,7 @@ pub fn RunScript(allocator: *Allocator, message_range: Range, receiver: Object.R
 
     var result_value = environment.globalNil();
     if (try interpreter.executeSubScript(allocator, script, context)) |script_result| {
-        result_value.unref();
+        result_value.unrefWithAllocator(allocator);
         result_value = script_result;
     }
 
@@ -110,7 +109,7 @@ pub fn ID(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arg
     _ = arguments;
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     return try Object.createFromIntegerLiteral(allocator, @intCast(i64, receiver.value.id));
 }
@@ -119,10 +118,10 @@ pub fn ID(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arg
 pub fn Error(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     var argument = arguments[0];
-    defer argument.unref();
+    defer argument.unrefWithAllocator(allocator);
 
     if (!argument.value.is(.ByteVector)) {
         return runtime_error.raiseError(allocator, context, "Expected ByteVector as _Error: argument, got {s}", .{@tagName(argument.value.content)});

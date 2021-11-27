@@ -88,15 +88,15 @@ pub fn main() !u8 {
     }
 
     Object.setupObjectRefTracker(allocator);
-    defer Object.teardownObjectRefTrackerAndReportAliveRefs();
+    defer Object.teardownObjectRefTrackerAndReportAliveRefs(allocator);
 
     var lobby = try environment.prepareRuntimeEnvironment(allocator);
-    defer lobby.unref();
-    defer environment.teardownGlobalObjects();
+    defer lobby.unrefWithAllocator(allocator);
+    defer environment.teardownGlobalObjects(allocator);
 
     did_pass_script_to_interpreter = true;
     if (try interpreter.executeScript(allocator, entrypoint_script, lobby)) |result| {
-        result.unref();
+        result.unrefWithAllocator(allocator);
     }
 
     return 0;

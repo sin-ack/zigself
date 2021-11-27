@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const EnableRefCountDebugging = false;
 
@@ -91,6 +92,18 @@ pub fn RefPtr(comptime T: type) type {
             if (EnableRefCountDebugging) std.debug.print("Decrementing refcount on {*} - now {d} refs\n", .{ self.value, self.value.ref.ref_count });
             if (self.value.ref.ref_count == 0) {
                 self.value.destroy();
+            }
+        }
+
+        pub fn unrefWithAllocator(self: Self, allocator: *Allocator) void {
+            if (self.value.ref.ref_count < 1) {
+                @panic("!!! Attempting to unreference an already-destroyed RefPtr");
+            }
+
+            self.value.ref.ref_count -= 1;
+            if (EnableRefCountDebugging) std.debug.print("Decrementing refcount on {*} - now {d} refs\n", .{ self.value, self.value.ref.ref_count });
+            if (self.value.ref.ref_count == 0) {
+                self.value.destroy(allocator);
             }
         }
     };

@@ -26,11 +26,11 @@ pub fn inspectObject(allocator: *Allocator, object: Object.Ref, comptime display
     var visited_object_set = VisitedObjectSet.init(allocator);
     defer visited_object_set.deinit();
 
-    try inspectObjectInternal(object, display_type, 0, &visited_object_set);
+    try inspectObjectInternal(allocator, object, display_type, 0, &visited_object_set);
     std.debug.print("\n", .{});
 }
 
-fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDisplayType, indent: usize, visited_object_set: *VisitedObjectSet) Allocator.Error!void {
+fn inspectObjectInternal(allocator: *Allocator, object: Object.Ref, comptime display_type: InspectDisplayType, indent: usize, visited_object_set: *VisitedObjectSet) Allocator.Error!void {
     const separator = switch (display_type) {
         .Inline => " ",
         .Multiline => "\n",
@@ -49,21 +49,21 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
     // printed directly, then print them as a summary.
     if (!is_first_object_to_be_printed and !environment.hasBeenTornDown()) {
         const nil_object = environment.globalNil();
-        defer nil_object.unref();
+        defer nil_object.unrefWithAllocator(allocator);
         if (object.value == nil_object.value) {
             std.debug.print("<global nil>", .{});
             return;
         }
 
         const true_object = environment.globalTrue();
-        defer true_object.unref();
+        defer true_object.unrefWithAllocator(allocator);
         if (object.value == true_object.value) {
             std.debug.print("<global true>", .{});
             return;
         }
 
         const false_object = environment.globalFalse();
-        defer false_object.unref();
+        defer false_object.unrefWithAllocator(allocator);
         if (object.value == false_object.value) {
             std.debug.print("<global false>", .{});
             return;
@@ -78,7 +78,7 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
         .Slots => |slots| {
             std.debug.print("(|{s}", .{separator});
 
-            try inspectSlots(slots.slots, display_type, indent + 2, separator, visited_object_set);
+            try inspectSlots(allocator, slots.slots, display_type, indent + 2, separator, visited_object_set);
 
             printWithIndent(indent, display_type, "|)", .{});
         },
@@ -87,7 +87,7 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
         .Activation => |activation| {
             std.debug.print("<activation object> (|{s}", .{separator});
 
-            try inspectSlots(activation.slots, display_type, indent + 2, separator, visited_object_set);
+            try inspectSlots(allocator, activation.slots, display_type, indent + 2, separator, visited_object_set);
 
             printWithIndent(indent, display_type, "|)", .{});
         },
@@ -107,7 +107,7 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
                     const mutability_marker: []const u8 = if (slot.is_mutable) "<-" else "=";
                     printWithIndent(indent + 2, display_type, "{s}{s} {s} ", .{ slot.name, parent_marker, mutability_marker });
 
-                    try inspectObjectInternal(slot.value, display_type, indent + 2, visited_object_set);
+                    try inspectObjectInternal(allocator, slot.value, display_type, indent + 2, visited_object_set);
 
                     std.debug.print(".{s}", .{separator});
                 }
@@ -139,7 +139,7 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
                     const mutability_marker: []const u8 = if (slot.is_mutable) "<-" else "=";
                     printWithIndent(indent + 2, display_type, "{s}{s} {s} ", .{ slot.name, parent_marker, mutability_marker });
 
-                    try inspectObjectInternal(slot.value, display_type, indent + 2, visited_object_set);
+                    try inspectObjectInternal(allocator, slot.value, display_type, indent + 2, visited_object_set);
 
                     std.debug.print(".{s}", .{separator});
                 }
@@ -162,7 +162,7 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
                 for (vector.values) |v, i| {
                     printWithIndent(indent + 2, display_type, "", .{});
 
-                    try inspectObjectInternal(v, display_type, indent + 2, visited_object_set);
+                    try inspectObjectInternal(allocator, v, display_type, indent + 2, visited_object_set);
 
                     if (i < vector.values.len - 1) std.debug.print(",", .{});
                     std.debug.print(separator, .{});
@@ -181,7 +181,7 @@ fn inspectObjectInternal(object: Object.Ref, comptime display_type: InspectDispl
     }
 }
 
-fn inspectSlots(slots: []Slot, comptime display_type: InspectDisplayType, indent: usize, separator: []const u8, visited_object_set: *VisitedObjectSet) !void {
+fn inspectSlots(allocator: *Allocator, slots: []Slot, comptime display_type: InspectDisplayType, indent: usize, separator: []const u8, visited_object_set: *VisitedObjectSet) !void {
     for (slots) |slot| {
         const parent_marker: []const u8 = if (slot.is_parent) "*" else "";
         const mutability_marker: []const u8 = if (slot.is_mutable) "<-" else "=";
@@ -190,7 +190,7 @@ fn inspectSlots(slots: []Slot, comptime display_type: InspectDisplayType, indent
         if (slot.is_parent) {
             std.debug.print("<*{d}>", .{slot.value.value.id});
         } else {
-            try inspectObjectInternal(slot.value, display_type, indent, visited_object_set);
+            try inspectObjectInternal(allocator, slot.value, display_type, indent, visited_object_set);
         }
 
         std.debug.print(".{s}", .{separator});

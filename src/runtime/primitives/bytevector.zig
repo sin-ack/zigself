@@ -16,7 +16,7 @@ pub fn StringPrint(allocator: *Allocator, message_range: Range, receiver: Object
     _ = arguments;
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     const writer = std.io.getStdOut().writer();
 
@@ -47,7 +47,7 @@ pub fn ByteVectorSize(allocator: *Allocator, message_range: Range, receiver: Obj
     _ = arguments;
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.ByteVector)) {
         return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteVectorSize receiver, got {s}", .{@tagName(receiver.value.content)});
@@ -62,10 +62,10 @@ pub fn ByteVectorSize(allocator: *Allocator, message_range: Range, receiver: Obj
 pub fn ByteAt(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     var argument = arguments[0];
-    defer argument.unref();
+    defer argument.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.ByteVector)) {
         return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteAt: receiver, got {s}", .{@tagName(receiver.value.content)});
@@ -95,13 +95,13 @@ pub fn ByteAt(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
 pub fn ByteAt_Put(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    errdefer receiver.unref();
+    errdefer receiver.unrefWithAllocator(allocator);
 
     var first_argument = arguments[0];
-    defer first_argument.unref();
+    defer first_argument.unrefWithAllocator(allocator);
 
     var second_argument = arguments[1];
-    defer second_argument.unref();
+    defer second_argument.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.ByteVector)) {
         return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteAt:Put: receiver, got {s}", .{@tagName(receiver.value.content)});
@@ -141,10 +141,10 @@ pub fn ByteAt_Put(allocator: *Allocator, message_range: Range, receiver: Object.
 pub fn ByteVectorCopySize(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
-    defer receiver.unref();
+    defer receiver.unrefWithAllocator(allocator);
 
     var argument = arguments[0];
-    defer argument.unref();
+    defer argument.unrefWithAllocator(allocator);
 
     if (!receiver.value.is(.ByteVector)) {
         return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteVectorCopySize: receiver, got {s}", .{@tagName(receiver.value.content)});

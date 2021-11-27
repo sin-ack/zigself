@@ -84,7 +84,7 @@ fn init(
 
 fn deinit(self: *Self) void {
     self.weak.deinit();
-    self.activation_object.unref();
+    self.activation_object.unrefWithAllocator(self.allocator);
     self.creation_context.script.unref();
     self.allocator.free(self.creation_context.message);
 }

@@ -57,7 +57,7 @@ pub fn executeScript(allocator: *Allocator, script: Script.Ref, lobby: Object.Re
     defer script.unref();
 
     lobby.ref();
-    defer lobby.unref();
+    defer lobby.unrefWithAllocator(allocator);
 
     var last_expression_result: ?Object.Ref = null;
     var activation_stack = std.ArrayList(*Activation).init(allocator);
@@ -80,7 +80,7 @@ pub fn executeScript(allocator: *Allocator, script: Script.Ref, lobby: Object.Re
         std.debug.assert(activation_stack.items.len == 0);
 
         if (last_expression_result) |*result| {
-            result.unref();
+            result.unrefWithAllocator(allocator);
         }
 
         const expression_result = executeStatement(allocator, statement, &context) catch |err| {
@@ -104,7 +104,7 @@ pub fn executeScript(allocator: *Allocator, script: Script.Ref, lobby: Object.Re
                     std.debug.print("A non-local return has bubbled up to the top! This is likely a bug!", .{});
                     runtime_error.printTraceFromActivationStack(activation_stack.items);
                     context.current_nonlocal_return.?.target_activation.deinit();
-                    context.current_nonlocal_return.?.value.unref();
+                    context.current_nonlocal_return.?.value.unrefWithAllocator(allocator);
 
                     // Since the execution was abruptly stopped the activation
                     // stack wasn't properly unwound, so let's do that now.
@@ -133,7 +133,7 @@ pub fn executeSubScript(allocator: *Allocator, script: Script.Ref, parent_contex
     defer script.unref();
 
     parent_context.lobby.ref();
-    defer parent_context.lobby.unref();
+    defer parent_context.lobby.unrefWithAllocator(allocator);
 
     var last_expression_result: ?Object.Ref = null;
 
@@ -147,7 +147,7 @@ pub fn executeSubScript(allocator: *Allocator, script: Script.Ref, parent_contex
     };
     for (script.value.ast_root.?.statements) |statement| {
         if (last_expression_result) |*result| {
-            result.unref();
+            result.unrefWithAllocator(allocator);
         }
 
         const expression_result = executeStatement(allocator, statement, &child_context) catch |err| {
@@ -203,7 +203,7 @@ fn executeMethod(allocator: *Allocator, name: []const u8, object_node: AST.Objec
     var slots = try std.ArrayList(Slot).initCapacity(allocator, object_node.slots.len);
     errdefer {
         for (slots.items) |*slot| {
-            slot.deinit();
+            slot.deinit(allocator);
         }
         slots.deinit();
     }
@@ -225,7 +225,7 @@ fn executeMethod(allocator: *Allocator, name: []const u8, object_node: AST.Objec
 
     for (object_node.slots) |slot| {
         var slot_copy = try executeSlot(allocator, slot, context);
-        errdefer slot_copy.deinit();
+        errdefer slot_copy.deinit(allocator);
 
         // TODO nonlocals
 
@@ -253,7 +253,7 @@ pub fn executeSlot(allocator: *Allocator, slot_node: AST.SlotNode, context: *Int
             break :blk try executeExpression(allocator, slot_node.value, context);
         }
     };
-    errdefer value.unref();
+    errdefer value.unrefWithAllocator(allocator);
 
     return try Slot.init(allocator, slot_node.is_mutable, slot_node.is_parent, slot_node.name, value);
 }
@@ -273,14 +273,14 @@ pub fn executeObject(allocator: *Allocator, object_node: AST.ObjectNode, context
     var slots = try std.ArrayList(Slot).initCapacity(allocator, object_node.slots.len);
     errdefer {
         for (slots.items) |*slot| {
-            slot.deinit();
+            slot.deinit(allocator);
         }
         slots.deinit();
     }
 
     for (object_node.slots) |*slot_node| {
         var slot = try executeSlot(allocator, slot_node.*, context);
-        errdefer slot.deinit();
+        errdefer slot.deinit(allocator);
 
         // TODO nonlocals
 
@@ -302,7 +302,7 @@ pub fn executeBlock(allocator: *Allocator, block: AST.BlockNode, context: *Inter
     var slots = try std.ArrayList(Slot).initCapacity(allocator, block.slots.len);
     errdefer {
         for (slots.items) |*slot| {
-            slot.deinit();
+            slot.deinit(allocator);
         }
         slots.deinit();
     }
@@ -323,7 +323,7 @@ pub fn executeBlock(allocator: *Allocator, block: AST.BlockNode, context: *Inter
             try arguments.append(argument_copy);
         } else {
             var slot_copy = try executeSlot(allocator, slot_node, context);
-            errdefer slot_copy.deinit();
+            errdefer slot_copy.deinit(allocator);
 
             // TODO nonlocals
 
@@ -371,7 +371,7 @@ pub fn executeReturn(allocator: *Allocator, return_node: AST.ReturnNode, context
 
     {
         const value = try executeExpression(allocator, return_node.expression, context);
-        errdefer value.unref();
+        errdefer value.unrefWithAllocator(allocator);
 
         const target_activation_weak = target_activation.makeWeakRef();
         context.current_nonlocal_return = .{ .target_activation = target_activation_weak, .value = value };
@@ -407,7 +407,7 @@ pub fn executeIdentifier(allocator: *Allocator, identifier: AST.IdentifierNode, 
         }
     }
 
-    if (try context.self_object.value.lookup(context, identifier.value, .Value)) |value| {
+    if (try context.self_object.value.lookup(allocator, context, identifier.value, .Value)) |value| {
         switch (value.value.content) {
             .Integer, .FloatingPoint, .ByteVector, .Vector, .Slots, .Empty, .Block, .Activation => {
                 value.ref();

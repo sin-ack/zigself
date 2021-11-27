@@ -18,16 +18,16 @@ var has_been_torn_down = true;
 /// required for basic objects and literal evaluation to function.
 pub fn prepareRuntimeEnvironment(allocator: *Allocator) !Object.Ref {
     global_nil = try Object.createEmpty(allocator);
-    errdefer global_nil.?.unref();
+    errdefer global_nil.?.unrefWithAllocator(allocator);
     global_true = try Object.createEmpty(allocator);
-    errdefer global_true.?.unref();
+    errdefer global_true.?.unrefWithAllocator(allocator);
     global_false = try Object.createEmpty(allocator);
-    errdefer global_false.?.unref();
+    errdefer global_false.?.unrefWithAllocator(allocator);
 
     var lobby_slots = try makeLobbySlots(allocator);
     errdefer {
         for (lobby_slots) |*slot| {
-            slot.deinit();
+            slot.deinit(allocator);
         }
         allocator.free(lobby_slots);
     }
@@ -41,10 +41,10 @@ fn makeLobbySlots(allocator: *Allocator) ![]Slot {
     errdefer lobby_slots.deinit();
 
     var traits_object = try makeTraitsObject(allocator);
-    errdefer traits_object.unref();
+    errdefer traits_object.unrefWithAllocator(allocator);
 
     var traits_slot = try Slot.init(allocator, false, false, "traits", traits_object);
-    errdefer traits_slot.deinit();
+    errdefer traits_slot.deinit(allocator);
 
     try lobby_slots.append(traits_slot);
 
@@ -55,7 +55,7 @@ fn makeTraitsObject(allocator: *Allocator) !Object.Ref {
     var traits_slots = try makeTraitsSlots(allocator);
     errdefer {
         for (traits_slots) |*slot| {
-            slot.deinit();
+            slot.deinit(allocator);
         }
         allocator.free(traits_slots);
     }
@@ -68,29 +68,29 @@ fn makeTraitsSlots(allocator: *Allocator) ![]Slot {
     errdefer traits_slots.deinit();
 
     var integer_object = try Object.createEmpty(allocator);
-    errdefer integer_object.unref();
+    errdefer integer_object.unrefWithAllocator(allocator);
     var integer_slot = try Slot.init(allocator, false, false, "integer", integer_object);
-    errdefer integer_slot.deinit();
+    errdefer integer_slot.deinit(allocator);
 
     var float_object = try Object.createEmpty(allocator);
-    errdefer float_object.unref();
+    errdefer float_object.unrefWithAllocator(allocator);
     var float_slot = try Slot.init(allocator, false, false, "float", float_object);
-    errdefer float_slot.deinit();
+    errdefer float_slot.deinit(allocator);
 
     var string_object = try Object.createEmpty(allocator);
-    errdefer string_object.unref();
+    errdefer string_object.unrefWithAllocator(allocator);
     var string_slot = try Slot.init(allocator, false, false, "string", string_object);
-    errdefer string_slot.deinit();
+    errdefer string_slot.deinit(allocator);
 
     var block_object = try Object.createEmpty(allocator);
-    errdefer block_object.unref();
+    errdefer block_object.unrefWithAllocator(allocator);
     var block_slot = try Slot.init(allocator, false, false, "block", block_object);
-    errdefer block_slot.deinit();
+    errdefer block_slot.deinit(allocator);
 
     var vector_object = try Object.createEmpty(allocator);
-    errdefer vector_object.unref();
+    errdefer vector_object.unrefWithAllocator(allocator);
     var vector_slot = try Slot.init(allocator, false, false, "vector", vector_object);
-    errdefer vector_slot.deinit();
+    errdefer vector_slot.deinit(allocator);
 
     try traits_slots.append(integer_slot);
     try traits_slots.append(float_slot);
@@ -122,19 +122,19 @@ pub fn globalFalse() Object.Ref {
     return false_object;
 }
 
-pub fn teardownGlobalObjects() void {
+pub fn teardownGlobalObjects(allocator: *Allocator) void {
     if (global_true) |*true_object| {
-        true_object.unref();
+        true_object.unrefWithAllocator(allocator);
         global_true = null;
     }
 
     if (global_false) |*false_object| {
-        false_object.unref();
+        false_object.unrefWithAllocator(allocator);
         global_false = null;
     }
 
     if (global_nil) |*nil_object| {
-        nil_object.unref();
+        nil_object.unrefWithAllocator(allocator);
         global_nil = null;
     }
 
