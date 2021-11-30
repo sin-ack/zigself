@@ -5,7 +5,7 @@
 const std = @import("std");
 
 const Object = @import("./object.zig");
-const ByteVector = @import("./byte_vector.zig").ByteVector;
+const ByteVector = @import("./byte_vector.zig");
 
 pub const Value = packed struct {
     data: u64,

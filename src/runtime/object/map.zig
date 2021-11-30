@@ -5,7 +5,7 @@
 const std = @import("std");
 
 const Heap = @import("../heap.zig");
-const Slot = @import("../slot.zig");
+const Slot = @import("../slot.zig").Slot;
 const hash = @import("../../utility/hash.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");

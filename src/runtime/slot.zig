@@ -17,7 +17,7 @@ const MutableBit: u32 = 1 << MutableShift;
 pub const SlotParentFlag = enum { Parent, NotParent };
 pub const SlotMutableFlag = enum { Mutable, Constant };
 
-const Slot = packed struct {
+pub const Slot = packed struct {
     name: Value,
     /// A bitfield describing the properties of this slot. The bottom two bits
     /// are always zero.
