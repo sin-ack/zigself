@@ -2,72 +2,94 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
-const std = @import("std");
-const Allocator = std.mem.Allocator;
-
-const Object = @import("./object.zig");
-const ref_counted = @import("../utility/ref_counted.zig");
+const Heap = @import("./heap.zig");
 const hash = @import("../utility/hash.zig");
+const Value = @import("./value.zig").Value;
+const Object = @import("./object.zig");
+const ByteVector = @import("./byte_vector.zig");
 
-const Self = @This();
+const ParentShift = 2;
+const ParentBit: u32 = 1 << ParentShift;
 
-// Cannot use Object.Ref because it creates a cycle.
-const ObjectRef = ref_counted.RefPtr(Object);
+const MutableShift = 3;
+const MutableBit: u32 = 1 << MutableShift;
 
-/// Initialize a slot. The slot borrows a ref from the caller for `value`.
-/// `name` is duped internally.
-pub fn init(
-    allocator: *Allocator,
-    is_mutable: bool,
-    is_parent: bool,
-    name: []const u8,
-    value: ObjectRef,
-) !Self {
-    const name_hash = hash.stringHash(name);
+pub const SlotParentFlag = enum { Parent, NotParent };
+pub const SlotMutableFlag = enum { Mutable, Constant };
 
-    return Self{
-        .is_mutable = is_mutable,
-        .is_parent = is_parent,
-        // FIXME: Avoid duping like this, it's horrible. This would normally
-        //        go in the byte-vector space if we had that set up.
-        .name = try allocator.dupe(u8, name),
-        .name_hash = name_hash,
-        .value = value,
-    };
-}
+const Slot = packed struct {
+    name: Value,
+    /// A bitfield describing the properties of this slot. The bottom two bits
+    /// are always zero.
+    ///
+    /// Bit 2: Whether this slot is a parent slot; that is, whether the value
+    /// will have its slots considered after a lookup on the object's regular
+    /// slots fail.
+    ///
+    /// Bit 3: Whether this slot is mutable or a constant. If the slot is
+    /// constant, then the `value` field will contain the value of this slot,
+    /// and it will not change across all the object which have this slot in
+    /// their map; if the slot is mutable, then each slot object pointing to the
+    /// map this slot is contained within will carry a `Value` object
+    /// corresponding to this slot.
+    properties: u32,
+    /// The hash of the slot name.
+    hash: u32,
+    value: Value,
 
-/// Deinitialize the slot, and unref the value.
-pub fn deinit(self: *Self, allocator: *Allocator) void {
-    self.deinitOptions(allocator, false);
-}
+    /// Initalizes this slot to a constant value.
+    pub fn initConstant(self: *Slot, name: ByteVector, parent_flag: SlotParentFlag, value: Value) void {
+        self.init(name);
+        self.value = value;
 
-pub fn deinitOptions(self: *Self, allocator: *Allocator, comptime avoid_unref: bool) void {
-    allocator.free(self.name);
-    if (!avoid_unref) self.value.unrefWithAllocator(allocator);
-}
+        self.setParent(parent_flag);
+    }
 
-pub fn copy(self: Self, allocator: *Allocator) !Self {
-    self.value.ref();
-    return Self{
-        .is_mutable = self.is_mutable,
-        .is_parent = self.is_parent,
-        // FIXME: Avoid duping like this, it's horrible. This would normally
-        //        go in the byte-vector space if we had that set up.
-        .name = try allocator.dupe(u8, self.name),
-        .name_hash = self.name_hash,
-        .value = self.value,
-    };
-}
+    /// Initalizes this slot to a mutable value.
+    pub fn initMutable(self: *Slot, map: *Object.Map.Slots, name: ByteVector, parent_flag: SlotParentFlag) void {
+        self.init(name);
 
-/// Assign a new value to the given slot object. The previous value is unref'd.
-/// The new value borrows a ref from the caller.
-pub fn assignNewValue(self: *Self, allocator: *Allocator, value: Object.Ref) void {
-    self.value.unrefWithAllocator(allocator);
-    self.value = value;
-}
+        self.setParent(parent_flag);
+        self.setMutable(map, .Mutable);
+    }
 
-is_mutable: bool,
-is_parent: bool,
-name: []const u8,
-name_hash: u32,
-value: ObjectRef,
+    fn init(self: *Slot, name: ByteVector) void {
+        // TODO: Verify that this slot hasn't been initialized yet!
+        self.name = name.asValue();
+        self.hash = hash.stringHash(name.getValues());
+        self.properties = 0;
+    }
+
+    pub fn isParent(self: *const Slot) bool {
+        return self.properties & ParentBit > 0;
+    }
+
+    pub fn setParent(self: *Slot, flag: SlotParentFlag) void {
+        self.properties = switch (flag) {
+            .Parent => self.properties | ParentBit,
+            .NotParent => self.properties & ~ParentBit,
+        };
+    }
+
+    pub fn isMutable(self: *const Slot) bool {
+        return self.properties & MutableBit > 0;
+    }
+
+    /// Sets whether this slot is mutable or not. If the mutable state of the
+    /// slot differs from what it is being set to, the map's assignable slot
+    /// count is updated.
+    pub fn setMutable(self: *Slot, map: *Object.Map.Slots, flag: SlotMutableFlag) void {
+        switch (flag) {
+            .Mutable => {
+                if (self.properties & MutableBit > 0) return;
+                self.properties |= MutableBit;
+                map.setAssignableSlotCount(map.getAssignableSlotCount() + 1);
+            },
+            .Constant => {
+                if (self.properties & MutableBit == 0) return;
+                self.properties &= ~MutableBit;
+                map.setAssignableSlotCount(map.getAssignableSlotCount() - 1);
+            },
+        }
+    }
+};
