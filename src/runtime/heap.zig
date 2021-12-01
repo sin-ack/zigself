@@ -281,6 +281,10 @@ const Space = struct {
 
         const start_of_object = self.object_cursor;
         self.object_cursor += size / @sizeOf(u64);
+
+        if (builtin.mode == .Debug)
+            std.mem.set(u8, @ptrCast([*]align(@alignOf(u64)) u8, start_of_object)[0..size], UninitializedHeapScrubByte);
+
         return start_of_object;
     }
 
@@ -291,6 +295,10 @@ const Space = struct {
         if (self.freeMemory() < size) try self.collectGarbage(allocator, size, activation_stack);
 
         self.byte_vector_cursor -= size / @sizeOf(u64);
+
+        if (builtin.mode == .Debug)
+            std.mem.set(u8, @ptrCast([*]align(@alignOf(u64)) u8, self.byte_vector_cursor)[0..size], UninitializedHeapScrubByte);
+
         return self.byte_vector_cursor;
     }
 };
