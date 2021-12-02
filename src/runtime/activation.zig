@@ -5,7 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Object = @import("./object.zig");
+const Value = @import("./value.zig").Value;
 const Script = @import("../language/script.zig");
 const Range = @import("../language/location_range.zig");
 const weak_ref = @import("../utility/weak_ref.zig");
@@ -23,7 +23,7 @@ pub const ActivationCreationContext = struct {
 };
 
 allocator: *Allocator,
-activation_object: Object.Ref,
+activation_object: Value,
 creation_context: ActivationCreationContext,
 /// Will be used as the target activation that a non-local return needs to rise
 /// to. Must be non-null when a non-local return is encountered, and when
@@ -45,7 +45,7 @@ weak: WeakBlock,
 /// Borrows a ref for `creator_script` from the caller.
 pub fn create(
     allocator: *Allocator,
-    activation_object: Object.Ref,
+    activation_object: Value,
     creator_message: []const u8,
     creator_script: Script.Ref,
     creator_range: Range,
@@ -65,11 +65,13 @@ pub fn destroy(self: *Self) void {
 fn init(
     self: *Self,
     allocator: *Allocator,
-    activation_object: Object.Ref,
+    activation_object: Value,
     creator_message: []const u8,
     creator_script: Script.Ref,
     creator_range: Range,
 ) !void {
+    std.debug.assert(activation_object.isObjectReference());
+
     self.* = Self{
         .weak = try WeakBlock.init(allocator, self),
         .allocator = allocator,
