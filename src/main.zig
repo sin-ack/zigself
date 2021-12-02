@@ -8,7 +8,7 @@ const zig_args = @import("zig-args");
 const Script = @import("./language/script.zig");
 const ASTPrinter = @import("./language/ast_printer.zig");
 
-const Object = @import("./runtime/object.zig");
+const Heap = @import("./runtime/heap.zig");
 const interpreter = @import("./runtime/interpreter.zig");
 const environment = @import("./runtime/environment.zig");
 
@@ -87,8 +87,10 @@ pub fn main() !u8 {
         return 1;
     }
 
+    var heap = try Heap.create(allocator);
+    defer heap.destroy();
 
-    var lobby = try environment.prepareRuntimeEnvironment(allocator);
+    var lobby = try environment.prepareRuntimeEnvironment(heap);
     defer lobby.unrefWithAllocator(allocator);
     defer environment.teardownGlobalObjects(allocator);
 
