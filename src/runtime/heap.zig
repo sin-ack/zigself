@@ -19,6 +19,81 @@ const Activation = struct {
 const Self = @This();
 const UninitializedHeapScrubByte = 0xAB;
 
+/// This is the space where newly created objects are placed. It is a fixed size
+/// space, and objects that survive this space are placed in the from-space.
+eden: Space,
+
+/// This is the space where objects that survive the eden and previous scavenges
+/// are placed. It is a fixed size space. When a scavenge cannot clean up enough
+/// objects to leave memory for the survivors of a scavenge in this space, all
+/// the objects in this space are moved to the old space where they reside until
+/// a compaction happens.
+from_space: Space,
+/// This is a space with an identical size to the from space. When a scavenge
+/// happens in the new space, the from space and this space are swapped.
+to_space: Space,
+
+/// This is the space where permanent objects reside. It can be expanded as
+/// memory requirements of the program grows.
+old_space: Space,
+
+allocator: *Allocator,
+
+// FIXME: Make eden + new space configurable at runtime
+const EdenSize = 1 * 1024 * 1024;
+const NewSpaceSize = 4 * 1024 * 1024;
+const InitialOldSpaceSize = 16 * 1024 * 1024;
+
+pub fn create(allocator: *Allocator) !*Self {
+    const self = try allocator.create(Self);
+    errdefer allocator.destroy(self);
+
+    try self.init(allocator);
+    return self;
+}
+
+pub fn destroy(self: *Self) void {
+    self.deinit();
+    self.allocator.destroy(self);
+}
+
+fn init(self: *Self, allocator: *Allocator) !void {
+    self.allocator = allocator;
+
+    self.old_space = try Space.init(allocator, InitialOldSpaceSize);
+    errdefer self.old_space.deinit(allocator);
+
+    self.from_space = try Space.init(allocator, NewSpaceSize);
+    errdefer self.from_space.deinit(allocator);
+
+    self.to_space = try Space.init(allocator, NewSpaceSize);
+    errdefer self.to_space.deinit(allocator);
+
+    self.eden = try Space.init(allocator, EdenSize);
+
+    self.from_space.scavenge_target = &self.to_space;
+    self.from_space.tenure_target = &self.old_space;
+    self.eden.tenure_target = &self.from_space;
+}
+
+fn deinit(self: *Self) void {
+    self.eden.deinit(self.allocator);
+    self.from_space.deinit(self.allocator);
+    self.to_space.deinit(self.allocator);
+    self.old_space.deinit(self.allocator);
+}
+
+// Attempts to allocate `size` bytes in the object segment of the eden. If
+// necessary, garbage collection is performed in the process.
+// The given address must be a multiple of `@sizeOf(u64)`.
+pub fn allocateInObjectSegment(self: *Self, size: usize) ![*]u64 {
+    return try self.eden.allocateInObjectSegment(self.allocator, &[_]*Activation{}, size);
+}
+
+pub fn allocateInByteVectorSegment(self: *Self, size: usize) ![*]u64 {
+    return try self.eden.allocateInByteVectorSegment(self.allocator, &[_]*Activation{}, size);
+}
+
 /// A mapping from an address to its size. This area of memory is checked for
 /// any object references in the current space which are then copied during a
 /// scavenge.
@@ -302,81 +377,6 @@ const Space = struct {
         return self.byte_vector_cursor;
     }
 };
-
-/// This is the space where newly created objects are placed. It is a fixed size
-/// space, and objects that survive this space are placed in the from-space.
-eden: Space,
-
-/// This is the space where objects that survive the eden and previous scavenges
-/// are placed. It is a fixed size space. When a scavenge cannot clean up enough
-/// objects to leave memory for the survivors of a scavenge in this space, all
-/// the objects in this space are moved to the old space where they reside until
-/// a compaction happens.
-from_space: Space,
-/// This is a space with an identical size to the from space. When a scavenge
-/// happens in the new space, the from space and this space are swapped.
-to_space: Space,
-
-/// This is the space where permanent objects reside. It can be expanded as
-/// memory requirements of the program grows.
-old_space: Space,
-
-allocator: *Allocator,
-
-// FIXME: Make eden + new space configurable at runtime
-const EdenSize = 1 * 1024 * 1024;
-const NewSpaceSize = 4 * 1024 * 1024;
-const InitialOldSpaceSize = 16 * 1024 * 1024;
-
-pub fn create(allocator: *Allocator) !*Self {
-    const self = try allocator.create(Self);
-    errdefer allocator.destroy(self);
-
-    try self.init(allocator);
-    return self;
-}
-
-pub fn destroy(self: *Self) void {
-    self.deinit();
-    self.allocator.destroy(self);
-}
-
-fn init(self: *Self, allocator: *Allocator) !void {
-    self.allocator = allocator;
-
-    self.old_space = try Space.init(allocator, InitialOldSpaceSize);
-    errdefer self.old_space.deinit(allocator);
-
-    self.from_space = try Space.init(allocator, NewSpaceSize);
-    errdefer self.from_space.deinit(allocator);
-
-    self.to_space = try Space.init(allocator, NewSpaceSize);
-    errdefer self.to_space.deinit(allocator);
-
-    self.eden = try Space.init(allocator, EdenSize);
-
-    self.from_space.scavenge_target = &self.to_space;
-    self.from_space.tenure_target = &self.old_space;
-    self.eden.tenure_target = &self.from_space;
-}
-
-fn deinit(self: *Self) void {
-    self.eden.deinit(self.allocator);
-    self.from_space.deinit(self.allocator);
-    self.to_space.deinit(self.allocator);
-    self.old_space.deinit(self.allocator);
-}
-
-// Attempts to allocate `size` bytes in the object segment of the eden. If
-// necessary, garbage collection is performed in the process.
-// The given address must be a multiple of `@sizeOf(u64)`.
-pub fn allocateInObjectSegment(self: *Self, size: usize) ![*]u64 {
-    return try self.eden.allocateInObjectSegment(self.allocator, &[_]*Activation{}, size);
-}
-
-pub fn allocateInByteVectorSegment(self: *Self, size: usize) ![*]u64 {
-    return try self.eden.allocateInByteVectorSegment(self.allocator, &[_]*Activation{}, size);
-}
 
 test "allocate one object's worth of space on the heap" {
     const allocator = std.testing.allocator;

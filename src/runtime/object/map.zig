@@ -101,6 +101,15 @@ const SlotsMap = packed struct {
     /// field.
     slot_count: u32,
 
+    /// Create a new slots map. Takes the amount of slots this object will have.
+    ///
+    /// IMPORTANT: All slots *must* be initialized right after creation like this:
+    ///
+    /// ```
+    /// var slots_map = Object.Map.Slots.create(heap, 2);
+    /// slots_map.getSlots()[0].initConstant(...);
+    /// slots_map.getSlots()[1].initMutable(...);
+    /// ```
     pub fn create(heap: *Heap, slot_count: u32) !*SlotsMap {
         const size = requiredSizeForAllocation(slot_count);
         const map_map = try getMapMap(heap);
