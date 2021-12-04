@@ -31,12 +31,22 @@ pub const Value = packed struct {
     }
 
     /// Create a new Value object from an integer literal.
-    pub fn fromInteger(integer: u64) Value {
+    pub fn fromInteger(integer: i64) Value {
+        std.debug.assert((@as(i64, -1) << 62) < integer and integer < (@as(i64, 1) << 62));
+        return .{ .data = @bitCast(u64, integer << 2) | IntegerMarker };
+    }
+
+    /// Create a new Value object from an unsigned integer literal.
+    pub fn fromUnsignedInteger(integer: u64) Value {
         std.debug.assert(integer < (@as(u64, 1) << 62));
         return .{ .data = (integer << 2) | IntegerMarker };
     }
 
-    /// Return whether this value is an object reference.
+    pub fn fromFloatingPoint(floating_point: f64) Value {
+        return .{ .data = (@bitCast(u64, floating_point) & ~ValueMarkerMask) | FloatingPointMarker };
+    }
+
+    /// Return whether this value is an integer.
     pub fn isInteger(self: Value) bool {
         return (self.data & ValueMarkerMask) == IntegerMarker;
     }
@@ -46,10 +56,27 @@ pub const Value = packed struct {
         return (self.data & ValueMarkerMask) == ObjectReferenceMarker;
     }
 
+    /// Return whether this value is a floating point number.
+    pub fn isFloatingPoint(self: Value) bool {
+        return (self.data & ValueMarkerMask) == FloatingPointMarker;
+    }
+
     /// Return this value as an integer.
-    pub fn asInteger(self: Value) u64 {
+    pub fn asInteger(self: Value) i64 {
+        std.debug.assert(self.isInteger());
+        return @bitCast(i64, self.data) >> 2;
+    }
+
+    /// Return this value as an unsigned integer.
+    pub fn asUnsignedInteger(self: Value) u64 {
         std.debug.assert(self.isInteger());
         return self.data >> 2;
+    }
+
+    /// Return this value as a floating point number.
+    pub fn asFloatingPoint(self: Value) f64 {
+        std.debug.assert(self.isFloatingPoint());
+        return @bitCast(f64, self.data & ~ValueMarkerMask);
     }
 
     /// Return the object address stored in this object as a pointer.

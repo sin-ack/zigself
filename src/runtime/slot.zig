@@ -14,9 +14,6 @@ const ParentBit: u32 = 1 << ParentShift;
 const MutableShift = 3;
 const MutableBit: u32 = 1 << MutableShift;
 
-pub const SlotParentFlag = enum { Parent, NotParent };
-pub const SlotMutableFlag = enum { Mutable, Constant };
-
 pub const Slot = packed struct {
     name: Value,
     /// A bitfield describing the properties of this slot. The bottom two bits
@@ -37,8 +34,11 @@ pub const Slot = packed struct {
     hash: u32,
     value: Value,
 
+    pub const ParentFlag = enum { Parent, NotParent };
+    pub const MutableFlag = enum { Mutable, Constant };
+
     /// Initalizes this slot to a constant value.
-    pub fn initConstant(self: *Slot, name: ByteVector, parent_flag: SlotParentFlag, value: Value) void {
+    pub fn initConstant(self: *Slot, name: ByteVector, parent_flag: ParentFlag, value: Value) void {
         self.init(name);
         self.value = value;
 
@@ -46,11 +46,11 @@ pub const Slot = packed struct {
     }
 
     /// Initalizes this slot to a mutable value.
-    pub fn initMutable(self: *Slot, map: *Object.Map.Slots, name: ByteVector, parent_flag: SlotParentFlag) void {
+    pub fn initMutable(self: *Slot, comptime MapType: type, map: *MapType, name: ByteVector, parent_flag: ParentFlag) void {
         self.init(name);
 
         self.setParent(parent_flag);
-        self.setMutable(map, .Mutable);
+        self.setMutable(MapType, map, .Mutable);
     }
 
     fn init(self: *Slot, name: ByteVector) void {
@@ -64,7 +64,7 @@ pub const Slot = packed struct {
         return self.properties & ParentBit > 0;
     }
 
-    pub fn setParent(self: *Slot, flag: SlotParentFlag) void {
+    pub fn setParent(self: *Slot, flag: ParentFlag) void {
         self.properties = switch (flag) {
             .Parent => self.properties | ParentBit,
             .NotParent => self.properties & ~ParentBit,
@@ -78,7 +78,7 @@ pub const Slot = packed struct {
     /// Sets whether this slot is mutable or not. If the mutable state of the
     /// slot differs from what it is being set to, the map's assignable slot
     /// count is updated.
-    pub fn setMutable(self: *Slot, map: *Object.Map.Slots, flag: SlotMutableFlag) void {
+    pub fn setMutable(self: *Slot, comptime MapType: type, map: *MapType, flag: MutableFlag) void {
         switch (flag) {
             .Mutable => {
                 if (self.properties & MutableBit > 0) return;

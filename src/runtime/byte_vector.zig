@@ -29,7 +29,7 @@ pub fn fromAddress(address: [*]u64) Self {
 
 pub fn getValues(self: Self) []u8 {
     const header_size = @sizeOf(Header);
-    const total_length = self.header.length.asInteger();
+    const total_length = self.header.length.asUnsignedInteger();
 
     return @ptrCast([*]u8, self.header)[header_size..total_length];
 }
@@ -39,7 +39,7 @@ pub fn asValue(self: Self) Value {
 }
 
 pub fn getSizeInMemory(self: Self) usize {
-    return requiredSize(self.header.length.asInteger() - @sizeOf(Header));
+    return requiredSize(self.header.length.asUnsignedInteger() - @sizeOf(Header));
 }
 
 /// Return the size required for the byte vector with `length` amount of
@@ -57,7 +57,7 @@ pub const Header = packed struct {
     length: Value,
 
     pub fn init(self: *Header, byte_vector_length: u64) void {
-        self.length = Value.fromInteger(@sizeOf(Header) + byte_vector_length);
+        self.length = Value.fromUnsignedInteger(@sizeOf(Header) + byte_vector_length);
     }
 
     pub fn asByteVector(self: *Header) Self {

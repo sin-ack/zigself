@@ -3,9 +3,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const Value = @import("./value.zig").Value;
-pub const Slots = @import("./object/slots.zig").Slots;
+const slots_objects = @import("./object/slots.zig");
+const byte_vector_object = @import("./object/byte_vector.zig");
+
+pub const Slots = slots_objects.Slots;
+pub const Activation = slots_objects.Activation;
+pub const Method = slots_objects.Method;
+pub const Block = slots_objects.Block;
+pub const ByteVector = byte_vector_object.ByteVectorObject;
 pub const Map = @import("./object/map.zig").Map;
 
 const Self = @This();
@@ -17,7 +25,11 @@ const ObjectTypeMask: u64 = 0b111 << ObjectTypeShift;
 const ObjectType = enum(u64) {
     ForwardingReference = 0b000 << ObjectTypeShift,
     Slots = 0b001 << ObjectTypeShift,
-    Map = 0b010 << ObjectTypeShift,
+    Activation = 0b010 << ObjectTypeShift,
+    Method = 0b011 << ObjectTypeShift,
+    Block = 0b100 << ObjectTypeShift,
+    ByteVector = 0b101 << ObjectTypeShift,
+    Map = 0b111 << ObjectTypeShift,
 };
 
 header: *align(@alignOf(u64)) Header,
@@ -42,6 +54,10 @@ pub fn getSizeInMemory(self: Self) usize {
     return switch (self.header.getObjectType()) {
         .ForwardingReference => unreachable,
         .Slots => self.asSlotsObject().getSizeInMemory(),
+        .Activation => self.asActivationObject().getSizeInMemory(),
+        .Method => self.asMethodObject().getSizeInMemory(),
+        .Block => self.asBlockObject().getSizeInMemory(),
+        .ByteVector => self.asByteVectorObject().getSizeInMemory(),
         .Map => self.asMap().getSizeInMemory(),
     };
 }
@@ -70,6 +86,11 @@ fn formatObject(
             try std.fmt.formatInt(@ptrCast(*Slots, header).getMap().getAssignableSlotCount(), 10, .lower, options, writer);
             try writer.writeAll(" }");
         },
+        .Activation => {
+            try writer.writeAll("Activation){ .assignable_slots = ");
+            try std.fmt.formatInt(@ptrCast(*Activation, header).getMap().getAssignableSlotCount(), 10, .lower, options, writer);
+            try writer.writeAll(" }");
+        },
         .Map => {
             var map = @ptrCast(*Map, header);
             try writer.writeAll("Map(");
@@ -82,9 +103,27 @@ fn formatObject(
                     try std.fmt.formatInt(map.asSlotsMap().getAssignableSlotCount(), 10, .lower, options, writer);
                     try writer.writeAll(" }");
                 },
+                .Activation => {
+                    try writer.writeAll("Activation)) { .slot_count = ");
+                    try std.fmt.formatInt(map.asActivationMap().slots_map.slot_count, 10, .lower, options, writer);
+                    try writer.writeAll(", .assignable_slots = ");
+                    try std.fmt.formatInt(map.asActivationMap().getAssignableSlotCount(), 10, .lower, options, writer);
+                    try writer.writeAll(" }");
+                },
             }
         },
     }
+}
+
+pub fn finalize(self: Self, allocator: *Allocator) void {
+    switch (self.header.getObjectType()) {
+        .ForwardingReference, .Slots, .Activation, .Method, .Block, .ByteVector => unreachable,
+        .Map => self.asMap().finalize(allocator),
+    }
+}
+
+pub fn asValue(self: Self) Value {
+    return Value.fromObjectAddress(self.getAddress());
 }
 
 // Slots objects
@@ -102,6 +141,74 @@ fn mustBeSlotsObject(self: Self) void {
 pub fn asSlotsObject(self: Self) *Slots {
     self.mustBeSlotsObject();
     return @ptrCast(*Slots, self.header);
+}
+
+// Activation objects
+
+pub fn isActivationObject(self: Self) bool {
+    return self.header.getObjectType() == .Activation;
+}
+
+fn mustBeActivationObject(self: Self) void {
+    if (!self.isActivationObject()) {
+        std.debug.panic("Expected the object at {*} to be a activation object", .{self.header});
+    }
+}
+
+pub fn asActivationObject(self: Self) *Activation {
+    self.mustBeActivationObject();
+    return @ptrCast(*Activation, self.header);
+}
+
+// Method objects
+
+pub fn isMethodObject(self: Self) bool {
+    return self.header.getObjectType() == .Method;
+}
+
+fn mustBeMethodObject(self: Self) void {
+    if (!self.isMethodObject()) {
+        std.debug.panic("Expected the object at {*} to be a method object", .{self.header});
+    }
+}
+
+pub fn asMethodObject(self: Self) *Method {
+    self.mustBeMethodObject();
+    return @ptrCast(*Method, self.header);
+}
+
+// Block objects
+
+pub fn isBlockObject(self: Self) bool {
+    return self.header.getObjectType() == .Block;
+}
+
+fn mustBeBlockObject(self: Self) void {
+    if (!self.isBlockObject()) {
+        std.debug.panic("Expected the object at {*} to be a block object", .{self.header});
+    }
+}
+
+pub fn asBlockObject(self: Self) *Block {
+    self.mustBeBlockObject();
+    return @ptrCast(*Block, self.header);
+}
+
+// Byte vector objects
+
+pub fn isByteVectorObject(self: Self) bool {
+    return self.header.getObjectType() == .ByteVector;
+}
+
+fn mustBeByteVectorObject(self: Self) void {
+    if (!self.isByteVectorObject()) {
+        std.debug.panic("Expected the object at {*} to be a byte vector object", .{self.header});
+    }
+}
+
+pub fn asByteVectorObject(self: Self) *ByteVector {
+    self.mustBeByteVectorObject();
+    return @ptrCast(*ByteVector, self.header);
 }
 
 // Map objects

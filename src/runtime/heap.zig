@@ -94,10 +94,24 @@ pub fn allocateInByteVectorSegment(self: *Self, size: usize) ![*]u64 {
     return try self.eden.allocateInByteVectorSegment(self.allocator, &[_]*Activation{}, size);
 }
 
+/// Mark the given address within the heap as an object which needs to know when
+/// it is finalized. The address must've just been allocated (i.e. still in
+/// eden).
+pub fn markAddressAsNeedingFinalization(self: *Self, address: [*]u64) !void {
+    if (!self.eden.objectSegmentContains(address)) {
+        std.debug.panic("!!! markAddressAsNeedingFinalization called on address which isn't in eden object segment", .{});
+    }
+
+    try self.eden.addToFinalizationSet(self.allocator, address);
+}
+
 /// A mapping from an address to its size. This area of memory is checked for
 /// any object references in the current space which are then copied during a
 /// scavenge.
 const RememberedSet = std.AutoArrayHashMapUnmanaged([*]u64, usize);
+/// A set of objects which should be notified when they are not referenced
+/// anymore. See `Space.finalization_set` for more information.
+const FinalizationSet = std.AutoArrayHashMapUnmanaged([*]u64, void);
 const Space = struct {
     /// The raw memory contents of the space. The space capacity can be learned
     /// with `memory.len`.
@@ -116,11 +130,19 @@ const Space = struct {
     /// any references that were still pointing to this space at scavenge time
     /// are transferred to the target space.
     ///
-    /// FIXME: The original Self VM used "cards" (i.e. a bitmap) to mark certain
-    ///        regions of memory as pointing to a new space indiscriminate of
-    ///        object size. Figure out whether that is faster than this
-    ///        approach.
+    /// TODO: The original Self VM used "cards" (i.e. a bitmap) to mark certain
+    ///       regions of memory as pointing to a new space indiscriminate of
+    ///       object size. Figure out whether that is faster than this
+    ///       approach.
     remembered_set: RememberedSet,
+    /// The finalization set of a space represents the set of objects which
+    /// should be notified when they haven't been copied after a scavenge
+    /// operation. These objects need to perform additional steps once they are
+    /// not scavenged (in other words, not referenced by anyone anymore).
+    ///
+    ///When an item in this set gets copied to the target space, it is removed
+    ///from this set and added to the target set.
+    finalization_set: FinalizationSet,
     /// The scavenging target of this space. When the space runs out of memory
     /// and this space is set, the space will attempt to perform a scavenging
     /// operation towards this space. This space must have the same size as the
@@ -140,6 +162,7 @@ const Space = struct {
             .object_cursor = memory.ptr,
             .byte_vector_cursor = memory.ptr + memory.len,
             .remembered_set = .{},
+            .finalization_set = .{},
         };
     }
 
@@ -193,7 +216,7 @@ const Space = struct {
             if (!self.objectSegmentContains(activation_object_address))
                 continue;
 
-            const new_address = copyObjectTo(allocator, activation_object_address, target_space);
+            const new_address = try self.copyObjectTo(allocator, activation_object_address, target_space);
             activation.activation_object = Value.fromObjectAddress(new_address);
         }
 
@@ -216,7 +239,7 @@ const Space = struct {
                     const address = value.asObject().getAddress();
 
                     if (self.objectSegmentContains(address)) {
-                        cursor.* = Value.fromObjectAddress(copyObjectTo(allocator, address, target_space)).data;
+                        cursor.* = Value.fromObjectAddress(try self.copyObjectTo(allocator, address, target_space)).data;
                         found_references += 1;
                     } else if (self.byteVectorSegmentContains(address)) {
                         cursor.* = Value.fromObjectAddress(copyByteVectorTo(allocator, address, target_space)).data;
@@ -243,7 +266,7 @@ const Space = struct {
                 const address = value.asObjectAddress();
 
                 if (self.objectSegmentContains(address)) {
-                    object_scan_cursor[0] = Value.fromObjectAddress(copyObjectTo(allocator, address, target_space)).data;
+                    object_scan_cursor[0] = Value.fromObjectAddress(try self.copyObjectTo(allocator, address, target_space)).data;
                 } else if (self.byteVectorSegmentContains(address)) {
                     object_scan_cursor[0] = Value.fromObjectAddress(copyByteVectorTo(allocator, address, target_space)).data;
                 }
@@ -252,11 +275,19 @@ const Space = struct {
 
         std.debug.assert(object_scan_cursor == target_space.object_cursor);
 
-        // Reset this space's pointers and remembered set, as it is now
-        // effectively empty.
+        // Notify any object who didn't make it out of this space and wanted to
+        // be notified about being finalized.
+        for (self.finalization_set.keys()) |address| {
+            const object = Object.fromAddress(address);
+            object.finalize(allocator);
+        }
+
+        // Reset this space's pointers, remembered set and finalization set, as
+        // it is now effectively empty.
         self.object_cursor = self.memory.ptr;
         self.byte_vector_cursor = self.memory.ptr + self.memory.len;
         self.remembered_set.clearRetainingCapacity();
+        self.finalization_set.clearRetainingCapacity();
     }
 
     /// Performs a garbage collection operation on this space.
@@ -300,7 +331,7 @@ const Space = struct {
     /// location of the old object which tells the future calls of this function
     /// for the same object to just return the new location and avoid copying
     /// again.
-    fn copyObjectTo(allocator: *Allocator, address: [*]u64, target_space: *Space) [*]u64 {
+    fn copyObjectTo(self: *Space, allocator: *Allocator, address: [*]u64, target_space: *Space) ![*]u64 {
         const object = Object.fromAddress(address);
         if (object.isForwardingReference()) {
             const forward_address = object.getForwardAddress();
@@ -312,8 +343,15 @@ const Space = struct {
 
         const object_size_in_words = object_size / @sizeOf(u64);
         // We must have enough space at this point.
-        const new_address = target_space.allocateInObjectSegment(allocator, &[_]*Activation{}, object_size) catch unreachable;
+        const new_address = try target_space.allocateInObjectSegment(allocator, &[_]*Activation{}, object_size);
         std.mem.copy(u64, new_address[0..object_size_in_words], address[0..object_size_in_words]);
+
+        // Add this object to the target space's finalization set if it is in
+        // ours.
+        if (self.finalizationSetContains(address)) {
+            self.removeFromFinalizationSet(address) catch unreachable;
+            try target_space.addToFinalizationSet(allocator, address);
+        }
 
         // Create a forwarding reference
         object.setForwardAddress(new_address);
@@ -338,6 +376,8 @@ const Space = struct {
         std.mem.swap([]u64, &self.memory, &target_space.memory);
         std.mem.swap([*]u64, &self.object_cursor, &target_space.object_cursor);
         std.mem.swap([*]u64, &self.byte_vector_cursor, &target_space.byte_vector_cursor);
+        std.mem.swap(RememberedSet, &self.remembered_set, &target_space.remembered_set);
+        std.mem.swap(FinalizationSet, &self.finalization_set, &target_space.finalization_set);
     }
 
     fn objectSegmentContains(self: *Space, address: [*]u64) bool {
@@ -375,6 +415,26 @@ const Space = struct {
             std.mem.set(u8, @ptrCast([*]align(@alignOf(u64)) u8, self.byte_vector_cursor)[0..size], UninitializedHeapScrubByte);
 
         return self.byte_vector_cursor;
+    }
+
+    /// Adds the given address to the finalization set of this space.
+    pub fn addToFinalizationSet(self: *Space, allocator: *Allocator, address: [*]u64) !void {
+        try self.finalization_set.put(allocator, address, .{});
+    }
+
+    /// Return whether the finalization set contains the given address.
+    pub fn finalizationSetContains(self: *Space, address: [*]u64) bool {
+        return self.finalization_set.contains(address);
+    }
+
+    pub const RemoveFromFinalizationSetError = error{AddressNotInFinalizationSet};
+    /// Removes the given address from the finalization set of this space.
+    /// Returns error.AddressNotInFinalizationSet if the address was not in
+    /// the finalization set.
+    pub fn removeFromFinalizationSet(self: *Space, address: [*]u64) !void {
+        if (!self.finalization_set.swapRemove(address)) {
+            return RemoveFromFinalizationSetError.AddressNotInFinalizationSet;
+        }
     }
 };
 
@@ -416,14 +476,14 @@ test "link an object to another and perform scavenge" {
     // The object being referenced
     var referenced_object_map = try Object.Map.Slots.create(heap, 1);
     var actual_name = try ByteVector.createFromString(heap, "actual");
-    referenced_object_map.getSlots()[0].initConstant(actual_name, .NotParent, Value.fromInteger(0xDEADBEEF));
+    referenced_object_map.getSlots()[0].initConstant(actual_name, .NotParent, Value.fromUnsignedInteger(0xDEADBEEF));
     var referenced_object = try Object.Slots.create(heap, referenced_object_map, &[_]Value{});
 
     // The "activation object", which is how we get a reference to the object in
     // the from space after the tenure is done
     var activation_object_map = try Object.Map.Slots.create(heap, 1);
     var reference_name = try ByteVector.createFromString(heap, "reference");
-    activation_object_map.getSlots()[0].initMutable(activation_object_map, reference_name, .NotParent);
+    activation_object_map.getSlots()[0].initMutable(Object.Map.Slots, activation_object_map, reference_name, .NotParent);
     var activation_object = try Object.Slots.create(heap, activation_object_map, &[_]Value{referenced_object.asValue()});
 
     // Create the activation
@@ -456,5 +516,5 @@ test "link an object to another and perform scavenge" {
 
     // Get the value we stored and compare it
     var referenced_object_value = new_referenced_object.getMap().getSlotByName("actual").?.value;
-    try std.testing.expectEqual(@as(u64, 0xDEADBEEF), referenced_object_value.asInteger());
+    try std.testing.expectEqual(@as(u64, 0xDEADBEEF), referenced_object_value.asUnsignedInteger());
 }

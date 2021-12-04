@@ -91,13 +91,10 @@ pub fn main() !u8 {
     defer heap.destroy();
 
     var lobby = try environment.prepareRuntimeEnvironment(heap);
-    defer lobby.unrefWithAllocator(allocator);
-    defer environment.teardownGlobalObjects(allocator);
+    defer environment.teardownGlobalObjects();
 
     did_pass_script_to_interpreter = true;
-    if (try interpreter.executeScript(allocator, entrypoint_script, lobby)) |result| {
-        result.unrefWithAllocator(allocator);
-    }
+    _ = try interpreter.executeScript(allocator, heap, entrypoint_script, lobby);
 
     return 0;
 }

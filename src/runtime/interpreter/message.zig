@@ -6,8 +6,10 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const AST = @import("../../language/ast.zig");
-const Slot = @import("../slot.zig");
+const Slot = @import("../slot.zig").Slot;
+const Heap = @import("../heap.zig");
 const Range = @import("../../language/location_range.zig");
+const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const Activation = @import("../activation.zig");
 const primitives = @import("../primitives.zig");
@@ -19,8 +21,8 @@ const InterpreterContext = root_interpreter.InterpreterContext;
 
 const MaximumStackDepth = 2048;
 
-fn getMessageArguments(allocator: *Allocator, ast_arguments: []AST.ExpressionNode, context: *InterpreterContext) root_interpreter.InterpreterError![]Object.Ref {
-    var arguments = try std.ArrayList(Object.Ref).initCapacity(allocator, ast_arguments.len);
+fn getMessageArguments(allocator: *Allocator, ast_arguments: []AST.ExpressionNode, context: *InterpreterContext) root_interpreter.InterpreterError![]Value {
+    var arguments = try std.ArrayList(Value).initCapacity(allocator, ast_arguments.len);
     errdefer {
         for (arguments.items) |*argument| {
             argument.unrefWithAllocator(allocator);
@@ -41,10 +43,10 @@ fn getMessageArguments(allocator: *Allocator, ast_arguments: []AST.ExpressionNod
 pub fn executeBlockMessage(
     allocator: *Allocator,
     message_range: Range,
-    block_object: Object.Ref,
-    arguments: []Object.Ref,
+    block_object: Value,
+    arguments: []Value,
     context: *InterpreterContext,
-) root_interpreter.InterpreterError!Object.Ref {
+) root_interpreter.InterpreterError!Value {
     var did_find_activation_in_stack = false;
     var parent_activation: *Activation = undefined;
 
@@ -109,7 +111,7 @@ pub fn executeBlockMessage(
         }
     }
 
-    var last_expression_result: ?Object.Ref = null;
+    var last_expression_result: ?Value = null;
     for (block_object.value.content.Block.statements) |statement| {
         if (last_expression_result) |last_result| {
             last_result.unrefWithAllocator(allocator);
@@ -138,11 +140,11 @@ pub fn executeBlockMessage(
 pub fn executeMethodMessage(
     allocator: *Allocator,
     message_range: Range,
-    receiver: Object.Ref,
-    method_object: Object.Ref,
-    arguments: []Object.Ref,
+    receiver: Value,
+    method_object: Value,
+    arguments: []Value,
     context: *InterpreterContext,
-) !Object.Ref {
+) !Value {
     if (context.activation_stack.items.len >= MaximumStackDepth) {
         return runtime_error.raiseError(allocator, context, "Maximum stack size reached", .{});
     }
@@ -184,7 +186,7 @@ pub fn executeMethodMessage(
         }
     }
 
-    var last_expression_result: ?Object.Ref = null;
+    var last_expression_result: ?Value = null;
     for (method_object.value.content.Method.statements) |statement| {
         if (last_expression_result) |last_result| {
             last_result.unrefWithAllocator(allocator);
@@ -227,11 +229,11 @@ pub fn executeMethodMessage(
 pub fn executePrimitiveMessage(
     allocator: *Allocator,
     message_range: Range,
-    receiver: Object.Ref,
+    receiver: Value,
     name: []const u8,
-    arguments: []Object.Ref,
+    arguments: []Value,
     context: *InterpreterContext,
-) root_interpreter.InterpreterError!Object.Ref {
+) root_interpreter.InterpreterError!Value {
     // All primitives borrow a ref from the caller for the receiver and
     // each argument. It is the primitive's job to unref any argument after
     // its work is done.
@@ -249,7 +251,7 @@ pub fn executeAssignmentMessage(
     slot: *Slot,
     ast_argument: AST.ExpressionNode,
     context: *InterpreterContext,
-) root_interpreter.InterpreterError!Object.Ref {
+) root_interpreter.InterpreterError!Value {
     var argument = try root_interpreter.executeExpression(allocator, ast_argument, context);
     errdefer argument.unrefWithAllocator(allocator);
 
@@ -268,13 +270,15 @@ pub fn executeAssignmentMessage(
 }
 
 /// Executes a message. All refs are forwarded.
-pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: *InterpreterContext) root_interpreter.InterpreterError!Object.Ref {
-    var receiver = try root_interpreter.executeExpression(allocator, message.receiver, context);
-    defer receiver.unrefWithAllocator(allocator);
+pub fn executeMessage(allocator: *Allocator, heap: *Heap, message: AST.MessageNode, context: *InterpreterContext) root_interpreter.InterpreterError!Value {
+    // FIXME: Track the receiver, and untrack on return
+    var receiver = try root_interpreter.executeExpression(allocator, heap, message.receiver, context);
 
     // Check for assignable slots
-    if (try receiver.value.getAssignableSlotForMessage(message.message_name)) |slot| {
-        return try executeAssignmentMessage(allocator, slot, message.arguments[0], context);
+    if (receiver.isObjectReference()) {
+        if (receiver.asObject().getAssignableSlotForMessage(message.message_name)) |slot| {
+            return try executeAssignmentMessage(allocator, slot, message.arguments[0], context);
+        }
     }
 
     // Primitive check
@@ -284,10 +288,11 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
         //       them.
         defer allocator.free(arguments);
 
-        if (try receiver.value.findActivationReceiver()) |actual_receiver| {
-            actual_receiver.ref();
-            receiver.unrefWithAllocator(allocator);
-            receiver = actual_receiver;
+        if (receiver.isObjectReference() and receiver.asObject().isActivationObject()) {
+            if (try receiver.asObject().asActivationObject().findActivationReceiver()) |actual_receiver| {
+                // FIXME: Stop tracking receiver, and track actual receiver
+                receiver = actual_receiver;
+            }
         }
 
         return try executePrimitiveMessage(allocator, message.range, receiver, message.message_name, arguments, context);
@@ -297,9 +302,13 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
     // method on traits block, this is actually executing the block itself via
     // the virtual method.
     {
+        // FIXME: Track block_receiver here
         var block_receiver = receiver;
-        if (try block_receiver.value.findActivationReceiver()) |actual_receiver| {
-            block_receiver = actual_receiver;
+        if (block_receiver.isObjectReference() and block_receiver.asObject().isActivationObject()) {
+            if (try block_receiver.value.findActivationReceiver()) |actual_receiver| {
+                // FIXME: Stop tracking block_receiver, track actual_receiver
+                block_receiver = actual_receiver;
+            }
         }
 
         if (block_receiver.value.is(.Block) and block_receiver.value.isCorrectMessageForBlockExecution(message.message_name)) {
@@ -310,21 +319,15 @@ pub fn executeMessage(allocator: *Allocator, message: AST.MessageNode, context: 
         }
     }
 
-    if (try receiver.value.lookup(allocator, context, message.message_name, .Value)) |lookup_result| {
-        switch (lookup_result.value.content) {
-            .Integer, .FloatingPoint, .ByteVector, .Vector, .Slots, .Empty, .Block => {
-                lookup_result.ref();
-                return lookup_result;
-            },
+    if (try receiver.lookup(allocator, context, message.message_name, .Value)) |lookup_result| {
+        // FIXME: Track lookup_result before getting message arguments
+        const arguments = try getMessageArguments(allocator, message.arguments, context);
+        defer allocator.free(arguments);
 
-            .Method => {
-                const arguments = try getMessageArguments(allocator, message.arguments, context);
-                defer allocator.free(arguments);
-
-                return try executeMethodMessage(allocator, message.range, receiver, lookup_result, arguments, context);
-            },
-
-            .Activation => unreachable,
+        if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
+            return try executeMethodMessage(allocator, heap, message.range, receiver, lookup_result, arguments, context);
+        } else {
+            return lookup_result;
         }
     } else {
         return runtime_error.raiseError(allocator, context, "Unknown selector \"{s}\"", .{message.message_name});
