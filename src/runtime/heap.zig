@@ -105,6 +105,25 @@ pub fn markAddressAsNeedingFinalization(self: *Self, address: [*]u64) !void {
     try self.eden.addToFinalizationSet(self.allocator, address);
 }
 
+/// Track the given value, returning a Tracked. When a garbage collection
+/// occurs, the value will be updated with the new location.
+pub fn track(self: *Self, value: Value) Tracked {
+    const tracked = Tracked.create(self.allocator, value);
+
+    if (value.isObjectReference()) {
+        _ = self.eden.startTracking(self.allocator, tracked.tracker);
+    }
+
+    return tracked;
+}
+
+/// Untracks the given value.
+pub fn untrack(self: *Self, tracked: Tracked) void {
+    if (tracked.tracker.value.isObjectReference()) {
+        _ = self.eden.stopTracking(tracked);
+    }
+}
+
 /// A mapping from an address to its size. This area of memory is checked for
 /// any object references in the current space which are then copied during a
 /// scavenge.
@@ -112,6 +131,8 @@ const RememberedSet = std.AutoArrayHashMapUnmanaged([*]u64, usize);
 /// A set of objects which should be notified when they are not referenced
 /// anymore. See `Space.finalization_set` for more information.
 const FinalizationSet = std.AutoArrayHashMapUnmanaged([*]u64, void);
+/// A set of objects which are tracked across garbage collection events.
+const TrackedSet = std.AutoArrayHashMapUnmanaged(*Tracked.Tracker, void);
 const Space = struct {
     /// The raw memory contents of the space. The space capacity can be learned
     /// with `memory.len`.
@@ -143,6 +164,11 @@ const Space = struct {
     ///When an item in this set gets copied to the target space, it is removed
     ///from this set and added to the target set.
     finalization_set: FinalizationSet,
+    /// The tracked set of this space. At a garbage collection, all the objects
+    /// pointed to by values in this set will be marked as referenced and will
+    /// be copied to the new space. The tracked values are then transferred to
+    /// the new space, updating them with their new locations.
+    tracked_set: TrackedSet,
     /// The scavenging target of this space. When the space runs out of memory
     /// and this space is set, the space will attempt to perform a scavenging
     /// operation towards this space. This space must have the same size as the
@@ -163,6 +189,7 @@ const Space = struct {
             .byte_vector_cursor = memory.ptr + memory.len,
             .remembered_set = .{},
             .finalization_set = .{},
+            .tracked_set = .{},
         };
     }
 
@@ -209,7 +236,7 @@ const Space = struct {
         for (activation_stack) |activation| {
             const activation_object_reference = activation.activation_object;
             std.debug.assert(activation_object_reference.isObjectReference());
-            const activation_object_address = activation_object_reference.asObject().getAddress();
+            const activation_object_address = activation_object_reference.asObjectAddress();
 
             // If the activation object address is not within the object segment
             // of our space, then we do not care about it.
@@ -218,6 +245,21 @@ const Space = struct {
 
             const new_address = try self.copyObjectTo(allocator, activation_object_address, target_space);
             activation.activation_object = Value.fromObjectAddress(new_address);
+        }
+
+        // Go through the tracked set, copying referenced objects
+        for (self.tracked_set.keys()) |tracker| {
+            var address = tracker.value.asObjectAddress();
+
+            if (self.objectSegmentContains(address)) {
+                tracker.value = Value.fromObjectAddress(try self.copyObjectTo(allocator, address, target_space));
+            } else if (self.byteVectorSegmentContains(address)) {
+                tracker.value = Value.fromObjectAddress(copyByteVectorTo(allocator, address, target_space));
+            } else {
+                std.debug.panic("The tracked value was neither in this space's object segment nor was it in its byte vector segment. Why was it in the tracked set in the first place?", .{});
+            }
+
+            try target_space.addToTrackedSet(allocator, Tracked{ .tracker = tracker });
         }
 
         var remembered_set_iterator = self.remembered_set.iterator();
@@ -288,6 +330,7 @@ const Space = struct {
         self.byte_vector_cursor = self.memory.ptr + self.memory.len;
         self.remembered_set.clearRetainingCapacity();
         self.finalization_set.clearRetainingCapacity();
+        self.tracked_set.clearRetainingCapacity();
     }
 
     /// Performs a garbage collection operation on this space.
@@ -378,6 +421,7 @@ const Space = struct {
         std.mem.swap([*]u64, &self.byte_vector_cursor, &target_space.byte_vector_cursor);
         std.mem.swap(RememberedSet, &self.remembered_set, &target_space.remembered_set);
         std.mem.swap(FinalizationSet, &self.finalization_set, &target_space.finalization_set);
+        std.mem.swap(TrackedSet, &self.tracked_set, &target_space.tracked_set);
     }
 
     fn objectSegmentContains(self: *Space, address: [*]u64) bool {
@@ -422,19 +466,110 @@ const Space = struct {
         try self.finalization_set.put(allocator, address, .{});
     }
 
-    /// Return whether the finalization set contains the given address.
+    /// Returns whether the finalization set contains the given address.
     pub fn finalizationSetContains(self: *Space, address: [*]u64) bool {
         return self.finalization_set.contains(address);
     }
 
     pub const RemoveFromFinalizationSetError = error{AddressNotInFinalizationSet};
     /// Removes the given address from the finalization set of this space.
-    /// Returns error.AddressNotInFinalizationSet if the address was not in
-    /// the finalization set.
+    /// Returns AddressNotInFinalizationSet if the address was not in the
+    /// finalization set.
     pub fn removeFromFinalizationSet(self: *Space, address: [*]u64) !void {
         if (!self.finalization_set.swapRemove(address)) {
             return RemoveFromFinalizationSetError.AddressNotInFinalizationSet;
         }
+    }
+
+    /// Adds the given tracked value into the tracked set of this space.
+    pub fn addToTrackedSet(self: *Space, allocator: *Allocator, tracked: Tracked) !void {
+        try self.tracked_set.put(allocator, tracked.tracker, .{});
+    }
+
+    /// Returns whether the tracked set contains the given tracked value.
+    pub fn trackedSetContains(self: *Space, tracked: Tracked) !void {
+        return self.tracked_set.contains(tracked.tracker);
+    }
+
+    pub const RemoveFromTrackedSetError = error{AddressNotInTrackedSet};
+    /// Removes the given address from the tracked set of this space. Returns
+    /// AddressNotInTrackedSet if the address was not in the tracked set.
+    pub fn removeFromTrackedSet(self: *Space, tracked: Tracked) !void {
+        if (!self.tracked_set.swapRemove(tracked.tracker)) {
+            return RemoveFromTrackedSetError.AddressNotInTrackedSet;
+        }
+    }
+
+    /// Find the space which has this value, and add the tracked value to the
+    /// tracked set of that space.
+    pub fn startTracking(self: *Space, allocator: *Allocator, tracked: Tracked) !bool {
+        const address = tracked.tracker.value.asObjectAddress();
+
+        if (self.objectSegmentContains(address) or self.byteVectorSegmentContains(address)) {
+            self.addToTrackedSet(allocator, tracked);
+            return true;
+        }
+
+        if (self.scavenge_target) |scavenge_target| {
+            if (try scavenge_target.startTracking(allocator, tracked)) return true;
+        }
+
+        if (self.tenure_target) |tenure_target| {
+            if (try tenure_target.startTracking(allocator, tracked)) return true;
+        }
+
+        return false;
+    }
+
+    /// Find the space which has this value, and remove the tracked value from
+    /// the tracked set of that space.
+    pub fn stopTracking(self: *Space, tracked: Tracked) !bool {
+        const address = tracked.tracker.value.asObjectAddress();
+
+        if (self.objectSegmentContains(address) or self.byteVectorSegmentContains(address)) {
+            self.removeFromTrackedSet(tracked) catch unreachable;
+            return true;
+        }
+
+        if (self.scavenge_target) |scavenge_target| {
+            if (try scavenge_target.stopTracking(tracked)) return true;
+        }
+
+        if (self.tenure_target) |tenure_target| {
+            if (try tenure_target.stopTracking(tracked)) return true;
+        }
+
+        return false;
+    }
+};
+
+/// A tracked heap value. This value is updated whenever garbage collection
+/// occurs and the object moves.
+pub const Tracked = struct {
+    tracker: *Tracker,
+
+    pub const Tracker = struct {
+        value: Value,
+    };
+
+    pub fn create(allocator: *Allocator, value: Value) !Tracked {
+        const tracker = try allocator.create(Tracker);
+        tracker.value = value;
+
+        return Tracked{ .tracker = tracker };
+    }
+
+    pub fn destroy(self: Tracked, allocator: *Allocator) void {
+        allocator.free(self.tracker);
+    }
+
+    pub fn untrackAndDestroy(self: Tracked, heap: *Self) void {
+        heap.untrack(self);
+        self.destroy(heap.allocator);
+    }
+
+    pub fn getValue(self: Tracked) Value {
+        return self.tracker.value;
     }
 };
 
