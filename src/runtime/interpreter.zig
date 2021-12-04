@@ -69,6 +69,9 @@ pub fn executeScript(allocator: *Allocator, heap: *Heap, script: Script.Ref, lob
         }
     }
 
+    heap.setActivationStack(&activation_stack);
+    defer heap.setActivationStack(null);
+
     var context = InterpreterContext{
         .self_object = lobby,
         .lobby = lobby,

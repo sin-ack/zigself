@@ -38,6 +38,7 @@ to_space: Space,
 old_space: Space,
 
 allocator: *Allocator,
+activation_stack: ?*std.ArrayList(*Activation),
 
 // FIXME: Make eden + new space configurable at runtime
 const EdenSize = 1 * 1024 * 1024;
@@ -59,6 +60,7 @@ pub fn destroy(self: *Self) void {
 
 fn init(self: *Self, allocator: *Allocator) !void {
     self.allocator = allocator;
+    self.activation_stack = null;
 
     self.old_space = try Space.init(allocator, InitialOldSpaceSize);
     errdefer self.old_space.deinit(allocator);
@@ -87,11 +89,25 @@ fn deinit(self: *Self) void {
 // necessary, garbage collection is performed in the process.
 // The given address must be a multiple of `@sizeOf(u64)`.
 pub fn allocateInObjectSegment(self: *Self, size: usize) ![*]u64 {
-    return try self.eden.allocateInObjectSegment(self.allocator, &[_]*Activation{}, size);
+    const stack = if (self.activation_stack) |activation_stack|
+        activation_stack.items
+    else
+        &[_]*Activation{};
+
+    return try self.eden.allocateInObjectSegment(self.allocator, stack, size);
 }
 
 pub fn allocateInByteVectorSegment(self: *Self, size: usize) ![*]u64 {
-    return try self.eden.allocateInByteVectorSegment(self.allocator, &[_]*Activation{}, size);
+    const stack = if (self.activation_stack) |activation_stack|
+        activation_stack.items
+    else
+        &[_]*Activation{};
+
+    return try self.eden.allocateInByteVectorSegment(self.allocator, stack, size);
+}
+
+pub fn setActivationStack(self: *Self, activation_stack: ?*std.ArrayList(*Activation)) void {
+    self.activation_stack = activation_stack;
 }
 
 /// Mark the given address within the heap as an object which needs to know when
