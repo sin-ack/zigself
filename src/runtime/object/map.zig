@@ -43,19 +43,17 @@ pub fn getMapMap(heap: *Heap) !Value {
 const MapTypeShift = 2 + 3;
 const MapTypeMask: u64 = 0b111 << MapTypeShift;
 
-const MapType = enum(u64) {
+pub const MapType = enum(u64) {
     Slots = 0b000 << MapTypeShift,
-    Activation = 0b001 << MapTypeShift,
-    Method = 0b010 << MapTypeShift,
-    Block = 0b011 << MapTypeShift,
-    ByteVector = 0b100 << MapTypeShift,
+    Method = 0b001 << MapTypeShift,
+    Block = 0b010 << MapTypeShift,
+    ByteVector = 0b011 << MapTypeShift,
 };
 
 pub const Map = packed struct {
     header: Object.Header,
 
     pub const Slots = SlotsMap;
-    pub const Activation = ActivationMap;
     pub const Method = MethodMap;
     pub const Block = BlockMap;
     pub const ByteVector = ByteVectorMap;
@@ -67,7 +65,7 @@ pub const Map = packed struct {
 
     pub fn finalize(self: *Map, allocator: *Allocator) void {
         switch (self.getMapType()) {
-            .Slots, .Activation, .ByteVector => unreachable,
+            .Slots, .ByteVector => unreachable,
             .Method => self.asMethodMap().finalize(allocator),
             .Block => self.asBlockMap().finalize(allocator),
         }
@@ -100,21 +98,6 @@ pub const Map = packed struct {
     pub fn asSlotsMap(self: *Map) *Slots {
         self.mustBeSlotsMap();
         return @ptrCast(*Slots, self);
-    }
-
-    pub fn isActivationMap(self: *Map) bool {
-        return self.getMapType() == .Activation;
-    }
-
-    fn mustBeActivationMap(self: *Map) void {
-        if (!self.isActivationMap()) {
-            std.debug.panic("Expected the object at {*} to be a activation map", .{self});
-        }
-    }
-
-    pub fn asActivationMap(self: *Map) *ActivationMap {
-        self.mustBeActivationMap();
-        return @ptrCast(*ActivationMap, self);
     }
 
     pub fn isMethodMap(self: *Map) bool {
@@ -165,11 +148,14 @@ pub const Map = packed struct {
     pub fn getSizeInMemory(self: *Map) usize {
         return switch (self.getMapType()) {
             .Slots => self.asSlotsMap().getSizeInMemory(),
-            .Activation => self.asActivationMap().getSizeInMemory(),
             .Method => self.asMethodMap().getSizeInMemory(),
             .Block => self.asBlockMap().getSizeInMemory(),
             .ByteVector => self.asByteVectorMap().getSizeInMemory(),
         };
+    }
+
+    pub fn asValue(self: *Map) Value {
+        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
     }
 };
 
@@ -258,92 +244,8 @@ const SlotsMap = packed struct {
     }
 
     /// Return the size required for the whole map with the given slot count.
-    fn requiredSizeForAllocation(slot_count: u32) usize {
+    pub fn requiredSizeForAllocation(slot_count: u32) usize {
         return @sizeOf(SlotsMap) + slot_count * @sizeOf(Slot);
-    }
-};
-
-/// A map for a method or block activation. Is pretty much a slots map, however
-/// also contains a direct reference to the receiver of the method or block
-/// activation. For method activations, it is the value to which the message was
-/// sent; for blocks, it is the current activation object.
-const ActivationMap = packed struct {
-    slots_map: SlotsMap,
-    receiver: Value,
-
-    /// Create a new activation map. Takes the amount of slots this map will
-    /// have.
-    ///
-    /// IMPORTANT: All slots *must* be initialized right after creation like this:
-    ///
-    /// ```
-    /// var activation_map = Object.Map.Activation.create(heap, receiver, 2);
-    /// activation_map.getSlots()[0].initConstant(...);
-    /// activation_map.getSlots()[1].initMutable(...);
-    /// ```
-    pub fn create(heap: *Heap, receiver: Value, slot_count: u32) !*SlotsMap {
-        const size = requiredSizeForAllocation(slot_count);
-        const map_map = try getMapMap(heap);
-
-        var memory_area = try heap.allocateInObjectSegment(size);
-        var self = @ptrCast(*ActivationMap, memory_area);
-        self.init(receiver, slot_count, map_map);
-
-        return self;
-    }
-
-    fn init(self: *ActivationMap, receiver: Value, slot_count: u32, map_map: Value) void {
-        self.slots.init(slot_count, map_map);
-        self.slots_map.map.init(.Activation, map_map);
-        self.receiver = receiver;
-    }
-
-    fn getSlotsSlice(self: *ActivationMap) []u8 {
-        const total_object_size = @sizeOf(ActivationMap) + self.slots_map.slot_count * @sizeOf(Slot);
-        const map_memory = @ptrCast([*]u8, self);
-        return map_memory[@sizeOf(ActivationMap)..total_object_size];
-    }
-
-    pub fn getSlots(self: *ActivationMap) []Slot {
-        return std.mem.bytesAsSlice(Slot, self.getSlotsSlice());
-    }
-
-    pub fn getSizeInMemory(self: *ActivationMap) usize {
-        return requiredSizeForAllocation(self.slots_map.slot_count);
-    }
-
-    pub fn asValue(self: *ActivationMap) Value {
-        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
-    }
-
-    /// Return the amount of assignable slots that this slot map
-    /// contains.
-    pub fn getAssignableSlotCount(self: *ActivationMap) u8 {
-        return self.slots_map.getAssignableSlotCount();
-    }
-
-    pub fn setAssignableSlotCount(self: *ActivationMap, count: u8) void {
-        self.slots_map.setAssignableSlotCount(count);
-    }
-
-    pub fn getSlotByHash(self: *ActivationMap, hash_value: u32) ?*Slot {
-        for (self.getSlots()) |*slot| {
-            if (slot.hash == hash_value) {
-                return slot;
-            }
-        }
-
-        return null;
-    }
-
-    pub fn getSlotByName(self: *ActivationMap, string: []const u8) ?*Slot {
-        const hash_value = hash.stringHash(string);
-        return self.getSlotByName(hash_value);
-    }
-
-    /// Return the size required for the whole map with the given slot count.
-    fn requiredSizeForAllocation(slot_count: u32) usize {
-        return @sizeOf(ActivationMap) + slot_count * @sizeOf(Slot);
     }
 };
 
@@ -388,8 +290,11 @@ const SlotsAndStatementsMap = packed struct {
     pub fn finalize(self: *SlotsAndStatementsMap, allocator: *Allocator) void {
         allocator.free(self.getStatementsSlice());
 
-        const script = Script.Ref{ .value = @intToPtr(*Script, self.script_ref.asUnsignedInteger()) };
-        script.unref();
+        self.getDefinitionScript().unref();
+    }
+
+    pub fn getDefinitionScript(self: *SlotsAndStatementsMap) Script.Ref {
+        return Script.Ref{ .value = @intToPtr(*Script, self.script_ref.asUnsignedInteger()) };
     }
 
     pub fn getStatementsSlice(self: *SlotsAndStatementsMap) []AST.StatementNode {
@@ -487,6 +392,10 @@ const MethodMap = packed struct {
         return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
     }
 
+    pub fn getDefinitionScript(self: *MethodMap) Script.Ref {
+        return self.base_map.getDefinitionScript();
+    }
+
     pub fn getStatementsSlice(self: *MethodMap) []AST.StatementNode {
         return self.base_map.getStatementsSlice();
     }
@@ -516,7 +425,7 @@ const MethodMap = packed struct {
     }
 
     /// Return the size required for the whole map with the given slot count.
-    fn requiredSizeForAllocation(slot_count: u32) usize {
+    pub fn requiredSizeForAllocation(slot_count: u32) usize {
         return @sizeOf(MethodMap) + slot_count * @sizeOf(Slot);
     }
 };
@@ -604,6 +513,10 @@ const BlockMap = packed struct {
         return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
     }
 
+    pub fn getDefinitionScript(self: *BlockMap) Script.Ref {
+        return self.base_map.getDefinitionScript();
+    }
+
     pub fn getStatementsSlice(self: *BlockMap) []AST.StatementNode {
         return self.base_map.getStatementsSlice();
     }
@@ -641,7 +554,7 @@ const BlockMap = packed struct {
     }
 
     /// Return the size required for the whole map with the given slot count.
-    fn requiredSizeForAllocation(slot_count: u32) usize {
+    pub fn requiredSizeForAllocation(slot_count: u32) usize {
         return @sizeOf(MethodMap) + slot_count * @sizeOf(Slot);
     }
 
@@ -691,7 +604,7 @@ const ByteVectorMap = packed struct {
         return requiredSizeForAllocation();
     }
 
-    fn requiredSizeForAllocation() usize {
+    pub fn requiredSizeForAllocation() usize {
         return @sizeOf(ByteVectorMap);
     }
 };

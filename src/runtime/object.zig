@@ -8,15 +8,18 @@ const Allocator = std.mem.Allocator;
 const Value = @import("./value.zig").Value;
 const slots_objects = @import("./object/slots.zig");
 const byte_vector_object = @import("./object/byte_vector.zig");
+const map_objects = @import("./object/map.zig");
+
+const Self = @This();
 
 pub const Slots = slots_objects.Slots;
 pub const Activation = slots_objects.Activation;
 pub const Method = slots_objects.Method;
 pub const Block = slots_objects.Block;
 pub const ByteVector = byte_vector_object.ByteVectorObject;
-pub const Map = @import("./object/map.zig").Map;
+pub const Map = map_objects.Map;
 
-const Self = @This();
+pub usingnamespace @import("./object/lookup.zig");
 
 const ObjectTypeShift = 2;
 const ObjectTypeMask: u64 = 0b111 << ObjectTypeShift;
@@ -35,7 +38,7 @@ const ObjectType = enum(u64) {
 header: *align(@alignOf(u64)) Header,
 
 pub fn addressIsObject(address: [*]u64) bool {
-    return address[0] & Value.ValueMarkerMask == Value.ObjectMarker;
+    return address[0] & Value.ValueMarkerMask == @enumToInt(Value.ValueType.ObjectMarker);
 }
 
 pub fn fromAddress(address: [*]u64) Self {
@@ -259,7 +262,7 @@ pub const Header = packed struct {
     map_pointer: Value,
 
     pub fn init(self: *Header, object_type: ObjectType, map: Value) void {
-        self.object_information = Value.ObjectMarker;
+        self.object_information = @enumToInt(Value.ValueType.ObjectMarker);
         self.setObjectType(object_type);
 
         self.map_pointer = map;

@@ -12,7 +12,7 @@ const Self = @This();
 header: *align(@alignOf(u64)) Header,
 
 pub fn createFromString(heap: *Heap, string: []const u8) !Self {
-    var memory_area = try heap.allocateInByteVectorSegment(requiredSize(string.len));
+    var memory_area = try heap.allocateInByteVectorSegment(requiredSizeForAllocation(string.len));
     var header = @ptrCast(*Header, memory_area);
 
     header.init(string.len);
@@ -39,12 +39,12 @@ pub fn asValue(self: Self) Value {
 }
 
 pub fn getSizeInMemory(self: Self) usize {
-    return requiredSize(self.header.length.asUnsignedInteger() - @sizeOf(Header));
+    return requiredSizeForAllocation(self.header.length.asUnsignedInteger() - @sizeOf(Header));
 }
 
 /// Return the size required for the byte vector with `length` amount of
 /// bytes to be stored inside.
-fn requiredSize(length: u64) usize {
+pub fn requiredSizeForAllocation(length: u64) usize {
     // A basic ceil
     const required_words = if (length == 0) 0 else ((length - 1) / @sizeOf(u64)) + 1;
 

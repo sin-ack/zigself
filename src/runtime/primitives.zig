@@ -5,6 +5,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Heap = @import("./heap.zig");
+const Value = @import("./value.zig").Value;
 const Range = @import("../language/location_range.zig");
 const Object = @import("./object.zig");
 const runtime_error = @import("./error.zig");
@@ -24,11 +26,12 @@ const PrimitiveSpec = struct {
     name: []const u8,
     function: fn (
         allocator: *Allocator,
+        heap: *Heap,
         message_range: Range,
-        receiver: Object.Ref,
-        arguments: []Object.Ref,
+        receiver: Heap.Tracked,
+        arguments: []Heap.Tracked,
         context: *InterpreterContext,
-    ) interpreter.InterpreterError!Object.Ref,
+    ) interpreter.InterpreterError!Value,
 };
 
 const PrimitiveRegistry = &[_]PrimitiveSpec{
@@ -78,15 +81,16 @@ pub fn hasPrimitive(selector: []const u8) bool {
 
 pub fn callPrimitive(
     allocator: *Allocator,
+    heap: *Heap,
     message_range: Range,
     selector: []const u8,
-    receiver: Object.Ref,
-    arguments: []Object.Ref,
+    receiver: Heap.Tracked,
+    arguments: []Heap.Tracked,
     context: *InterpreterContext,
-) !Object.Ref {
+) !Value {
     for (PrimitiveRegistry) |primitive| {
         if (std.mem.eql(u8, primitive.name, selector)) {
-            return try primitive.function(allocator, message_range, receiver, arguments, context);
+            return try primitive.function(allocator, heap, message_range, receiver, arguments, context);
         }
     }
 

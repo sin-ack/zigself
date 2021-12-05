@@ -10,9 +10,9 @@ const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
 const ByteVector = @import("./byte_vector.zig");
 
-var global_nil: ?Value = null;
-var global_true: ?Value = null;
-var global_false: ?Value = null;
+var global_nil: ?Heap.Tracked = null;
+var global_true: ?Heap.Tracked = null;
+var global_false: ?Heap.Tracked = null;
 var has_been_torn_down = true;
 
 /// Prepares important objects in the runtime. Note that these are the bare
@@ -21,11 +21,9 @@ var has_been_torn_down = true;
 pub fn prepareRuntimeEnvironment(heap: *Heap) !Value {
     var empty_map = try Object.Map.Slots.create(heap, 0);
 
-    // FIXME: We can't keep track of objects in the heap like this, find another
-    //        way.
-    global_nil = (try Object.Slots.create(heap, empty_map, &.{})).asValue();
-    global_true = (try Object.Slots.create(heap, empty_map, &.{})).asValue();
-    global_false = (try Object.Slots.create(heap, empty_map, &.{})).asValue();
+    global_nil = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
+    global_true = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
+    global_false = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
 
     var lobby = try makeLobbyObject(heap);
     has_been_torn_down = false;
@@ -76,21 +74,35 @@ fn makeTraitsMap(heap: *Heap) !*Object.Map.Slots {
 
 /// Return the global nil object. The nil object is ref'd before returning.
 pub fn globalNil() Value {
-    return global_nil.?;
+    return global_nil.?.getValue();
 }
 
 /// Return the global true object. The true object is ref'd before returning.
 pub fn globalTrue() Value {
-    return global_true.?;
+    return global_true.?.getValue();
 }
 
 /// Return the global false object. The false object is ref'd before returning.
 pub fn globalFalse() Value {
-    return global_false.?;
+    return global_false.?.getValue();
 }
 
-pub fn teardownGlobalObjects() void {
-    // FIXME: Stop tracking global objects here
+pub fn teardownGlobalObjects(heap: *Heap) void {
+    if (global_nil) |*nil_object| {
+        nil_object.untrackAndDestroy(heap);
+        global_nil = null;
+    }
+
+    if (global_true) |*true_object| {
+        true_object.untrackAndDestroy(heap);
+        global_true = null;
+    }
+
+    if (global_false) |*false_object| {
+        false_object.untrackAndDestroy(heap);
+        global_false = null;
+    }
+
     has_been_torn_down = true;
 }
 

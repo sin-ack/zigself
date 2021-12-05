@@ -11,10 +11,7 @@ const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
 const ByteVector = @import("./byte_vector.zig");
 
-// const Activation = @import("./activation.zig");
-const Activation = struct {
-    activation_object: Value,
-};
+const Activation = @import("./activation.zig");
 
 const Self = @This();
 const UninitializedHeapScrubByte = 0xAB;
@@ -123,11 +120,11 @@ pub fn markAddressAsNeedingFinalization(self: *Self, address: [*]u64) !void {
 
 /// Track the given value, returning a Tracked. When a garbage collection
 /// occurs, the value will be updated with the new location.
-pub fn track(self: *Self, value: Value) Tracked {
-    const tracked = Tracked.create(self.allocator, value);
+pub fn track(self: *Self, value: Value) !Tracked {
+    const tracked = try Tracked.create(self.allocator, value);
 
     if (value.isObjectReference()) {
-        _ = self.eden.startTracking(self.allocator, tracked.tracker);
+        _ = try self.eden.startTracking(self.allocator, tracked);
     }
 
     return tracked;
@@ -138,6 +135,18 @@ pub fn untrack(self: *Self, tracked: Tracked) void {
     if (tracked.tracker.value.isObjectReference()) {
         _ = self.eden.stopTracking(tracked);
     }
+}
+
+/// Ensures that the given amount of bytes are immediately available in eden, so
+/// garbage collection won't happen. Performs a pre-emptive garbage collection
+/// if there isn't enough space.
+pub fn ensureSpaceInEden(self: *Self, required_memory: usize) !void {
+    const stack = if (self.activation_stack) |activation_stack|
+        activation_stack.items
+    else
+        &[_]*Activation{};
+
+    try self.eden.collectGarbage(self.allocator, required_memory, stack);
 }
 
 /// A mapping from an address to its size. This area of memory is checked for
@@ -250,7 +259,7 @@ const Space = struct {
         // Go through the whole activation stack, copying activation objects
         // that are within this space
         for (activation_stack) |activation| {
-            const activation_object_reference = activation.activation_object;
+            const activation_object_reference = activation.activation_object.getValue();
             std.debug.assert(activation_object_reference.isObjectReference());
             const activation_object_address = activation_object_reference.asObjectAddress();
 
@@ -260,7 +269,10 @@ const Space = struct {
                 continue;
 
             const new_address = try self.copyObjectTo(allocator, activation_object_address, target_space);
-            activation.activation_object = Value.fromObjectAddress(new_address);
+            const new_value = Value.fromObjectAddress(new_address);
+            const tracked_value = try Tracked.create(allocator, new_value);
+            try target_space.addToTrackedSet(allocator, tracked_value);
+            activation.activation_object = tracked_value;
         }
 
         // Go through the tracked set, copying referenced objects
@@ -518,11 +530,11 @@ const Space = struct {
 
     /// Find the space which has this value, and add the tracked value to the
     /// tracked set of that space.
-    pub fn startTracking(self: *Space, allocator: *Allocator, tracked: Tracked) !bool {
+    pub fn startTracking(self: *Space, allocator: *Allocator, tracked: Tracked) Allocator.Error!bool {
         const address = tracked.tracker.value.asObjectAddress();
 
         if (self.objectSegmentContains(address) or self.byteVectorSegmentContains(address)) {
-            self.addToTrackedSet(allocator, tracked);
+            try self.addToTrackedSet(allocator, tracked);
             return true;
         }
 
@@ -539,7 +551,7 @@ const Space = struct {
 
     /// Find the space which has this value, and remove the tracked value from
     /// the tracked set of that space.
-    pub fn stopTracking(self: *Space, tracked: Tracked) !bool {
+    pub fn stopTracking(self: *Space, tracked: Tracked) bool {
         const address = tracked.tracker.value.asObjectAddress();
 
         if (self.objectSegmentContains(address) or self.byteVectorSegmentContains(address)) {
@@ -548,11 +560,11 @@ const Space = struct {
         }
 
         if (self.scavenge_target) |scavenge_target| {
-            if (try scavenge_target.stopTracking(tracked)) return true;
+            if (scavenge_target.stopTracking(tracked)) return true;
         }
 
         if (self.tenure_target) |tenure_target| {
-            if (try tenure_target.stopTracking(tracked)) return true;
+            if (tenure_target.stopTracking(tracked)) return true;
         }
 
         return false;
@@ -576,7 +588,7 @@ pub const Tracked = struct {
     }
 
     pub fn destroy(self: Tracked, allocator: *Allocator) void {
-        allocator.free(self.tracker);
+        allocator.destroy(self.tracker);
     }
 
     pub fn untrackAndDestroy(self: Tracked, heap: *Self) void {

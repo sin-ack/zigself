@@ -19,13 +19,12 @@ const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
 
 const message_interpreter = @import("./interpreter/message.zig");
 
-// FIXME: Track the self object and lobby in the heap
 pub const InterpreterContext = struct {
     /// The object that is the current context. The identifier "self" will
     /// resolve to this object.
-    self_object: Value,
+    self_object: Heap.Tracked,
     /// The root of the current Self world.
-    lobby: Value,
+    lobby: Heap.Tracked,
     /// The method/block activation stack. This is used with blocks in order to
     /// verify that the block is executed within its enclosing method and for
     /// stack traces. When the activation completes, the activation object is
@@ -45,7 +44,7 @@ pub const InterpreterContext = struct {
         target_activation: Activation.Weak,
         /// The value that should be returned when the non-local return reaches
         /// its destination.
-        value: Value,
+        value: Heap.Tracked,
     },
 };
 
@@ -65,26 +64,31 @@ pub fn executeScript(allocator: *Allocator, heap: *Heap, script: Script.Ref, lob
     defer activation_stack.deinit();
     errdefer {
         for (activation_stack.items) |activation| {
-            activation.destroy();
+            activation.destroy(heap);
         }
     }
 
     heap.setActivationStack(&activation_stack);
     defer heap.setActivationStack(null);
 
+    var tracked_lobby = try heap.track(lobby);
+    defer tracked_lobby.untrackAndDestroy(heap);
+
     var context = InterpreterContext{
-        .self_object = lobby,
-        .lobby = lobby,
+        .self_object = tracked_lobby,
+        .lobby = tracked_lobby,
         .activation_stack = &activation_stack,
         .script = script,
         .current_error = null,
         .current_nonlocal_return = null,
     };
-    var last_expression_result: ?Value = null;
+    var last_expression_result: ?Heap.Tracked = null;
     for (script.value.ast_root.?.statements) |statement| {
         std.debug.assert(activation_stack.items.len == 0);
 
-        // FIXME: stop tracking the last expression result
+        if (last_expression_result) |result| {
+            result.untrackAndDestroy(heap);
+        }
 
         const expression_result = executeStatement(allocator, heap, statement, &context) catch |err| {
             switch (err) {
@@ -98,7 +102,7 @@ pub fn executeScript(allocator: *Allocator, heap: *Heap, script: Script.Ref, lob
                     // Since the execution was abruptly stopped the activation
                     // stack wasn't properly unwound, so let's do that now.
                     for (activation_stack.items) |activation| {
-                        activation.destroy();
+                        activation.destroy(heap);
                     }
 
                     return null;
@@ -107,12 +111,12 @@ pub fn executeScript(allocator: *Allocator, heap: *Heap, script: Script.Ref, lob
                     std.debug.print("A non-local return has bubbled up to the top! This is likely a bug!", .{});
                     runtime_error.printTraceFromActivationStack(activation_stack.items);
                     context.current_nonlocal_return.?.target_activation.deinit();
-                    // FIXME: Stop tracking the current non-local return's value
+                    context.current_nonlocal_return.?.value.untrackAndDestroy(heap);
 
                     // Since the execution was abruptly stopped the activation
                     // stack wasn't properly unwound, so let's do that now.
                     for (activation_stack.items) |activation| {
-                        activation.destroy();
+                        activation.destroy(heap);
                     }
 
                     return null;
@@ -121,10 +125,10 @@ pub fn executeScript(allocator: *Allocator, heap: *Heap, script: Script.Ref, lob
             }
         };
 
-        last_expression_result = expression_result;
+        last_expression_result = try heap.track(expression_result);
     }
 
-    return last_expression_result;
+    return if (last_expression_result) |result| result.getValue() else null;
 }
 
 /// Execute a script object as a child script of the root script. The root
@@ -135,7 +139,6 @@ pub fn executeScript(allocator: *Allocator, heap: *Heap, script: Script.Ref, lob
 pub fn executeSubScript(allocator: *Allocator, heap: *Heap, script: Script.Ref, parent_context: *InterpreterContext) InterpreterError!?Value {
     defer script.unref();
 
-    // FIXME: Track the parent context's lobby
     var child_context = InterpreterContext{
         .self_object = parent_context.lobby,
         .lobby = parent_context.lobby,
@@ -144,9 +147,11 @@ pub fn executeSubScript(allocator: *Allocator, heap: *Heap, script: Script.Ref, 
         .current_error = null,
         .current_nonlocal_return = null,
     };
-    var last_expression_result: ?Value = null;
+    var last_expression_result: ?Heap.Tracked = null;
     for (script.value.ast_root.?.statements) |statement| {
-        // FIXME: Stop tracking the last expression result
+        if (last_expression_result) |result| {
+            result.untrackAndDestroy(heap);
+        }
 
         const expression_result = executeStatement(allocator, heap, statement, &child_context) catch |err| {
             switch (err) {
@@ -165,7 +170,7 @@ pub fn executeSubScript(allocator: *Allocator, heap: *Heap, script: Script.Ref, 
         last_expression_result = expression_result;
     }
 
-    return last_expression_result;
+    return if (last_expression_result) |result| result.getValue() else null;
 }
 
 /// Executes a statement. All refs are forwardded.
@@ -197,10 +202,13 @@ fn executeMethod(
     arguments: [][]const u8,
     context: *InterpreterContext,
 ) InterpreterError!Value {
-    // FIXME: Track these values, and untrack when the values are passed to the
-    //        object/on error
-    var assignable_slot_values = try std.ArrayList(Value).initCapacity(allocator, arguments.len);
-    defer assignable_slot_values.deinit();
+    var assignable_slot_values = try std.ArrayList(Heap.Tracked).initCapacity(allocator, arguments.len);
+    defer {
+        for (assignable_slot_values.items) |value| {
+            value.untrackAndDestroy(heap);
+        }
+        assignable_slot_values.deinit();
+    }
 
     var statements = try std.ArrayList(AST.StatementNode).initCapacity(allocator, object_node.slots.len);
     errdefer {
@@ -217,10 +225,19 @@ fn executeMethod(
         try statements.append(statement_copy);
     }
 
-    const method_name_in_heap = try ByteVector.createFromString(heap, name);
     context.script.ref();
     errdefer context.script.unref();
-    // FIXME: Track the method map
+
+    // This will prevent garbage collections until the execution of slots at least.
+    var required_memory: usize = ByteVector.requiredSizeForAllocation(name.len);
+    required_memory += Object.Map.Method.requiredSizeForAllocation(@intCast(u32, object_node.slots.len + arguments.len));
+    for (arguments) |argument| {
+        required_memory += ByteVector.requiredSizeForAllocation(argument.len);
+    }
+
+    try heap.ensureSpaceInEden(required_memory);
+
+    const method_name_in_heap = try ByteVector.createFromString(heap, name);
     const method_map = try Object.Map.Method.create(
         heap,
         @intCast(u8, arguments.len),
@@ -234,28 +251,30 @@ fn executeMethod(
     for (arguments) |argument, i| {
         const argument_in_heap = try ByteVector.createFromString(heap, argument);
         argument_slots[i].initMutable(Object.Map.Method, method_map, argument_in_heap, .NotParent);
-        // FIXME: Track global nil here
-        assignable_slot_values.appendAssumeCapacity(environment.globalNil());
+        assignable_slot_values.appendAssumeCapacity(try heap.track(environment.globalNil()));
     }
 
+    const tracked_method_map = try heap.track(method_map.asValue());
+    defer tracked_method_map.untrackAndDestroy(heap);
+
     for (object_node.slots) |slot_node, i| {
-        // FIXME: Use the tracked method map here
-        var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Method, method_map, i, context);
+        var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Method, tracked_method_map.getValue().asObject().asMap().asMethodMap(), i, context);
         if (slot_value) |value| {
-            // FIXME: Track the returned value here
-            try assignable_slot_values.append(value);
+            try assignable_slot_values.append(try heap.track(value));
         }
     }
 
-    // FIXME: Extract the current memory locations of tracked assignable slots here
+    // Ensure that creating the method object won't cause a garbage collection
+    // before the assignable slot values are copied in.
+    try heap.ensureSpaceInEden(Object.Method.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.items.len)));
+
     var current_assignable_slot_values = try allocator.alloc(Value, assignable_slot_values.items.len);
     defer allocator.free(current_assignable_slot_values);
     for (assignable_slot_values.items) |value, i| {
-        current_assignable_slot_values[i] = value;
+        current_assignable_slot_values[i] = value.getValue();
     }
 
-    // FIXME: Use the tracked method map here
-    return (try Object.Method.create(heap, method_map, current_assignable_slot_values)).asValue();
+    return (try Object.Method.create(heap, tracked_method_map.getValue().asObject().asMap().asMethodMap(), current_assignable_slot_values)).asValue();
 }
 
 /// Creates a new slot. All refs are forwarded.
@@ -275,13 +294,15 @@ pub fn executeSlot(
             break :blk try executeExpression(allocator, heap, slot_node.value, context);
         }
     };
+    const tracked_value = try heap.track(value);
+    defer tracked_value.untrackAndDestroy(heap);
 
     const slot_name = try ByteVector.createFromString(heap, slot_node.name);
     if (slot_node.is_mutable) {
         map.getSlots()[slot_index].initMutable(MapType, map, slot_name, if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent);
-        return value;
+        return tracked_value.getValue();
     } else {
-        map.getSlots()[slot_index].initConstant(slot_name, if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent, value);
+        map.getSlots()[slot_index].initConstant(slot_name, if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent, tracked_value.getValue());
         return null;
     }
 }
@@ -294,35 +315,35 @@ pub fn executeObject(allocator: *Allocator, heap: *Heap, object_node: AST.Object
         @panic("!!! Attempted to execute a non-slots object! Methods must be created via executeSlot.");
     }
 
-    // FIXME: Track values, and untrack on error/exit
-    var assignable_slot_values = std.ArrayList(Value).init(allocator);
-    defer assignable_slot_values.deinit();
+    var assignable_slot_values = std.ArrayList(Heap.Tracked).init(allocator);
+    defer {
+        for (assignable_slot_values.items) |value| {
+            value.untrackAndDestroy(heap);
+        }
+        assignable_slot_values.deinit();
+    }
 
-    // FIXME: Track the slots map
     var slots_map = try Object.Map.Slots.create(heap, @intCast(u32, object_node.slots.len));
+    const tracked_slots_map = try heap.track(slots_map.asValue());
 
     for (object_node.slots) |slot_node, i| {
-        // FIXME: Use the tracked slots map here
-        var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Slots, slots_map, i, context);
+        var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Slots, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), i, context);
         if (slot_value) |value| {
-            // FIXME: Track the returned value here
-            try assignable_slot_values.append(value);
+            try assignable_slot_values.append(try heap.track(value));
         }
     }
 
-    // FIXME: Ensure enough memory for slots before value extraction
+    // Ensure that creating the slots object won't cause a garbage collection
+    // before the assignable slot values are copied in.
+    try heap.ensureSpaceInEden(Object.Slots.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.items.len)));
 
-    // FIXME: Extract the current memory locations of tracked assignable slots here
-    // FIXME: Does this have to be an allocation?
     var current_assignable_slot_values = try allocator.alloc(Value, assignable_slot_values.items.len);
     defer allocator.free(current_assignable_slot_values);
-
     for (assignable_slot_values.items) |value, i| {
-        current_assignable_slot_values[i] = value;
+        current_assignable_slot_values[i] = value.getValue();
     }
 
-    // FIXME: Use the tracked slots map here
-    return (try Object.Slots.create(heap, slots_map, current_assignable_slot_values)).asValue();
+    return (try Object.Slots.create(heap, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), current_assignable_slot_values)).asValue();
 }
 
 pub fn executeBlock(allocator: *Allocator, heap: *Heap, block: AST.BlockNode, context: *InterpreterContext) InterpreterError!Value {
@@ -332,8 +353,13 @@ pub fn executeBlock(allocator: *Allocator, heap: *Heap, block: AST.BlockNode, co
     }
 
     // FIXME: Track slot values and untrack them on error/return
-    var assignable_slot_values = try std.ArrayList(Value).initCapacity(allocator, argument_slot_count);
-    defer assignable_slot_values.deinit();
+    var assignable_slot_values = try std.ArrayList(Heap.Tracked).initCapacity(allocator, argument_slot_count);
+    defer {
+        for (assignable_slot_values.items) |value| {
+            value.untrackAndDestroy(heap);
+        }
+        assignable_slot_values.deinit();
+    }
 
     var statements = try std.ArrayList(AST.StatementNode).initCapacity(allocator, block.statements.len);
     errdefer {
@@ -365,8 +391,17 @@ pub fn executeBlock(allocator: *Allocator, heap: *Heap, block: AST.BlockNode, co
 
     context.script.ref();
     errdefer context.script.unref();
-    // FIXME: Track the block map
-    const block_map = try Object.Map.Block.create(
+
+    var required_memory: usize = Object.Map.Block.requiredSizeForAllocation(@intCast(u32, block.slots.len));
+    for (block.slots) |slot_node| {
+        if (slot_node.is_argument) {
+            required_memory += ByteVector.requiredSizeForAllocation(slot_node.name.len);
+        }
+    }
+
+    try heap.ensureSpaceInEden(required_memory);
+
+    var block_map = try Object.Map.Block.create(
         heap,
         argument_slot_count,
         @intCast(u32, block.slots.len) - argument_slot_count,
@@ -377,40 +412,42 @@ pub fn executeBlock(allocator: *Allocator, heap: *Heap, block: AST.BlockNode, co
     );
 
     // Add all the argument slots
+    var argument_slots = block_map.getArgumentSlots();
     for (block.slots) |slot_node, i| {
         if (slot_node.is_argument) {
             const slot_name = try ByteVector.createFromString(heap, slot_node.name);
-            // FIXME: Use the tracked block map
-            block_map.getArgumentSlots()[i].initMutable(
+
+            argument_slots[i].initMutable(
                 Object.Map.Block,
                 block_map,
                 slot_name,
                 if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent,
             );
-            // FIXME: Track the global nil
-            assignable_slot_values.appendAssumeCapacity(environment.globalNil());
+            assignable_slot_values.appendAssumeCapacity(try heap.track(environment.globalNil()));
         }
     }
+
+    const tracked_block_map = try heap.track(block_map.asValue());
+    defer tracked_block_map.untrackAndDestroy(heap);
 
     // Add all the non-argument slots
     for (block.slots) |slot_node, i| {
         if (!slot_node.is_argument) {
-            // FIXME: Use the tracked block map
-            var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Block, block_map, i, context);
+            var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Block, tracked_block_map.getValue().asObject().asMap().asBlockMap(), i, context);
             if (slot_value) |value| {
-                // FIXME: Track the returned value
-                try assignable_slot_values.append(value);
+                try assignable_slot_values.append(try heap.track(value));
             }
         }
     }
 
-    // FIXME: Ensure enough space for block object before value extraction
+    // Ensure that creating the block object won't cause a garbage collection
+    // before the assignable slot values are copied in.
+    try heap.ensureSpaceInEden(Object.Block.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.items.len)));
 
-    // FIXME: Extract the current memory locations of tracked assignable slots here
     var current_assignable_slot_values = try allocator.alloc(Value, assignable_slot_values.items.len);
     defer allocator.free(current_assignable_slot_values);
     for (assignable_slot_values.items) |value, i| {
-        current_assignable_slot_values[i] = value;
+        current_assignable_slot_values[i] = value.getValue();
     }
 
     return (try Object.Block.create(heap, block_map, current_assignable_slot_values)).asValue();
@@ -424,7 +461,7 @@ pub fn executeReturn(allocator: *Allocator, heap: *Heap, return_node: AST.Return
 
     const value = try executeExpression(allocator, heap, return_node.expression, context);
     const target_activation_weak = target_activation.makeWeakRef();
-    context.current_nonlocal_return = .{ .target_activation = target_activation_weak, .value = value };
+    context.current_nonlocal_return = .{ .target_activation = target_activation_weak, .value = try heap.track(value) };
 
     return NonlocalReturnError.NonlocalReturn;
 }
@@ -434,34 +471,54 @@ pub fn executeReturn(allocator: *Allocator, heap: *Heap, return_node: AST.Return
 pub fn executeIdentifier(allocator: *Allocator, heap: *Heap, identifier: AST.IdentifierNode, context: *InterpreterContext) InterpreterError!Value {
     _ = heap;
     if (identifier.value[0] == '_') {
-        var receiver = context.self_object;
+        var receiver = context.self_object.getValue();
 
         if (receiver.isObjectReference() and receiver.asObject().isActivationObject()) {
             receiver = receiver.asObject().asActivationObject().findActivationReceiver();
         }
 
-        return try message_interpreter.executePrimitiveMessage(allocator, heap, identifier.range, receiver, identifier.value, &[_]Value{}, context);
+        var tracked_receiver = try heap.track(receiver);
+        defer tracked_receiver.untrackAndDestroy(heap);
+
+        return try message_interpreter.executePrimitiveMessage(allocator, heap, identifier.range, tracked_receiver, identifier.value, &[_]Heap.Tracked{}, context);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
     // method on traits block, this is actually executing the block itself via
     // the virtual method.
     {
-        var receiver = context.self_object;
+        var receiver = context.self_object.getValue();
         if (receiver.isObjectReference() and receiver.asObject().isActivationObject()) {
             receiver = receiver.asObject().asActivationObject().findActivationReceiver();
         }
 
-        if (receiver.value.is(.Block) and receiver.value.isCorrectMessageForBlockExecution(identifier.value)) {
-            return try message_interpreter.executeBlockMessage(allocator, heap, identifier.range, receiver, &[_]Value{}, context);
+        if (receiver.isObjectReference() and
+            receiver.asObject().isBlockObject() and
+            receiver.asObject().asBlockObject().isCorrectMessageForBlockExecution(identifier.value))
+        {
+            var tracked_receiver = try heap.track(receiver);
+            defer tracked_receiver.untrackAndDestroy(heap);
+
+            return try message_interpreter.executeBlockMessage(allocator, heap, identifier.range, tracked_receiver, &[_]Heap.Tracked{}, context);
         }
     }
 
-    if (try context.self_object.lookup(allocator, context, identifier.value, .Value)) |value| {
-        if (value.isObjectReference() and value.asObject().isMethodObject()) {
-            return try message_interpreter.executeMethodMessage(allocator, heap, identifier.range, context.self_object, value, &[_]Value{}, context);
+    if (try context.self_object.getValue().lookup(.Read, identifier.value, allocator, context)) |lookup_result| {
+        if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
+            var tracked_lookup_result = try heap.track(lookup_result);
+            defer tracked_lookup_result.untrackAndDestroy(heap);
+
+            return try message_interpreter.executeMethodMessage(
+                allocator,
+                heap,
+                identifier.range,
+                context.self_object,
+                tracked_lookup_result,
+                &[_]Heap.Tracked{},
+                context,
+            );
         } else {
-            return value;
+            return lookup_result;
         }
     } else {
         return runtime_error.raiseError(allocator, context, "Failed looking up \"{s}\"", .{identifier.value});
@@ -475,9 +532,13 @@ pub fn executeString(allocator: *Allocator, heap: *Heap, string: AST.StringNode,
     _ = heap;
     _ = context;
 
-    // FIXME: Track the byte vector
+    try heap.ensureSpaceInEden(
+        ByteVector.requiredSizeForAllocation(string.value.len) +
+            Object.Map.ByteVector.requiredSizeForAllocation() +
+            Object.ByteVector.requiredSizeForAllocation(),
+    );
+
     const byte_vector = try ByteVector.createFromString(heap, string.value);
-    // FIXME: Track the byte vector map
     const byte_vector_map = try Object.Map.ByteVector.create(heap, byte_vector);
     return (try Object.ByteVector.create(heap, byte_vector_map)).asValue();
 }

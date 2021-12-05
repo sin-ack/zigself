@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Heap = @import("./heap.zig");
 const Value = @import("./value.zig").Value;
 const Script = @import("../language/script.zig");
 const Range = @import("../language/location_range.zig");
@@ -23,7 +24,7 @@ pub const ActivationCreationContext = struct {
 };
 
 allocator: *Allocator,
-activation_object: Value,
+activation_object: Heap.Tracked,
 creation_context: ActivationCreationContext,
 /// Will be used as the target activation that a non-local return needs to rise
 /// to. Must be non-null when a non-local return is encountered, and when
@@ -45,26 +46,28 @@ weak: WeakBlock,
 /// Borrows a ref for `creator_script` from the caller.
 pub fn create(
     allocator: *Allocator,
+    heap: *Heap,
     activation_object: Value,
     creator_message: []const u8,
-    creator_script: Script.Ref,
     creator_range: Range,
+    creator_script: Script.Ref,
 ) !*Self {
     var self = try allocator.create(Self);
     errdefer allocator.destroy(self);
-    try self.init(allocator, activation_object, creator_message, creator_script, creator_range);
+    try self.init(allocator, heap, activation_object, creator_message, creator_script, creator_range);
 
     return self;
 }
 
-pub fn destroy(self: *Self) void {
-    self.deinit();
+pub fn destroy(self: *Self, heap: *Heap) void {
+    self.deinit(heap);
     self.allocator.destroy(self);
 }
 
 fn init(
     self: *Self,
     allocator: *Allocator,
+    heap: *Heap,
     activation_object: Value,
     creator_message: []const u8,
     creator_script: Script.Ref,
@@ -75,7 +78,7 @@ fn init(
     self.* = Self{
         .weak = try WeakBlock.init(allocator, self),
         .allocator = allocator,
-        .activation_object = activation_object,
+        .activation_object = try heap.track(activation_object),
         .creation_context = .{
             .message = creator_message,
             .script = creator_script,
@@ -84,9 +87,10 @@ fn init(
     };
 }
 
-fn deinit(self: *Self) void {
+fn deinit(self: *Self, heap: *Heap) void {
     self.weak.deinit();
     self.creation_context.script.unref();
+    self.activation_object.untrackAndDestroy(heap);
     self.allocator.free(self.creation_context.message);
 }
 

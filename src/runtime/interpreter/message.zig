@@ -12,6 +12,7 @@ const Range = @import("../../language/location_range.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const Activation = @import("../activation.zig");
+const ByteVector = @import("../byte_vector.zig");
 const primitives = @import("../primitives.zig");
 const environment = @import("../environment.zig");
 const runtime_error = @import("../error.zig");
@@ -21,20 +22,26 @@ const InterpreterContext = root_interpreter.InterpreterContext;
 
 const MaximumStackDepth = 2048;
 
-fn getMessageArguments(allocator: *Allocator, ast_arguments: []AST.ExpressionNode, context: *InterpreterContext) root_interpreter.InterpreterError![]Value {
-    var arguments = try std.ArrayList(Value).initCapacity(allocator, ast_arguments.len);
+fn getMessageArguments(
+    allocator: *Allocator,
+    heap: *Heap,
+    ast_arguments: []AST.ExpressionNode,
+    context: *InterpreterContext,
+) root_interpreter.InterpreterError![]Heap.Tracked {
+    var arguments = try std.ArrayList(Heap.Tracked).initCapacity(allocator, ast_arguments.len);
     errdefer {
-        for (arguments.items) |*argument| {
-            argument.unrefWithAllocator(allocator);
+        for (arguments.items) |argument| {
+            argument.untrackAndDestroy(heap);
         }
         arguments.deinit();
     }
 
     for (ast_arguments) |argument| {
-        var expression_result = try root_interpreter.executeExpression(allocator, argument, context);
-        errdefer expression_result.unrefWithAllocator(allocator);
+        var expression_result = try root_interpreter.executeExpression(allocator, heap, argument, context);
+        var tracked_result = try heap.track(expression_result);
+        errdefer tracked_result.untrackAndDestroy(heap);
 
-        try arguments.append(expression_result);
+        try arguments.append(tracked_result);
     }
 
     return arguments.toOwnedSlice();
@@ -42,17 +49,19 @@ fn getMessageArguments(allocator: *Allocator, ast_arguments: []AST.ExpressionNod
 
 pub fn executeBlockMessage(
     allocator: *Allocator,
+    heap: *Heap,
     message_range: Range,
-    block_object: Value,
-    arguments: []Value,
+    block_value: Heap.Tracked,
+    arguments: []Heap.Tracked,
     context: *InterpreterContext,
 ) root_interpreter.InterpreterError!Value {
     var did_find_activation_in_stack = false;
     var parent_activation: *Activation = undefined;
 
+    var block_object = block_value.getValue().asObject().asBlockObject();
     // Check if this method can be executed, i.e. whether its enclosing
     // activation is currently on the stack.
-    if (block_object.value.content.Block.parent_activation.getPointer()) |parent_activation_ptr| {
+    if (block_object.getMap().getParentActivation()) |parent_activation_ptr| {
         parent_activation = parent_activation_ptr;
 
         var i = @intCast(isize, context.activation_stack.items.len - 1);
@@ -74,15 +83,32 @@ pub fn executeBlockMessage(
         return runtime_error.raiseError(allocator, context, "Maximum stack size reached", .{});
     }
 
-    // This is done so that we never hold an Activation in value form, and
-    // always refer to the in-place version in the activation stack.
-    const block_activation = try block_object.value.activateBlock(allocator, context, message_range, arguments, parent_activation.activation_object);
+    // Ensure that we won't cause a GC by activating the block.
+    try heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(block_object.getAssignableSlotCount()));
+
+    // Refresh the pointer in case a GC happened
+    block_object = block_value.getValue().asObject().asBlockObject();
+
+    var argument_values = try allocator.alloc(Value, arguments.len);
+    defer allocator.free(argument_values);
+    for (arguments) |argument, i| {
+        argument_values[i] = argument.getValue();
+    }
+
+    context.script.ref();
+    errdefer context.script.unref();
+
+    const block_activation = try block_object.activateBlock(
+        allocator,
+        heap,
+        parent_activation.activation_object.getValue(),
+        argument_values,
+        message_range,
+        context.script,
+    );
     var did_execute_normally = false;
 
-    {
-        errdefer block_activation.destroy();
-        try context.activation_stack.append(block_activation);
-    }
+    try context.activation_stack.append(block_activation);
 
     // NOTE: We shouldn't pop from the activation stack if we didn't execute
     //       normally and didn't non-local return.
@@ -91,14 +117,14 @@ pub fn executeBlockMessage(
         if (did_execute_normally or did_nonlocal_return) {
             const popped_activation = context.activation_stack.pop();
             std.debug.assert(popped_activation == block_activation);
-            popped_activation.destroy();
+            popped_activation.destroy(heap);
         }
     }
 
     const previous_script = context.script;
     const previous_self_object = context.self_object;
 
-    const block_script = block_object.value.content.Block.script;
+    const block_script = block_object.getDefinitionScript();
     const block_activation_object = block_activation.activation_object;
     context.script = block_script;
     context.self_object = block_activation_object;
@@ -111,13 +137,13 @@ pub fn executeBlockMessage(
         }
     }
 
-    var last_expression_result: ?Value = null;
-    for (block_object.value.content.Block.statements) |statement| {
+    var last_expression_result: ?Heap.Tracked = null;
+    for (block_object.getStatementsSlice()) |statement| {
         if (last_expression_result) |last_result| {
-            last_result.unrefWithAllocator(allocator);
+            last_result.untrackAndDestroy(heap);
         }
 
-        last_expression_result = root_interpreter.executeStatement(allocator, statement, context) catch |err|
+        const expression_result = root_interpreter.executeStatement(allocator, heap, statement, context) catch |err|
             switch (err) {
             root_interpreter.NonlocalReturnError.NonlocalReturn => |e| {
                 did_nonlocal_return = true;
@@ -125,12 +151,15 @@ pub fn executeBlockMessage(
             },
             else => |e| return e,
         };
+
+        last_expression_result = try heap.track(expression_result);
     }
 
     did_execute_normally = true;
 
     if (last_expression_result) |last_result| {
-        return last_result;
+        defer last_result.untrackAndDestroy(heap);
+        return last_result.getValue();
     } else {
         return environment.globalNil();
     }
@@ -139,25 +168,45 @@ pub fn executeBlockMessage(
 /// `receiver` handles its own refs. `method_object` is forwarded.
 pub fn executeMethodMessage(
     allocator: *Allocator,
+    heap: *Heap,
     message_range: Range,
-    receiver: Value,
-    method_object: Value,
-    arguments: []Value,
+    receiver: Heap.Tracked,
+    tracked_method_object: Heap.Tracked,
+    arguments: []Heap.Tracked,
     context: *InterpreterContext,
 ) !Value {
     if (context.activation_stack.items.len >= MaximumStackDepth) {
         return runtime_error.raiseError(allocator, context, "Maximum stack size reached", .{});
     }
 
-    // NOTE: This is done so that we never hold an Activation in value form, and
-    //       always refer to the in-place version in the activation stack.
-    const method_activation = try method_object.value.activateMethod(allocator, context, message_range, arguments, receiver);
+    var method_object = tracked_method_object.getValue().asObject().asMethodObject();
+    // Ensure that we won't cause a GC by activating the method.
+    try heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(method_object.getAssignableSlotCount()));
+
+    // Refresh the pointer in case a GC happened
+    method_object = tracked_method_object.getValue().asObject().asMethodObject();
+
+    var argument_values = try allocator.alloc(Value, arguments.len);
+    defer allocator.free(argument_values);
+    for (arguments) |argument, i| {
+        argument_values[i] = argument.getValue();
+    }
+
+    context.script.ref();
+    errdefer context.script.unref();
+
+    const method_activation = try method_object.activateMethod(
+        allocator,
+        heap,
+        receiver.getValue(),
+        argument_values,
+        ByteVector.fromAddress(method_object.getMap().method_name.asObjectAddress()).getValues(),
+        message_range,
+        context.script,
+    );
     var did_execute_normally = false;
 
-    {
-        errdefer method_activation.destroy();
-        try context.activation_stack.append(method_activation);
-    }
+    try context.activation_stack.append(method_activation);
 
     // NOTE: We shouldn't pop from the activation stack if we didn't execute
     //       normally and didn't non-local return.
@@ -166,14 +215,14 @@ pub fn executeMethodMessage(
         if (did_execute_normally or did_nonlocal_return) {
             const popped_activation = context.activation_stack.pop();
             std.debug.assert(popped_activation == method_activation);
-            popped_activation.destroy();
+            popped_activation.destroy(heap);
         }
     }
 
     const previous_script = context.script;
     const previous_self_object = context.self_object;
 
-    const method_script = method_object.value.content.Method.script;
+    const method_script = method_object.getDefinitionScript();
     const method_activation_object = method_activation.activation_object;
     context.script = method_script;
     context.self_object = method_activation_object;
@@ -186,13 +235,13 @@ pub fn executeMethodMessage(
         }
     }
 
-    var last_expression_result: ?Value = null;
-    for (method_object.value.content.Method.statements) |statement| {
+    var last_expression_result: ?Heap.Tracked = null;
+    for (method_object.getStatementsSlice()) |statement| {
         if (last_expression_result) |last_result| {
-            last_result.unrefWithAllocator(allocator);
+            last_result.untrackAndDestroy(heap);
         }
 
-        const expression_result = root_interpreter.executeStatement(allocator, statement, context) catch |err| {
+        const expression_result = root_interpreter.executeStatement(allocator, heap, statement, context) catch |err| {
             switch (err) {
                 root_interpreter.NonlocalReturnError.NonlocalReturn => {
                     if (context.current_nonlocal_return.?.target_activation.getPointer()) |target_activation| {
@@ -213,13 +262,14 @@ pub fn executeMethodMessage(
             }
         };
 
-        last_expression_result = expression_result;
+        last_expression_result = try heap.track(expression_result);
     }
 
     did_execute_normally = true;
 
     if (last_expression_result) |last_result| {
-        return last_result;
+        defer last_result.untrackAndDestroy(heap);
+        return last_result.getValue();
     } else {
         return environment.globalNil();
     }
@@ -228,18 +278,18 @@ pub fn executeMethodMessage(
 /// Refs `receiver`.
 pub fn executePrimitiveMessage(
     allocator: *Allocator,
+    heap: *Heap,
     message_range: Range,
-    receiver: Value,
+    receiver: Heap.Tracked,
     name: []const u8,
-    arguments: []Value,
+    arguments: []Heap.Tracked,
     context: *InterpreterContext,
 ) root_interpreter.InterpreterError!Value {
     // All primitives borrow a ref from the caller for the receiver and
     // each argument. It is the primitive's job to unref any argument after
     // its work is done.
     if (primitives.hasPrimitive(name)) {
-        receiver.ref();
-        return try primitives.callPrimitive(allocator, message_range, name, receiver, arguments, context);
+        return try primitives.callPrimitive(allocator, heap, message_range, name, receiver, arguments, context);
     } else {
         return runtime_error.raiseError(allocator, context, "Unknown primitive selector \"{s}\"", .{name});
     }
@@ -248,84 +298,104 @@ pub fn executePrimitiveMessage(
 /// The original value in `slot` is unref'd.
 pub fn executeAssignmentMessage(
     allocator: *Allocator,
-    slot: *Slot,
+    heap: *Heap,
+    receiver: Heap.Tracked,
+    message_name: []const u8,
     ast_argument: AST.ExpressionNode,
     context: *InterpreterContext,
-) root_interpreter.InterpreterError!Value {
-    var argument = try root_interpreter.executeExpression(allocator, ast_argument, context);
-    errdefer argument.unrefWithAllocator(allocator);
+) root_interpreter.InterpreterError!?Value {
+    var argument = try root_interpreter.executeExpression(allocator, heap, ast_argument, context);
 
     // NOTE: This is required, for instance, when we are assigning `self` to
     //       a slot (happens more often than you might think!). We need to strip
     //       the activation object to get to the actual value inside.
-    if (try argument.value.findActivationReceiver()) |actual_argument| {
-        actual_argument.ref();
-        argument.unrefWithAllocator(allocator);
-        argument = actual_argument;
+    if (argument.isObjectReference() and argument.asObject().isActivationObject()) {
+        argument = argument.asObject().asActivationObject().findActivationReceiver();
     }
 
-    slot.assignNewValue(allocator, argument);
-
-    return environment.globalNil();
+    const message_name_without_colon = message_name[0 .. message_name.len - 1];
+    if (try receiver.getValue().lookup(.Assign, message_name_without_colon, allocator, context)) |value_ptr| {
+        value_ptr.* = argument;
+        return environment.globalNil();
+    } else {
+        return null;
+    }
 }
 
 /// Executes a message. All refs are forwarded.
 pub fn executeMessage(allocator: *Allocator, heap: *Heap, message: AST.MessageNode, context: *InterpreterContext) root_interpreter.InterpreterError!Value {
-    // FIXME: Track the receiver, and untrack on return
     var receiver = try root_interpreter.executeExpression(allocator, heap, message.receiver, context);
 
     // Check for assignable slots
-    if (receiver.isObjectReference()) {
-        if (receiver.asObject().getAssignableSlotForMessage(message.message_name)) |slot| {
-            return try executeAssignmentMessage(allocator, slot, message.arguments[0], context);
+    if (message.message_name[message.message_name.len - 1] == ':') {
+        var tracked_receiver = try heap.track(receiver);
+        defer tracked_receiver.untrackAndDestroy(heap);
+
+        if (try executeAssignmentMessage(allocator, heap, tracked_receiver, message.message_name, message.arguments[0], context)) |value| {
+            return value;
         }
     }
 
     // Primitive check
     if (message.message_name[0] == '_') {
-        const arguments = try getMessageArguments(allocator, message.arguments, context);
-        // NOTE: The activations borrow refs from the arguments, so no need to unref
-        //       them.
-        defer allocator.free(arguments);
-
         if (receiver.isObjectReference() and receiver.asObject().isActivationObject()) {
-            if (try receiver.asObject().asActivationObject().findActivationReceiver()) |actual_receiver| {
-                // FIXME: Stop tracking receiver, and track actual receiver
-                receiver = actual_receiver;
-            }
+            receiver = receiver.asObject().asActivationObject().findActivationReceiver();
         }
 
-        return try executePrimitiveMessage(allocator, message.range, receiver, message.message_name, arguments, context);
+        var tracked_receiver = try heap.track(receiver);
+        defer tracked_receiver.untrackAndDestroy(heap);
+
+        const arguments = try getMessageArguments(allocator, heap, message.arguments, context);
+        defer {
+            for (arguments) |argument| {
+                argument.untrackAndDestroy(heap);
+            }
+            allocator.free(arguments);
+        }
+
+        return try executePrimitiveMessage(allocator, heap, message.range, tracked_receiver, message.message_name, arguments, context);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
     // method on traits block, this is actually executing the block itself via
     // the virtual method.
     {
-        // FIXME: Track block_receiver here
         var block_receiver = receiver;
         if (block_receiver.isObjectReference() and block_receiver.asObject().isActivationObject()) {
-            if (try block_receiver.value.findActivationReceiver()) |actual_receiver| {
-                // FIXME: Stop tracking block_receiver, track actual_receiver
-                block_receiver = actual_receiver;
-            }
+            block_receiver = receiver.asObject().asActivationObject().findActivationReceiver();
         }
 
-        if (block_receiver.value.is(.Block) and block_receiver.value.isCorrectMessageForBlockExecution(message.message_name)) {
-            const arguments = try getMessageArguments(allocator, message.arguments, context);
-            defer allocator.free(arguments);
+        if (block_receiver.isObjectReference() and
+            block_receiver.asObject().isBlockObject() and
+            block_receiver.asObject().asBlockObject().isCorrectMessageForBlockExecution(message.message_name))
+        {
+            var tracked_receiver = try heap.track(block_receiver);
+            defer tracked_receiver.untrackAndDestroy(heap);
 
-            return try executeBlockMessage(allocator, message.range, block_receiver, arguments, context);
+            const arguments = try getMessageArguments(allocator, heap, message.arguments, context);
+            defer {
+                for (arguments) |argument| {
+                    argument.untrackAndDestroy(heap);
+                }
+                allocator.free(arguments);
+            }
+
+            return try executeBlockMessage(allocator, heap, message.range, tracked_receiver, arguments, context);
         }
     }
 
-    if (try receiver.lookup(allocator, context, message.message_name, .Value)) |lookup_result| {
-        // FIXME: Track lookup_result before getting message arguments
-        const arguments = try getMessageArguments(allocator, message.arguments, context);
-        defer allocator.free(arguments);
-
+    if (try receiver.lookup(.Read, message.message_name, allocator, context)) |lookup_result| {
         if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
-            return try executeMethodMessage(allocator, heap, message.range, receiver, lookup_result, arguments, context);
+            var tracked_receiver = try heap.track(receiver);
+            defer tracked_receiver.untrackAndDestroy(heap);
+
+            var tracked_lookup_result = try heap.track(lookup_result);
+            defer tracked_lookup_result.untrackAndDestroy(heap);
+
+            const arguments = try getMessageArguments(allocator, heap, message.arguments, context);
+            defer allocator.free(arguments);
+
+            return try executeMethodMessage(allocator, heap, message.range, tracked_receiver, tracked_lookup_result, arguments, context);
         } else {
             return lookup_result;
         }

@@ -7,196 +7,18 @@ const Allocator = std.mem.Allocator;
 
 const hash = @import("../../utility/hash.zig");
 const Slot = @import("../slot.zig");
+const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const runtime_error = @import("../error.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
-const LookupType = enum { Value, Slot };
-const LookupError = Allocator.Error || runtime_error.SelfRuntimeError;
-const VisitedObjectLink = struct { previous: ?*const VisitedObjectLink = null, object: *const Object };
+pub const LookupIntent = enum { Read, Assign };
+pub const LookupError = Allocator.Error || runtime_error.SelfRuntimeError;
+const VisitedValueLink = struct { previous: ?*const VisitedValueLink = null, value: Value };
 
-fn lookupReturnType(comptime lookup_type: LookupType) type {
-    if (lookup_type == .Value) {
-        return LookupError!?Object.Ref;
-    } else {
-        return LookupError!?*Slot;
-    }
-}
-
-pub fn lookup(self: *const Object, allocator: ?*Allocator, context: ?*InterpreterContext, selector: []const u8, comptime lookup_type: LookupType) lookupReturnType(lookup_type) {
-    const selector_hash = hash.stringHash(selector);
-    return lookupHash(self, allocator, context, selector_hash, lookup_type);
-}
-
-const self_hash = hash.stringHash("self");
-const parent_hash = hash.stringHash("parent");
-
-fn lookupHash(self: *const Object, allocator: ?*Allocator, context: ?*InterpreterContext, selector_hash: u32, comptime lookup_type: LookupType) lookupReturnType(lookup_type) {
-    if (lookup_type == .Value) {
-        if (selector_hash == self_hash) {
-            return Object.Ref{ .value = @intToPtr(*Object, @ptrToInt(self)) };
-        }
-    }
-
-    return if (lookup_type == .Value)
-        try lookupValue(self, allocator, context, selector_hash, null)
-    else
-        try lookupSlot(self, selector_hash, null);
-}
-
-fn lookupValue(self: *const Object, allocator: ?*Allocator, context: ?*InterpreterContext, selector_hash: u32, previously_visited: ?*const VisitedObjectLink) LookupError!?Object.Ref {
-    if (previously_visited) |visited| {
-        var link: ?*const VisitedObjectLink = visited;
-        while (link) |l| {
-            if (l.object == self) {
-                // Cyclic reference
-                return null;
-            }
-
-            link = l.previous;
-        }
-    }
-
-    const currently_visited = VisitedObjectLink{ .previous = previously_visited, .object = self };
-
-    switch (self.content) {
-        .Empty => return null,
-
-        .Slots => |slots| {
-            if (try slotsLookup(slots.slots, selector_hash, &currently_visited)) |slot| {
-                return slot.value;
-            }
-
-            return null;
-        },
-
-        .Activation => |activation| {
-            if (try slotsLookup(activation.slots, selector_hash, &currently_visited)) |slot| {
-                return slot.value;
-            }
-
-            // Receiver lookup
-            if (try lookupValue(activation.receiver.value, allocator, context, selector_hash, &currently_visited)) |found_object| {
-                return found_object;
-            }
-
-            return null;
-        },
-
-        .Method => unreachable,
-
-        // The 4 types below have an imaginary field called "parent" which
-        // refers to their respective traits objects.
-
-        .Block => {
-            // NOTE: executeMessage will handle the execution of the block itself.
-            if (context) |ctx| {
-                const traits_block = try lookupTraitsObject(allocator.?, ctx, "block");
-                if (selector_hash == parent_hash)
-                    return traits_block;
-
-                return try lookupHash(traits_block.value, allocator, ctx, selector_hash, .Value);
-            } else {
-                @panic("Context MUST be passed for Block objects!");
-            }
-        },
-
-        .ByteVector => {
-            if (context) |ctx| {
-                const traits_string = try lookupTraitsObject(allocator.?, ctx, "string");
-                if (selector_hash == parent_hash)
-                    return traits_string;
-
-                return try lookupHash(traits_string.value, allocator, ctx, selector_hash, .Value);
-            } else {
-                @panic("Context MUST be passed for ByteVector objects!");
-            }
-        },
-
-        .Vector => {
-            if (context) |ctx| {
-                const traits_vector = try lookupTraitsObject(allocator.?, ctx, "vector");
-                if (selector_hash == parent_hash)
-                    return traits_vector;
-
-                return try lookupHash(traits_vector.value, allocator, ctx, selector_hash, .Value);
-            } else {
-                @panic("Context MUST be passed for Vector objects!");
-            }
-        },
-
-        .Integer => {
-            if (context) |ctx| {
-                const traits_integer = try lookupTraitsObject(allocator.?, ctx, "integer");
-                if (selector_hash == parent_hash)
-                    return traits_integer;
-
-                return try lookupHash(traits_integer.value, allocator, ctx, selector_hash, .Value);
-            } else {
-                @panic("Context MUST be passed for Integer objects!");
-            }
-        },
-
-        .FloatingPoint => {
-            if (context) |ctx| {
-                const traits_float = try lookupTraitsObject(allocator.?, ctx, "float");
-                if (selector_hash == parent_hash)
-                    return traits_float;
-
-                return try lookupHash(traits_float.value, allocator, ctx, selector_hash, .Value);
-            } else {
-                @panic("Context MUST be passed for FloatingPoint objects!");
-            }
-        },
-    }
-}
-
-/// Like lookupValue but finds slots instead of values.
-fn lookupSlot(self: *const Object, selector_hash: u32, previously_visited: ?*const VisitedObjectLink) LookupError!?*Slot {
-    // I'd like this to not be duplicated but unfortunately I couldn't reconcile
-    // them.
-    if (previously_visited) |visited| {
-        var link: ?*const VisitedObjectLink = visited;
-        while (link) |l| {
-            if (l.object == self) {
-                // Cyclic reference
-                return null;
-            }
-
-            link = l.previous;
-        }
-    }
-
-    const currently_visited = VisitedObjectLink{ .previous = previously_visited, .object = self };
-
-    switch (self.content) {
-        .Empty, .Block, .ByteVector, .Vector, .Integer, .FloatingPoint => return null,
-
-        .Slots => |slots| {
-            return try slotsLookup(slots.slots, selector_hash, &currently_visited);
-        },
-
-        // FIXME: Don't repeat this code
-        .Activation => |activation| {
-            if (try slotsLookup(activation.slots, selector_hash, &currently_visited)) |slot| {
-                return slot;
-            }
-
-            // Receiver lookup
-            if (try lookupSlot(activation.receiver.value, selector_hash, &currently_visited)) |found_slot| {
-                return found_slot;
-            }
-
-            return null;
-        },
-
-        .Method => @panic("Attempting to perform lookup on method?!"),
-    }
-}
-
-fn lookupTraitsObject(allocator: *Allocator, context: *InterpreterContext, comptime selector: []const u8) !Object.Ref {
-    if (try context.lobby.value.lookup(allocator, context, "traits", .Value)) |traits| {
-        if (try traits.value.lookup(allocator, context, selector, .Value)) |traits_object| {
+pub fn findTraitsObject(comptime selector: []const u8, allocator: *Allocator, context: *InterpreterContext) !Value {
+    if (try context.lobby.getValue().lookup(.Read, "traits", allocator, context)) |traits| {
+        if (try traits.lookup(.Read, selector, allocator, context)) |traits_object| {
             return traits_object;
         } else {
             return runtime_error.raiseError(allocator, context, "Could not find " ++ selector ++ " in traits", .{});
@@ -206,20 +28,159 @@ fn lookupTraitsObject(allocator: *Allocator, context: *InterpreterContext, compt
     }
 }
 
+fn lookupReturnType(comptime intent: LookupIntent) type {
+    if (intent == .Assign) {
+        return LookupError!?*Value;
+    } else {
+        return LookupError!?Value;
+    }
+}
+
+const self_hash = hash.stringHash("self");
+const parent_hash = hash.stringHash("parent");
+
+pub fn lookupByHash(
+    self: Object,
+    comptime intent: LookupIntent,
+    selector_hash: u32,
+    allocator: ?*Allocator,
+    context: ?*InterpreterContext,
+) lookupReturnType(intent) {
+    if (intent == .Read) {
+        if (selector_hash == self_hash) {
+            return self.asValue();
+        }
+    }
+
+    return try lookupInternal(self, intent, selector_hash, null, allocator, context);
+}
+
+fn lookupInternal(
+    self: Object,
+    comptime intent: LookupIntent,
+    selector_hash: u32,
+    previously_visited: ?*const VisitedValueLink,
+    allocator: ?*Allocator,
+    context: ?*InterpreterContext,
+) lookupReturnType(intent) {
+    switch (self.header.getObjectType()) {
+        .ForwardingReference, .Map, .Method => unreachable,
+        .Slots => {
+            if (try slotsLookup(intent, Object.Slots, self.asSlotsObject(), selector_hash, previously_visited, allocator, context)) |value| {
+                return value;
+            }
+
+            return null;
+        },
+        .Activation => {
+            if (try slotsLookup(intent, Object.Activation, self.asActivationObject(), selector_hash, previously_visited, allocator, context)) |value| {
+                return value;
+            }
+
+            // Receiver lookup
+            if (try self.asActivationObject().receiver.lookupByHash(intent, selector_hash, allocator, context)) |value| {
+                return value;
+            }
+
+            return null;
+        },
+        .Block => {
+            // NOTE: executeMessage will handle the execution of the block itself.
+            if (context) |ctx| {
+                const traits_block = try findTraitsObject("block", allocator.?, ctx);
+                if (intent == .Read) {
+                    if (selector_hash == parent_hash)
+                        return traits_block;
+                }
+
+                return try traits_block.lookupByHash(intent, selector_hash, allocator, context);
+            } else {
+                @panic("Context MUST be passed for Block objects!");
+            }
+        },
+        .ByteVector => {
+            // NOTE: executeMessage will handle the execution of the block itself.
+            if (context) |ctx| {
+                const traits_string = try findTraitsObject("string", allocator.?, ctx);
+                if (intent == .Read) {
+                    if (selector_hash == parent_hash)
+                        return traits_string;
+                }
+
+                return try traits_string.lookupByHash(intent, selector_hash, allocator, context);
+            } else {
+                @panic("Context MUST be passed for ByteVector objects!");
+            }
+        },
+    }
+}
+
 /// Self Handbook, §3.3.8 The lookup algorithm
-fn slotsLookup(slots: []Slot, selector_hash: u32, currently_visited: *const VisitedObjectLink) !?*Slot {
+fn slotsLookup(
+    comptime intent: LookupIntent,
+    comptime ObjectType: type,
+    object: *ObjectType,
+    selector_hash: u32,
+    previously_visited: ?*const VisitedValueLink,
+    allocator: ?*Allocator,
+    context: ?*InterpreterContext,
+) lookupReturnType(intent) {
+    if (previously_visited) |visited| {
+        var link: ?*const VisitedValueLink = visited;
+        while (link) |l| {
+            if (l.value.data == object.asValue().data) {
+                // Cyclic reference
+                return null;
+            }
+
+            link = l.previous;
+        }
+    }
+
+    const currently_visited = VisitedValueLink{ .previous = previously_visited, .value = object.asValue() };
+
+    // Note that we only return the value for the assign intent if it's assignable;
+    // if it's not assignable, then we return null. This is important because
+    // it prevents assigning to constant slots. Perhaps a primitive can help you
+    // assign to a constant slot? It will cause a map copy though.
+    var assignable_slots = object.getAssignableSlots();
+    var assignable_slots_cursor: usize = 0;
     // Direct lookup
-    for (slots) |*slot| {
-        if (slot.name_hash == selector_hash) {
-            return slot;
+    for (object.getSlots()) |slot| {
+        if (slot.hash == selector_hash) {
+            if (intent == .Assign) {
+                if (slot.isMutable()) {
+                    return &assignable_slots[assignable_slots_cursor];
+                } else {
+                    // Prevent constant slots from being assigned
+                    return null;
+                }
+            } else {
+                if (slot.isMutable()) {
+                    return assignable_slots[assignable_slots_cursor];
+                } else {
+                    return slot.value;
+                }
+            }
+        }
+
+        // FIXME: Don't keep a cursor; use the value field to hold the
+        //        assignable slot index instead. It's currently sitting there
+        //        doing nothing.
+        if (slot.isMutable()) {
+            assignable_slots_cursor += 1;
         }
     }
 
     // Parent lookup
-    for (slots) |slot| {
-        if (slot.is_parent) {
-            if (try lookupSlot(slot.value.value, selector_hash, currently_visited)) |found_slot| {
-                return found_slot;
+    for (object.getSlots()) |slot| {
+        if (slot.isParent()) {
+            if (slot.value.isObjectReference()) {
+                if (try lookupInternal(slot.value.asObject(), intent, selector_hash, &currently_visited, allocator, context)) |value| {
+                    return value;
+                }
+            } else {
+                @panic("FIXME: Allow integers and floating point numbers to be parent slot values (let me know of your usecase!)");
             }
         }
     }
