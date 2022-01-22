@@ -54,7 +54,7 @@ pub fn RefPtr(comptime T: type) type {
         /// Example for an object returning a ref-counted version of itself:
         ///
         /// ```
-        /// pub fn create(allocator: *Allocator) RefPtr(Self) {
+        /// pub fn create(allocator: Allocator) RefPtr(Self) {
         ///     var self = try allocator.create(Self);
         ///     defer allocator.destroy(self);
         ///
@@ -95,7 +95,7 @@ pub fn RefPtr(comptime T: type) type {
             }
         }
 
-        pub fn unrefWithAllocator(self: Self, allocator: *Allocator) void {
+        pub fn unrefWithAllocator(self: Self, allocator: Allocator) void {
             if (self.value.ref.ref_count < 1) {
                 @panic("!!! Attempting to unreference an already-destroyed RefPtr");
             }

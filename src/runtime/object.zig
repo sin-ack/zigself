@@ -118,7 +118,7 @@ fn formatObject(
     }
 }
 
-pub fn finalize(self: Self, allocator: *Allocator) void {
+pub fn finalize(self: Self, allocator: Allocator) void {
     switch (self.header.getObjectType()) {
         .ForwardingReference, .Slots, .Activation, .Method, .Block, .ByteVector => unreachable,
         .Map => self.asMap().finalize(allocator),

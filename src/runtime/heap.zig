@@ -34,7 +34,7 @@ to_space: Space,
 /// memory requirements of the program grows.
 old_space: Space,
 
-allocator: *Allocator,
+allocator: Allocator,
 activation_stack: ?*std.ArrayList(*Activation),
 
 // FIXME: Make eden + new space configurable at runtime
@@ -42,7 +42,7 @@ const EdenSize = 1 * 1024 * 1024;
 const NewSpaceSize = 4 * 1024 * 1024;
 const InitialOldSpaceSize = 16 * 1024 * 1024;
 
-pub fn create(allocator: *Allocator) !*Self {
+pub fn create(allocator: Allocator) !*Self {
     const self = try allocator.create(Self);
     errdefer allocator.destroy(self);
 
@@ -55,7 +55,7 @@ pub fn destroy(self: *Self) void {
     self.allocator.destroy(self);
 }
 
-fn init(self: *Self, allocator: *Allocator) !void {
+fn init(self: *Self, allocator: Allocator) !void {
     self.allocator = allocator;
     self.activation_stack = null;
 
@@ -206,7 +206,7 @@ const Space = struct {
     /// order to evacuate all the objects to a higher generation.
     tenure_target: ?*Space = null,
 
-    pub fn init(allocator: *Allocator, size: usize) !Space {
+    pub fn init(allocator: Allocator, size: usize) !Space {
         var memory = try allocator.alloc(u64, size / @sizeOf(u64));
         return Space{
             .memory = memory,
@@ -218,7 +218,7 @@ const Space = struct {
         };
     }
 
-    pub fn deinit(self: *Space, allocator: *Allocator) void {
+    pub fn deinit(self: *Space, allocator: Allocator) void {
         self.remembered_set.deinit(allocator);
         allocator.free(self.memory);
     }
@@ -236,7 +236,7 @@ const Space = struct {
     }
 
     /// Performs Cheney's algorithm, copying alive objects to the given target.
-    pub fn cheneyCommon(self: *Space, allocator: *Allocator, activation_stack: []const *Activation, target_space: *Space) Allocator.Error!void {
+    pub fn cheneyCommon(self: *Space, allocator: Allocator, activation_stack: []const *Activation, target_space: *Space) Allocator.Error!void {
         // First see if the target space has enough space to potentially take
         // everything in this space.
         const space_size = self.memory.len * @sizeOf(u64);
@@ -369,7 +369,7 @@ const Space = struct {
     /// scavenge target, a *tenure* is attempted towards the tenure target of
     /// this space. If a tenure target is not specified either, then the heap is
     /// simply expanded to accomodate the new objects.
-    pub fn collectGarbage(self: *Space, allocator: *Allocator, required_memory: usize, activation_stack: []const *Activation) !void {
+    pub fn collectGarbage(self: *Space, allocator: Allocator, required_memory: usize, activation_stack: []const *Activation) !void {
         // See if we already have the required memory amount.
         if (self.freeMemory() >= required_memory) return;
 
@@ -402,7 +402,7 @@ const Space = struct {
     /// location of the old object which tells the future calls of this function
     /// for the same object to just return the new location and avoid copying
     /// again.
-    fn copyObjectTo(self: *Space, allocator: *Allocator, address: [*]u64, target_space: *Space) ![*]u64 {
+    fn copyObjectTo(self: *Space, allocator: Allocator, address: [*]u64, target_space: *Space) ![*]u64 {
         const object = Object.fromAddress(address);
         if (object.isForwardingReference()) {
             const forward_address = object.getForwardAddress();
@@ -430,7 +430,7 @@ const Space = struct {
     }
 
     /// Same as copyObjectTo, but for byte vectors.
-    fn copyByteVectorTo(allocator: *Allocator, address: [*]u64, target_space: *Space) [*]u64 {
+    fn copyByteVectorTo(allocator: Allocator, address: [*]u64, target_space: *Space) [*]u64 {
         const byte_vector = ByteVector.fromAddress(address);
         const byte_vector_size = byte_vector.getSizeInMemory();
         std.debug.assert(byte_vector_size % @sizeOf(u64) == 0);
@@ -462,7 +462,7 @@ const Space = struct {
 
     /// Allocates the requested amount in bytes in the object segment of this
     /// space, garbage collecting if there is not enough space.
-    pub fn allocateInObjectSegment(self: *Space, allocator: *Allocator, activation_stack: []const *Activation, size: usize) ![*]u64 {
+    pub fn allocateInObjectSegment(self: *Space, allocator: Allocator, activation_stack: []const *Activation, size: usize) ![*]u64 {
         std.debug.assert(size % 8 == 0);
         if (self.freeMemory() < size) try self.collectGarbage(allocator, size, activation_stack);
 
@@ -477,7 +477,7 @@ const Space = struct {
 
     /// Allocates the requested amount in bytes in the byte vector segment of
     /// this space, garbage collecting if there is not enough space.
-    pub fn allocateInByteVectorSegment(self: *Space, allocator: *Allocator, activation_stack: []const *Activation, size: usize) ![*]u64 {
+    pub fn allocateInByteVectorSegment(self: *Space, allocator: Allocator, activation_stack: []const *Activation, size: usize) ![*]u64 {
         std.debug.assert(size % 8 == 0);
         if (self.freeMemory() < size) try self.collectGarbage(allocator, size, activation_stack);
 
@@ -490,7 +490,7 @@ const Space = struct {
     }
 
     /// Adds the given address to the finalization set of this space.
-    pub fn addToFinalizationSet(self: *Space, allocator: *Allocator, address: [*]u64) !void {
+    pub fn addToFinalizationSet(self: *Space, allocator: Allocator, address: [*]u64) !void {
         try self.finalization_set.put(allocator, address, .{});
     }
 
@@ -510,7 +510,7 @@ const Space = struct {
     }
 
     /// Adds the given tracked value into the tracked set of this space.
-    pub fn addToTrackedSet(self: *Space, allocator: *Allocator, tracked: Tracked) !void {
+    pub fn addToTrackedSet(self: *Space, allocator: Allocator, tracked: Tracked) !void {
         try self.tracked_set.put(allocator, tracked.tracker, .{});
     }
 
@@ -530,7 +530,7 @@ const Space = struct {
 
     /// Find the space which has this value, and add the tracked value to the
     /// tracked set of that space.
-    pub fn startTracking(self: *Space, allocator: *Allocator, tracked: Tracked) Allocator.Error!bool {
+    pub fn startTracking(self: *Space, allocator: Allocator, tracked: Tracked) Allocator.Error!bool {
         const address = tracked.tracker.value.asObjectAddress();
 
         if (self.objectSegmentContains(address) or self.byteVectorSegmentContains(address)) {
@@ -580,14 +580,14 @@ pub const Tracked = struct {
         value: Value,
     };
 
-    pub fn create(allocator: *Allocator, value: Value) !Tracked {
+    pub fn create(allocator: Allocator, value: Value) !Tracked {
         const tracker = try allocator.create(Tracker);
         tracker.value = value;
 
         return Tracked{ .tracker = tracker };
     }
 
-    pub fn destroy(self: Tracked, allocator: *Allocator) void {
+    pub fn destroy(self: Tracked, allocator: Allocator) void {
         allocator.destroy(self.tracker);
     }
 

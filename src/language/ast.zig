@@ -11,7 +11,7 @@ const Range = @import("./location_range.zig");
 pub const ScriptNode = struct {
     statements: []StatementNode,
 
-    pub fn deinit(self: *ScriptNode, allocator: *Allocator) void {
+    pub fn deinit(self: *ScriptNode, allocator: Allocator) void {
         for (self.statements) |*statement| {
             statement.deinit(allocator);
         }
@@ -25,7 +25,7 @@ pub const StatementNode = struct {
 
     range: Range,
 
-    pub fn deinit(self: *StatementNode, allocator: *Allocator) void {
+    pub fn deinit(self: *StatementNode, allocator: Allocator) void {
         self.expression.deinit(allocator);
     }
 };
@@ -40,7 +40,7 @@ pub const ExpressionNode = union(enum) {
     String: StringNode,
     Number: NumberNode,
 
-    pub fn deinit(self: *ExpressionNode, allocator: *Allocator) void {
+    pub fn deinit(self: *ExpressionNode, allocator: Allocator) void {
         switch (self.*) {
             .Object => self.Object.destroy(allocator),
             .Block => self.Block.destroy(allocator),
@@ -61,7 +61,7 @@ pub const ObjectNode = struct {
 
     range: Range,
 
-    pub fn deinit(self: *ObjectNode, allocator: *Allocator) void {
+    pub fn deinit(self: *ObjectNode, allocator: Allocator) void {
         for (self.slots) |*slot| {
             slot.deinit(allocator);
         }
@@ -73,7 +73,7 @@ pub const ObjectNode = struct {
         allocator.free(self.statements);
     }
 
-    pub fn destroy(self: *ObjectNode, allocator: *Allocator) void {
+    pub fn destroy(self: *ObjectNode, allocator: Allocator) void {
         self.deinit(allocator);
         allocator.destroy(self);
     }
@@ -91,7 +91,7 @@ pub const SlotNode = struct {
 
     range: Range,
 
-    pub fn deinit(self: *SlotNode, allocator: *Allocator) void {
+    pub fn deinit(self: *SlotNode, allocator: Allocator) void {
         allocator.free(self.name);
 
         for (self.arguments) |argument| {
@@ -109,7 +109,7 @@ pub const BlockNode = struct {
 
     range: Range,
 
-    pub fn deinit(self: *BlockNode, allocator: *Allocator) void {
+    pub fn deinit(self: *BlockNode, allocator: Allocator) void {
         for (self.slots) |*slot| {
             slot.deinit(allocator);
         }
@@ -121,7 +121,7 @@ pub const BlockNode = struct {
         allocator.free(self.statements);
     }
 
-    pub fn destroy(self: *BlockNode, allocator: *Allocator) void {
+    pub fn destroy(self: *BlockNode, allocator: Allocator) void {
         self.deinit(allocator);
         allocator.destroy(self);
     }
@@ -132,7 +132,7 @@ pub const IdentifierNode = struct {
 
     range: Range,
 
-    pub fn deinit(self: *IdentifierNode, allocator: *Allocator) void {
+    pub fn deinit(self: *IdentifierNode, allocator: Allocator) void {
         allocator.free(self.value);
     }
 };
@@ -144,7 +144,7 @@ pub const MessageNode = struct {
 
     range: Range,
 
-    pub fn deinit(self: *MessageNode, allocator: *Allocator) void {
+    pub fn deinit(self: *MessageNode, allocator: Allocator) void {
         self.receiver.deinit(allocator);
         allocator.free(self.message_name);
 
@@ -154,7 +154,7 @@ pub const MessageNode = struct {
         allocator.free(self.arguments);
     }
 
-    pub fn destroy(self: *MessageNode, allocator: *Allocator) void {
+    pub fn destroy(self: *MessageNode, allocator: Allocator) void {
         self.deinit(allocator);
         allocator.destroy(self);
     }
@@ -167,11 +167,11 @@ pub const ReturnNode = struct {
 
     range: Range,
 
-    pub fn deinit(self: *ReturnNode, allocator: *Allocator) void {
+    pub fn deinit(self: *ReturnNode, allocator: Allocator) void {
         self.expression.deinit(allocator);
     }
 
-    pub fn destroy(self: *ReturnNode, allocator: *Allocator) void {
+    pub fn destroy(self: *ReturnNode, allocator: Allocator) void {
         self.deinit(allocator);
         allocator.destroy(self);
     }
@@ -182,7 +182,7 @@ pub const StringNode = struct {
 
     range: Range,
 
-    pub fn deinit(self: *StringNode, allocator: *Allocator) void {
+    pub fn deinit(self: *StringNode, allocator: Allocator) void {
         allocator.free(self.value);
     }
 };

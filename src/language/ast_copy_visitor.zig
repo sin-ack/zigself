@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const AST = @import("./ast.zig");
 
-pub fn visitScript(script: AST.ScriptNode, allocator: *Allocator) !AST.ScriptNode {
+pub fn visitScript(script: AST.ScriptNode, allocator: Allocator) !AST.ScriptNode {
     const statements = try std.ArrayList(AST.StatementNode).initCapacity(allocator, script.statements.len);
     errdefer {
         for (statements.items) |*statement| {
@@ -23,11 +23,11 @@ pub fn visitScript(script: AST.ScriptNode, allocator: *Allocator) !AST.ScriptNod
     return AST.ScriptNode{ .statements = statements.toOwnedSlice() };
 }
 
-pub fn visitStatement(statement: AST.StatementNode, allocator: *Allocator) !AST.StatementNode {
+pub fn visitStatement(statement: AST.StatementNode, allocator: Allocator) !AST.StatementNode {
     return AST.StatementNode{ .expression = try visitExpression(statement.expression, allocator), .range = statement.range };
 }
 
-pub fn visitExpression(expression: AST.ExpressionNode, allocator: *Allocator) Allocator.Error!AST.ExpressionNode {
+pub fn visitExpression(expression: AST.ExpressionNode, allocator: Allocator) Allocator.Error!AST.ExpressionNode {
     return switch (expression) {
         .Object => AST.ExpressionNode{ .Object = try visitObject(expression.Object.*, allocator) },
         .Block => AST.ExpressionNode{ .Block = try visitBlock(expression.Block.*, allocator) },
@@ -40,7 +40,7 @@ pub fn visitExpression(expression: AST.ExpressionNode, allocator: *Allocator) Al
     };
 }
 
-pub fn visitSlot(slot: AST.SlotNode, allocator: *Allocator) !AST.SlotNode {
+pub fn visitSlot(slot: AST.SlotNode, allocator: Allocator) !AST.SlotNode {
     var arguments = try std.ArrayList([]const u8).initCapacity(allocator, slot.arguments.len);
     errdefer {
         for (arguments.items) |argument| {
@@ -71,7 +71,7 @@ fn visitSlotsStatementsCommon(
     statements: []AST.StatementNode,
     out_slots: *[]AST.SlotNode,
     out_statements: *[]AST.StatementNode,
-    allocator: *Allocator,
+    allocator: Allocator,
 ) !void {
     var slots_copy = try std.ArrayList(AST.SlotNode).initCapacity(allocator, slots.len);
     errdefer {
@@ -101,7 +101,7 @@ fn visitSlotsStatementsCommon(
     out_statements.* = statements_copy.toOwnedSlice();
 }
 
-pub fn visitObject(object: AST.ObjectNode, allocator: *Allocator) !*AST.ObjectNode {
+pub fn visitObject(object: AST.ObjectNode, allocator: Allocator) !*AST.ObjectNode {
     var slots: []AST.SlotNode = undefined;
     var statements: []AST.StatementNode = undefined;
 
@@ -116,7 +116,7 @@ pub fn visitObject(object: AST.ObjectNode, allocator: *Allocator) !*AST.ObjectNo
     return object_copy;
 }
 
-pub fn visitBlock(block: AST.BlockNode, allocator: *Allocator) !*AST.BlockNode {
+pub fn visitBlock(block: AST.BlockNode, allocator: Allocator) !*AST.BlockNode {
     var slots: []AST.SlotNode = undefined;
     var statements: []AST.StatementNode = undefined;
 
@@ -131,7 +131,7 @@ pub fn visitBlock(block: AST.BlockNode, allocator: *Allocator) !*AST.BlockNode {
     return block_copy;
 }
 
-pub fn visitMessage(message: AST.MessageNode, allocator: *Allocator) !*AST.MessageNode {
+pub fn visitMessage(message: AST.MessageNode, allocator: Allocator) !*AST.MessageNode {
     var arguments = try std.ArrayList(AST.ExpressionNode).initCapacity(allocator, message.arguments.len);
     errdefer {
         for (arguments.items) |*argument| {
@@ -159,7 +159,7 @@ pub fn visitMessage(message: AST.MessageNode, allocator: *Allocator) !*AST.Messa
     return message_copy;
 }
 
-pub fn visitReturn(return_node: AST.ReturnNode, allocator: *Allocator) !*AST.ReturnNode {
+pub fn visitReturn(return_node: AST.ReturnNode, allocator: Allocator) !*AST.ReturnNode {
     var return_copy = try allocator.create(AST.ReturnNode);
     errdefer allocator.destroy(return_copy);
     return_copy.expression = try visitExpression(return_node.expression, allocator);
@@ -168,15 +168,15 @@ pub fn visitReturn(return_node: AST.ReturnNode, allocator: *Allocator) !*AST.Ret
     return return_copy;
 }
 
-pub fn visitIdentifier(identifier: AST.IdentifierNode, allocator: *Allocator) !AST.IdentifierNode {
+pub fn visitIdentifier(identifier: AST.IdentifierNode, allocator: Allocator) !AST.IdentifierNode {
     return AST.IdentifierNode{ .value = try allocator.dupe(u8, identifier.value), .range = identifier.range };
 }
 
-pub fn visitString(string: AST.StringNode, allocator: *Allocator) !AST.StringNode {
+pub fn visitString(string: AST.StringNode, allocator: Allocator) !AST.StringNode {
     return AST.StringNode{ .value = try allocator.dupe(u8, string.value), .range = string.range };
 }
 
-pub fn visitNumber(number: AST.NumberNode, allocator: *Allocator) AST.NumberNode {
+pub fn visitNumber(number: AST.NumberNode, allocator: Allocator) AST.NumberNode {
     _ = allocator;
     return number;
 }

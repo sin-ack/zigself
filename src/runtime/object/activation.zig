@@ -45,7 +45,7 @@ pub fn isCorrectMessageForBlockExecution(self: Object, message: []const u8) bool
     return remaining_message.len == 0;
 }
 
-fn createMessageNameForBlock(self: Object, allocator: *Allocator) ![]const u8 {
+fn createMessageNameForBlock(self: Object, allocator: Allocator) ![]const u8 {
     std.debug.assert(self.is(.Block));
 
     var needed_space: usize = 5; // value
@@ -71,7 +71,7 @@ fn createMessageNameForBlock(self: Object, allocator: *Allocator) ![]const u8 {
 }
 
 fn createActivationObject(
-    allocator: *Allocator,
+    allocator: Allocator,
     arguments: []Object.Ref,
     argument_names: [][]const u8,
     slots: []Slot,
@@ -127,7 +127,7 @@ fn createActivationObject(
 /// `context.script` is ref'd once.
 pub fn activateBlock(
     self: Object,
-    allocator: *Allocator,
+    allocator: Allocator,
     context: *InterpreterContext,
     message_range: Range,
     arguments: []Object.Ref,
@@ -165,7 +165,7 @@ pub fn activateBlock(
 /// `context.script` is ref'd once.
 pub fn activateMethod(
     self: Object,
-    allocator: *Allocator,
+    allocator: Allocator,
     context: *InterpreterContext,
     message_range: Range,
     arguments: []Object.Ref,

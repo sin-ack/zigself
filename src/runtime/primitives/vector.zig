@@ -18,7 +18,7 @@ const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 /// As a special case, if the first argument is 0, then a new empty vector is
 /// created without looking at the receiver.
 pub fn VectorCopySize_FillingExtrasWith(
-    allocator: *Allocator,
+    allocator: Allocator,
     message_range: Range,
     receiver: Object.Ref,
     arguments: []Object.Ref,
@@ -69,7 +69,7 @@ pub fn VectorCopySize_FillingExtrasWith(
 }
 
 /// Return the size of the receiver vector.
-pub fn VectorSize(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn VectorSize(allocator: Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
     _ = arguments;
 
@@ -85,7 +85,7 @@ pub fn VectorSize(allocator: *Allocator, message_range: Range, receiver: Object.
 
 /// Return the value at the given position of the receiver vector. If the given
 /// position is out of bounds, an error is raised.
-pub fn VectorAt(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn VectorAt(allocator: Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
     defer receiver.unrefWithAllocator(allocator);
@@ -115,7 +115,7 @@ pub fn VectorAt(allocator: *Allocator, message_range: Range, receiver: Object.Re
 /// Place the object in the second argument to the integer position in the first
 /// argument. If the given position is out of bounds, an error is raised.
 /// Returns the receiver.
-pub fn VectorAt_Put(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn VectorAt_Put(allocator: Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
     _ = message_range;
 
     errdefer receiver.unrefWithAllocator(allocator);

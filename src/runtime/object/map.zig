@@ -63,7 +63,7 @@ pub const Map = packed struct {
         self.setMapType(map_type);
     }
 
-    pub fn finalize(self: *Map, allocator: *Allocator) void {
+    pub fn finalize(self: *Map, allocator: Allocator) void {
         switch (self.getMapType()) {
             .Slots, .ByteVector => unreachable,
             .Method => self.asMethodMap().finalize(allocator),
@@ -287,7 +287,7 @@ const SlotsAndStatementsMap = packed struct {
         self.statements_address = Value.fromUnsignedInteger((statements.len << 48) | @ptrToInt(statements.ptr));
     }
 
-    pub fn finalize(self: *SlotsAndStatementsMap, allocator: *Allocator) void {
+    pub fn finalize(self: *SlotsAndStatementsMap, allocator: Allocator) void {
         allocator.free(self.getStatementsSlice());
 
         self.getDefinitionScript().unref();
@@ -384,7 +384,7 @@ const MethodMap = packed struct {
         self.method_name = method_name.asValue();
     }
 
-    pub fn finalize(self: *MethodMap, allocator: *Allocator) void {
+    pub fn finalize(self: *MethodMap, allocator: Allocator) void {
         self.base_map.finalize(allocator);
     }
 
@@ -503,7 +503,7 @@ const BlockMap = packed struct {
         return Activation.Weak{ .handle = .{ .value = @intToPtr(getActivationHandlePointerType(), self.nonlocal_return_target_activation_weak.asUnsignedInteger()) } };
     }
 
-    pub fn finalize(self: *BlockMap, allocator: *Allocator) void {
+    pub fn finalize(self: *BlockMap, allocator: Allocator) void {
         self.base_map.finalize(allocator);
         self.getParentActivationWeak().deinit();
         self.getNonlocalReturnTargetActivationWeak().deinit();

@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+
 const Location = @import("./location.zig");
 
 const Self = @This();
@@ -20,7 +22,7 @@ pub const Diagnostic = struct {
     message_is_allocated: bool = false,
     // TODO: Filename, location
 
-    pub fn deinit(self: *Diagnostic, allocator: *std.mem.Allocator) void {
+    pub fn deinit(self: *Diagnostic, allocator: Allocator) void {
         if (self.message_is_allocated) {
             allocator.free(self.message);
         }
@@ -29,7 +31,7 @@ pub const Diagnostic = struct {
 
 const DiagnosticList = std.ArrayList(Diagnostic);
 
-pub fn init(allocator: *std.mem.Allocator) !Self {
+pub fn init(allocator: Allocator) !Self {
     return Self{
         .allocator = allocator,
         .diagnostics = DiagnosticList.init(allocator),
@@ -52,5 +54,5 @@ pub fn reportDiagnosticFormatted(self: *Self, comptime level: DiagnosticLevel, l
     try self.diagnostics.append(Diagnostic{ .level = level, .location = location, .message = formatted_message, .message_is_allocated = true });
 }
 
-allocator: *std.mem.Allocator,
+allocator: Allocator,
 diagnostics: DiagnosticList,

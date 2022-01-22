@@ -24,7 +24,7 @@ is_stem: bool = false,
 
 const Branch = struct { indent: usize, concluded: bool };
 
-pub fn init(indent_width: usize, allocator: *Allocator) Self {
+pub fn init(indent_width: usize, allocator: Allocator) Self {
     return .{
         .indent_width = indent_width,
         .branches = std.ArrayList(Branch).init(allocator),

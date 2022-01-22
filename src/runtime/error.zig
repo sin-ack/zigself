@@ -14,7 +14,7 @@ pub const SelfRuntimeError = error{RuntimeError};
 /// displayed as a runtime error.
 ///
 /// `context.current_error` should be freed by whoever handles the error.
-pub fn raiseError(allocator: *Allocator, context: *InterpreterContext, comptime fmt: []const u8, args: anytype) (SelfRuntimeError || Allocator.Error) {
+pub fn raiseError(allocator: Allocator, context: *InterpreterContext, comptime fmt: []const u8, args: anytype) (SelfRuntimeError || Allocator.Error) {
     context.current_error = try std.fmt.allocPrint(allocator, fmt, args);
     return SelfRuntimeError.RuntimeError;
 }

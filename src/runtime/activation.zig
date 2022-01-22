@@ -23,7 +23,7 @@ pub const ActivationCreationContext = struct {
     range: Range,
 };
 
-allocator: *Allocator,
+allocator: Allocator,
 activation_object: Heap.Tracked,
 creation_context: ActivationCreationContext,
 /// Will be used as the target activation that a non-local return needs to rise
@@ -45,7 +45,7 @@ weak: WeakBlock,
 /// Takes ownership of `creator_message`.
 /// Borrows a ref for `creator_script` from the caller.
 pub fn create(
-    allocator: *Allocator,
+    allocator: Allocator,
     heap: *Heap,
     activation_object: Value,
     creator_message: []const u8,
@@ -66,7 +66,7 @@ pub fn destroy(self: *Self, heap: *Heap) void {
 
 fn init(
     self: *Self,
-    allocator: *Allocator,
+    allocator: Allocator,
     heap: *Heap,
     activation_object: Value,
     creator_message: []const u8,

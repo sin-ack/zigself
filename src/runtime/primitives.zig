@@ -25,7 +25,7 @@ const object_primitives = @import("./primitives/object.zig");
 const PrimitiveSpec = struct {
     name: []const u8,
     function: fn (
-        allocator: *Allocator,
+        allocator: Allocator,
         heap: *Heap,
         message_range: Range,
         receiver: Heap.Tracked,
@@ -80,7 +80,7 @@ pub fn hasPrimitive(selector: []const u8) bool {
 }
 
 pub fn callPrimitive(
-    allocator: *Allocator,
+    allocator: Allocator,
     heap: *Heap,
     message_range: Range,
     selector: []const u8,

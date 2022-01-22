@@ -22,7 +22,7 @@ fn printWithIndent(indent: usize, comptime display_type: InspectDisplayType, com
     std.debug.print(fmt, args);
 }
 
-pub fn inspectObject(allocator: *Allocator, object: Object.Ref, comptime display_type: InspectDisplayType) !void {
+pub fn inspectObject(allocator: Allocator, object: Object.Ref, comptime display_type: InspectDisplayType) !void {
     var visited_object_set = VisitedObjectSet.init(allocator);
     defer visited_object_set.deinit();
 
@@ -30,7 +30,7 @@ pub fn inspectObject(allocator: *Allocator, object: Object.Ref, comptime display
     std.debug.print("\n", .{});
 }
 
-fn inspectObjectInternal(allocator: *Allocator, object: Object.Ref, comptime display_type: InspectDisplayType, indent: usize, visited_object_set: *VisitedObjectSet) Allocator.Error!void {
+fn inspectObjectInternal(allocator: Allocator, object: Object.Ref, comptime display_type: InspectDisplayType, indent: usize, visited_object_set: *VisitedObjectSet) Allocator.Error!void {
     const separator = switch (display_type) {
         .Inline => " ",
         .Multiline => "\n",
@@ -181,7 +181,7 @@ fn inspectObjectInternal(allocator: *Allocator, object: Object.Ref, comptime dis
     }
 }
 
-fn inspectSlots(allocator: *Allocator, slots: []Slot, comptime display_type: InspectDisplayType, indent: usize, separator: []const u8, visited_object_set: *VisitedObjectSet) !void {
+fn inspectSlots(allocator: Allocator, slots: []Slot, comptime display_type: InspectDisplayType, indent: usize, separator: []const u8, visited_object_set: *VisitedObjectSet) !void {
     for (slots) |slot| {
         const parent_marker: []const u8 = if (slot.is_parent) "*" else "";
         const mutability_marker: []const u8 = if (slot.is_mutable) "<-" else "=";

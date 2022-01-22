@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+
 const Location = @import("./location.zig");
 const Lexer = @import("./lexer.zig");
 const AST = @import("./ast.zig");
@@ -15,7 +17,7 @@ const SlotName = struct {
     name: []const u8,
     arguments: [][]const u8,
 
-    pub fn deinit(self: *SlotName, allocator: *std.mem.Allocator) void {
+    pub fn deinit(self: *SlotName, allocator: Allocator) void {
         allocator.free(self.name);
 
         for (self.arguments) |argument| {
@@ -35,7 +37,7 @@ const ParserFunctionErrorSet = (errorSetOf(Lexer.nextToken));
 
 // TODO: When Zig's RLS actually starts working properly, make this a static
 //       function.
-pub fn initInPlaceFromFilePath(self: *Self, file_path: []const u8, allocator: *std.mem.Allocator) !void {
+pub fn initInPlaceFromFilePath(self: *Self, file_path: []const u8, allocator: Allocator) !void {
     if (self.initialized)
         @panic("Attempting to initialize already-initialized parser");
 
@@ -217,7 +219,8 @@ fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.Expr
                 const statement = object.statements[0];
 
                 // This is done so that the slice is freed but the expression isn't.
-                object.statements = try self.allocator.resize(object.statements, 0);
+                // The optional should not fail because we're just reducing the size.
+                object.statements = self.allocator.resize(object.statements, 0).?;
                 object.destroy(self.allocator);
 
                 return statement.expression;
@@ -1041,6 +1044,6 @@ fn parseString(self: *Self) ParserFunctionErrorSet!?AST.StringNode {
 }
 
 initialized: bool = false,
-allocator: *std.mem.Allocator = undefined,
+allocator: Allocator = undefined,
 lexer: Lexer = undefined,
 diagnostics: Diagnostics = undefined,

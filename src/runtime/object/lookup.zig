@@ -16,7 +16,7 @@ pub const LookupIntent = enum { Read, Assign };
 pub const LookupError = Allocator.Error || runtime_error.SelfRuntimeError;
 const VisitedValueLink = struct { previous: ?*const VisitedValueLink = null, value: Value };
 
-pub fn findTraitsObject(comptime selector: []const u8, allocator: *Allocator, context: *InterpreterContext) !Value {
+pub fn findTraitsObject(comptime selector: []const u8, allocator: Allocator, context: *InterpreterContext) !Value {
     if (try context.lobby.getValue().lookup(.Read, "traits", allocator, context)) |traits| {
         if (try traits.lookup(.Read, selector, allocator, context)) |traits_object| {
             return traits_object;
@@ -43,7 +43,7 @@ pub fn lookupByHash(
     self: Object,
     comptime intent: LookupIntent,
     selector_hash: u32,
-    allocator: ?*Allocator,
+    allocator: ?Allocator,
     context: ?*InterpreterContext,
 ) lookupReturnType(intent) {
     if (intent == .Read) {
@@ -60,7 +60,7 @@ fn lookupInternal(
     comptime intent: LookupIntent,
     selector_hash: u32,
     previously_visited: ?*const VisitedValueLink,
-    allocator: ?*Allocator,
+    allocator: ?Allocator,
     context: ?*InterpreterContext,
 ) lookupReturnType(intent) {
     switch (self.header.getObjectType()) {
@@ -122,7 +122,7 @@ fn slotsLookup(
     object: *ObjectType,
     selector_hash: u32,
     previously_visited: ?*const VisitedValueLink,
-    allocator: ?*Allocator,
+    allocator: ?Allocator,
     context: ?*InterpreterContext,
 ) lookupReturnType(intent) {
     if (previously_visited) |visited| {

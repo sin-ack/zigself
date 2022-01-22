@@ -57,7 +57,7 @@ pub const InterpreterError = Allocator.Error || runtime_error.SelfRuntimeError |
 /// returned.
 ///
 /// Borrows a ref for `script` from the caller.
-pub fn executeScript(allocator: *Allocator, heap: *Heap, script: Script.Ref, lobby: Value) InterpreterError!?Value {
+pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobby: Value) InterpreterError!?Value {
     defer script.unref();
 
     var activation_stack = std.ArrayList(*Activation).init(allocator);
@@ -136,7 +136,7 @@ pub fn executeScript(allocator: *Allocator, heap: *Heap, script: Script.Ref, lob
 /// various other context objects.
 ///
 /// Borrows a ref for `script` from the caller.
-pub fn executeSubScript(allocator: *Allocator, heap: *Heap, script: Script.Ref, parent_context: *InterpreterContext) InterpreterError!?Value {
+pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, parent_context: *InterpreterContext) InterpreterError!?Value {
     defer script.unref();
 
     var child_context = InterpreterContext{
@@ -174,12 +174,12 @@ pub fn executeSubScript(allocator: *Allocator, heap: *Heap, script: Script.Ref, 
 }
 
 /// Executes a statement. All refs are forwardded.
-pub fn executeStatement(allocator: *Allocator, heap: *Heap, statement: AST.StatementNode, context: *InterpreterContext) InterpreterError!Value {
+pub fn executeStatement(allocator: Allocator, heap: *Heap, statement: AST.StatementNode, context: *InterpreterContext) InterpreterError!Value {
     return try executeExpression(allocator, heap, statement.expression, context);
 }
 
 /// Executes an expression. All refs are forwarded.
-pub fn executeExpression(allocator: *Allocator, heap: *Heap, expression: AST.ExpressionNode, context: *InterpreterContext) InterpreterError!Value {
+pub fn executeExpression(allocator: Allocator, heap: *Heap, expression: AST.ExpressionNode, context: *InterpreterContext) InterpreterError!Value {
     return switch (expression) {
         .Object => |object| try executeObject(allocator, heap, object.*, context),
         .Block => |block| try executeBlock(allocator, heap, block.*, context),
@@ -195,7 +195,7 @@ pub fn executeExpression(allocator: *Allocator, heap: *Heap, expression: AST.Exp
 /// Creates a new method object. All refs are forwarded. `arguments` and
 /// `object_node`'s statements are copied.
 fn executeMethod(
-    allocator: *Allocator,
+    allocator: Allocator,
     heap: *Heap,
     name: []const u8,
     object_node: AST.ObjectNode,
@@ -279,7 +279,7 @@ fn executeMethod(
 
 /// Creates a new slot. All refs are forwarded.
 pub fn executeSlot(
-    allocator: *Allocator,
+    allocator: Allocator,
     heap: *Heap,
     slot_node: AST.SlotNode,
     comptime MapType: type,
@@ -308,7 +308,7 @@ pub fn executeSlot(
 }
 
 /// Creates a new slots object. All refs are forwarded.
-pub fn executeObject(allocator: *Allocator, heap: *Heap, object_node: AST.ObjectNode, context: *InterpreterContext) InterpreterError!Value {
+pub fn executeObject(allocator: Allocator, heap: *Heap, object_node: AST.ObjectNode, context: *InterpreterContext) InterpreterError!Value {
     // Verify that we are executing a slots object and not a method; methods
     // are created through executeSlot.
     if (object_node.statements.len > 0) {
@@ -346,7 +346,7 @@ pub fn executeObject(allocator: *Allocator, heap: *Heap, object_node: AST.Object
     return (try Object.Slots.create(heap, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), current_assignable_slot_values)).asValue();
 }
 
-pub fn executeBlock(allocator: *Allocator, heap: *Heap, block: AST.BlockNode, context: *InterpreterContext) InterpreterError!Value {
+pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, context: *InterpreterContext) InterpreterError!Value {
     var argument_slot_count: u8 = 0;
     for (block.slots) |slot_node| {
         if (slot_node.is_argument) argument_slot_count += 1;
@@ -453,7 +453,7 @@ pub fn executeBlock(allocator: *Allocator, heap: *Heap, block: AST.BlockNode, co
     return (try Object.Block.create(heap, block_map, current_assignable_slot_values)).asValue();
 }
 
-pub fn executeReturn(allocator: *Allocator, heap: *Heap, return_node: AST.ReturnNode, context: *InterpreterContext) InterpreterError {
+pub fn executeReturn(allocator: Allocator, heap: *Heap, return_node: AST.ReturnNode, context: *InterpreterContext) InterpreterError {
     _ = heap;
     const latest_activation = context.activation_stack.items[context.activation_stack.items.len - 1];
     const target_activation = latest_activation.nonlocal_return_target_activation.?;
@@ -468,7 +468,7 @@ pub fn executeReturn(allocator: *Allocator, heap: *Heap, return_node: AST.Return
 
 /// Executes an identifier expression. If the looked up value exists, the value
 /// gains a ref. `self_object` gains a ref during a method execution.
-pub fn executeIdentifier(allocator: *Allocator, heap: *Heap, identifier: AST.IdentifierNode, context: *InterpreterContext) InterpreterError!Value {
+pub fn executeIdentifier(allocator: Allocator, heap: *Heap, identifier: AST.IdentifierNode, context: *InterpreterContext) InterpreterError!Value {
     _ = heap;
     if (identifier.value[0] == '_') {
         var receiver = context.self_object.getValue();
@@ -527,7 +527,7 @@ pub fn executeIdentifier(allocator: *Allocator, heap: *Heap, identifier: AST.Ide
 
 /// Executes a string literal expression. `lobby` gains a ref during the
 /// lifetime of the function.
-pub fn executeString(allocator: *Allocator, heap: *Heap, string: AST.StringNode, context: *InterpreterContext) InterpreterError!Value {
+pub fn executeString(allocator: Allocator, heap: *Heap, string: AST.StringNode, context: *InterpreterContext) InterpreterError!Value {
     _ = allocator;
     _ = heap;
     _ = context;
@@ -545,7 +545,7 @@ pub fn executeString(allocator: *Allocator, heap: *Heap, string: AST.StringNode,
 
 /// Executes a number literal expression. `lobby` gains a ref during the
 /// lifetime of the function.
-pub fn executeNumber(allocator: *Allocator, heap: *Heap, number: AST.NumberNode, context: *InterpreterContext) InterpreterError!Value {
+pub fn executeNumber(allocator: Allocator, heap: *Heap, number: AST.NumberNode, context: *InterpreterContext) InterpreterError!Value {
     _ = allocator;
     _ = heap;
     _ = context;

@@ -307,7 +307,7 @@ pub const Method = packed struct {
     /// Borrows a ref for `message_script`.
     pub fn activateMethod(
         self: *Method,
-        allocator: *Allocator,
+        allocator: Allocator,
         heap: *Heap,
         receiver: Value,
         arguments: []Value,
@@ -419,7 +419,7 @@ pub const Block = packed struct {
         return remaining_message.len == 0;
     }
 
-    fn createMessageNameForBlock(self: *Block, allocator: *Allocator) ![]const u8 {
+    fn createMessageNameForBlock(self: *Block, allocator: Allocator) ![]const u8 {
         var needed_space: usize = 5; // value
         if (self.getArgumentSlotCount() > 0) {
             needed_space += 1; // :
@@ -446,7 +446,7 @@ pub const Block = packed struct {
     /// a ref for `message_script`.
     pub fn activateBlock(
         self: *Block,
-        allocator: *Allocator,
+        allocator: Allocator,
         heap: *Heap,
         receiver: Value,
         arguments: []Value,

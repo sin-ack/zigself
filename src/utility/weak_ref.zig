@@ -9,7 +9,7 @@ const ref_counted = @import("./ref_counted.zig");
 
 fn WeakHandle(comptime T: type) type {
     return struct {
-        allocator: *Allocator,
+        allocator: Allocator,
         ptr: ?*T,
         ref: ref_counted.RefCount,
 
@@ -32,7 +32,7 @@ pub fn WeakPtrBlock(comptime T: type) type {
 
         const Self = @This();
 
-        pub fn init(allocator: *Allocator, ptr: *T) !Self {
+        pub fn init(allocator: Allocator, ptr: *T) !Self {
             const raw_handle_object = try allocator.create(Handle);
             raw_handle_object.allocator = allocator;
             raw_handle_object.ptr = ptr;

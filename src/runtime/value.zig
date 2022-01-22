@@ -118,7 +118,7 @@ pub const Value = packed struct {
         self: Value,
         comptime intent: LookupIntent,
         selector: []const u8,
-        allocator: ?*Allocator,
+        allocator: ?Allocator,
         context: ?*InterpreterContext,
     ) lookupReturnType(intent) {
         const selector_hash = hash.stringHash(selector);
@@ -129,7 +129,7 @@ pub const Value = packed struct {
         self: Value,
         comptime intent: LookupIntent,
         selector_hash: u32,
-        allocator: ?*Allocator,
+        allocator: ?Allocator,
         context: ?*InterpreterContext,
     ) lookupReturnType(intent) {
         return switch (self.getType()) {

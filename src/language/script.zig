@@ -16,11 +16,11 @@ pub const Ref = ref_counted.RefPtr(Self);
 ast_root: ?AST.ScriptNode = null,
 
 ref: ref_counted.RefCount,
-allocator: *Allocator,
+allocator: Allocator,
 file_path: []const u8,
 parser: Parser,
 
-pub fn createFromFilePath(allocator: *Allocator, file_path: []const u8) !Ref {
+pub fn createFromFilePath(allocator: Allocator, file_path: []const u8) !Ref {
     const self = try allocator.create(Self);
     try self.initFromFilePath(allocator, file_path);
     return Ref.adopt(self);
@@ -31,7 +31,7 @@ pub fn destroy(self: *Self) void {
     self.allocator.destroy(self);
 }
 
-fn initFromFilePath(self: *Self, allocator: *Allocator, file_path: []const u8) !void {
+fn initFromFilePath(self: *Self, allocator: Allocator, file_path: []const u8) !void {
     var file_path_copy = try allocator.dupe(u8, file_path);
     errdefer allocator.free(file_path_copy);
 

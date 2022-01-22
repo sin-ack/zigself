@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const tokens = @import("./tokens.zig");
 const Location = @import("./location.zig");
@@ -16,7 +17,7 @@ const PeekStreamType = std.io.PeekStream(.{ .Static = MaximumLookaheadLength }, 
 
 // TODO: When Zig's RLS actually starts working properly, make this a static
 //       function.
-pub fn initInPlaceFromFilePath(self: *Self, file_path: []const u8, allocator: *std.mem.Allocator) !void {
+pub fn initInPlaceFromFilePath(self: *Self, file_path: []const u8, allocator: Allocator) !void {
     if (self.initialized)
         @panic("Attempting to initialize already-initialized lexer");
 
@@ -463,7 +464,7 @@ fn lexSymbol(self: *Self) !?tokens.Token {
 
 // Zig's RLS is currently broken. :^(
 initialized: bool = false,
-allocator: *std.mem.Allocator = undefined,
+allocator: Allocator = undefined,
 file_contents: []const u8 = undefined,
 buffer: BufferType = undefined,
 stream: PeekStreamType = undefined,

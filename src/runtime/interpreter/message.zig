@@ -23,7 +23,7 @@ const InterpreterContext = root_interpreter.InterpreterContext;
 const MaximumStackDepth = 2048;
 
 fn getMessageArguments(
-    allocator: *Allocator,
+    allocator: Allocator,
     heap: *Heap,
     ast_arguments: []AST.ExpressionNode,
     context: *InterpreterContext,
@@ -48,7 +48,7 @@ fn getMessageArguments(
 }
 
 pub fn executeBlockMessage(
-    allocator: *Allocator,
+    allocator: Allocator,
     heap: *Heap,
     message_range: Range,
     block_value: Heap.Tracked,
@@ -167,7 +167,7 @@ pub fn executeBlockMessage(
 
 /// `receiver` handles its own refs. `method_object` is forwarded.
 pub fn executeMethodMessage(
-    allocator: *Allocator,
+    allocator: Allocator,
     heap: *Heap,
     message_range: Range,
     receiver: Heap.Tracked,
@@ -277,7 +277,7 @@ pub fn executeMethodMessage(
 
 /// Refs `receiver`.
 pub fn executePrimitiveMessage(
-    allocator: *Allocator,
+    allocator: Allocator,
     heap: *Heap,
     message_range: Range,
     receiver: Heap.Tracked,
@@ -297,7 +297,7 @@ pub fn executePrimitiveMessage(
 
 /// The original value in `slot` is unref'd.
 pub fn executeAssignmentMessage(
-    allocator: *Allocator,
+    allocator: Allocator,
     heap: *Heap,
     receiver: Heap.Tracked,
     message_name: []const u8,
@@ -323,7 +323,7 @@ pub fn executeAssignmentMessage(
 }
 
 /// Executes a message. All refs are forwarded.
-pub fn executeMessage(allocator: *Allocator, heap: *Heap, message: AST.MessageNode, context: *InterpreterContext) root_interpreter.InterpreterError!Value {
+pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNode, context: *InterpreterContext) root_interpreter.InterpreterError!Value {
     var receiver = try root_interpreter.executeExpression(allocator, heap, message.receiver, context);
 
     // Check for assignable slots
