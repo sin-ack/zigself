@@ -251,7 +251,7 @@ const SlotsMap = packed struct {
 
 /// Common code and fields shared between methods and blocks.
 const SlotsAndStatementsMap = packed struct {
-    slots_map: *SlotsMap,
+    slots_map: SlotsMap,
     /// The address of the statements to be executed when this method is
     /// activated. The stored value is a 64-bit bitfield consisting of:
     ///
