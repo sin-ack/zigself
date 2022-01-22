@@ -38,14 +38,14 @@ pub const Slots = packed struct {
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*Slots, memory_area);
-        self.init(map.asValue(), assignable_slot_values);
+        self.init(map.asValue());
+        std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
 
         return self;
     }
 
-    fn init(self: *Slots, map: Value, assignable_slot_values: []Value) void {
+    fn init(self: *Slots, map: Value) void {
         self.header.init(.Slots, map);
-        std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
     }
 
     pub fn getMap(self: *Slots) *Map.Slots {
@@ -115,7 +115,8 @@ pub const Activation = packed struct {
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*Activation, memory_area);
-        self.init(map.asValue(), map_type, assignable_slot_values, receiver);
+        self.init(map.asValue(), map_type, receiver);
+        std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
 
         return self;
     }
@@ -124,10 +125,8 @@ pub const Activation = packed struct {
         self: *Activation,
         map: Value,
         comptime map_type: MapType,
-        assignable_slot_values: []Value,
         receiver: Value,
     ) void {
-        self.slots.init(map, assignable_slot_values);
         self.slots.header.init(.Activation, map);
         self.setActivationType(if (map_type == .Block) ActivationType.Block else ActivationType.Method);
 
@@ -258,13 +257,13 @@ pub const Method = packed struct {
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*Method, memory_area);
-        self.init(map.asValue(), assignable_slot_values);
+        self.init(map.asValue());
+        std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
 
         return self;
     }
 
-    fn init(self: *Method, map: Value, assignable_slot_values: []Value) void {
-        self.slots.init(map, assignable_slot_values);
+    fn init(self: *Method, map: Value) void {
         self.slots.header.init(.Method, map);
     }
 
@@ -345,13 +344,13 @@ pub const Block = packed struct {
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*Block, memory_area);
-        self.init(map.asValue(), assignable_slot_values);
+        self.init(map.asValue());
+        std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
 
         return self;
     }
 
-    fn init(self: *Block, map: Value, assignable_slot_values: []Value) void {
-        self.slots.init(map, assignable_slot_values);
+    fn init(self: *Block, map: Value) void {
         self.slots.header.init(.Block, map);
     }
 
