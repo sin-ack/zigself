@@ -78,6 +78,176 @@ pub const Slots = packed struct {
         return self.getMap().getSlots();
     }
 
+    /// Adds the given slots to the current object. May cause a move of this
+    /// object.
+    pub fn addSlotsFrom(self: *Slots, source_object: *Slots, heap: *Heap, allocator: Allocator) !*Slots {
+        _ = heap;
+
+        var new_assignable_slots: u32 = 0;
+        var new_constant_slots: u32 = 0;
+
+        calculateNewSlotsAfterMerging(self, source_object, &new_constant_slots, &new_assignable_slots);
+
+        // If there are new slots to be added, then we need to create a new map
+        // (or worse, create a new object and link everything to that new
+        // object if there are new assignable slots!).
+        if (new_constant_slots != 0 or new_assignable_slots != 0) {
+            // Need to copy the current map into a new one.
+            const target_object_map = self.getMap();
+            const source_object_map = source_object.getMap();
+            const existing_slot_count = target_object_map.slot_count;
+
+            // Try to copy the existing slots from our map; if a slot with the
+            // same hash exists on the source map, then use that instead of our
+            // slot. This allows us to override existing slots on the target object.
+            var new_map = try Map.Slots.create(heap, existing_slot_count + new_constant_slots + new_assignable_slots);
+            var new_map_slots = new_map.getSlots();
+            for (target_object_map.getSlots()) |target_object_slot, i| {
+                var slot_to_add = blk: {
+                    for (source_object_map.getSlots()) |source_object_slot| {
+                        if (target_object_slot.hash == source_object_slot.hash) {
+                            if (target_object_slot.isMutable() != source_object_slot.isMutable()) {
+                                std.debug.panic("TODO: Sorry, changing the mutability of an existing slot has not been implemented yet.", .{});
+                            }
+
+                            break :blk source_object_slot;
+                        }
+                    }
+                    break :blk target_object_slot;
+                };
+
+                const parent_flag: Slot.ParentFlag = if (slot_to_add.isParent()) .Parent else .NotParent;
+                if (slot_to_add.isMutable()) {
+                    new_map_slots[i].initMutable(Map.Slots, new_map, slot_to_add.name.asByteVector(), parent_flag);
+                } else {
+                    new_map_slots[i].initConstant(slot_to_add.name.asByteVector(), parent_flag, slot_to_add.value);
+                }
+            }
+
+            // Let's add all the new slots.
+            var new_slot_offset = existing_slot_count;
+            new_slot_loop: for (source_object_map.getSlots()) |source_object_slot| {
+                for (target_object_map.getSlots()) |target_object_slot| {
+                    if (target_object_slot.hash == source_object_slot.hash) {
+                        if (target_object_slot.isMutable() != source_object_slot.isMutable()) {
+                            std.debug.panic("TODO: Sorry, changing the mutability of an existing slot has not been implemented yet.", .{});
+                        }
+                        continue :new_slot_loop;
+                    }
+                }
+
+                const parent_flag: Slot.ParentFlag = if (source_object_slot.isParent()) .Parent else .NotParent;
+                if (source_object_slot.isMutable()) {
+                    new_map_slots[new_slot_offset].initMutable(Map.Slots, new_map, source_object_slot.name.asByteVector(), parent_flag);
+                } else {
+                    new_map_slots[new_slot_offset].initConstant(source_object_slot.name.asByteVector(), parent_flag, source_object_slot.value);
+                }
+
+                new_slot_offset += 1;
+            }
+
+            // Construct a slice of assignable slots.
+            var assignable_slot_values = try std.ArrayList(Value).initCapacity(allocator, new_map.getAssignableSlotCount());
+            defer assignable_slot_values.deinit();
+
+            var source_object_assignable_slot_offset: usize = 0;
+            var target_object_assignable_slot_offset: usize = 0;
+
+            for (target_object_map.getSlots()) |target_object_slot| {
+                if (!target_object_slot.isMutable())
+                    continue;
+
+                const value_to_append = blk: {
+                    for (source_object_map.getSlots()) |source_object_slot| {
+                        if (target_object_slot.hash == source_object_slot.hash) {
+                            const slot_value = source_object.getAssignableSlots()[source_object_assignable_slot_offset];
+                            source_object_assignable_slot_offset += 1;
+                            break :blk slot_value;
+                        }
+                    }
+
+                    const slot_value = self.getAssignableSlots()[target_object_assignable_slot_offset];
+                    target_object_assignable_slot_offset += 1;
+                    break :blk slot_value;
+                };
+
+                assignable_slot_values.appendAssumeCapacity(value_to_append);
+            }
+
+            source_assignable_slot_loop: for (source_object_map.getSlots()) |source_object_slot| {
+                if (!source_object_slot.isMutable())
+                    continue;
+
+                for (target_object_map.getSlots()) |target_object_slot| {
+                    if (target_object_slot.hash == source_object_slot.hash)
+                        continue :source_assignable_slot_loop;
+                }
+
+                const slot_value = source_object.getAssignableSlots()[source_object_assignable_slot_offset];
+                source_object_assignable_slot_offset += 1;
+                assignable_slot_values.appendAssumeCapacity(slot_value);
+            }
+
+            // Do we also have to create a new object?
+            if (new_assignable_slots != 0) {
+                // Yup. Create a new object and update all the references to it.
+                var new_object = try Slots.create(heap, new_map, assignable_slot_values.items);
+                heap.updateAllReferencesTo(self.asValue(), new_object.asValue());
+                return new_object;
+            } else {
+                // Nope, just update our assignable slots and map.
+                std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values.items);
+                self.header.map_pointer = new_map.asValue();
+                return self;
+            }
+        } else {
+            std.debug.panic("TODO: Implement the easy part of adding slots", .{});
+        }
+    }
+
+    /// Return the amount of bytes that must be available on the heap in order
+    /// to merge `source_object` into `target_object`.
+    pub fn requiredSizeForMerging(target_object: *Slots, source_object: *Slots) usize {
+        var new_assignable_slots: u32 = 0;
+        var new_constant_slots: u32 = 0;
+
+        calculateNewSlotsAfterMerging(target_object, source_object, &new_constant_slots, &new_assignable_slots);
+
+        var required_size = Map.Slots.requiredSizeForAllocation(
+            (target_object.getMap().slot_count - target_object.getMap().getAssignableSlotCount()) + new_constant_slots,
+        );
+        if (new_assignable_slots > 0) {
+            required_size += Slots.requiredSizeForAllocation(
+                target_object.getMap().getAssignableSlotCount() + @intCast(u8, new_assignable_slots),
+            );
+        }
+
+        return required_size;
+    }
+
+    /// Finds out how many new constant and assignable slots are required if the
+    /// source object were to be merged into the target object.
+    /// new_constant_slots and new_assignable_slots are out parameters.
+    fn calculateNewSlotsAfterMerging(target_object: *Slots, source_object: *Slots, new_constant_slots: *u32, new_assignable_slots: *u32) void {
+        for (source_object.getSlots()) |source_slot| {
+            var did_find_matching_slot = false;
+            for (target_object.getSlots()) |target_slot| {
+                if (source_slot.hash == target_slot.hash) {
+                    did_find_matching_slot = true;
+                    break;
+                }
+            }
+
+            if (!did_find_matching_slot) {
+                if (source_slot.isMutable()) {
+                    new_assignable_slots.* += 1;
+                } else {
+                    new_constant_slots.* += 1;
+                }
+            }
+        }
+    }
+
     pub fn requiredSizeForAllocation(assignable_slot_count: u8) usize {
         return @sizeOf(Object.Header) + assignable_slot_count * @sizeOf(Value);
     }

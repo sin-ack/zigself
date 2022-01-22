@@ -42,8 +42,8 @@ pub fn AddSlots(allocator: Allocator, heap: *Heap, message_range: Range, tracked
     receiver_object = tracked_receiver.getValue().asObject().asSlotsObject();
     argument_object = arguments[0].getValue().asObject().asSlotsObject();
 
-    const new_object = try receiver_object.addSlotsFrom(argument_object, heap);
-    return new_object;
+    const new_object = try receiver_object.addSlotsFrom(argument_object, heap, allocator);
+    return new_object.asValue();
 }
 
 /// Removes the given slot. If the slot isn't found or otherwise cannot be

@@ -149,6 +149,15 @@ pub fn ensureSpaceInEden(self: *Self, required_memory: usize) !void {
     try self.eden.collectGarbage(self.allocator, required_memory, stack);
 }
 
+/// Go through the whole heap, updating references to the given value with the
+/// new value.
+pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) void {
+    _ = self;
+    _ = old_value;
+    _ = new_value;
+    std.debug.panic("TODO", .{});
+}
+
 /// A mapping from an address to its size. This area of memory is checked for
 /// any object references in the current space which are then copied during a
 /// scavenge.
