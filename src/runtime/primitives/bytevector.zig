@@ -5,78 +5,79 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Heap = @import("../heap.zig");
+const Value = @import("../value.zig").Value;
 const Range = @import("../../language/location_range.zig");
 const Object = @import("../object.zig");
+const ByteVector = @import("../byte_vector.zig");
 const environment = @import("../environment.zig");
 const runtime_error = @import("../error.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
 /// Print the given ByteVector to stdout, followed by a newline.
-pub fn StringPrint(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn StringPrint(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
     _ = arguments;
     _ = message_range;
-
-    defer receiver.unrefWithAllocator(allocator);
 
     const writer = std.io.getStdOut().writer();
 
     // FIXME: Don't ignore errors.
-    switch (receiver.value.content) {
-        .ByteVector => |byte_vector| {
-            writer.print("{s}", .{byte_vector.values}) catch unreachable;
+    const receiver = tracked_receiver.getValue();
+    switch (receiver.getType()) {
+        .Integer => {
+            writer.print("{d}", .{receiver.asInteger()}) catch unreachable;
         },
+        .FloatingPoint => {
+            writer.print("{d}", .{receiver.asFloatingPoint()}) catch unreachable;
+        },
+        .ObjectReference => {
+            if (!(receiver.asObject().isByteVectorObject())) {
+                return runtime_error.raiseError(allocator, context, "Expected ByteVector as the receiver of _StringPrint", .{});
+            }
 
-        .Integer => |integer| {
-            writer.print("{d}", .{integer.value}) catch unreachable;
+            writer.print("{s}", .{receiver.asObject().asByteVectorObject().getValues()}) catch unreachable;
         },
-
-        .FloatingPoint => |floating_point| {
-            writer.print("{d}", .{floating_point.value}) catch unreachable;
-        },
-
-        else => {
-            return runtime_error.raiseError(allocator, context, "Unexpected object type {s} passed as the receiver of _StringPrint", .{@tagName(receiver.value.content)});
-        },
+        else => unreachable,
     }
 
     return environment.globalNil();
 }
 
 /// Return the size of the byte vector in bytes.
-pub fn ByteVectorSize(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn ByteVectorSize(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
     _ = arguments;
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.ByteVector)) {
-        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteVectorSize receiver, got {s}", .{@tagName(receiver.value.content)});
+    const receiver = tracked_receiver.getValue();
+    if (!(receiver.isObjectReference() and receiver.asObject().isByteVectorObject())) {
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteVectorSize receiver", .{});
     }
 
-    return Object.createFromIntegerLiteral(allocator, @intCast(i64, receiver.value.content.ByteVector.values.len));
+    return Value.fromInteger(@intCast(i64, receiver.asObject().asByteVectorObject().getValues().len));
 }
 
 /// Return a byte at the given (integer) position of the receiver, which is a
 /// byte vector. Fails if the index is out of bounds or if the receiver is not a
 /// byte vector.
-pub fn ByteAt(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn ByteAt(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
+    const receiver = tracked_receiver.getValue();
+    const argument = arguments[0].getValue();
 
-    var argument = arguments[0];
-    defer argument.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.ByteVector)) {
-        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteAt: receiver, got {s}", .{@tagName(receiver.value.content)});
+    if (!(receiver.isObjectReference() and receiver.asObject().isByteVectorObject())) {
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteAt: receiver", .{});
     }
 
-    if (!argument.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _ByteAt: argument, got {s}", .{@tagName(argument.value.content)});
+    if (!argument.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as _ByteAt: argument", .{});
     }
 
-    const values = receiver.value.content.ByteVector.values;
-    const position = @intCast(usize, argument.value.content.Integer.value);
+    const values = receiver.asObject().asByteVectorObject().getValues();
+    const position = @intCast(usize, argument.asInteger());
     if (position < 0 or position >= values.len) {
         return runtime_error.raiseError(
             allocator,
@@ -86,37 +87,34 @@ pub fn ByteAt(allocator: *Allocator, message_range: Range, receiver: Object.Ref,
         );
     }
 
-    return try Object.createFromIntegerLiteral(allocator, values[position]);
+    return Value.fromInteger(values[position]);
 }
 
 /// Place the second argument at the position given by the first argument on the
 /// byte vector receiver. Fails if the index is out of bounds or if the receiver
 /// is not a byte vector.
-pub fn ByteAt_Put(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn ByteAt_Put(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
     _ = message_range;
 
-    errdefer receiver.unrefWithAllocator(allocator);
+    const receiver = tracked_receiver.getValue();
+    const first_argument = arguments[0].getValue();
+    const second_argument = arguments[1].getValue();
 
-    var first_argument = arguments[0];
-    defer first_argument.unrefWithAllocator(allocator);
-
-    var second_argument = arguments[1];
-    defer second_argument.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.ByteVector)) {
-        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteAt:Put: receiver, got {s}", .{@tagName(receiver.value.content)});
+    if (!(receiver.isObjectReference() and receiver.asObject().isByteVectorObject())) {
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteAt:Put: receiver", .{});
     }
 
-    if (!first_argument.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as first _ByteAt:Put: argument, got {s}", .{@tagName(first_argument.value.content)});
+    if (!first_argument.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as first _ByteAt:Put: argument", .{});
     }
-    if (!second_argument.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as second _ByteAt:Put: argument, got {s}", .{@tagName(second_argument.value.content)});
+    if (!second_argument.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as second _ByteAt:Put: argument", .{});
     }
 
-    var values = receiver.value.content.ByteVector.values;
-    const position = @intCast(usize, first_argument.value.content.Integer.value);
-    const new_value = second_argument.value.content.Integer.value;
+    var values = receiver.asObject().asByteVectorObject().getValues();
+    const position = @intCast(usize, first_argument.asInteger());
+    const new_value = second_argument.asInteger();
 
     if (position < 0 or position >= values.len) {
         return runtime_error.raiseError(
@@ -138,23 +136,22 @@ pub fn ByteAt_Put(allocator: *Allocator, message_range: Range, receiver: Object.
 
 /// Copy the byte vector receiver with a new size. Size cannot exceed the
 /// receiver's size.
-pub fn ByteVectorCopySize(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn ByteVectorCopySize(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
+    const receiver = tracked_receiver.getValue();
+    var argument = arguments[0].getValue();
 
-    var argument = arguments[0];
-    defer argument.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.ByteVector)) {
-        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteVectorCopySize: receiver, got {s}", .{@tagName(receiver.value.content)});
-    }
-    if (!argument.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _ByteVectorCopySize: argument, got {s}", .{@tagName(argument.value.content)});
+    if (!(receiver.isObjectReference() and receiver.asObject().isByteVectorObject())) {
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _ByteVectorCopySize: receiver", .{});
     }
 
-    const values = receiver.value.content.ByteVector.values;
-    const size = argument.value.content.Integer.value;
+    if (!argument.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as _ByteVectorCopySize: argument", .{});
+    }
+
+    var values = receiver.asObject().asByteVectorObject().getValues();
+    const size = argument.asInteger();
     if (size >= values.len) {
         return runtime_error.raiseError(allocator, context, "_ByteVectorCopySize: argument exceeds receiver's size", .{});
     }
@@ -163,5 +160,13 @@ pub fn ByteVectorCopySize(allocator: *Allocator, message_range: Range, receiver:
         return runtime_error.raiseError(allocator, context, "_ByteVectorCopySize: argument must be positive", .{});
     }
 
-    return try Object.createCopyFromStringLiteral(allocator, values[0..@intCast(usize, size)]);
+    try heap.ensureSpaceInEden(
+        ByteVector.requiredSizeForAllocation(values.len) +
+            Object.Map.ByteVector.requiredSizeForAllocation() +
+            Object.ByteVector.requiredSizeForAllocation(),
+    );
+
+    const byte_vector = try ByteVector.createFromString(heap, values);
+    const byte_vector_map = try Object.Map.ByteVector.create(heap, byte_vector);
+    return (try Object.ByteVector.create(heap, byte_vector_map)).asValue();
 }

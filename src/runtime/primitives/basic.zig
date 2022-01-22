@@ -5,9 +5,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Heap = @import("../heap.zig");
+const Value = @import("../value.zig").Value;
 const Range = @import("../../language/location_range.zig");
 const Script = @import("../../language/script.zig");
-const Object = @import("../object.zig");
 const environment = @import("../environment.zig");
 const interpreter = @import("../interpreter.zig");
 const runtime_error = @import("../error.zig");
@@ -16,43 +17,47 @@ const error_set_utils = @import("../../utility/error_set.zig");
 const InterpreterContext = interpreter.InterpreterContext;
 
 /// Return the static "nil" slots object.
-pub fn Nil(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
-    _ = context;
-    _ = arguments;
+pub fn Nil(allocator: Allocator, heap: *Heap, message_range: Range, receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = allocator;
+    _ = heap;
     _ = message_range;
+    _ = receiver;
+    _ = arguments;
+    _ = context;
 
-    receiver.unrefWithAllocator(allocator);
     return environment.globalNil();
 }
 
 /// Exit with the given return code.
-pub fn Exit(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
-    _ = receiver;
+pub fn Exit(allocator: Allocator, heap: *Heap, message_range: Range, receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
     _ = message_range;
+    _ = receiver;
 
-    var status_code = arguments[0];
-    if (!status_code.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer for the status code argument of _Exit:, got {s}", .{@tagName(status_code.value.content)});
+    var status_code = arguments[0].getValue();
+    if (!status_code.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer for the status code argument of _Exit:, got {s}", .{@tagName(status_code.getType())});
     }
 
     // The ultimate in garbage collection, no need to unref.
-    std.os.exit(@intCast(u8, status_code.value.content.Integer.value));
+    std.os.exit(@intCast(u8, status_code.asUnsignedInteger()));
 }
 
 /// Run the given script file, and return the result of the last expression.
-pub fn RunScript(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn RunScript(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
     _ = arguments;
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.ByteVector)) {
-        return runtime_error.raiseError(allocator, context, "Expected ByteVector for the receiver of _RunScript, got {s}", .{@tagName(receiver.value.content)});
+    const receiver = tracked_receiver.getValue();
+    if (!(receiver.isObjectReference() and receiver.asObject().isByteVectorObject())) {
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector for the receiver of _RunScript", .{});
     }
+
+    const receiver_byte_vector = receiver.asObject().asByteVectorObject();
 
     // FIXME: Find a way to handle errors here. These hacks are nasty.
 
-    const requested_script_path = receiver.value.content.ByteVector.values;
+    const requested_script_path = receiver_byte_vector.getValues();
     const running_script_path = context.script.value.file_path;
 
     const paths_to_join = &[_][]const u8{
@@ -94,38 +99,27 @@ pub fn RunScript(allocator: *Allocator, message_range: Range, receiver: Object.R
         }
     }
 
-    var result_value = environment.globalNil();
-    if (try interpreter.executeSubScript(allocator, script, context)) |script_result| {
-        result_value.unrefWithAllocator(allocator);
-        result_value = script_result;
+    var result_value: Heap.Tracked = try heap.track(environment.globalNil());
+    defer result_value.untrackAndDestroy(heap);
+
+    if (try interpreter.executeSubScript(allocator, heap, script, context)) |script_result| {
+        result_value.untrackAndDestroy(heap);
+        result_value = try heap.track(script_result);
     }
 
-    return result_value;
-}
-
-/// Return the receiver's global ID.
-pub fn ID(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
-    _ = context;
-    _ = arguments;
-    _ = message_range;
-
-    defer receiver.unrefWithAllocator(allocator);
-
-    return try Object.createFromIntegerLiteral(allocator, @intCast(i64, receiver.value.id));
+    return result_value.getValue();
 }
 
 /// Raise the argument as an error. The argument must be a byte vector.
-pub fn Error(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn Error(allocator: Allocator, heap: *Heap, message_range: Range, receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
     _ = message_range;
+    _ = receiver;
 
-    defer receiver.unrefWithAllocator(allocator);
-
-    var argument = arguments[0];
-    defer argument.unrefWithAllocator(allocator);
-
-    if (!argument.value.is(.ByteVector)) {
-        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _Error: argument, got {s}", .{@tagName(argument.value.content)});
+    var argument = arguments[0].getValue();
+    if (!(argument.isObjectReference() and argument.asObject().isByteVectorObject())) {
+        return runtime_error.raiseError(allocator, context, "Expected ByteVector as _Error: argument", .{});
     }
 
-    return runtime_error.raiseError(allocator, context, "Error raised in Self code: {s}", .{argument.value.content.ByteVector.values});
+    return runtime_error.raiseError(allocator, context, "Error raised in Self code: {s}", .{argument.asObject().asByteVectorObject().getValues()});
 }

@@ -5,8 +5,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Heap = @import("../heap.zig");
 const Range = @import("../../language/location_range.zig");
-const Object = @import("../object.zig");
+const Value = @import("../value.zig").Value;
 const environment = @import("../environment.zig");
 const runtime_error = @import("../error.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
@@ -14,154 +15,127 @@ const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 // FIXME: Add overflow checks here
 
 /// Add two integer numbers. The returned value is an integer.
-pub fn IntAdd(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn IntAdd(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
+    const receiver = tracked_receiver.getValue();
+    const term = arguments[0].getValue();
 
-    var addend = arguments[0];
-    defer addend.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntAdd: receiver, got {s}", .{@tagName(receiver.value.content)});
+    if (!receiver.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as _IntAdd: receiver", .{});
     }
 
-    if (!addend.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntAdd: argument, got {s}", .{@tagName(addend.value.content)});
+    if (!term.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as _IntAdd: argument", .{});
     }
 
-    const result = try Object.createFromIntegerLiteral(
-        allocator,
-        receiver.value.content.Integer.value + addend.value.content.Integer.value,
-    );
-
-    return result;
+    return Value.fromInteger(receiver.asInteger() + term.asInteger());
 }
 
 /// Subtract the argument from the receiver. The returned value is an integer.
-pub fn IntSub(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn IntSub(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
+    const receiver = tracked_receiver.getValue();
+    const term = arguments[0].getValue();
 
-    var term = arguments[0];
-    defer term.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntSub: receiver, got {s}", .{@tagName(receiver.value.content)});
+    if (!receiver.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as _IntSub: receiver", .{});
     }
 
-    if (!term.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntSub: argument, got {s}", .{@tagName(term.value.content)});
+    if (!term.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as _IntSub: argument", .{});
     }
 
-    const result = try Object.createFromIntegerLiteral(
-        allocator,
-        receiver.value.content.Integer.value - term.value.content.Integer.value,
-    );
-
-    return result;
+    return Value.fromInteger(receiver.asInteger() - term.asInteger());
 }
 
 /// Multiply the argument with the receiver. The returned value is an integer.
-pub fn IntMul(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn IntMul(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
+    const receiver = tracked_receiver.getValue();
+    const term = arguments[0].getValue();
 
-    var term = arguments[0];
-    defer term.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntMul: receiver, got {s}", .{@tagName(receiver.value.content)});
+    if (!receiver.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as _IntMul: receiver", .{});
     }
 
-    if (!term.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntMul: argument, got {s}", .{@tagName(term.value.content)});
+    if (!term.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as _IntMul: argument", .{});
     }
 
-    const result = try Object.createFromIntegerLiteral(
-        allocator,
-        receiver.value.content.Integer.value * term.value.content.Integer.value,
-    );
-
-    return result;
+    return Value.fromInteger(receiver.asInteger() * term.asInteger());
 }
 
 /// Return whether the receiver is less than its argument. The return value is
 /// either "true" or "false".
-pub fn IntLT(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn IntLT(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
+    const receiver = tracked_receiver.getValue();
+    const term = arguments[0].getValue();
 
-    var argument = arguments[0];
-    defer argument.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntLT: receiver, got {s}", .{@tagName(receiver.value.content)});
+    if (!receiver.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as _IntLT: receiver", .{});
     }
 
-    if (!argument.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntLT: argument, got {s}", .{@tagName(argument.value.content)});
+    if (!term.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as _IntLT: argument", .{});
     }
 
-    const result = if (receiver.value.content.Integer.value < argument.value.content.Integer.value)
+    return if (receiver.asInteger() < term.asInteger())
         environment.globalTrue()
     else
         environment.globalFalse();
-
-    return result;
 }
 
 /// Return whether the receiver is less than its argument. The return value is
 /// either "true" or "false".
-pub fn IntEq(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn IntEq(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
+    const receiver = tracked_receiver.getValue();
+    const term = arguments[0].getValue();
 
-    var argument = arguments[0];
-    defer argument.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntEq: receiver, got {s}", .{@tagName(receiver.value.content)});
+    if (!receiver.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as _IntEq: receiver", .{});
     }
 
-    if (!argument.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntEq: argument, got {s}", .{@tagName(argument.value.content)});
+    if (!term.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as _IntEq: argument", .{});
     }
 
-    const result = if (receiver.value.content.Integer.value == argument.value.content.Integer.value)
+    return if (receiver.asInteger() == term.asInteger())
         environment.globalTrue()
     else
         environment.globalFalse();
-
-    return result;
 }
 
 /// Return whether the receiver is greater than its argument. The return value
 /// is either "true" or "false".
-pub fn IntGT(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn IntGT(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
+    const receiver = tracked_receiver.getValue();
+    const term = arguments[0].getValue();
 
-    var argument = arguments[0];
-    defer argument.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntGT: receiver, got {s}", .{@tagName(receiver.value.content)});
+    if (!receiver.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as _IntGT: receiver", .{});
     }
 
-    if (!argument.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as _IntGT: argument, got {s}", .{@tagName(argument.value.content)});
+    if (!term.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected integer as _IntGT: argument", .{});
     }
 
-    const result = if (receiver.value.content.Integer.value > argument.value.content.Integer.value)
+    return if (receiver.asInteger() > term.asInteger())
         environment.globalTrue()
     else
         environment.globalFalse();
-
-    return result;
 }

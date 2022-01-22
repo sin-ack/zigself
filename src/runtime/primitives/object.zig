@@ -6,7 +6,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Slot = @import("../slot.zig");
+const Heap = @import("../heap.zig");
 const Range = @import("../../language/location_range.zig");
+const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const environment = @import("../environment.zig");
 const runtime_error = @import("../error.zig");
@@ -16,56 +18,42 @@ const message_interpreter = @import("../interpreter/message.zig");
 
 /// Adds the slots in the argument object to the receiver object. The slots
 /// are copied. The objects at each slot are not cloned, however.
-pub fn AddSlots(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn AddSlots(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
     _ = message_range;
 
-    errdefer receiver.unrefWithAllocator(allocator);
+    const receiver = tracked_receiver.getValue();
+    const argument = arguments[0].getValue();
 
-    const argument = arguments[0];
-    defer argument.unrefWithAllocator(allocator);
-
-    if (argument.value.is(.Empty)) {
-        return receiver;
-    } else if (!argument.value.is(.Slots)) {
-        return runtime_error.raiseError(allocator, context, "Expected Empty or Slots object as argument of _AddSlots:, got {s}", .{@tagName(argument.value.content)});
+    if (!(receiver.isObjectReference() and receiver.asObject().isSlotsObject())) {
+        return runtime_error.raiseError(allocator, context, "Expected Slots as the receiver to _AddSlots:", .{});
     }
 
-    const argument_slots = argument.value.content.Slots.slots;
-    var slots_copy = try std.ArrayList(Slot).initCapacity(allocator, argument_slots.len);
-    defer slots_copy.deinit();
-    errdefer {
-        for (slots_copy.items) |*slot| {
-            slot.deinit(allocator);
-        }
+    if (!(argument.isObjectReference() and argument.asObject().isSlotsObject())) {
+        return runtime_error.raiseError(allocator, context, "Expected Slots as the argument to _AddSlots:", .{});
     }
 
-    for (argument_slots) |slot| {
-        var slot_copy = try slot.copy(allocator);
-        errdefer slot_copy.deinit(allocator);
+    var receiver_object = receiver.asObject().asSlotsObject();
+    var argument_object = receiver.asObject().asSlotsObject();
 
-        try slots_copy.append(slot_copy);
-    }
+    // Avoid any further GCs by reserving the space beforehand
+    try heap.ensureSpaceInEden(Object.Slots.requiredSizeForMerging(receiver_object, argument_object));
 
-    receiver.value.addSlots(allocator, slots_copy.items) catch |err| switch (err) {
-        error.ObjectDoesNotAcceptSlots => {
-            return runtime_error.raiseError(allocator, context, "Attempted to add slots to an object which doesn't accept slots", .{});
-        },
-        else => return @errSetCast(Allocator.Error, err),
-    };
+    // Refresh the pointers in case that caused a GC
+    receiver_object = tracked_receiver.getValue().asObject().asSlotsObject();
+    argument_object = arguments[0].getValue().asObject().asSlotsObject();
 
-    return receiver;
+    const new_object = try receiver_object.addSlotsFrom(argument_object, heap);
+    return new_object;
 }
 
 /// Removes the given slot. If the slot isn't found or otherwise cannot be
 /// removed, the second argument is evaluated as a block.
-pub fn RemoveSlot_IfFail(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
-    defer receiver.unrefWithAllocator(allocator);
+pub fn RemoveSlot_IfFail(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
 
-    var slot_name = arguments[0];
-    defer slot_name.unrefWithAllocator(allocator);
-
-    var fail_block = arguments[1];
-    defer fail_block.unrefWithAllocator(allocator);
+    var receiver = tracked_receiver.getValue();
+    var slot_name = arguments[0].getValue();
+    var fail_block = arguments[1].getValue();
 
     if (!slot_name.value.is(.ByteVector)) {
         return runtime_error.raiseError(allocator, context, "Expected ByteVector for the slot name argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(slot_name.value.content)});
@@ -83,7 +71,7 @@ pub fn RemoveSlot_IfFail(allocator: *Allocator, message_range: Range, receiver: 
     };
 
     if (!did_remove_slot) {
-        const returned_value = try message_interpreter.executeBlockMessage(allocator, message_range, fail_block, &[_]Object.Ref{}, context);
+        const returned_value = try message_interpreter.executeBlockMessage(allocator, message_range, fail_block, &[_]Value{}, context);
         returned_value.unrefWithAllocator(allocator);
     }
 
@@ -91,36 +79,43 @@ pub fn RemoveSlot_IfFail(allocator: *Allocator, message_range: Range, receiver: 
 }
 
 /// Inspect the receiver and print it to stderr. Return the receiver.
-pub fn Inspect(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn Inspect(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = heap;
     _ = context;
     _ = arguments;
     _ = message_range;
 
-    errdefer receiver.unrefWithAllocator(allocator);
+    const receiver = tracked_receiver.getValue();
     try object_inspector.inspectObject(allocator, receiver, .Multiline);
 
     return receiver;
 }
 
 /// Make an identical shallow copy of the receiver and return it.
-pub fn Clone(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn Clone(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = allocator;
     _ = context;
     _ = arguments;
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
-    return try receiver.value.copy(allocator);
+    const receiver = tracked_receiver.getValue();
+    return switch (receiver.getType()) {
+        .Integer, .FloatingPoint => Value{ .data = receiver.data },
+        .ObjectReference => try receiver.asObject().clone(heap),
+        else => unreachable,
+    };
 }
 
 /// Return whether the receiver and argument are identical. Returns either
 /// the global "true" or "false" object.
-pub fn Eq(allocator: *Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) error{}!Object.Ref {
+pub fn Eq(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) error{}!Value {
+    _ = allocator;
+    _ = heap;
     _ = context;
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
-    var argument = arguments[0];
-    defer argument.unrefWithAllocator(allocator);
-
-    return if (receiver.value == argument.value) environment.globalTrue() else environment.globalFalse();
+    return if (tracked_receiver.getValue().data == arguments[0].getValue().data)
+        environment.globalTrue()
+    else
+        environment.globalFalse();
 }

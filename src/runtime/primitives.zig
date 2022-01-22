@@ -39,7 +39,6 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_Nil", .function = basic_primitives.Nil },
     .{ .name = "_Exit:", .function = basic_primitives.Exit },
     .{ .name = "_RunScript", .function = basic_primitives.RunScript },
-    .{ .name = "_ID", .function = basic_primitives.ID },
     .{ .name = "_Error:", .function = basic_primitives.Error },
     // byte vector primitives
     .{ .name = "_StringPrint", .function = bytevector_primitives.StringPrint },
@@ -48,10 +47,10 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_ByteAt:Put:", .function = bytevector_primitives.ByteAt_Put },
     .{ .name = "_ByteVectorCopySize:", .function = bytevector_primitives.ByteVectorCopySize },
     // vector primitives
-    .{ .name = "_VectorCopySize:FillingExtrasWith:", .function = vector_primitives.VectorCopySize_FillingExtrasWith },
-    .{ .name = "_VectorSize", .function = vector_primitives.VectorSize },
-    .{ .name = "_VectorAt:", .function = vector_primitives.VectorAt },
-    .{ .name = "_VectorAt:Put:", .function = vector_primitives.VectorAt_Put },
+    // .{ .name = "_VectorCopySize:FillingExtrasWith:", .function = vector_primitives.VectorCopySize_FillingExtrasWith },
+    // .{ .name = "_VectorSize", .function = vector_primitives.VectorSize },
+    // .{ .name = "_VectorAt:", .function = vector_primitives.VectorAt },
+    // .{ .name = "_VectorAt:Put:", .function = vector_primitives.VectorAt_Put },
     // number primitives
     .{ .name = "_IntAdd:", .function = number_primitives.IntAdd },
     .{ .name = "_IntSub:", .function = number_primitives.IntSub },
@@ -60,10 +59,10 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_IntEq:", .function = number_primitives.IntEq },
     .{ .name = "_IntGT:", .function = number_primitives.IntGT },
     // object primitives
-    .{ .name = "_AddSlots:", .function = object_primitives.AddSlots },
-    .{ .name = "_RemoveSlot:IfFail:", .function = object_primitives.RemoveSlot_IfFail },
-    .{ .name = "_Inspect", .function = object_primitives.Inspect },
-    .{ .name = "_Clone", .function = object_primitives.Clone },
+    // .{ .name = "_AddSlots:", .function = object_primitives.AddSlots },
+    // .{ .name = "_RemoveSlot:IfFail:", .function = object_primitives.RemoveSlot_IfFail },
+    // .{ .name = "_Inspect", .function = object_primitives.Inspect },
+    // .{ .name = "_Clone", .function = object_primitives.Clone },
     .{ .name = "_Eq:", .function = object_primitives.Eq },
 };
 
