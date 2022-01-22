@@ -167,7 +167,7 @@ pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, p
                 else => return err,
             }
         };
-        last_expression_result = expression_result;
+        last_expression_result = try heap.track(expression_result);
     }
 
     return if (last_expression_result) |result| result.getValue() else null;
