@@ -253,21 +253,27 @@ fn executeMethod(
         );
     };
 
+    var slot_init_offset: usize = 0;
+
     const argument_slots = method_map.getArgumentSlots();
-    for (arguments) |argument, i| {
+    for (arguments) |argument| {
         const argument_in_heap = try ByteVector.createFromString(heap, argument);
-        argument_slots[i].initMutable(Object.Map.Method, method_map, argument_in_heap, .NotParent);
+        argument_slots[slot_init_offset].initMutable(Object.Map.Method, method_map, argument_in_heap, .NotParent);
         assignable_slot_values.appendAssumeCapacity(try heap.track(environment.globalNil()));
+
+        slot_init_offset += 1;
     }
 
     const tracked_method_map = try heap.track(method_map.asValue());
     defer tracked_method_map.untrackAndDestroy(heap);
 
-    for (object_node.slots) |slot_node, i| {
-        var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Method, tracked_method_map.getValue().asObject().asMap().asMethodMap(), i, context);
+    for (object_node.slots) |slot_node| {
+        var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Method, tracked_method_map.getValue().asObject().asMap().asMethodMap(), slot_init_offset, context);
         if (slot_value) |value| {
             try assignable_slot_values.append(try heap.track(value));
         }
+
+        slot_init_offset += 1;
     }
 
     // Ensure that creating the method object won't cause a garbage collection
@@ -422,19 +428,23 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
         );
     };
 
+    var slot_init_offset: usize = 0;
+
     // Add all the argument slots
     var argument_slots = block_map.getArgumentSlots();
-    for (block.slots) |slot_node, i| {
+    for (block.slots) |slot_node| {
         if (slot_node.is_argument) {
             const slot_name = try ByteVector.createFromString(heap, slot_node.name);
 
-            argument_slots[i].initMutable(
+            argument_slots[slot_init_offset].initMutable(
                 Object.Map.Block,
                 block_map,
                 slot_name,
                 if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent,
             );
             assignable_slot_values.appendAssumeCapacity(try heap.track(environment.globalNil()));
+
+            slot_init_offset += 1;
         }
     }
 
@@ -442,12 +452,14 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
     defer tracked_block_map.untrackAndDestroy(heap);
 
     // Add all the non-argument slots
-    for (block.slots) |slot_node, i| {
+    for (block.slots) |slot_node| {
         if (!slot_node.is_argument) {
-            var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Block, tracked_block_map.getValue().asObject().asMap().asBlockMap(), i, context);
+            var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Block, tracked_block_map.getValue().asObject().asMap().asBlockMap(), slot_init_offset, context);
             if (slot_value) |value| {
                 try assignable_slot_values.append(try heap.track(value));
             }
+
+            slot_init_offset += 1;
         }
     }
 
