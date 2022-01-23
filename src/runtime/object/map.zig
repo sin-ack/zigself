@@ -293,7 +293,10 @@ const SlotsAndStatementsMap = packed struct {
         for (statements) |*statement| {
             statement.deinit(allocator);
         }
-        allocator.free(statements);
+        // It will only be a real heap-allocated slice if it has items.
+        if (statements.len > 0) {
+            allocator.free(statements);
+        }
 
         self.getDefinitionScript().unref();
     }
@@ -304,6 +307,11 @@ const SlotsAndStatementsMap = packed struct {
 
     pub fn getStatementsSlice(self: *SlotsAndStatementsMap) []AST.StatementNode {
         const statements_bitfield = self.statements_address.asUnsignedInteger();
+        if (statements_bitfield == 0) {
+            // We have exactly zero statements, so let's just return an empty slice.
+            return &[_]AST.StatementNode{};
+        }
+
         const statements_length = (statements_bitfield & @as(u64, 0xFFFF000000000000)) >> 48;
         const statements_address = statements_bitfield & @as(u64, 0x0000FFFFFFFFFFFF);
 
