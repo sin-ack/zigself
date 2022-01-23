@@ -99,7 +99,6 @@ fn lookupInternal(
             }
         },
         .ByteVector => {
-            // NOTE: executeMessage will handle the execution of the block itself.
             if (context) |ctx| {
                 const traits_string = try findTraitsObject("string", allocator.?, ctx);
                 if (intent == .Read) {

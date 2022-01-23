@@ -313,26 +313,19 @@ const SlotsAndStatementsMap = packed struct {
         return @intCast(u8, (self.slots_map.properties >> 16) & @as(u64, 0xFF));
     }
 
-    fn getArgumentSlotsSlice(self: *SlotsAndStatementsMap, comptime MapSize: usize) []u8 {
-        const object_size_up_to_argument_slots = MapSize + self.getArgumentSlotCount() * @sizeOf(Slot);
-        const map_memory = @ptrCast([*]u8, self);
-        return map_memory[MapSize..object_size_up_to_argument_slots];
-    }
-
-    pub fn getArgumentSlots(self: *SlotsAndStatementsMap, comptime MapSize: usize) []Slot {
-        return std.mem.bytesAsSlice(Slot, self.getArgumentSlotsSlice(MapSize));
-    }
-
     fn getSlotsSlice(self: *SlotsAndStatementsMap, comptime MapSize: usize) []u8 {
         const total_object_size = MapSize + self.slots_map.slot_count * @sizeOf(Slot);
-        const argument_slots_size = self.getArgumentSlotCount() * @sizeOf(Slot);
 
         const map_memory = @ptrCast([*]u8, self);
-        return map_memory[MapSize + argument_slots_size .. total_object_size];
+        return map_memory[MapSize..total_object_size];
     }
 
     pub fn getSlots(self: *SlotsAndStatementsMap, comptime MapSize: usize) []Slot {
         return std.mem.bytesAsSlice(Slot, self.getSlotsSlice(MapSize));
+    }
+
+    pub fn getArgumentSlots(self: *SlotsAndStatementsMap, comptime MapSize: usize) []Slot {
+        return self.getSlots(MapSize)[0..self.getArgumentSlotCount()];
     }
 
     pub fn getAssignableSlotCount(self: *SlotsAndStatementsMap) u8 {
