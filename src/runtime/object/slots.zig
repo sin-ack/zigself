@@ -61,16 +61,22 @@ pub const Slots = packed struct {
     }
 
     /// Returns a slice of `Value`s for the assignable slots that are after the
-    /// Slots object header.
-    pub fn getAssignableSlots(self: *Slots) []Value {
-        const slots_header_size = @sizeOf(Slots);
+    /// given object offset. Should not be called from the outside, it's only
+    /// intended for Slots and its "subclasses".
+    pub fn getAssignableSlotsInternal(self: *Slots, comptime ObjectSize: usize, comptime MapT: type, map: *MapT) []Value {
         const object_memory = @ptrCast([*]u8, self);
-        const assignable_slot_count = self.getMap().getAssignableSlotCount();
+        const assignable_slot_count = map.getAssignableSlotCount();
 
         return std.mem.bytesAsSlice(
             Value,
-            object_memory[slots_header_size .. slots_header_size + assignable_slot_count * @sizeOf(Value)],
+            object_memory[ObjectSize .. ObjectSize + assignable_slot_count * @sizeOf(Value)],
         );
+    }
+
+    /// Returns a slice of `Value`s for the assignable slots that are after the
+    /// Slots object header.
+    pub fn getAssignableSlots(self: *Slots) []Value {
+        return self.getAssignableSlotsInternal(@sizeOf(Slots), Map.Slots, self.getMap());
     }
 
     /// Returns a slice of `Slot`s that exist on the slots map.
@@ -462,14 +468,7 @@ pub const Method = packed struct {
     }
 
     pub fn getAssignableSlots(self: *Method) []Value {
-        const slots_header_size = @sizeOf(Method);
-        const object_memory = @ptrCast([*]u8, self);
-        const assignable_slot_count = self.getAssignableSlotCount();
-
-        return std.mem.bytesAsSlice(
-            Value,
-            object_memory[slots_header_size .. slots_header_size + assignable_slot_count * @sizeOf(Value)],
-        );
+        return self.slots.getAssignableSlotsInternal(@sizeOf(Method), Map.Method, self.getMap());
     }
 
     /// Creates a method activation object for this block and returns it.
@@ -553,7 +552,7 @@ pub const Block = packed struct {
     }
 
     pub fn getAssignableSlots(self: *Block) []Value {
-        return self.slots.getAssignableSlots();
+        return self.slots.getAssignableSlotsInternal(@sizeOf(Block), Map.Block, self.getMap());
     }
 
     /// Returns whether the passed message name is the correct one for this block
