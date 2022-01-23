@@ -228,6 +228,15 @@ const Space = struct {
     }
 
     pub fn deinit(self: *Space, allocator: Allocator) void {
+        // Finalize everything that needs to be finalized.
+        var it = self.finalization_set.iterator();
+        while (it.next()) |object_key| {
+            var object = Value.fromObjectAddress(object_key.key_ptr.*).asObject();
+            object.finalize(allocator);
+        }
+
+        self.finalization_set.deinit(allocator);
+        self.tracked_set.deinit(allocator);
         self.remembered_set.deinit(allocator);
         allocator.free(self.memory);
     }
