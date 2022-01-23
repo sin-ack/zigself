@@ -229,10 +229,17 @@ const Space = struct {
 
     pub fn deinit(self: *Space, allocator: Allocator) void {
         // Finalize everything that needs to be finalized.
-        var it = self.finalization_set.iterator();
-        while (it.next()) |object_key| {
-            var object = Value.fromObjectAddress(object_key.key_ptr.*).asObject();
+        var finalization_it = self.finalization_set.iterator();
+        while (finalization_it.next()) |entry| {
+            var object = Value.fromObjectAddress(entry.key_ptr.*).asObject();
             object.finalize(allocator);
+        }
+
+        // Destroy everything in the tracked set. All tracked values become
+        // invalid after this point.
+        var tracked_it = self.tracked_set.iterator();
+        while (tracked_it.next()) |entry| {
+            allocator.destroy(entry.key_ptr.*);
         }
 
         self.finalization_set.deinit(allocator);
