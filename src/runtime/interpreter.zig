@@ -225,10 +225,8 @@ fn executeMethod(
         try statements.append(statement_copy);
     }
 
-    context.script.ref();
-    errdefer context.script.unref();
-
-    // This will prevent garbage collections until the execution of slots at least.
+    // This will prevent garbage collections until the execution of slots at
+    // least.
     var required_memory: usize = ByteVector.requiredSizeForAllocation(name.len);
     required_memory += Object.Map.Method.requiredSizeForAllocation(@intCast(u32, object_node.slots.len + arguments.len));
     for (arguments) |argument| {
@@ -237,15 +235,23 @@ fn executeMethod(
 
     try heap.ensureSpaceInEden(required_memory);
 
-    const method_name_in_heap = try ByteVector.createFromString(heap, name);
-    const method_map = try Object.Map.Method.create(
-        heap,
-        @intCast(u8, arguments.len),
-        @intCast(u32, object_node.slots.len),
-        statements.toOwnedSlice(),
-        method_name_in_heap,
-        context.script,
-    );
+    context.script.ref();
+    // NOTE: Once we create the method map successfully, the ref we just created
+    // above is owned by the method_map, and we shouldn't try to unref in case
+    // of an error.
+    var method_map = blk: {
+        errdefer context.script.unref();
+
+        const method_name_in_heap = try ByteVector.createFromString(heap, name);
+        break :blk try Object.Map.Method.create(
+            heap,
+            @intCast(u8, arguments.len),
+            @intCast(u32, object_node.slots.len),
+            statements.toOwnedSlice(),
+            method_name_in_heap,
+            context.script,
+        );
+    };
 
     const argument_slots = method_map.getArgumentSlots();
     for (arguments) |argument, i| {
@@ -389,9 +395,6 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
     const nonlocal_return_target_activation = if (parent_activation.nonlocal_return_target_activation) |target| target else parent_activation;
     std.debug.assert(nonlocal_return_target_activation.nonlocal_return_target_activation == null);
 
-    context.script.ref();
-    errdefer context.script.unref();
-
     var required_memory: usize = Object.Map.Block.requiredSizeForAllocation(@intCast(u32, block.slots.len));
     for (block.slots) |slot_node| {
         if (slot_node.is_argument) {
@@ -401,15 +404,23 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
 
     try heap.ensureSpaceInEden(required_memory);
 
-    var block_map = try Object.Map.Block.create(
-        heap,
-        argument_slot_count,
-        @intCast(u32, block.slots.len) - argument_slot_count,
-        statements.toOwnedSlice(),
-        parent_activation,
-        nonlocal_return_target_activation,
-        context.script,
-    );
+    context.script.ref();
+    // NOTE: Once we create the block map successfully, the ref we just created
+    // above is owned by the block_map, and we shouldn't try to unref in case
+    // of an error.
+    var block_map = blk: {
+        errdefer context.script.unref();
+
+        break :blk try Object.Map.Block.create(
+            heap,
+            argument_slot_count,
+            @intCast(u32, block.slots.len) - argument_slot_count,
+            statements.toOwnedSlice(),
+            parent_activation,
+            nonlocal_return_target_activation,
+            context.script,
+        );
+    };
 
     // Add all the argument slots
     var argument_slots = block_map.getArgumentSlots();

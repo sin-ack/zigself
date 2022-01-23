@@ -96,22 +96,24 @@ pub fn executeBlockMessage(
     }
 
     context.script.ref();
-    errdefer context.script.unref();
+    const block_activation = blk: {
+        errdefer context.script.unref();
 
-    const block_activation = try block_object.activateBlock(
-        allocator,
-        heap,
-        parent_activation.activation_object.getValue(),
-        argument_values,
-        message_range,
-        context.script,
-    );
-    var did_execute_normally = false;
-
-    try context.activation_stack.append(block_activation);
+        const activation = try block_object.activateBlock(
+            allocator,
+            heap,
+            parent_activation.activation_object.getValue(),
+            argument_values,
+            message_range,
+            context.script,
+        );
+        try context.activation_stack.append(activation);
+        break :blk activation;
+    };
 
     // NOTE: We shouldn't pop from the activation stack if we didn't execute
     //       normally and didn't non-local return.
+    var did_execute_normally = false;
     var did_nonlocal_return = false;
     defer {
         if (did_execute_normally or did_nonlocal_return) {
@@ -193,23 +195,26 @@ pub fn executeMethodMessage(
     }
 
     context.script.ref();
-    errdefer context.script.unref();
 
-    const method_activation = try method_object.activateMethod(
-        allocator,
-        heap,
-        receiver.getValue(),
-        argument_values,
-        ByteVector.fromAddress(method_object.getMap().method_name.asObjectAddress()).getValues(),
-        message_range,
-        context.script,
-    );
-    var did_execute_normally = false;
+    const method_activation = blk: {
+        errdefer context.script.unref();
 
-    try context.activation_stack.append(method_activation);
+        const activation = try method_object.activateMethod(
+            allocator,
+            heap,
+            receiver.getValue(),
+            argument_values,
+            ByteVector.fromAddress(method_object.getMap().method_name.asObjectAddress()).getValues(),
+            message_range,
+            context.script,
+        );
+        try context.activation_stack.append(activation);
+        break :blk activation;
+    };
 
     // NOTE: We shouldn't pop from the activation stack if we didn't execute
     //       normally and didn't non-local return.
+    var did_execute_normally = false;
     var did_nonlocal_return = false;
     defer {
         if (did_execute_normally or did_nonlocal_return) {
