@@ -264,6 +264,7 @@ const SlotsAndStatementsMap = packed struct {
 
     fn init(
         self: *SlotsAndStatementsMap,
+        comptime map_type: MapType,
         map_map: Value,
         argument_slot_count: u8,
         regular_slot_count: u32,
@@ -271,7 +272,7 @@ const SlotsAndStatementsMap = packed struct {
         script: Script.Ref,
     ) void {
         self.slots_map.init(regular_slot_count + argument_slot_count, map_map);
-        self.slots_map.map.init(.Method, map_map);
+        self.slots_map.map.init(map_type, map_map);
         self.setArgumentSlotCount(argument_slot_count);
 
         self.setStatementsSlice(statements);
@@ -377,7 +378,7 @@ const MethodMap = packed struct {
         method_name: ByteVectorTheFirst,
         script: Script.Ref,
     ) void {
-        self.base_map.init(map_map, argument_slot_count, regular_slot_count, statements, script);
+        self.base_map.init(.Method, map_map, argument_slot_count, regular_slot_count, statements, script);
         self.method_name = method_name.asValue();
     }
 
@@ -473,7 +474,7 @@ const BlockMap = packed struct {
         nonlocal_return_target_activation: *Activation,
         script: Script.Ref,
     ) void {
-        self.base_map.init(map_map, argument_slot_count, regular_slot_count, statements, script);
+        self.base_map.init(.Block, map_map, argument_slot_count, regular_slot_count, statements, script);
         self.setParentActivation(parent_activation);
         self.setNonlocalReturnTargetActivation(nonlocal_return_target_activation);
     }
