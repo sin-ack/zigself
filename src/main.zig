@@ -94,7 +94,7 @@ pub fn main() !u8 {
     defer environment.teardownGlobalObjects(heap);
 
     did_pass_script_to_interpreter = true;
-    _ = try interpreter.executeScript(allocator, heap, entrypoint_script, lobby);
+    const result = try interpreter.executeScript(allocator, heap, entrypoint_script, lobby);
 
-    return 0;
+    return if (result == null) 1 else 0;
 }
