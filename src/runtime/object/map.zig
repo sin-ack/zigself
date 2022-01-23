@@ -288,7 +288,11 @@ const SlotsAndStatementsMap = packed struct {
     }
 
     pub fn finalize(self: *SlotsAndStatementsMap, allocator: Allocator) void {
-        allocator.free(self.getStatementsSlice());
+        const statements = self.getStatementsSlice();
+        for (statements) |*statement| {
+            statement.deinit(allocator);
+        }
+        allocator.free(statements);
 
         self.getDefinitionScript().unref();
     }
