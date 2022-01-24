@@ -561,7 +561,7 @@ const BlockMap = packed struct {
 
     /// Return the size required for the whole map with the given slot count.
     pub fn requiredSizeForAllocation(slot_count: u32) usize {
-        return @sizeOf(MethodMap) + slot_count * @sizeOf(Slot);
+        return @sizeOf(BlockMap) + slot_count * @sizeOf(Slot);
     }
 
     fn getActivationHandlePointerType() type {
