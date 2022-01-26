@@ -98,6 +98,19 @@ fn lookupInternal(
                 @panic("Context MUST be passed for Block objects!");
             }
         },
+        .Vector => {
+            if (context) |ctx| {
+                const traits_vector = try findTraitsObject("vector", allocator.?, ctx);
+                if (intent == .Read) {
+                    if (selector_hash == parent_hash)
+                        return traits_vector;
+                }
+
+                return try traits_vector.lookupByHash(intent, selector_hash, allocator, context);
+            } else {
+                @panic("Context MUST be passed for Vector objects!");
+            }
+        },
         .ByteVector => {
             if (context) |ctx| {
                 const traits_string = try findTraitsObject("string", allocator.?, ctx);

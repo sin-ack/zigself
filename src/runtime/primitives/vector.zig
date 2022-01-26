@@ -5,8 +5,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Heap = @import("../heap.zig");
+const Value = @import("../value.zig").Value;
 const Range = @import("../../language/location_range.zig");
 const Object = @import("../object.zig");
+const ByteVector = @import("../byte_vector.zig");
 const environment = @import("../environment.zig");
 const runtime_error = @import("../error.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
@@ -19,68 +22,78 @@ const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 /// created without looking at the receiver.
 pub fn VectorCopySize_FillingExtrasWith(
     allocator: Allocator,
+    heap: *Heap,
     message_range: Range,
-    receiver: Object.Ref,
-    arguments: []Object.Ref,
+    tracked_receiver: Heap.Tracked,
+    arguments: []Heap.Tracked,
     context: *InterpreterContext,
-) !Object.Ref {
+) !Value {
+    _ = tracked_receiver;
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
-
-    const size_object = arguments[0];
-    defer size_object.unrefWithAllocator(allocator);
-
-    const filler = arguments[1];
-    defer filler.unrefWithAllocator(allocator);
-
-    if (!size_object.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as the first argument of _VectorCopySize:FillingExtrasWith:, got {s}", .{@tagName(size_object.value.content)});
+    const size_value = arguments[0].getValue();
+    if (!size_value.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as the first argument of _VectorCopySize:FillingExtrasWith:", .{});
     }
 
-    const size = size_object.value.content.Integer.value;
-    if (size == 0) {
-        return Object.createEmptyVector(allocator);
-    } else if (size < 0) {
+    const size = size_value.asInteger();
+    if (size < 0) {
         return runtime_error.raiseError(allocator, context, "First argument of _VectorCopySize:FillingExtrasWith: must be positive", .{});
+    }
+
+    const required_memory = Object.Map.Vector.requiredSizeForAllocation(@intCast(u64, size)) + Object.Vector.requiredSizeForAllocation();
+    try heap.ensureSpaceInEden(required_memory);
+
+    const filler = arguments[1].getValue();
+
+    if (size == 0) {
+        const vector_map = try Object.Map.Vector.create(heap, 0, filler);
+        const vector = try Object.Vector.create(heap, vector_map);
+
+        return vector.asValue();
     } else {
-        if (!receiver.value.is(.Vector)) {
-            return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorCopySize:FillingExtrasWith:, got {s}", .{@tagName(receiver.value.content)});
+        var receiver = tracked_receiver.getValue();
+        if (!(receiver.isObjectReference() and receiver.asObject().isVectorObject())) {
+            return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorCopySize:FillingExtrasWith:", .{});
         }
 
-        var values = try allocator.alloc(Object.Ref, @intCast(usize, size));
-        errdefer allocator.free(values);
+        // FIXME: This first fills up the new map with the filler and then overwrites the
+        //        values which we do have. This is too much work, let's just fill the space
+        //        that's actually extra.
+        const new_vector_map = try Object.Map.Vector.create(heap, @intCast(u64, size), filler);
+        const new_vector = try Object.Vector.create(heap, new_vector_map);
 
-        const receiver_values = receiver.value.content.Vector.values;
-        for (values) |*v, i| {
-            if (i >= receiver_values.len) {
-                filler.ref();
-                v.* = filler;
-            } else {
-                const receiver_value = receiver_values[i];
-                receiver_value.ref();
-                v.* = receiver_value;
-            }
+        const new_vector_values = new_vector_map.getValues();
+        for (receiver.asObject().asVectorObject().getMap().getValues()) |value, i| {
+            if (i >= new_vector_values.len) break;
+            new_vector_values[i] = value;
         }
-        errdefer for (values) |v| v.unrefWithAllocator(allocator);
 
-        return Object.createVectorFromValues(allocator, values);
+        return new_vector.asValue();
     }
 }
 
 /// Return the size of the receiver vector.
-pub fn VectorSize(allocator: Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn VectorSize(
+    allocator: Allocator,
+    heap: *Heap,
+    message_range: Range,
+    tracked_receiver: Heap.Tracked,
+    arguments: []Heap.Tracked,
+    context: *InterpreterContext,
+) !Value {
+    _ = allocator;
+    _ = heap;
     _ = message_range;
     _ = arguments;
+    _ = context;
 
-    defer receiver.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.Vector)) {
-        return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorSize, got {s}", .{@tagName(receiver.value.content)});
+    const receiver = tracked_receiver.getValue();
+    if (!(receiver.isObjectReference() and receiver.asObject().isVectorObject())) {
+        return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorSize", .{});
     }
 
-    const values = receiver.value.content.Vector.values;
-    return Object.createFromIntegerLiteral(allocator, @intCast(i64, values.len));
+    return Value.fromUnsignedInteger(receiver.asObject().asVectorObject().getMap().getSize());
 }
 
 /// Return the value at the given position of the receiver vector. If the given

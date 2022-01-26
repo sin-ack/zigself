@@ -48,6 +48,7 @@ pub const MapType = enum(u64) {
     Method = 0b001 << MapTypeShift,
     Block = 0b010 << MapTypeShift,
     ByteVector = 0b011 << MapTypeShift,
+    Vector = 0b100 << MapTypeShift,
 };
 
 pub const Map = packed struct {
@@ -57,6 +58,7 @@ pub const Map = packed struct {
     pub const Method = MethodMap;
     pub const Block = BlockMap;
     pub const ByteVector = ByteVectorMap;
+    pub const Vector = VectorMap;
 
     fn init(self: *Map, map_type: MapType, map_map: Value) void {
         self.header.init(.Map, map_map);
@@ -65,7 +67,7 @@ pub const Map = packed struct {
 
     pub fn finalize(self: *Map, allocator: Allocator) void {
         switch (self.getMapType()) {
-            .Slots, .ByteVector => unreachable,
+            .Slots, .Vector, .ByteVector => unreachable,
             .Method => self.asMethodMap().finalize(allocator),
             .Block => self.asBlockMap().finalize(allocator),
         }
@@ -145,12 +147,28 @@ pub const Map = packed struct {
         return @ptrCast(*ByteVector, self);
     }
 
+    pub fn isVectorMap(self: *Map) bool {
+        return self.getMapType() == .Vector;
+    }
+
+    fn mustBeVectorMap(self: *Map) void {
+        if (!self.isVectorMap()) {
+            std.debug.panic("Expected the object at {*} to be a vector map", .{self});
+        }
+    }
+
+    pub fn asVectorMap(self: *Map) *Vector {
+        self.mustBeVectorMap();
+        return @ptrCast(*Vector, self);
+    }
+
     pub fn getSizeInMemory(self: *Map) usize {
         return switch (self.getMapType()) {
             .Slots => self.asSlotsMap().getSizeInMemory(),
             .Method => self.asMethodMap().getSizeInMemory(),
             .Block => self.asBlockMap().getSizeInMemory(),
             .ByteVector => self.asByteVectorMap().getSizeInMemory(),
+            .Vector => self.asVectorMap().getSizeInMemory(),
         };
     }
 
@@ -612,5 +630,52 @@ const ByteVectorMap = packed struct {
 
     pub fn requiredSizeForAllocation() usize {
         return @sizeOf(ByteVectorMap);
+    }
+};
+
+/// A map for a vector object.
+const VectorMap = packed struct {
+    map: Map,
+    size: Value,
+    // All the values in this vector come after here.
+
+    pub fn create(heap: *Heap, size: usize, filler: Value) !*VectorMap {
+        const memory_size = requiredSizeForAllocation(size);
+        const map_map = try getMapMap(heap);
+
+        var memory_area = try heap.allocateInObjectSegment(memory_size);
+        var self = @ptrCast(*VectorMap, memory_area);
+        self.init(map_map, size, filler);
+
+        return self;
+    }
+
+    fn init(self: *VectorMap, map_map: Value, size: usize, filler: Value) void {
+        self.map.init(.Vector, map_map);
+        self.size = Value.fromUnsignedInteger(size);
+        std.mem.set(Value, self.getValues(), filler);
+    }
+
+    pub fn asValue(self: *VectorMap) Value {
+        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
+    }
+
+    pub fn getValues(self: *VectorMap) []Value {
+        const object_memory = @ptrCast([*]u8, self);
+        const start_of_items = object_memory + @sizeOf(VectorMap);
+
+        return std.mem.bytesAsSlice(Value, start_of_items[0..self.size.asUnsignedInteger() * @sizeOf(Value)]);
+    }
+
+    pub fn getSize(self: *VectorMap) usize {
+        return self.size.asUnsignedInteger();
+    }
+
+    pub fn getSizeInMemory(self: *VectorMap) usize {
+        return requiredSizeForAllocation(self.size.asUnsignedInteger());
+    }
+
+    pub fn requiredSizeForAllocation(size: usize) usize {
+        return @sizeOf(VectorMap) + size * @sizeOf(Value);
     }
 };

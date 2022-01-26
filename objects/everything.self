@@ -15,6 +15,6 @@ _AddSlots: (| nil = _Nil |).
 'string.self' _RunScript.
 'integer.self' _RunScript.
 'block.self' _RunScript.
-"FIXME: Implement vectors 'vector.self' _RunScript."
+'vector.self' _RunScript.
 
 'list.self' _RunScript.

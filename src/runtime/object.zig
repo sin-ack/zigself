@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const Value = @import("./value.zig").Value;
 const slots_objects = @import("./object/slots.zig");
 const byte_vector_object = @import("./object/byte_vector.zig");
+const vector_object = @import("./object/vector.zig");
 const map_objects = @import("./object/map.zig");
 
 const Self = @This();
@@ -17,6 +18,7 @@ pub const Activation = slots_objects.Activation;
 pub const Method = slots_objects.Method;
 pub const Block = slots_objects.Block;
 pub const ByteVector = byte_vector_object.ByteVectorObject;
+pub const Vector = vector_object.VectorObject;
 pub const Map = map_objects.Map;
 
 pub usingnamespace @import("./object/lookup.zig");
@@ -32,6 +34,7 @@ const ObjectType = enum(u64) {
     Method = 0b011 << ObjectTypeShift,
     Block = 0b100 << ObjectTypeShift,
     ByteVector = 0b101 << ObjectTypeShift,
+    Vector = 0b110 << ObjectTypeShift,
     Map = 0b111 << ObjectTypeShift,
 };
 
@@ -61,6 +64,7 @@ pub fn getSizeInMemory(self: Self) usize {
         .Method => self.asMethodObject().getSizeInMemory(),
         .Block => self.asBlockObject().getSizeInMemory(),
         .ByteVector => self.asByteVectorObject().getSizeInMemory(),
+        .Vector => self.asVectorObject().getSizeInMemory(),
         .Map => self.asMap().getSizeInMemory(),
     };
 }
@@ -120,7 +124,7 @@ fn formatObject(
 
 pub fn finalize(self: Self, allocator: Allocator) void {
     switch (self.header.getObjectType()) {
-        .ForwardingReference, .Slots, .Activation, .Method, .Block, .ByteVector => unreachable,
+        .ForwardingReference, .Slots, .Activation, .Method, .Block, .Vector, .ByteVector => unreachable,
         .Map => self.asMap().finalize(allocator),
     }
 }
@@ -212,6 +216,23 @@ fn mustBeByteVectorObject(self: Self) void {
 pub fn asByteVectorObject(self: Self) *ByteVector {
     self.mustBeByteVectorObject();
     return @ptrCast(*ByteVector, self.header);
+}
+
+// Vector objects
+
+pub fn isVectorObject(self: Self) bool {
+    return self.header.getObjectType() == .Vector;
+}
+
+fn mustBeVectorObject(self: Self) void {
+    if (!self.isVectorObject()) {
+        std.debug.panic("Expected the object at {*} to be a vector object", .{self.header});
+    }
+}
+
+pub fn asVectorObject(self: Self) *Vector {
+    self.mustBeVectorObject();
+    return @ptrCast(*Vector, self.header);
 }
 
 // Map objects
