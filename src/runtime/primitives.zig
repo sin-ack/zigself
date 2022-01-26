@@ -49,8 +49,8 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     // vector primitives
     .{ .name = "_VectorCopySize:FillingExtrasWith:", .function = vector_primitives.VectorCopySize_FillingExtrasWith },
     .{ .name = "_VectorSize", .function = vector_primitives.VectorSize },
-    // .{ .name = "_VectorAt:", .function = vector_primitives.VectorAt },
-    // .{ .name = "_VectorAt:Put:", .function = vector_primitives.VectorAt_Put },
+    .{ .name = "_VectorAt:", .function = vector_primitives.VectorAt },
+    .{ .name = "_VectorAt:Put:", .function = vector_primitives.VectorAt_Put },
     // number primitives
     .{ .name = "_IntAdd:", .function = number_primitives.IntAdd },
     .{ .name = "_IntSub:", .function = number_primitives.IntSub },

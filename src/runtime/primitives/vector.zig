@@ -98,62 +98,69 @@ pub fn VectorSize(
 
 /// Return the value at the given position of the receiver vector. If the given
 /// position is out of bounds, an error is raised.
-pub fn VectorAt(allocator: Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn VectorAt(
+    allocator: Allocator,
+    heap: *Heap,
+    message_range: Range,
+    tracked_receiver: Heap.Tracked,
+    arguments: []Heap.Tracked,
+    context: *InterpreterContext,
+) !Value {
+    _ = heap;
     _ = message_range;
 
-    defer receiver.unrefWithAllocator(allocator);
+    const receiver = tracked_receiver.getValue();
+    const position_value = arguments[0].getValue();
 
-    const position_object = arguments[0];
-    defer position_object.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.Vector)) {
-        return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorAt:, got {s}", .{@tagName(receiver.value.content)});
+    if (!(receiver.isObjectReference() and receiver.asObject().isVectorObject())) {
+        return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorAt:", .{});
     }
 
-    if (!position_object.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as the first argument of _VectorAt:, got {s}", .{@tagName(position_object.value.content)});
+    if (!position_value.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as the first argument of _VectorAt:", .{});
     }
 
-    const position = position_object.value.content.Integer.value;
-    const values = receiver.value.content.Vector.values;
-    if (position < 0 or position >= values.len) {
-        return runtime_error.raiseError(allocator, context, "Position passed to _VectorAt: is out of bounds (position: {d}, size: {d})", .{ position, values.len });
+    const position = position_value.asInteger();
+    const vector_values = receiver.asObject().asVectorObject().getValues();
+    if (position < 0 or position >= vector_values.len) {
+        return runtime_error.raiseError(allocator, context, "Position passed to _VectorAt: is out of bounds (position: {d}, size: {d})", .{ position, vector_values.len });
     }
 
-    const value = values[@intCast(usize, position)];
-    value.ref();
-    return value;
+    return vector_values[@intCast(u64, position)];
 }
 
 /// Place the object in the second argument to the integer position in the first
 /// argument. If the given position is out of bounds, an error is raised.
 /// Returns the receiver.
-pub fn VectorAt_Put(allocator: Allocator, message_range: Range, receiver: Object.Ref, arguments: []Object.Ref, context: *InterpreterContext) !Object.Ref {
+pub fn VectorAt_Put(
+    allocator: Allocator,
+    heap: *Heap,
+    message_range: Range,
+    tracked_receiver: Heap.Tracked,
+    arguments: []Heap.Tracked,
+    context: *InterpreterContext,
+) !Value {
+    _ = heap;
     _ = message_range;
 
-    errdefer receiver.unrefWithAllocator(allocator);
+    const receiver = tracked_receiver.getValue();
+    const position_value = arguments[0].getValue();
+    const new_value = arguments[1].getValue();
 
-    const position_object = arguments[0];
-    defer position_object.unrefWithAllocator(allocator);
-
-    const value = arguments[1];
-    errdefer value.unrefWithAllocator(allocator);
-
-    if (!receiver.value.is(.Vector)) {
-        return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorAt:Put:, got {s}", .{@tagName(receiver.value.content)});
+    if (!(receiver.isObjectReference() and receiver.asObject().isVectorObject())) {
+        return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorAt:Put:", .{});
     }
 
-    if (!position_object.value.is(.Integer)) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as the first argument of _VectorAt:Put:, got {s}", .{@tagName(position_object.value.content)});
+    if (!position_value.isInteger()) {
+        return runtime_error.raiseError(allocator, context, "Expected Integer as the first argument of _VectorAt:Put:", .{});
     }
 
-    const position = position_object.value.content.Integer.value;
-    const values = receiver.value.content.Vector.values;
-    if (position < 0 or position >= values.len) {
-        return runtime_error.raiseError(allocator, context, "Position passed to _VectorAt:Put: is out of bounds (position: {d}, size: {d})", .{ position, values.len });
+    const position = position_value.asInteger();
+    const vector_values = receiver.asObject().asVectorObject().getValues();
+    if (position < 0 or position >= vector_values.len) {
+        return runtime_error.raiseError(allocator, context, "Position passed to _VectorAt:Put: is out of bounds (position: {d}, size: {d})", .{ position, vector_values.len });
     }
 
-    values[@intCast(usize, position)] = value;
-
-    return receiver;
+    vector_values[@intCast(u64, position)] = new_value;
+    return tracked_receiver.getValue();
 }
