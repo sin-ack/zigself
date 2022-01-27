@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Heap = @import("./heap.zig");
 const Value = @import("./value.zig").Value;
 const slots_objects = @import("./object/slots.zig");
 const byte_vector_object = @import("./object/byte_vector.zig");
@@ -131,6 +132,16 @@ pub fn finalize(self: Self, allocator: Allocator) void {
 
 pub fn asValue(self: Self) Value {
     return Value.fromObjectAddress(self.getAddress());
+}
+
+pub fn clone(self: Self, heap: *Heap) !Self {
+    return switch (self.header.getObjectType()) {
+        .ForwardingReference, .Activation, .Method, .Map => unreachable,
+        .Slots => fromAddress((try self.asSlotsObject().clone(heap)).asObjectAddress()),
+        .Block => fromAddress((try self.asBlockObject().clone(heap)).asObjectAddress()),
+        .ByteVector => fromAddress((try self.asByteVectorObject().clone(heap)).asObjectAddress()),
+        .Vector => fromAddress((try self.asVectorObject().clone(heap)).asObjectAddress()),
+    };
 }
 
 // Slots objects

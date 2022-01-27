@@ -25,12 +25,24 @@ pub const ByteVectorObject = packed struct {
         self.header.init(.ByteVector, map);
     }
 
+    pub fn asObjectAddress(self: *ByteVectorObject) [*]u64 {
+        return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+    }
+
     pub fn asValue(self: *ByteVectorObject) Value {
-        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
+        return Value.fromObjectAddress(self.asObjectAddress());
+    }
+
+    pub fn getMap(self: *ByteVectorObject) *Object.Map.ByteVector {
+        return self.header.getMap().asByteVectorMap();
     }
 
     pub fn getValues(self: *ByteVectorObject) []u8 {
         return self.header.getMap().asByteVectorMap().getValues();
+    }
+
+    pub fn clone(self: *ByteVectorObject, heap: *Heap) !*ByteVectorObject {
+        return create(heap, self.getMap());
     }
 
     pub fn getSizeInMemory(self: *ByteVectorObject) usize {

@@ -56,8 +56,12 @@ pub const Slots = packed struct {
         return requiredSizeForAllocation(self.getMap().getAssignableSlotCount());
     }
 
+    pub fn asObjectAddress(self: *Slots) [*]u64 {
+        return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+    }
+
     pub fn asValue(self: *Slots) Value {
-        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
+        return Value.fromObjectAddress(self.asObjectAddress());
     }
 
     /// Returns a slice of `Value`s for the assignable slots that are after the
@@ -252,6 +256,10 @@ pub const Slots = packed struct {
                 }
             }
         }
+    }
+
+    pub fn clone(self: *Slots, heap: *Heap) !*Slots {
+        return create(heap, self.getMap(), self.getAssignableSlots());
     }
 
     pub fn requiredSizeForAllocation(assignable_slot_count: u8) usize {
@@ -523,8 +531,12 @@ pub const Block = packed struct {
         self.slots.header.init(.Block, map);
     }
 
+    pub fn asObjectAddress(self: *Block) [*]u64 {
+        return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+    }
+
     pub fn asValue(self: *Block) Value {
-        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
+        return Value.fromObjectAddress(self.asObjectAddress());
     }
 
     pub fn getMap(self: *Block) *Map.Block {
@@ -553,6 +565,10 @@ pub const Block = packed struct {
 
     pub fn getAssignableSlots(self: *Block) []Value {
         return self.slots.getAssignableSlotsInternal(@sizeOf(Block), Map.Block, self.getMap());
+    }
+
+    pub fn clone(self: *Block, heap: *Heap) !*Block {
+        return create(heap, self.getMap(), self.getAssignableSlots());
     }
 
     /// Returns whether the passed message name is the correct one for this block

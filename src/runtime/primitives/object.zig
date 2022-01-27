@@ -94,16 +94,12 @@ pub fn Inspect(allocator: Allocator, heap: *Heap, message_range: Range, tracked_
 /// Make an identical shallow copy of the receiver and return it.
 pub fn Clone(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
     _ = allocator;
-    _ = context;
-    _ = arguments;
     _ = message_range;
+    _ = arguments;
+    _ = context;
 
     const receiver = tracked_receiver.getValue();
-    return switch (receiver.getType()) {
-        .Integer, .FloatingPoint => Value{ .data = receiver.data },
-        .ObjectReference => try receiver.asObject().clone(heap),
-        else => unreachable,
-    };
+    return receiver.clone(heap);
 }
 
 /// Return whether the receiver and argument are identical. Returns either

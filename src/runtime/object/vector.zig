@@ -25,16 +25,24 @@ pub const VectorObject = packed struct {
         self.header.init(.Vector, map);
     }
 
+    pub fn asObjectAddress(self: *VectorObject) [*]u64 {
+        return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+    }
+
+    pub fn asValue(self: *VectorObject) Value {
+        return Value.fromObjectAddress(self.asObjectAddress());
+    }
+
     pub fn getMap(self: *VectorObject) *Object.Map.Vector {
         return self.header.getMap().asVectorMap();
     }
 
-    pub fn asValue(self: *VectorObject) Value {
-        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
-    }
-
     pub fn getValues(self: *VectorObject) []Value {
         return self.header.getMap().asVectorMap().getValues();
+    }
+
+    pub fn clone(self: *VectorObject, heap: *Heap) !*VectorObject {
+        return create(heap, self.getMap());
     }
 
     pub fn getSizeInMemory(self: *VectorObject) usize {

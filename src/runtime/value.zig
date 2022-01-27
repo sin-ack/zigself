@@ -10,6 +10,7 @@ const Object = @import("./object.zig");
 const ByteVector = @import("./byte_vector.zig");
 const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 const object_lookup = @import("./object/lookup.zig");
+const Heap = @import("./heap.zig");
 
 const LookupIntent = object_lookup.LookupIntent;
 const LookupError = object_lookup.LookupError;
@@ -162,6 +163,15 @@ pub const Value = packed struct {
                     @panic("Context MUST be passed for FloatingPoint objects!");
                 }
             },
+        };
+    }
+
+    /// Clones this value and returns a copy of it.
+    pub fn clone(self: Value, heap: *Heap) !Value {
+        return switch (self.getType()) {
+            .ObjectMarker => unreachable,
+            .Integer, .FloatingPoint => Value{ .data = self.data },
+            .ObjectReference => (try self.asObject().clone(heap)).asValue(),
         };
     }
 };
