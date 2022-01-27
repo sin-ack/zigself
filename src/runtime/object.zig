@@ -311,6 +311,16 @@ pub const Header = packed struct {
     }
 
     pub fn getMap(self: *Header) *Map {
-        return self.map_pointer.asObject().asMap();
+        const object = self.map_pointer.asObject();
+
+        // XXX: If we're currently in the middle of scavenging, then our map
+        //      probably has already been scavenged into the target space and
+        //      a forward reference has been placed in its location instead.
+        //      Let's dereference that forward reference. I don't know whether
+        //      this is the cleanest way or not, but let's do it for now anyway.
+        return if (object.isForwardingReference()) {
+            const forwarded_object = fromAddress(object.getForwardAddress());
+            return forwarded_object.asMap();
+        } else object.asMap();
     }
 };
