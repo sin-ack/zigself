@@ -504,7 +504,7 @@ const Space = struct {
         // ours.
         if (self.finalizationSetContains(address)) {
             self.removeFromFinalizationSet(address) catch unreachable;
-            try target_space.addToFinalizationSet(allocator, address);
+            try target_space.addToFinalizationSet(allocator, new_address);
         }
 
         // Create a forwarding reference
