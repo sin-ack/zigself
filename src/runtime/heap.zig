@@ -328,7 +328,7 @@ const Space = struct {
         while (remembered_set_iterator.next()) |entry| {
             const start_of_object = entry.key_ptr.*;
             const object_size = entry.value_ptr.*;
-            const end_of_object = start_of_object + object_size;
+            const end_of_object = start_of_object + (object_size / @sizeOf(u64));
 
             var cursor = start_of_object;
             var found_references: usize = 0;
