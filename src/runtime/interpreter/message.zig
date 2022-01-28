@@ -339,6 +339,10 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
         if (try executeAssignmentMessage(allocator, heap, tracked_receiver, message.message_name, message.arguments[0], context)) |value| {
             return value;
         }
+
+        // Make sure to refresh the pointer as executeAssignmentMessage could
+        // have caused a GC
+        receiver = tracked_receiver.getValue();
     }
 
     // Primitive check
