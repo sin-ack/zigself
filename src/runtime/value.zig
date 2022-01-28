@@ -21,7 +21,7 @@ const parent_hash = hash.stringHash("parent");
 
 fn lookupReturnType(comptime intent: LookupIntent) type {
     if (intent == .Assign) {
-        return LookupError!?*Value;
+        return LookupError!?object_lookup.AssignLookupResult;
     } else {
         return LookupError!?Value;
     }

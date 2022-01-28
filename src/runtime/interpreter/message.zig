@@ -304,7 +304,7 @@ pub fn executePrimitiveMessage(
 pub fn executeAssignmentMessage(
     allocator: Allocator,
     heap: *Heap,
-    receiver: Heap.Tracked,
+    tracked_receiver: Heap.Tracked,
     message_name: []const u8,
     ast_argument: AST.ExpressionNode,
     context: *InterpreterContext,
@@ -319,8 +319,15 @@ pub fn executeAssignmentMessage(
     }
 
     const message_name_without_colon = message_name[0 .. message_name.len - 1];
-    if (try receiver.getValue().lookup(.Assign, message_name_without_colon, allocator, context)) |value_ptr| {
+    const receiver = tracked_receiver.getValue();
+    if (try receiver.lookup(.Assign, message_name_without_colon, allocator, context)) |assign_lookup_result| {
+        const object_that_has_the_assignable_slot = assign_lookup_result.object;
+        const value_ptr = assign_lookup_result.value_ptr;
         value_ptr.* = argument;
+
+        // David will remember that.
+        try heap.rememberObjectReference(object_that_has_the_assignable_slot.asValue(), argument);
+
         return environment.globalNil();
     } else {
         return null;

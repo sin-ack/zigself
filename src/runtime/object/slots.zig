@@ -352,8 +352,12 @@ pub const Activation = packed struct {
         return requiredSizeForAllocation(self.getAssignableSlotCount());
     }
 
+    pub fn asObjectAddress(self: *Activation) [*]u64 {
+        return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+    }
+
     pub fn asValue(self: *Activation) Value {
-        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
+        return Value.fromObjectAddress(self.asObjectAddress());
     }
 
     fn getAssignableSlotCount(self: *Activation) u8 {

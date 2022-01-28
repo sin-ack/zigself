@@ -161,6 +161,43 @@ pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) vo
     std.debug.panic("TODO", .{});
 }
 
+/// Figure out which spaces the referrer and target object are in, and add an
+/// entry to the target object's space's remembered set. This ensures that the
+/// object in the old space gets its references properly updated when the new
+/// space gets garbage collected.
+pub fn rememberObjectReference(self: *Self, referrer: Value, target: Value) !void {
+    // FIXME: If we add an assignable slot to traits integer for instance, this
+    //        will cause the assignment code to explode. What can we do there?
+    std.debug.assert(referrer.isObjectReference());
+    if (!target.isObjectReference()) return;
+
+    const referrer_address = referrer.asObjectAddress();
+    const target_address = target.asObjectAddress();
+
+    var referrer_space: ?*Space = null;
+    var target_space: ?*Space = null;
+
+    if (self.eden.objectSegmentContains(referrer_address)) referrer_space = &self.eden;
+    if (self.from_space.objectSegmentContains(referrer_address)) referrer_space = &self.from_space;
+    if (self.old_space.objectSegmentContains(referrer_address)) referrer_space = &self.old_space;
+    std.debug.assert(referrer_space != null);
+
+    if (self.eden.objectSegmentContains(target_address)) {
+        if (referrer_space.? == &self.eden) return;
+        target_space = &self.eden;
+    } else if (self.from_space.objectSegmentContains(target_address)) {
+        if (referrer_space.? == &self.eden or referrer_space.? == &self.from_space) return;
+        target_space = &self.from_space;
+    } else if (self.old_space.objectSegmentContains(target_address)) {
+        // Old space to old space references need not be updated, as the old
+        // space is supposed to infinitely expand.
+        return;
+    }
+    std.debug.assert(target_space != null);
+
+    try target_space.?.addToRememberedSet(self.allocator, referrer_address, referrer.asObject().getSizeInMemory());
+}
+
 /// A mapping from an address to its size. This area of memory is checked for
 /// any object references in the current space which are then copied during a
 /// scavenge.
@@ -577,6 +614,11 @@ const Space = struct {
         if (!self.tracked_set.swapRemove(tracked.tracker.Object)) {
             return RemoveFromTrackedSetError.AddressNotInTrackedSet;
         }
+    }
+
+    /// Adds the given address into the remembered set of this space.
+    pub fn addToRememberedSet(self: *Space, allocator: Allocator, address: [*]u64, size: usize) !void {
+        try self.remembered_set.put(allocator, address, size);
     }
 
     /// Find the space which has this value, and add the tracked value to the

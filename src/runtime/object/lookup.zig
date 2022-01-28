@@ -20,6 +20,11 @@ pub const LookupIntent = enum { Read, Assign };
 pub const LookupError = Allocator.Error || runtime_error.SelfRuntimeError;
 const VisitedValueLink = struct { previous: ?*const VisitedValueLink = null, value: Value };
 
+pub const AssignLookupResult = struct {
+    object: Object,
+    value_ptr: *Value,
+};
+
 pub fn findTraitsObject(comptime selector: []const u8, allocator: Allocator, context: *InterpreterContext) !Value {
     if (try context.lobby.getValue().lookup(.Read, "traits", allocator, context)) |traits| {
         if (try traits.lookup(.Read, selector, allocator, context)) |traits_object| {
@@ -34,7 +39,7 @@ pub fn findTraitsObject(comptime selector: []const u8, allocator: Allocator, con
 
 fn lookupReturnType(comptime intent: LookupIntent) type {
     if (intent == .Assign) {
-        return LookupError!?*Value;
+        return LookupError!?AssignLookupResult;
     } else {
         return LookupError!?Value;
     }
@@ -172,7 +177,10 @@ fn slotsLookup(
         if (slot.hash == selector_hash) {
             if (intent == .Assign) {
                 if (slot.isMutable()) {
-                    return &assignable_slots[assignable_slots_cursor];
+                    return AssignLookupResult{
+                        .object = Object.fromAddress(object.asObjectAddress()),
+                        .value_ptr = &assignable_slots[assignable_slots_cursor],
+                    };
                 } else {
                     // Prevent constant slots from being assigned
                     return null;
