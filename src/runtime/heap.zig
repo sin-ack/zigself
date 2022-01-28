@@ -10,8 +10,10 @@ const hash = @import("../utility/hash.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
 const ByteVector = @import("./byte_vector.zig");
-
 const Activation = @import("./activation.zig");
+const debug = @import("../debug.zig");
+
+const GC_DEBUG = debug.GC_DEBUG;
 
 const Self = @This();
 const UninitializedHeapScrubByte = 0xAB;
@@ -59,16 +61,16 @@ fn init(self: *Self, allocator: Allocator) !void {
     self.allocator = allocator;
     self.activation_stack = null;
 
-    self.old_space = try Space.init(allocator, InitialOldSpaceSize);
+    self.old_space = try Space.init(allocator, "old space", InitialOldSpaceSize);
     errdefer self.old_space.deinit(allocator);
 
-    self.from_space = try Space.init(allocator, NewSpaceSize);
+    self.from_space = try Space.init(allocator, "from space", NewSpaceSize);
     errdefer self.from_space.deinit(allocator);
 
-    self.to_space = try Space.init(allocator, NewSpaceSize);
+    self.to_space = try Space.init(allocator, "to space", NewSpaceSize);
     errdefer self.to_space.deinit(allocator);
 
-    self.eden = try Space.init(allocator, EdenSize);
+    self.eden = try Space.init(allocator, "eden", EdenSize);
 
     self.from_space.scavenge_target = &self.to_space;
     self.from_space.tenure_target = &self.old_space;
@@ -215,8 +217,10 @@ const Space = struct {
     /// scavenge did not clear enough memory, a tenuring operation is done in
     /// order to evacuate all the objects to a higher generation.
     tenure_target: ?*Space = null,
+    /// The name of this space.
+    name: [*:0]const u8,
 
-    pub fn init(allocator: Allocator, size: usize) !Space {
+    pub fn init(allocator: Allocator, comptime name: [*:0]const u8, size: usize) !Space {
         var memory = try allocator.alloc(u64, size / @sizeOf(u64));
         return Space{
             .memory = memory,
@@ -225,6 +229,7 @@ const Space = struct {
             .remembered_set = .{},
             .finalization_set = .{},
             .tracked_set = .{},
+            .name = name,
         };
     }
 
@@ -352,6 +357,8 @@ const Space = struct {
             try target_space.remembered_set.put(allocator, start_of_object, object_size);
         }
 
+        if (GC_DEBUG) std.debug.print("Space.cheneyCommon: Trying to catch up from {*} to {*}\n", .{ object_scan_cursor, target_space.object_cursor });
+
         // Try to catch up to the target space's object and byte vector cursors,
         // copying any other objects/byte vectors that still exist in this space
         while (@ptrToInt(object_scan_cursor) < @ptrToInt(target_space.object_cursor)) : (object_scan_cursor += 1) {
@@ -399,23 +406,39 @@ const Space = struct {
         // See if we already have the required memory amount.
         if (self.freeMemory() >= required_memory) return;
 
+        if (GC_DEBUG) std.debug.print("Space.collectGarbage: Attempting to garbage collect in {s}\n", .{self.name});
+
         // See if we can perform a scavenge first.
         if (self.scavenge_target) |scavenge_target| {
+            if (GC_DEBUG) std.debug.print("Space.collectGarbage: Attempting to perform a scavenge to my scavenge target, {s}\n", .{scavenge_target.name});
             try self.cheneyCommon(allocator, activation_stack, scavenge_target);
             self.swapMemoryWith(scavenge_target);
 
-            if (self.freeMemory() >= required_memory) return;
+            if (self.freeMemory() >= required_memory) {
+                if (GC_DEBUG) std.debug.print("Space.collectGarbage: Scavenging was sufficient. {} bytes now free in {s}.\n", .{ self.freeMemory(), self.name });
+                return;
+            }
         }
 
         // Looks like the scavenge didn't give us enough memory. Let's attempt a
         // tenure.
         if (self.tenure_target) |tenure_target| {
+            const tenure_target_previous_free_memory = tenure_target.freeMemory();
+
+            if (GC_DEBUG) std.debug.print("Space.collectGarbage: Attempting to tenure to {s}\n", .{tenure_target.name});
             try self.cheneyCommon(allocator, activation_stack, tenure_target);
 
             // FIXME: Return an error instead of panicing when the allocation
             //        is too large for this space. How should we handle large
             //        allocations anyway?
-            std.debug.assert(self.freeMemory() >= required_memory);
+            if (self.freeMemory() < required_memory) {
+                std.debug.panic("!!! Could not free enough space in {s} even after tenuring! ({} bytes free, {} required)\n", .{ self.name, self.freeMemory(), required_memory });
+            }
+
+            if (GC_DEBUG) {
+                std.debug.print("Space.collectGarbage: Successfully tenured, {} bytes now free in {s}.\n", .{ self.freeMemory(), self.name });
+                std.debug.print("Space.collectGarbage: (Tenure target {s} gained {} bytes)\n", .{ tenure_target.name, tenure_target_previous_free_memory - tenure_target.freeMemory() });
+            }
             return;
         }
 

@@ -11,6 +11,9 @@ const ByteVector = @import("./byte_vector.zig");
 const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 const object_lookup = @import("./object/lookup.zig");
 const Heap = @import("./heap.zig");
+const debug = @import("../debug.zig");
+
+const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
 const LookupIntent = object_lookup.LookupIntent;
 const LookupError = object_lookup.LookupError;
@@ -123,6 +126,8 @@ pub const Value = packed struct {
         context: ?*InterpreterContext,
     ) lookupReturnType(intent) {
         const selector_hash = hash.stringHash(selector);
+        if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up \"{s}\" (hash: {x}) on {}\n", .{ selector, selector_hash, self });
+
         return try self.lookupByHash(intent, selector_hash, allocator, context);
     }
 
@@ -138,6 +143,8 @@ pub const Value = packed struct {
             .ObjectReference => self.asObject().lookupByHash(intent, selector_hash, allocator, context),
 
             .Integer => {
+                if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits integer\n", .{});
+
                 if (context) |ctx| {
                     const traits_integer = try Object.findTraitsObject("integer", allocator.?, ctx);
                     if (intent == .Read) {
@@ -151,6 +158,8 @@ pub const Value = packed struct {
                 }
             },
             .FloatingPoint => {
+                if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits float\n", .{});
+
                 if (context) |ctx| {
                     const traits_float = try Object.findTraitsObject("float", allocator.?, ctx);
                     if (intent == .Read) {

@@ -11,6 +11,10 @@ const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const runtime_error = @import("../error.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
+const debug = @import("../../debug.zig");
+
+const SLOTS_LOOKUP_DEBUG = debug.SLOTS_LOOKUP_DEBUG;
+const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
 pub const LookupIntent = enum { Read, Assign };
 pub const LookupError = Allocator.Error || runtime_error.SelfRuntimeError;
@@ -46,6 +50,8 @@ pub fn lookupByHash(
     allocator: ?Allocator,
     context: ?*InterpreterContext,
 ) lookupReturnType(intent) {
+    if (LOOKUP_DEBUG) std.debug.print("Object.lookupByHash: Looking up hash {x} on a {} object at {*}\n", .{ selector_hash, self.header.getObjectType(), self.header });
+
     if (intent == .Read) {
         if (selector_hash == self_hash) {
             return self.asValue();
@@ -85,6 +91,7 @@ fn lookupInternal(
             return null;
         },
         .Block => {
+            if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits block\n", .{});
             // NOTE: executeMessage will handle the execution of the block itself.
             if (context) |ctx| {
                 const traits_block = try findTraitsObject("block", allocator.?, ctx);
@@ -99,6 +106,7 @@ fn lookupInternal(
             }
         },
         .Vector => {
+            if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits vector\n", .{});
             if (context) |ctx| {
                 const traits_vector = try findTraitsObject("vector", allocator.?, ctx);
                 if (intent == .Read) {
@@ -112,6 +120,7 @@ fn lookupInternal(
             }
         },
         .ByteVector => {
+            if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits string\n", .{});
             if (context) |ctx| {
                 const traits_string = try findTraitsObject("string", allocator.?, ctx);
                 if (intent == .Read) {
@@ -159,6 +168,7 @@ fn slotsLookup(
     var assignable_slots_cursor: usize = 0;
     // Direct lookup
     for (object.getSlots()) |slot| {
+        if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing slot \"{s}\" (hash {x}) vs. our hash {x}\n", .{ slot.name.asByteVector().getValues(), slot.hash, selector_hash });
         if (slot.hash == selector_hash) {
             if (intent == .Assign) {
                 if (slot.isMutable()) {
@@ -183,6 +193,8 @@ fn slotsLookup(
             assignable_slots_cursor += 1;
         }
     }
+
+    if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Could not find the slot on this object, looking at parents\n", .{});
 
     // Parent lookup
     for (object.getSlots()) |slot| {
