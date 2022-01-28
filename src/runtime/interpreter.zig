@@ -364,7 +364,6 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
         if (slot_node.is_argument) argument_slot_count += 1;
     }
 
-    // FIXME: Track slot values and untrack them on error/return
     var assignable_slot_values = try std.ArrayList(Heap.Tracked).initCapacity(allocator, argument_slot_count);
     defer {
         for (assignable_slot_values.items) |value| {
@@ -473,7 +472,7 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
         current_assignable_slot_values[i] = value.getValue();
     }
 
-    return (try Object.Block.create(heap, block_map, current_assignable_slot_values)).asValue();
+    return (try Object.Block.create(heap, tracked_block_map.getValue().asObject().asMap().asBlockMap(), current_assignable_slot_values)).asValue();
 }
 
 pub fn executeReturn(allocator: Allocator, heap: *Heap, return_node: AST.ReturnNode, context: *InterpreterContext) InterpreterError {
