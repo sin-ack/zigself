@@ -327,7 +327,7 @@ const Space = struct {
         // Go through the whole activation stack, copying activation objects
         // that are within this space
         for (activation_stack) |activation| {
-            const activation_object_reference = activation.activation_object.getValue();
+            const activation_object_reference = activation.activation_object;
             std.debug.assert(activation_object_reference.isObjectReference());
             const activation_object_address = activation_object_reference.asObjectAddress();
 
@@ -337,10 +337,7 @@ const Space = struct {
                 continue;
 
             const new_address = try self.copyObjectTo(allocator, activation_object_address, target_space);
-            const new_value = Value.fromObjectAddress(new_address);
-            const tracked_value = try Tracked.createWithObject(allocator, new_value);
-            try target_space.addToTrackedSet(allocator, tracked_value);
-            activation.activation_object = tracked_value;
+            activation.activation_object = Value.fromObjectAddress(new_address);
         }
 
         // Go through the tracked set, copying referenced objects

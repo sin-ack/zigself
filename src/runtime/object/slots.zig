@@ -500,7 +500,7 @@ pub const Method = packed struct {
 
         const activation_object = try Activation.create(heap, .Method, self.slots.header.getMap(), self.getAssignableSlots(), receiver);
         activation_object.setArguments(arguments);
-        return try RuntimeActivation.create(allocator, heap, activation_object.asValue(), message_name_copy, message_range, message_script);
+        return try RuntimeActivation.create(allocator, activation_object.asValue(), message_name_copy, message_range, message_script);
     }
 
     pub fn requiredSizeForAllocation(assignable_slot_count: u8) usize {
@@ -647,7 +647,7 @@ pub const Block = packed struct {
         const activation_object = try Activation.create(heap, .Block, self.slots.header.getMap(), self.getAssignableSlots(), receiver);
         activation_object.setArguments(arguments);
 
-        const activation = try RuntimeActivation.create(allocator, heap, activation_object.asValue(), message_name, message_range, message_script);
+        const activation = try RuntimeActivation.create(allocator, activation_object.asValue(), message_name, message_range, message_script);
         activation.parent_activation = self.getMap().getParentActivation();
         activation.nonlocal_return_target_activation = self.getMap().getNonlocalReturnTargetActivation();
         return activation;

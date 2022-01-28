@@ -102,7 +102,7 @@ pub fn executeBlockMessage(
         const activation = try block_object.activateBlock(
             allocator,
             heap,
-            parent_activation.activation_object.getValue(),
+            parent_activation.activation_object,
             argument_values,
             message_range,
             context.script,
@@ -119,7 +119,7 @@ pub fn executeBlockMessage(
         if (did_execute_normally or did_nonlocal_return) {
             const popped_activation = context.activation_stack.pop();
             std.debug.assert(popped_activation == block_activation);
-            popped_activation.destroy(heap);
+            popped_activation.destroy();
         }
     }
 
@@ -129,7 +129,7 @@ pub fn executeBlockMessage(
     const block_script = block_object.getDefinitionScript();
     const block_activation_object = block_activation.activation_object;
     context.script = block_script;
-    context.self_object = block_activation_object;
+    context.self_object = try heap.track(block_activation_object);
 
     // NOTE: We don't care about this if an error is bubbling up.
     defer {
@@ -220,7 +220,7 @@ pub fn executeMethodMessage(
         if (did_execute_normally or did_nonlocal_return) {
             const popped_activation = context.activation_stack.pop();
             std.debug.assert(popped_activation == method_activation);
-            popped_activation.destroy(heap);
+            popped_activation.destroy();
         }
     }
 
@@ -230,7 +230,7 @@ pub fn executeMethodMessage(
     const method_script = method_object.getDefinitionScript();
     const method_activation_object = method_activation.activation_object;
     context.script = method_script;
-    context.self_object = method_activation_object;
+    context.self_object = try heap.track(method_activation_object);
 
     // NOTE: We don't care about this if an error is bubbling up.
     defer {

@@ -64,7 +64,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
     defer activation_stack.deinit();
     errdefer {
         for (activation_stack.items) |activation| {
-            activation.destroy(heap);
+            activation.destroy();
         }
     }
 
@@ -102,7 +102,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
                     // Since the execution was abruptly stopped the activation
                     // stack wasn't properly unwound, so let's do that now.
                     for (activation_stack.items) |activation| {
-                        activation.destroy(heap);
+                        activation.destroy();
                     }
 
                     return null;
@@ -116,7 +116,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
                     // Since the execution was abruptly stopped the activation
                     // stack wasn't properly unwound, so let's do that now.
                     for (activation_stack.items) |activation| {
-                        activation.destroy(heap);
+                        activation.destroy();
                     }
 
                     return null;
