@@ -664,7 +664,7 @@ const VectorMap = packed struct {
         const object_memory = @ptrCast([*]u8, self);
         const start_of_items = object_memory + @sizeOf(VectorMap);
 
-        return std.mem.bytesAsSlice(Value, start_of_items[0..self.size.asUnsignedInteger() * @sizeOf(Value)]);
+        return std.mem.bytesAsSlice(Value, start_of_items[0 .. self.size.asUnsignedInteger() * @sizeOf(Value)]);
     }
 
     pub fn getSize(self: *VectorMap) usize {
