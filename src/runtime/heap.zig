@@ -280,6 +280,13 @@ const Space = struct {
     /// The name of this space.
     name: [*:0]const u8,
 
+    /// A link node for a newer generation space to scan in order to update
+    /// references from the newer space to the older one.
+    const NewerGenerationLink = struct {
+        space: *Space,
+        previous: ?*const NewerGenerationLink,
+    };
+
     pub fn init(allocator: Allocator, comptime name: [*:0]const u8, size: usize) !Space {
         var memory = try allocator.alloc(u64, size / @sizeOf(u64));
         return Space{
@@ -326,19 +333,93 @@ const Space = struct {
         return memory_word_count * @sizeOf(u64) - object_size - byte_vector_size;
     }
 
+    /// Copy the given address as a new object in the target space. Creates a
+    /// forwarding reference in this space; if more than one object was pointing
+    /// to this object in the old space, then a special marker is placed in the
+    /// location of the old object which tells the future calls of this function
+    /// for the same object to just return the new location and avoid copying
+    /// again.
+    fn copyObjectTo(self: *Space, allocator: Allocator, address: [*]u64, target_space: *Space) ![*]u64 {
+        const object = Object.fromAddress(address);
+        if (object.isForwardingReference()) {
+            const forward_address = object.getForwardAddress();
+            return forward_address;
+        }
+
+        const object_size = object.getSizeInMemory();
+        std.debug.assert(object_size % @sizeOf(u64) == 0);
+
+        const object_size_in_words = object_size / @sizeOf(u64);
+        // We must have enough space at this point, so the empty activation
+        // stack doesn't matter (copyObjectTo is only called from within
+        // cheneyCommon).
+        const new_address = target_space.allocateInObjectSegment(allocator, &[_]*Activation{}, object_size) catch unreachable;
+        std.mem.copy(u64, new_address[0..object_size_in_words], address[0..object_size_in_words]);
+
+        // Add this object to the target space's finalization set if it is in
+        // ours.
+        if (self.finalizationSetContains(address)) {
+            self.removeFromFinalizationSet(address) catch unreachable;
+            try target_space.addToFinalizationSet(allocator, new_address);
+        }
+
+        // Create a forwarding reference
+        object.setForwardAddress(new_address);
+        return new_address;
+    }
+
+    /// Same as copyObjectTo, but for byte vectors.
+    fn copyByteVectorTo(allocator: Allocator, address: [*]u64, target_space: *Space) [*]u64 {
+        const byte_vector = ByteVector.fromAddress(address);
+        const byte_vector_size = byte_vector.getSizeInMemory();
+        std.debug.assert(byte_vector_size % @sizeOf(u64) == 0);
+
+        const byte_vector_size_in_words = byte_vector_size / @sizeOf(u64);
+        // We must have enough space at this point.
+        const new_address = target_space.allocateInByteVectorSegment(allocator, &[_]*Activation{}, byte_vector_size) catch unreachable;
+        std.mem.copy(u64, new_address[0..byte_vector_size_in_words], address[0..byte_vector_size_in_words]);
+
+        return new_address;
+    }
+
+    /// Copy the given address to the target space. If require_copy is true,
+    /// panics if the given address wasn't in this space.
+    fn copyAddress(self: *Space, allocator: Allocator, address: [*]u64, target_space: *Space, comptime require_copy: bool) !?[*]u64 {
+        if (self.objectSegmentContains(address)) {
+            return self.copyObjectTo(allocator, address, target_space);
+        } else if (self.byteVectorSegmentContains(address)) {
+            return copyByteVectorTo(allocator, address, target_space);
+        } else if (require_copy) {
+            std.debug.panic("!!! copyAddress called with an address that's not allocated in this space!", .{});
+        }
+
+        return null;
+    }
+
     /// Performs Cheney's algorithm, copying alive objects to the given target.
-    pub fn cheneyCommon(self: *Space, allocator: Allocator, activation_stack: []const *Activation, target_space: *Space) Allocator.Error!void {
+    pub fn cheneyCommon(
+        self: *Space,
+        allocator: Allocator,
+        activation_stack: []const *Activation,
+        target_space: *Space,
+        newer_generation_link: ?*const NewerGenerationLink,
+    ) Allocator.Error!void {
         // First see if the target space has enough space to potentially take
         // everything in this space.
         const space_size = self.memory.len * @sizeOf(u64);
         const required_size = space_size - self.freeMemory();
         if (required_size > target_space.freeMemory()) {
-            // Make the other space scavenge first.
-            try target_space.collectGarbage(allocator, required_size, activation_stack);
+            if (GC_DEBUG) std.debug.print("Space.cheneyCommon: Target space doesn't have enough memory to hold all of our objects, attempting to perform GC on it\n", .{});
+
+            // Make the other space garbage collect first.
+            const my_link = NewerGenerationLink{ .space = self, .previous = newer_generation_link };
+            try target_space.collectGarbageInternal(allocator, required_size, activation_stack, &my_link);
 
             if (space_size - self.freeMemory() > target_space.freeMemory()) {
                 std.debug.panic("Even after a garbage collection, the target space doesn't have enough memory for me to perform a scavenge, sorry.", .{});
             }
+
+            if (GC_DEBUG) std.debug.print("Space.cheneyCommon: Target space successfully GC'd, now has {} bytes free\n", .{target_space.freeMemory()});
         }
         // If we got here, then we have enough free memory on the target space
         // to perform our operations.
@@ -365,53 +446,66 @@ const Space = struct {
 
         // Go through the tracked set, copying referenced objects
         for (self.tracked_set.keys()) |tracker| {
-            var address = tracker.value.asObjectAddress();
-
-            if (self.objectSegmentContains(address)) {
-                tracker.value = Value.fromObjectAddress(try self.copyObjectTo(allocator, address, target_space));
-            } else if (self.byteVectorSegmentContains(address)) {
-                tracker.value = Value.fromObjectAddress(copyByteVectorTo(allocator, address, target_space));
-            } else {
-                std.debug.panic("The tracked value was neither in this space's object segment nor was it in its byte vector segment. Why was it in the tracked set in the first place?", .{});
-            }
-
+            const address = tracker.value.asObjectAddress();
+            tracker.value = Value.fromObjectAddress((try self.copyAddress(allocator, address, target_space, true)).?);
             try target_space.addToTrackedSet(allocator, Tracked{ .tracker = .{ .Object = tracker } });
         }
 
-        var remembered_set_iterator = self.remembered_set.iterator();
-        // Go through the remembered set, and copy any referenced objects.
-        // Transfer the remembered set objects to the new space if it has a
-        // remembered set of its own. (TODO old space shouldn't have one)
-        while (remembered_set_iterator.next()) |entry| {
-            const start_of_object = entry.key_ptr.*;
-            const object_size = entry.value_ptr.*;
-            const end_of_object = start_of_object + (object_size / @sizeOf(u64));
+        {
+            var remembered_set_iterator = self.remembered_set.iterator();
+            // Go through the remembered set, and copy any referenced objects.
+            // Transfer the remembered set objects to the new space if it has a
+            // remembered set of its own. (TODO old space shouldn't have one)
+            while (remembered_set_iterator.next()) |entry| {
+                const start_of_object = entry.key_ptr.*;
+                const object_size_in_bytes = entry.value_ptr.*;
+                const object_slice = start_of_object[0 .. object_size_in_bytes / @sizeOf(u64)];
 
-            var cursor = start_of_object;
-            var found_references: usize = 0;
-            while (@ptrToInt(cursor) < @ptrToInt(end_of_object)) : (cursor += 1) {
-                const word = cursor[0];
-                const value = Value{ .data = word };
+                var found_references: usize = 0;
+                for (object_slice) |*word| {
+                    const value = Value{ .data = word.* };
+                    if (value.isObjectReference()) {
+                        const address = value.asObjectAddress();
+                        if (try self.copyAddress(allocator, address, target_space, false)) |new_address| {
+                            word.* = Value.fromObjectAddress(new_address).data;
+                            found_references += 1;
+                        }
+                    }
+                }
 
+                // Make sure that the object in the remembered set actually has a
+                // purpose of being there, i.e. actually contains references to this
+                // space.
+                std.debug.assert(found_references > 0);
+
+                try target_space.remembered_set.put(allocator, start_of_object, object_size_in_bytes);
+            }
+        }
+
+        // Go through any memory regions in newer spaces, and copy any
+        // referenced objects (and update these newer spaces' remembered sets).
+        // This ensures that new->old references are also preserved.
+        var newer_generation_link_it = newer_generation_link;
+        while (newer_generation_link_it) |link| {
+            if (GC_DEBUG) std.debug.print("Space.cheneyCommon: Scanning newer generation {s}\n", .{link.space.name});
+
+            const newer_generation_space = link.space;
+            const object_segment_size_in_words = (@ptrToInt(newer_generation_space.object_cursor) - @ptrToInt(newer_generation_space.memory.ptr)) / @sizeOf(u64);
+            const object_segment_of_space = newer_generation_space.memory.ptr[0..object_segment_size_in_words];
+
+            // Update all the addresses in the newer space with the new
+            // locations in the target space
+            for (object_segment_of_space) |*word| {
+                const value = Value{ .data = word.* };
                 if (value.isObjectReference()) {
-                    const address = value.asObject().getAddress();
-
-                    if (self.objectSegmentContains(address)) {
-                        cursor.* = Value.fromObjectAddress(try self.copyObjectTo(allocator, address, target_space)).data;
-                        found_references += 1;
-                    } else if (self.byteVectorSegmentContains(address)) {
-                        cursor.* = Value.fromObjectAddress(copyByteVectorTo(allocator, address, target_space)).data;
-                        found_references += 1;
+                    const address = value.asObjectAddress();
+                    if (try self.copyAddress(allocator, address, target_space, false)) |new_address| {
+                        word.* = Value.fromObjectAddress(new_address).data;
                     }
                 }
             }
 
-            // Make sure that the object in the remembered set actually has a
-            // purpose of being there, i.e. actually contains references to this
-            // space.
-            std.debug.assert(found_references > 0);
-
-            try target_space.remembered_set.put(allocator, start_of_object, object_size);
+            newer_generation_link_it = link.previous;
         }
 
         if (GC_DEBUG) std.debug.print("Space.cheneyCommon: Trying to catch up from {*} to {*}\n", .{ object_scan_cursor, target_space.object_cursor });
@@ -442,8 +536,52 @@ const Space = struct {
             object.finalize(allocator);
         }
 
-        // Reset this space's pointers, remembered set and finalization set, as
-        // it is now effectively empty.
+        // Go through all the newer generations again, and remove or replace all
+        // the items in the remembered set which point to this space.
+        //
+        // NOTE: Must happen AFTER all copying of objects is finished, as we
+        //       need to know which objects survived the scavenge and which ones
+        //       did not - the ones which didn't survive the scavenge will
+        //       simply be removed from the remembered set, while the ones which
+        //       did must be replaced with the new object in the target space.
+        newer_generation_link_it = newer_generation_link;
+        while (newer_generation_link_it) |link| {
+            if (GC_DEBUG) std.debug.print("Space.cheneyCommon: Updating remembered set of newer generation {s}\n", .{link.space.name});
+
+            const newer_generation_space = link.space;
+            // NOTE: Must create a copy, as we're modifying entries in the
+            //       remembered set
+            var remembered_set_copy = try newer_generation_space.remembered_set.clone(allocator);
+            defer remembered_set_copy.deinit(allocator);
+
+            var remembered_set_iterator = remembered_set_copy.iterator();
+            while (remembered_set_iterator.next()) |entry| {
+                const object_address = entry.key_ptr.*;
+                const object_size = entry.value_ptr.*;
+
+                if (self.objectSegmentContains(object_address)) {
+                    const object = Object.fromAddress(object_address);
+
+                    if (object.isForwardingReference()) {
+                        // Yes, the object's been copied. Replace the entry in
+                        // the remembered set.
+                        const new_address = object.getForwardAddress();
+                        newer_generation_space.removeFromRememberedSet(object_address) catch unreachable;
+                        // Hopefully the object size has not changed somehow
+                        // during a GC. :^)
+                        try newer_generation_space.addToRememberedSet(allocator, new_address, object_size);
+                    } else {
+                        // No, the object didn't survive the scavenge.
+                        newer_generation_space.removeFromRememberedSet(object_address) catch unreachable;
+                    }
+                }
+            }
+
+            newer_generation_link_it = link.previous;
+        }
+
+        // Reset this space's pointers, tracked set, remembered set and
+        // finalization set, as it is now effectively empty.
         self.object_cursor = self.memory.ptr;
         self.byte_vector_cursor = self.memory.ptr + self.memory.len;
         self.remembered_set.clearRetainingCapacity();
@@ -460,6 +598,19 @@ const Space = struct {
     /// this space. If a tenure target is not specified either, then the heap is
     /// simply expanded to accomodate the new objects.
     pub fn collectGarbage(self: *Space, allocator: Allocator, required_memory: usize, activation_stack: []const *Activation) !void {
+        try self.collectGarbageInternal(allocator, required_memory, activation_stack, null);
+    }
+
+    /// Performs the actual operation as described in collectGarbage. Takes an
+    /// additional memory_link argument, which describes a set of memory areas
+    /// to scan after a garbage collection is done for stale references.
+    fn collectGarbageInternal(
+        self: *Space,
+        allocator: Allocator,
+        required_memory: usize,
+        activation_stack: []const *Activation,
+        newer_generation_link: ?*const NewerGenerationLink,
+    ) !void {
         // See if we already have the required memory amount.
         if (self.freeMemory() >= required_memory) return;
 
@@ -468,7 +619,7 @@ const Space = struct {
         // See if we can perform a scavenge first.
         if (self.scavenge_target) |scavenge_target| {
             if (GC_DEBUG) std.debug.print("Space.collectGarbage: Attempting to perform a scavenge to my scavenge target, {s}\n", .{scavenge_target.name});
-            try self.cheneyCommon(allocator, activation_stack, scavenge_target);
+            try self.cheneyCommon(allocator, activation_stack, scavenge_target, newer_generation_link);
             self.swapMemoryWith(scavenge_target);
 
             if (self.freeMemory() >= required_memory) {
@@ -483,7 +634,7 @@ const Space = struct {
             const tenure_target_previous_free_memory = tenure_target.freeMemory();
 
             if (GC_DEBUG) std.debug.print("Space.collectGarbage: Attempting to tenure to {s}\n", .{tenure_target.name});
-            try self.cheneyCommon(allocator, activation_stack, tenure_target);
+            try self.cheneyCommon(allocator, activation_stack, tenure_target, newer_generation_link);
 
             // FIXME: Return an error instead of panicing when the allocation
             //        is too large for this space. How should we handle large
@@ -493,60 +644,20 @@ const Space = struct {
             }
 
             if (GC_DEBUG) {
+                const tenure_target_current_free_memory = tenure_target.freeMemory();
+                const free_memory_diff = @intCast(isize, tenure_target_previous_free_memory) - @intCast(isize, tenure_target_current_free_memory);
+
                 std.debug.print("Space.collectGarbage: Successfully tenured, {} bytes now free in {s}.\n", .{ self.freeMemory(), self.name });
-                std.debug.print("Space.collectGarbage: (Tenure target {s} gained {} bytes)\n", .{ tenure_target.name, tenure_target_previous_free_memory - tenure_target.freeMemory() });
+                if (free_memory_diff < 0) {
+                    std.debug.print("Space.collectGarbage: (Tenure target {s} LOST {} bytes, target did a GC?)\n", .{ tenure_target.name, -free_memory_diff });
+                } else {
+                    std.debug.print("Space.collectGarbage: (Tenure target {s} gained {} bytes)\n", .{ tenure_target.name, free_memory_diff });
+                }
             }
             return;
         }
 
         std.debug.panic("TODO expanding a space which doesn't have a tenure or scavenge target", .{});
-    }
-
-    /// Copy the given address as a new object in the target space. Creates a
-    /// forwarding reference in this space; if more than one object was pointing
-    /// to this object in the old space, then a special marker is placed in the
-    /// location of the old object which tells the future calls of this function
-    /// for the same object to just return the new location and avoid copying
-    /// again.
-    fn copyObjectTo(self: *Space, allocator: Allocator, address: [*]u64, target_space: *Space) ![*]u64 {
-        const object = Object.fromAddress(address);
-        if (object.isForwardingReference()) {
-            const forward_address = object.getForwardAddress();
-            return forward_address;
-        }
-
-        const object_size = object.getSizeInMemory();
-        std.debug.assert(object_size % @sizeOf(u64) == 0);
-
-        const object_size_in_words = object_size / @sizeOf(u64);
-        // We must have enough space at this point.
-        const new_address = try target_space.allocateInObjectSegment(allocator, &[_]*Activation{}, object_size);
-        std.mem.copy(u64, new_address[0..object_size_in_words], address[0..object_size_in_words]);
-
-        // Add this object to the target space's finalization set if it is in
-        // ours.
-        if (self.finalizationSetContains(address)) {
-            self.removeFromFinalizationSet(address) catch unreachable;
-            try target_space.addToFinalizationSet(allocator, new_address);
-        }
-
-        // Create a forwarding reference
-        object.setForwardAddress(new_address);
-        return new_address;
-    }
-
-    /// Same as copyObjectTo, but for byte vectors.
-    fn copyByteVectorTo(allocator: Allocator, address: [*]u64, target_space: *Space) [*]u64 {
-        const byte_vector = ByteVector.fromAddress(address);
-        const byte_vector_size = byte_vector.getSizeInMemory();
-        std.debug.assert(byte_vector_size % @sizeOf(u64) == 0);
-
-        const byte_vector_size_in_words = byte_vector_size / @sizeOf(u64);
-        // We must have enough space at this point.
-        const new_address = target_space.allocateInByteVectorSegment(allocator, &[_]*Activation{}, byte_vector_size) catch unreachable;
-        std.mem.copy(u64, new_address[0..byte_vector_size_in_words], address[0..byte_vector_size_in_words]);
-
-        return new_address;
     }
 
     fn swapMemoryWith(self: *Space, target_space: *Space) void {
@@ -626,8 +737,9 @@ const Space = struct {
     }
 
     pub const RemoveFromTrackedSetError = error{AddressNotInTrackedSet};
-    /// Removes the given address from the tracked set of this space. Returns
-    /// AddressNotInTrackedSet if the address was not in the tracked set.
+    /// Removes the given object tracker from the tracked set of this space.
+    /// Returns AddressNotInTrackedSet if the tracker was not in the tracked
+    /// set.
     pub fn removeFromTrackedSet(self: *Space, tracked: Tracked) !void {
         std.debug.assert(tracked.tracker == .Object);
 
@@ -639,6 +751,15 @@ const Space = struct {
     /// Adds the given address into the remembered set of this space.
     pub fn addToRememberedSet(self: *Space, allocator: Allocator, address: [*]u64, size: usize) !void {
         try self.remembered_set.put(allocator, address, size);
+    }
+
+    pub const RemoveFromRememberedSetError = error{AddressNotInRememberedSet};
+    /// Removes the given address from the remembered set of this space. Returns
+    /// AddressNotInRememberedSet if the address was not in the remembered set.
+    pub fn removeFromRememberedSet(self: *Space, address: [*]u64) !void {
+        if (!self.remembered_set.swapRemove(address)) {
+            return RemoveFromRememberedSetError.AddressNotInRememberedSet;
+        }
     }
 
     /// Find the space which has this value, and add the tracked value to the
