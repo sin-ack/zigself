@@ -295,7 +295,7 @@ pub const Activation = packed struct {
             );
         }
 
-        const size = requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len));
+        const size = requiredSizeForAllocation(assignable_slot_count);
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*Activation, memory_area);
