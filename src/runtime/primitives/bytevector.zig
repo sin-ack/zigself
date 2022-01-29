@@ -161,12 +161,12 @@ pub fn ByteVectorCopySize(allocator: Allocator, heap: *Heap, message_range: Rang
     }
 
     try heap.ensureSpaceInEden(
-        ByteVector.requiredSizeForAllocation(values.len) +
+        ByteVector.requiredSizeForAllocation(@intCast(u64, size)) +
             Object.Map.ByteVector.requiredSizeForAllocation() +
             Object.ByteVector.requiredSizeForAllocation(),
     );
 
-    const byte_vector = try ByteVector.createFromString(heap, values);
+    const byte_vector = try ByteVector.createFromString(heap, values[0..@intCast(u64, size)]);
     const byte_vector_map = try Object.Map.ByteVector.create(heap, byte_vector);
     return (try Object.ByteVector.create(heap, byte_vector_map)).asValue();
 }
