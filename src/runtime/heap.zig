@@ -14,6 +14,7 @@ const Activation = @import("./activation.zig");
 const debug = @import("../debug.zig");
 
 const GC_DEBUG = debug.GC_DEBUG;
+const REMEMBERED_SET_DEBUG = debug.REMEMBERED_SET_DEBUG;
 
 const Self = @This();
 const UninitializedHeapScrubByte = 0xAB;
@@ -178,6 +179,8 @@ pub fn rememberObjectReference(self: *Self, referrer: Value, target: Value) !voi
     std.debug.assert(referrer.isObjectReference());
     if (!target.isObjectReference()) return;
 
+    if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Trying to create a reference {*} -> {*}\n", .{ referrer.asObjectAddress(), target.asObjectAddress() });
+
     const referrer_address = referrer.asObjectAddress();
     const target_address = target.asObjectAddress();
 
@@ -189,19 +192,32 @@ pub fn rememberObjectReference(self: *Self, referrer: Value, target: Value) !voi
     if (self.old_space.objectSegmentContains(referrer_address)) referrer_space = &self.old_space;
     std.debug.assert(referrer_space != null);
 
-    if (self.eden.objectSegmentContains(target_address)) {
-        if (referrer_space.? == &self.eden) return;
-        target_space = &self.eden;
-    } else if (self.from_space.objectSegmentContains(target_address)) {
-        if (referrer_space.? == &self.eden or referrer_space.? == &self.from_space) return;
-        target_space = &self.from_space;
-    } else if (self.old_space.objectSegmentContains(target_address)) {
-        // Old space to old space references need not be updated, as the old
-        // space is supposed to infinitely expand.
+    if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Referrer is in {s}\n", .{referrer_space.?.name});
+
+    const referrer_space_is_newer = blk: {
+        if (self.eden.objectSegmentContains(target_address)) {
+            if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Target is in eden\n", .{});
+            if (referrer_space.? == &self.eden) break :blk false;
+            target_space = &self.eden;
+        } else if (self.from_space.objectSegmentContains(target_address)) {
+            if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Target is in from space\n", .{});
+            if (referrer_space.? == &self.eden or referrer_space.? == &self.from_space) break :blk false;
+            target_space = &self.from_space;
+        } else if (self.old_space.objectSegmentContains(target_address)) {
+            if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Target is in old space\n", .{});
+            // Old space to old space references need not be updated, as the old
+            // space is supposed to infinitely expand.
+            break :blk false;
+        }
+        std.debug.assert(target_space != null);
+        break :blk true;
+    };
+    if (!referrer_space_is_newer) {
+        if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Referrer in same or older space than target, not creating a reference.\n", .{});
         return;
     }
-    std.debug.assert(target_space != null);
 
+    if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Adding to remembered set of {s}\n", .{target_space.?.name});
     try target_space.?.addToRememberedSet(self.allocator, referrer_address, referrer.asObject().getSizeInMemory());
 }
 
