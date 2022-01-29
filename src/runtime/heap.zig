@@ -75,6 +75,13 @@ fn init(self: *Self, allocator: Allocator) !void {
     self.from_space.scavenge_target = &self.to_space;
     self.from_space.tenure_target = &self.old_space;
     self.eden.tenure_target = &self.from_space;
+
+    if (GC_DEBUG) {
+        std.debug.print("Heap.init: Eden is {*}-{*}\n", .{ self.eden.memory.ptr, self.eden.memory.ptr + self.eden.memory.len });
+        std.debug.print("Heap.init: From space is {*}-{*}\n", .{ self.from_space.memory.ptr, self.from_space.memory.ptr + self.from_space.memory.len });
+        std.debug.print("Heap.init: To space is {*}-{*}\n", .{ self.to_space.memory.ptr, self.to_space.memory.ptr + self.to_space.memory.len });
+        std.debug.print("Heap.init: Old space is {*}-{*}\n", .{ self.old_space.memory.ptr, self.old_space.memory.ptr + self.old_space.memory.len });
+    }
 }
 
 fn deinit(self: *Self) void {
