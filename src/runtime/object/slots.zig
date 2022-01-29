@@ -424,7 +424,7 @@ pub const Activation = packed struct {
     }
 
     pub fn requiredSizeForAllocation(assignable_slot_count: u8) usize {
-        return @sizeOf(Activation) + assignable_slot_count * @sizeOf(Slot);
+        return @sizeOf(Activation) + assignable_slot_count * @sizeOf(Value);
     }
 };
 
