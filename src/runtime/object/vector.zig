@@ -11,18 +11,36 @@ const Object = @import("../object.zig");
 pub const VectorObject = packed struct {
     header: Object.Header,
 
-    pub fn create(heap: *Heap, map: *Object.Map.Vector) !*VectorObject {
-        const size = requiredSizeForAllocation();
+    /// Create a new vector with the given values and filling extra items with
+    /// the filler value. If filler value is null, expects values to be at least
+    /// as long as the size described in the map. If values is longer than the
+    /// size N specified in the map, copies the first N items.
+    pub fn createWithValues(heap: *Heap, map: *Object.Map.Vector, values: []Value, filler: ?Value) !*VectorObject {
+        if (filler == null and values.len < map.getSize()) {
+            std.debug.panic(
+                "!!! Vector.createWithValues given values slice that's too short, and no filler was given!",
+                .{},
+            );
+        }
+
+        const size = requiredSizeForAllocation(map.getSize());
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*VectorObject, memory_area);
-        self.init(map.asValue());
+        self.init(map, values, filler);
 
         return self;
     }
 
-    fn init(self: *VectorObject, map: Value) void {
-        self.header.init(.Vector, map);
+    fn init(self: *VectorObject, map: *Object.Map.Vector, values: []Value, filler: ?Value) void {
+        self.header.init(.Vector, map.asValue());
+
+        const values_to_copy = values[0..std.math.min(values.len, map.getSize())];
+        std.mem.copy(Value, self.getValues(), values_to_copy);
+
+        if (map.getSize() > values.len) {
+            std.mem.set(Value, self.getValues()[values.len..], filler.?);
+        }
     }
 
     pub fn asObjectAddress(self: *VectorObject) [*]u64 {
@@ -37,20 +55,26 @@ pub const VectorObject = packed struct {
         return self.header.getMap().asVectorMap();
     }
 
+    pub fn getSize(self: *VectorObject) usize {
+        return self.getMap().getSize();
+    }
+
     pub fn getValues(self: *VectorObject) []Value {
-        return self.header.getMap().asVectorMap().getValues();
+        const object_memory = @ptrCast([*]u8, self);
+        const start_of_items = object_memory + @sizeOf(VectorObject);
+
+        return std.mem.bytesAsSlice(Value, start_of_items[0 .. self.getSize() * @sizeOf(Value)]);
     }
 
     pub fn clone(self: *VectorObject, heap: *Heap) !*VectorObject {
-        return create(heap, self.getMap());
+        return createWithValues(heap, self.getMap(), self.getValues(), null);
     }
 
     pub fn getSizeInMemory(self: *VectorObject) usize {
-        _ = self;
-        return requiredSizeForAllocation();
+        return requiredSizeForAllocation(self.getSize());
     }
 
-    pub fn requiredSizeForAllocation() usize {
-        return @sizeOf(VectorObject);
+    pub fn requiredSizeForAllocation(size: usize) usize {
+        return @sizeOf(VectorObject) + size * @sizeOf(Value);
     }
 };

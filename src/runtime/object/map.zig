@@ -637,34 +637,25 @@ const ByteVectorMap = packed struct {
 const VectorMap = packed struct {
     map: Map,
     size: Value,
-    // All the values in this vector come after here.
 
-    pub fn create(heap: *Heap, size: usize, filler: Value) !*VectorMap {
-        const memory_size = requiredSizeForAllocation(size);
+    pub fn create(heap: *Heap, size: usize) !*VectorMap {
+        const memory_size = requiredSizeForAllocation();
         const map_map = try getMapMap(heap);
 
         var memory_area = try heap.allocateInObjectSegment(memory_size);
         var self = @ptrCast(*VectorMap, memory_area);
-        self.init(map_map, size, filler);
+        self.init(map_map, size);
 
         return self;
     }
 
-    fn init(self: *VectorMap, map_map: Value, size: usize, filler: Value) void {
+    fn init(self: *VectorMap, map_map: Value, size: usize) void {
         self.map.init(.Vector, map_map);
         self.size = Value.fromUnsignedInteger(size);
-        std.mem.set(Value, self.getValues(), filler);
     }
 
     pub fn asValue(self: *VectorMap) Value {
         return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
-    }
-
-    pub fn getValues(self: *VectorMap) []Value {
-        const object_memory = @ptrCast([*]u8, self);
-        const start_of_items = object_memory + @sizeOf(VectorMap);
-
-        return std.mem.bytesAsSlice(Value, start_of_items[0 .. self.size.asUnsignedInteger() * @sizeOf(Value)]);
     }
 
     pub fn getSize(self: *VectorMap) usize {
@@ -672,10 +663,11 @@ const VectorMap = packed struct {
     }
 
     pub fn getSizeInMemory(self: *VectorMap) usize {
-        return requiredSizeForAllocation(self.size.asUnsignedInteger());
+        _ = self;
+        return requiredSizeForAllocation();
     }
 
-    pub fn requiredSizeForAllocation(size: usize) usize {
-        return @sizeOf(VectorMap) + size * @sizeOf(Value);
+    pub fn requiredSizeForAllocation() usize {
+        return @sizeOf(VectorMap);
     }
 };

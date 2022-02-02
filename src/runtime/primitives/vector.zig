@@ -41,15 +41,12 @@ pub fn VectorCopySize_FillingExtrasWith(
         return runtime_error.raiseError(allocator, context, "First argument of _VectorCopySize:FillingExtrasWith: must be positive", .{});
     }
 
-    const required_memory = Object.Map.Vector.requiredSizeForAllocation(@intCast(u64, size)) + Object.Vector.requiredSizeForAllocation();
+    const required_memory = Object.Map.Vector.requiredSizeForAllocation() + Object.Vector.requiredSizeForAllocation(@intCast(u64, size));
     try heap.ensureSpaceInEden(required_memory);
 
-    const filler = arguments[1].getValue();
-
     if (size == 0) {
-        const vector_map = try Object.Map.Vector.create(heap, 0, filler);
-        const vector = try Object.Vector.create(heap, vector_map);
-
+        const vector_map = try Object.Map.Vector.create(heap, 0);
+        const vector = try Object.Vector.createWithValues(heap, vector_map, &[_]Value{}, null);
         return vector.asValue();
     } else {
         var receiver = tracked_receiver.getValue();
@@ -57,18 +54,13 @@ pub fn VectorCopySize_FillingExtrasWith(
             return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorCopySize:FillingExtrasWith:", .{});
         }
 
+        const filler = arguments[1].getValue();
+
         // FIXME: This first fills up the new map with the filler and then overwrites the
         //        values which we do have. This is too much work, let's just fill the space
         //        that's actually extra.
-        const new_vector_map = try Object.Map.Vector.create(heap, @intCast(u64, size), filler);
-        const new_vector = try Object.Vector.create(heap, new_vector_map);
-
-        const new_vector_values = new_vector_map.getValues();
-        for (receiver.asObject().asVectorObject().getMap().getValues()) |value, i| {
-            if (i >= new_vector_values.len) break;
-            new_vector_values[i] = value;
-        }
-
+        const new_vector_map = try Object.Map.Vector.create(heap, @intCast(u64, size));
+        const new_vector = try Object.Vector.createWithValues(heap, new_vector_map, receiver.asObject().asVectorObject().getValues(), filler);
         return new_vector.asValue();
     }
 }
@@ -93,7 +85,7 @@ pub fn VectorSize(
         return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorSize", .{});
     }
 
-    return Value.fromUnsignedInteger(receiver.asObject().asVectorObject().getMap().getSize());
+    return Value.fromUnsignedInteger(receiver.asObject().asVectorObject().getSize());
 }
 
 /// Return the value at the given position of the receiver vector. If the given
