@@ -154,5 +154,9 @@ pub fn VectorAt_Put(
     }
 
     vector_values[@intCast(u64, position)] = new_value;
+    // Since the vector object could potentially be in an older space than the
+    // value stored in it, let's add the vector object to the remembered set.
+    try heap.rememberObjectReference(receiver, new_value);
+
     return tracked_receiver.getValue();
 }
