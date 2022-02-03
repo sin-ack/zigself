@@ -270,13 +270,8 @@ const SlotsMap = packed struct {
 /// Common code and fields shared between methods and blocks.
 const SlotsAndStatementsMap = packed struct {
     slots_map: SlotsMap,
-    /// The address of the statements to be executed when this method is
-    /// activated. The stored value is a 64-bit bitfield consisting of:
-    ///
-    /// - 2 bits of zeros
-    /// - 14 bits representing the amount of statements contained within
-    /// - 48 bits for the pointer to the statements slice
-    statements_address: Value,
+    /// The address of the ref-counted statement slice.
+    statements_ref: Value,
     /// Which script this method or block is defined in.
     script_ref: Value,
 
@@ -286,14 +281,14 @@ const SlotsAndStatementsMap = packed struct {
         map_map: Value,
         argument_slot_count: u8,
         regular_slot_count: u32,
-        statements: []AST.StatementNode,
+        statements: AST.Statements.Ref,
         script: Script.Ref,
     ) void {
         self.slots_map.init(regular_slot_count + argument_slot_count, map_map);
         self.slots_map.map.init(map_type, map_map);
         self.setArgumentSlotCount(argument_slot_count);
 
-        self.setStatementsSlice(statements);
+        self.statements_ref = Value.fromUnsignedInteger(@ptrToInt(statements.value));
         self.script_ref = Value.fromUnsignedInteger(@ptrToInt(script.value));
     }
 
@@ -301,21 +296,8 @@ const SlotsAndStatementsMap = packed struct {
         self.slots_map.properties = (self.slots_map.properties & @as(u32, 0xFF00FFFF)) | (@as(u32, count) << 16);
     }
 
-    fn setStatementsSlice(self: *SlotsAndStatementsMap, statements: []AST.StatementNode) void {
-        std.debug.assert(statements.len < (@as(usize, 1) << 14));
-        self.statements_address = Value.fromUnsignedInteger((statements.len << 48) | @ptrToInt(statements.ptr));
-    }
-
     pub fn finalize(self: *SlotsAndStatementsMap, allocator: Allocator) void {
-        const statements = self.getStatementsSlice();
-        for (statements) |*statement| {
-            statement.deinit(allocator);
-        }
-        // It will only be a real heap-allocated slice if it has items.
-        if (statements.len > 0) {
-            allocator.free(statements);
-        }
-
+        self.getStatements().unrefWithAllocator(allocator);
         self.getDefinitionScript().unref();
     }
 
@@ -323,17 +305,12 @@ const SlotsAndStatementsMap = packed struct {
         return Script.Ref{ .value = @intToPtr(*Script, self.script_ref.asUnsignedInteger()) };
     }
 
+    pub fn getStatements(self: *SlotsAndStatementsMap) AST.Statements.Ref {
+        return AST.Statements.Ref{ .value = @intToPtr(*AST.Statements, self.statements_ref.asUnsignedInteger()) };
+    }
+
     pub fn getStatementsSlice(self: *SlotsAndStatementsMap) []AST.StatementNode {
-        const statements_bitfield = self.statements_address.asUnsignedInteger();
-        if (statements_bitfield == 0) {
-            // We have exactly zero statements, so let's just return an empty slice.
-            return &[_]AST.StatementNode{};
-        }
-
-        const statements_length = (statements_bitfield & @as(u64, 0xFFFF000000000000)) >> 48;
-        const statements_address = statements_bitfield & @as(u64, 0x0000FFFFFFFFFFFF);
-
-        return @intToPtr([*]AST.StatementNode, statements_address)[0..statements_length];
+        return self.getStatements().value.statements;
     }
 
     pub fn getArgumentSlotCount(self: *SlotsAndStatementsMap) u8 {
@@ -380,7 +357,7 @@ const MethodMap = packed struct {
         heap: *Heap,
         argument_slot_count: u8,
         regular_slot_count: u32,
-        statements: []AST.StatementNode,
+        statements: AST.Statements.Ref,
         method_name: ByteVectorTheFirst,
         script: Script.Ref,
     ) !*MethodMap {
@@ -400,7 +377,7 @@ const MethodMap = packed struct {
         map_map: Value,
         argument_slot_count: u8,
         regular_slot_count: u32,
-        statements: []AST.StatementNode,
+        statements: AST.Statements.Ref,
         method_name: ByteVectorTheFirst,
         script: Script.Ref,
     ) void {
@@ -474,7 +451,7 @@ const BlockMap = packed struct {
         heap: *Heap,
         argument_slot_count: u8,
         regular_slot_count: u32,
-        statements: []AST.StatementNode,
+        statements: AST.Statements.Ref,
         parent_activation: *Activation,
         nonlocal_return_target_activation: *Activation,
         script: Script.Ref,
@@ -495,7 +472,7 @@ const BlockMap = packed struct {
         map_map: Value,
         argument_slot_count: u8,
         regular_slot_count: u32,
-        statements: []AST.StatementNode,
+        statements: AST.Statements.Ref,
         parent_activation: *Activation,
         nonlocal_return_target_activation: *Activation,
         script: Script.Ref,

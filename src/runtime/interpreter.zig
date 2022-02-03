@@ -210,21 +210,6 @@ fn executeMethod(
         assignable_slot_values.deinit();
     }
 
-    var statements = try std.ArrayList(AST.StatementNode).initCapacity(allocator, object_node.slots.len);
-    errdefer {
-        for (statements.items) |*statement| {
-            statement.deinit(allocator);
-        }
-        statements.deinit();
-    }
-
-    for (object_node.statements) |statement| {
-        var statement_copy = try ASTCopyVisitor.visitStatement(statement, allocator);
-        errdefer statement_copy.deinit(allocator);
-
-        try statements.append(statement_copy);
-    }
-
     // This will prevent garbage collections until the execution of slots at
     // least.
     var required_memory: usize = ByteVector.requiredSizeForAllocation(name.len);
@@ -236,18 +221,20 @@ fn executeMethod(
     try heap.ensureSpaceInEden(required_memory);
 
     context.script.ref();
+    object_node.statements.ref();
     // NOTE: Once we create the method map successfully, the ref we just created
     // above is owned by the method_map, and we shouldn't try to unref in case
     // of an error.
     var method_map = blk: {
         errdefer context.script.unref();
+        errdefer object_node.statements.unrefWithAllocator(allocator);
 
         const method_name_in_heap = try ByteVector.createFromString(heap, name);
         break :blk try Object.Map.Method.create(
             heap,
             @intCast(u8, arguments.len),
             @intCast(u32, object_node.slots.len),
-            statements.toOwnedSlice(),
+            object_node.statements,
             method_name_in_heap,
             context.script,
         );
@@ -300,7 +287,7 @@ pub fn executeSlot(
     context: *InterpreterContext,
 ) InterpreterError!?Value {
     var value = blk: {
-        if (slot_node.value == .Object and slot_node.value.Object.statements.len > 0) {
+        if (slot_node.value == .Object and slot_node.value.Object.statements.value.statements.len > 0) {
             break :blk try executeMethod(allocator, heap, slot_node.name, slot_node.value.Object.*, slot_node.arguments, context);
         } else {
             break :blk try executeExpression(allocator, heap, slot_node.value, context);
@@ -323,7 +310,7 @@ pub fn executeSlot(
 pub fn executeObject(allocator: Allocator, heap: *Heap, object_node: AST.ObjectNode, context: *InterpreterContext) InterpreterError!Value {
     // Verify that we are executing a slots object and not a method; methods
     // are created through executeSlot.
-    if (object_node.statements.len > 0) {
+    if (object_node.statements.value.statements.len > 0) {
         @panic("!!! Attempted to execute a non-slots object! Methods must be created via executeSlot.");
     }
 
@@ -372,21 +359,6 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
         assignable_slot_values.deinit();
     }
 
-    var statements = try std.ArrayList(AST.StatementNode).initCapacity(allocator, block.statements.len);
-    errdefer {
-        for (statements.items) |*statement| {
-            statement.deinit(allocator);
-        }
-        statements.deinit();
-    }
-
-    for (block.statements) |statement| {
-        var statement_copy = try ASTCopyVisitor.visitStatement(statement, allocator);
-        errdefer statement_copy.deinit(allocator);
-
-        try statements.append(statement_copy);
-    }
-
     // The latest activation is where the block was created, so it will always
     // be the parent activation (i.e., where we look for parent blocks' and the
     // method's slots).
@@ -410,17 +382,19 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
     try heap.ensureSpaceInEden(required_memory);
 
     context.script.ref();
+    block.statements.ref();
     // NOTE: Once we create the block map successfully, the ref we just created
     // above is owned by the block_map, and we shouldn't try to unref in case
     // of an error.
     var block_map = blk: {
         errdefer context.script.unref();
+        errdefer block.statements.unrefWithAllocator(allocator);
 
         break :blk try Object.Map.Block.create(
             heap,
             argument_slot_count,
             @intCast(u32, block.slots.len) - argument_slot_count,
-            statements.toOwnedSlice(),
+            block.statements,
             parent_activation,
             nonlocal_return_target_activation,
             context.script,

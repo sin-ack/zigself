@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Range = @import("./location_range.zig");
+const ref_counted = @import("../utility/ref_counted.zig");
 
 /// A node which describes a single script.
 pub const ScriptNode = struct {
@@ -55,9 +56,43 @@ pub const ExpressionNode = union(enum) {
     }
 };
 
+/// A ref-counted slice of statements.
+pub const Statements = struct {
+    ref: ref_counted.RefCount,
+    statements: []StatementNode,
+
+    pub const Ref = ref_counted.RefPtr(Statements);
+
+    /// Creates a new ref-counted statement slice. Takes ownership of the given
+    /// statements slice.
+    pub fn create(allocator: Allocator, statements: []StatementNode) !Statements.Ref {
+        const self = try allocator.create(Statements);
+        self.init(statements);
+
+        return Ref.adopt(self);
+    }
+
+    fn init(self: *Statements, statements: []StatementNode) void {
+        self.ref = .{};
+        self.statements = statements;
+    }
+
+    fn deinit(self: *Statements, allocator: Allocator) void {
+        for (self.statements) |*statement| {
+            statement.deinit(allocator);
+        }
+        allocator.free(self.statements);
+    }
+
+    pub fn destroy(self: *Statements, allocator: Allocator) void {
+        self.deinit(allocator);
+        allocator.destroy(self);
+    }
+};
+
 pub const ObjectNode = struct {
     slots: []SlotNode,
-    statements: []StatementNode,
+    statements: Statements.Ref,
 
     range: Range,
 
@@ -67,10 +102,7 @@ pub const ObjectNode = struct {
         }
         allocator.free(self.slots);
 
-        for (self.statements) |*statement| {
-            statement.deinit(allocator);
-        }
-        allocator.free(self.statements);
+        self.statements.unrefWithAllocator(allocator);
     }
 
     pub fn destroy(self: *ObjectNode, allocator: Allocator) void {
@@ -105,7 +137,7 @@ pub const SlotNode = struct {
 
 pub const BlockNode = struct {
     slots: []SlotNode,
-    statements: []StatementNode,
+    statements: Statements.Ref,
 
     range: Range,
 
@@ -115,10 +147,7 @@ pub const BlockNode = struct {
         }
         allocator.free(self.slots);
 
-        for (self.statements) |*statement| {
-            statement.deinit(allocator);
-        }
-        allocator.free(self.statements);
+        self.statements.unrefWithAllocator(allocator);
     }
 
     pub fn destroy(self: *BlockNode, allocator: Allocator) void {

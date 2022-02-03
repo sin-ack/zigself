@@ -137,8 +137,8 @@ pub fn dumpObject(self: *Self, object: AST.ObjectNode) void {
     self.setStem(.Last);
     self.print("statements:\n", .{});
     self.indent();
-    for (object.statements) |statement, i| {
-        self.setStem(if (i == object.statements.len - 1) .Last else .NotLast);
+    for (object.statements.value.statements) |statement, i| {
+        self.setStem(if (i == object.statements.value.statements.len - 1) .Last else .NotLast);
         self.dumpStatement(statement);
     }
     self.dedent();
@@ -192,8 +192,8 @@ pub fn dumpBlock(self: *Self, block: AST.BlockNode) void {
     self.setStem(.Last);
     self.print("statements:\n", .{});
     self.indent();
-    for (block.statements) |statement, i| {
-        self.setStem(if (i == block.statements.len - 1) .Last else .NotLast);
+    for (block.statements.value.statements) |statement, i| {
+        self.setStem(if (i == block.statements.value.statements.len - 1) .Last else .NotLast);
         self.dumpStatement(statement);
     }
     self.dedent();

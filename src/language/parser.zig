@@ -202,7 +202,7 @@ fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.Expr
         errdefer object.destroy(self.allocator);
 
         if (object.slots.len > 0) {
-            if (object.statements.len == 0) {
+            if (object.statements.value.statements.len == 0) {
                 return AST.ExpressionNode{ .Object = object };
             } else {
                 // TODO: Recovery
@@ -212,15 +212,15 @@ fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.Expr
                 return null;
             }
         } else {
-            if (object.statements.len == 0) {
+            if (object.statements.value.statements.len == 0) {
                 // Just an empty object.
                 return AST.ExpressionNode{ .Object = object };
-            } else if (object.statements.len == 1) {
-                const statement = object.statements[0];
+            } else if (object.statements.value.statements.len == 1) {
+                const statement = object.statements.value.statements[0];
 
                 // This is done so that the slice is freed but the expression isn't.
                 // The optional should not fail because we're just reducing the size.
-                object.statements = self.allocator.resize(object.statements, 0).?;
+                object.statements.value.statements = self.allocator.resize(object.statements.value.statements, 0).?;
                 object.destroy(self.allocator);
 
                 return statement.expression;
@@ -314,7 +314,7 @@ fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
 
     const object_node = try self.allocator.create(AST.ObjectNode);
     object_node.slots = slots.toOwnedSlice();
-    object_node.statements = statements.toOwnedSlice();
+    object_node.statements = try AST.Statements.create(self.allocator, statements.toOwnedSlice());
     object_node.range = .{ .start = start, .end = self.lexer.token_start };
 
     return object_node;
@@ -424,7 +424,7 @@ fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
 
     const block_node = try self.allocator.create(AST.BlockNode);
     block_node.slots = slots.toOwnedSlice();
-    block_node.statements = statements.toOwnedSlice();
+    block_node.statements = try AST.Statements.create(self.allocator, statements.toOwnedSlice());
     block_node.range = .{ .start = start, .end = self.lexer.token_start };
 
     return block_node;

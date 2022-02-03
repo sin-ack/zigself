@@ -108,9 +108,9 @@ pub fn visitObject(object: AST.ObjectNode, allocator: Allocator) !*AST.ObjectNod
     var object_copy = try allocator.create(AST.ObjectNode);
     errdefer allocator.destroy(object_copy);
 
-    try visitSlotsStatementsCommon(object.slots, object.statements, &slots, &statements, allocator);
+    try visitSlotsStatementsCommon(object.slots, object.statements.value.statements, &slots, &statements, allocator);
     object_copy.slots = slots;
-    object_copy.statements = statements;
+    object_copy.statements = try AST.Statements.create(allocator, statements);
     object_copy.range = object.range;
 
     return object_copy;
@@ -123,9 +123,9 @@ pub fn visitBlock(block: AST.BlockNode, allocator: Allocator) !*AST.BlockNode {
     var block_copy = try allocator.create(AST.BlockNode);
     errdefer allocator.destroy(block_copy);
 
-    try visitSlotsStatementsCommon(block.slots, block.statements, &slots, &statements, allocator);
+    try visitSlotsStatementsCommon(block.slots, block.statements.value.statements, &slots, &statements, allocator);
     block_copy.slots = slots;
-    block_copy.statements = statements;
+    block_copy.statements = try AST.Statements.create(allocator, statements);
     block_copy.range = block.range;
 
     return block_copy;
