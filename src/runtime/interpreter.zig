@@ -72,7 +72,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
     defer heap.setActivationStack(null);
 
     var tracked_lobby = try heap.track(lobby);
-    defer tracked_lobby.untrackAndDestroy(heap);
+    defer tracked_lobby.untrack(heap);
 
     var context = InterpreterContext{
         .self_object = tracked_lobby,
@@ -87,7 +87,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
         std.debug.assert(activation_stack.items.len == 0);
 
         if (last_expression_result) |result| {
-            result.untrackAndDestroy(heap);
+            result.untrack(heap);
         }
 
         const expression_result = executeStatement(allocator, heap, statement, &context) catch |err| {
@@ -111,7 +111,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
                     std.debug.print("A non-local return has bubbled up to the top! This is likely a bug!", .{});
                     runtime_error.printTraceFromActivationStack(activation_stack.items);
                     context.current_nonlocal_return.?.target_activation.deinit();
-                    context.current_nonlocal_return.?.value.untrackAndDestroy(heap);
+                    context.current_nonlocal_return.?.value.untrack(heap);
 
                     // Since the execution was abruptly stopped the activation
                     // stack wasn't properly unwound, so let's do that now.
@@ -150,7 +150,7 @@ pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, p
     var last_expression_result: ?Heap.Tracked = null;
     for (script.value.ast_root.?.statements) |statement| {
         if (last_expression_result) |result| {
-            result.untrackAndDestroy(heap);
+            result.untrack(heap);
         }
 
         const expression_result = executeStatement(allocator, heap, statement, &child_context) catch |err| {
@@ -205,7 +205,7 @@ fn executeMethod(
     var assignable_slot_values = try std.ArrayList(Heap.Tracked).initCapacity(allocator, arguments.len);
     defer {
         for (assignable_slot_values.items) |value| {
-            value.untrackAndDestroy(heap);
+            value.untrack(heap);
         }
         assignable_slot_values.deinit();
     }
@@ -265,7 +265,7 @@ fn executeMethod(
     }
 
     const tracked_method_map = try heap.track(method_map.asValue());
-    defer tracked_method_map.untrackAndDestroy(heap);
+    defer tracked_method_map.untrack(heap);
 
     for (object_node.slots) |slot_node| {
         var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Method, tracked_method_map.getValue().asObject().asMap().asMethodMap(), slot_init_offset, context);
@@ -307,7 +307,7 @@ pub fn executeSlot(
         }
     };
     const tracked_value = try heap.track(value);
-    defer tracked_value.untrackAndDestroy(heap);
+    defer tracked_value.untrack(heap);
 
     const slot_name = try ByteVector.createFromString(heap, slot_node.name);
     if (slot_node.is_mutable) {
@@ -330,7 +330,7 @@ pub fn executeObject(allocator: Allocator, heap: *Heap, object_node: AST.ObjectN
     var assignable_slot_values = std.ArrayList(Heap.Tracked).init(allocator);
     defer {
         for (assignable_slot_values.items) |value| {
-            value.untrackAndDestroy(heap);
+            value.untrack(heap);
         }
         assignable_slot_values.deinit();
     }
@@ -367,7 +367,7 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
     var assignable_slot_values = try std.ArrayList(Heap.Tracked).initCapacity(allocator, argument_slot_count);
     defer {
         for (assignable_slot_values.items) |value| {
-            value.untrackAndDestroy(heap);
+            value.untrack(heap);
         }
         assignable_slot_values.deinit();
     }
@@ -448,7 +448,7 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
     }
 
     const tracked_block_map = try heap.track(block_map.asValue());
-    defer tracked_block_map.untrackAndDestroy(heap);
+    defer tracked_block_map.untrack(heap);
 
     // Add all the non-argument slots
     for (block.slots) |slot_node| {
@@ -500,7 +500,7 @@ pub fn executeIdentifier(allocator: Allocator, heap: *Heap, identifier: AST.Iden
         }
 
         var tracked_receiver = try heap.track(receiver);
-        defer tracked_receiver.untrackAndDestroy(heap);
+        defer tracked_receiver.untrack(heap);
 
         return try message_interpreter.executePrimitiveMessage(allocator, heap, identifier.range, tracked_receiver, identifier.value, &[_]Heap.Tracked{}, context);
     }
@@ -519,7 +519,7 @@ pub fn executeIdentifier(allocator: Allocator, heap: *Heap, identifier: AST.Iden
             receiver.asObject().asBlockObject().isCorrectMessageForBlockExecution(identifier.value))
         {
             var tracked_receiver = try heap.track(receiver);
-            defer tracked_receiver.untrackAndDestroy(heap);
+            defer tracked_receiver.untrack(heap);
 
             return try message_interpreter.executeBlockMessage(allocator, heap, identifier.range, tracked_receiver, &[_]Heap.Tracked{}, context);
         }
@@ -528,7 +528,7 @@ pub fn executeIdentifier(allocator: Allocator, heap: *Heap, identifier: AST.Iden
     if (try context.self_object.getValue().lookup(.Read, identifier.value, allocator, context)) |lookup_result| {
         if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
             var tracked_lookup_result = try heap.track(lookup_result);
-            defer tracked_lookup_result.untrackAndDestroy(heap);
+            defer tracked_lookup_result.untrack(heap);
 
             return try message_interpreter.executeMethodMessage(
                 allocator,

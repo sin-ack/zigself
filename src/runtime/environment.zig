@@ -89,17 +89,17 @@ pub fn globalFalse() Value {
 
 pub fn teardownGlobalObjects(heap: *Heap) void {
     if (global_nil) |*nil_object| {
-        nil_object.untrackAndDestroy(heap);
+        nil_object.untrack(heap);
         global_nil = null;
     }
 
     if (global_true) |*true_object| {
-        true_object.untrackAndDestroy(heap);
+        true_object.untrack(heap);
         global_true = null;
     }
 
     if (global_false) |*false_object| {
-        false_object.untrackAndDestroy(heap);
+        false_object.untrack(heap);
         global_false = null;
     }
 

@@ -5,6 +5,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 
 const hash = @import("../utility/hash.zig");
 const Value = @import("./value.zig").Value;
@@ -36,6 +37,11 @@ to_space: Space,
 /// This is the space where permanent objects reside. It can be expanded as
 /// memory requirements of the program grows.
 old_space: Space,
+
+/// This is where all the handles for tracked objects are stored. This arena
+/// lives as long as the heap does, and will constantly grow.
+handle_area: ArenaAllocator,
+handle_allocator: Allocator,
 
 allocator: Allocator,
 activation_stack: ?*std.ArrayList(*Activation),
@@ -77,6 +83,9 @@ fn init(self: *Self, allocator: Allocator) !void {
     self.from_space.tenure_target = &self.old_space;
     self.eden.tenure_target = &self.from_space;
 
+    self.handle_area = std.heap.ArenaAllocator.init(allocator);
+    self.handle_allocator = self.handle_area.allocator();
+
     if (GC_DEBUG) {
         std.debug.print("Heap.init: Eden is {*}-{*}\n", .{ self.eden.memory.ptr, self.eden.memory.ptr + self.eden.memory.len });
         std.debug.print("Heap.init: From space is {*}-{*}\n", .{ self.from_space.memory.ptr, self.from_space.memory.ptr + self.from_space.memory.len });
@@ -90,6 +99,7 @@ fn deinit(self: *Self) void {
     self.from_space.deinit(self.allocator);
     self.to_space.deinit(self.allocator);
     self.old_space.deinit(self.allocator);
+    self.handle_area.deinit();
 }
 
 // Attempts to allocate `size` bytes in the object segment of the eden. If
@@ -128,12 +138,19 @@ pub fn markAddressAsNeedingFinalization(self: *Self, address: [*]u64) !void {
     try self.eden.addToFinalizationSet(self.allocator, address);
 }
 
+fn allocateHandle(self: *Self) !*[*]u64 {
+    return self.handle_allocator.create([*]u64);
+}
+
 /// Track the given value, returning a Tracked. When a garbage collection
 /// occurs, the value will be updated with the new location.
 pub fn track(self: *Self, value: Value) !Tracked {
     if (value.isObjectReference()) {
-        const tracked = try Tracked.createWithObject(self.allocator, value);
-        _ = try self.eden.startTracking(self.allocator, tracked);
+        const handle = try self.allocateHandle();
+        handle.* = value.asObjectAddress();
+
+        const tracked = Tracked.createWithObject(handle);
+        _ = try self.eden.startTracking(self.allocator, handle);
 
         return tracked;
     } else {
@@ -143,8 +160,8 @@ pub fn track(self: *Self, value: Value) !Tracked {
 
 /// Untracks the given value.
 pub fn untrack(self: *Self, tracked: Tracked) void {
-    if (tracked.tracker == .Object) {
-        _ = self.eden.stopTracking(tracked);
+    if (tracked.value == .Object) {
+        _ = self.eden.stopTracking(tracked.value.Object);
     }
 }
 
@@ -229,7 +246,7 @@ const RememberedSet = std.AutoArrayHashMapUnmanaged([*]u64, usize);
 /// anymore. See `Space.finalization_set` for more information.
 const FinalizationSet = std.AutoArrayHashMapUnmanaged([*]u64, void);
 /// A set of objects which are tracked across garbage collection events.
-const TrackedSet = std.AutoArrayHashMapUnmanaged(*Tracked.Tracker, void);
+const TrackedSet = std.AutoArrayHashMapUnmanaged(*[*]u64, void);
 const Space = struct {
     /// The raw memory contents of the space. The space capacity can be learned
     /// with `memory.len`.
@@ -306,13 +323,6 @@ const Space = struct {
         while (finalization_it.next()) |entry| {
             var object = Value.fromObjectAddress(entry.key_ptr.*).asObject();
             object.finalize(allocator);
-        }
-
-        // Destroy everything in the tracked set. All tracked values become
-        // invalid after this point.
-        var tracked_it = self.tracked_set.iterator();
-        while (tracked_it.next()) |entry| {
-            allocator.destroy(entry.key_ptr.*);
         }
 
         self.finalization_set.deinit(allocator);
@@ -445,10 +455,10 @@ const Space = struct {
         }
 
         // Go through the tracked set, copying referenced objects
-        for (self.tracked_set.keys()) |tracker| {
-            const address = tracker.value.asObjectAddress();
-            tracker.value = Value.fromObjectAddress((try self.copyAddress(allocator, address, target_space, true)).?);
-            try target_space.addToTrackedSet(allocator, Tracked{ .tracker = .{ .Object = tracker } });
+        for (self.tracked_set.keys()) |handle| {
+            const address = handle.*;
+            handle.* = (try self.copyAddress(allocator, address, target_space, true)).?;
+            try target_space.addToTrackedSet(allocator, handle);
         }
 
         {
@@ -727,23 +737,21 @@ const Space = struct {
     }
 
     /// Adds the given tracked value into the tracked set of this space.
-    pub fn addToTrackedSet(self: *Space, allocator: Allocator, tracked: Tracked) !void {
-        try self.tracked_set.put(allocator, tracked.tracker.Object, .{});
+    pub fn addToTrackedSet(self: *Space, allocator: Allocator, handle: *[*]u64) !void {
+        try self.tracked_set.put(allocator, handle, .{});
     }
 
     /// Returns whether the tracked set contains the given tracked value.
-    pub fn trackedSetContains(self: *Space, tracked: Tracked) !void {
-        return self.tracked_set.contains(tracked.tracker);
+    pub fn trackedSetContains(self: *Space, handle: *[*]u64) !void {
+        return self.tracked_set.contains(handle);
     }
 
     pub const RemoveFromTrackedSetError = error{AddressNotInTrackedSet};
-    /// Removes the given object tracker from the tracked set of this space.
-    /// Returns AddressNotInTrackedSet if the tracker was not in the tracked
+    /// Removes the given object handle from the tracked set of this space.
+    /// Returns AddressNotInTrackedSet if the handle was not in the tracked
     /// set.
-    pub fn removeFromTrackedSet(self: *Space, tracked: Tracked) !void {
-        std.debug.assert(tracked.tracker == .Object);
-
-        if (!self.tracked_set.swapRemove(tracked.tracker.Object)) {
+    pub fn removeFromTrackedSet(self: *Space, handle: *[*]u64) !void {
+        if (!self.tracked_set.swapRemove(handle)) {
             return RemoveFromTrackedSetError.AddressNotInTrackedSet;
         }
     }
@@ -764,21 +772,20 @@ const Space = struct {
 
     /// Find the space which has this value, and add the tracked value to the
     /// tracked set of that space.
-    pub fn startTracking(self: *Space, allocator: Allocator, tracked: Tracked) Allocator.Error!bool {
-        std.debug.assert(tracked.tracker == .Object);
-        const address = tracked.tracker.Object.value.asObjectAddress();
+    pub fn startTracking(self: *Space, allocator: Allocator, handle: *[*]u64) Allocator.Error!bool {
+        const address = handle.*;
 
         if (self.objectSegmentContains(address) or self.byteVectorSegmentContains(address)) {
-            try self.addToTrackedSet(allocator, tracked);
+            try self.addToTrackedSet(allocator, handle);
             return true;
         }
 
         if (self.scavenge_target) |scavenge_target| {
-            if (try scavenge_target.startTracking(allocator, tracked)) return true;
+            if (try scavenge_target.startTracking(allocator, handle)) return true;
         }
 
         if (self.tenure_target) |tenure_target| {
-            if (try tenure_target.startTracking(allocator, tracked)) return true;
+            if (try tenure_target.startTracking(allocator, handle)) return true;
         }
 
         return false;
@@ -786,21 +793,20 @@ const Space = struct {
 
     /// Find the space which has this value, and remove the tracked value from
     /// the tracked set of that space.
-    pub fn stopTracking(self: *Space, tracked: Tracked) bool {
-        std.debug.assert(tracked.tracker == .Object);
-        const address = tracked.tracker.Object.value.asObjectAddress();
+    pub fn stopTracking(self: *Space, handle: *[*]u64) bool {
+        const address = handle.*;
 
         if (self.objectSegmentContains(address) or self.byteVectorSegmentContains(address)) {
-            self.removeFromTrackedSet(tracked) catch unreachable;
+            self.removeFromTrackedSet(handle) catch unreachable;
             return true;
         }
 
         if (self.scavenge_target) |scavenge_target| {
-            if (scavenge_target.stopTracking(tracked)) return true;
+            if (scavenge_target.stopTracking(handle)) return true;
         }
 
         if (self.tenure_target) |tenure_target| {
-            if (tenure_target.stopTracking(tracked)) return true;
+            if (tenure_target.stopTracking(handle)) return true;
         }
 
         return false;
@@ -810,44 +816,29 @@ const Space = struct {
 /// A tracked heap value. This value is updated whenever garbage collection
 /// occurs and the object moves.
 pub const Tracked = struct {
-    tracker: union(enum) {
-        Object: *Tracker,
+    value: union(enum) {
+        Object: *[*]u64,
         Literal: Value,
     },
 
-    pub const Tracker = struct {
-        value: Value,
-    };
-
-    pub fn createWithObject(allocator: Allocator, value: Value) !Tracked {
-        std.debug.assert(value.isObjectReference());
-        const tracker = try allocator.create(Tracker);
-        tracker.value = value;
-
-        return Tracked{ .tracker = .{ .Object = tracker } };
+    pub fn createWithObject(handle: *[*]u64) Tracked {
+        return Tracked{ .value = .{ .Object = handle } };
     }
 
     pub fn createWithLiteral(value: Value) Tracked {
         std.debug.assert(!value.isObjectReference());
-        return Tracked{ .tracker = .{ .Literal = value } };
+        return Tracked{ .value = .{ .Literal = value } };
     }
 
-    pub fn destroy(self: Tracked, allocator: Allocator) void {
-        if (self.tracker == .Object) {
-            allocator.destroy(self.tracker.Object);
-        }
-    }
-
-    pub fn untrackAndDestroy(self: Tracked, heap: *Self) void {
-        if (self.tracker == .Object) {
+    pub fn untrack(self: Tracked, heap: *Self) void {
+        if (self.value == .Object) {
             heap.untrack(self);
-            self.destroy(heap.allocator);
         }
     }
 
     pub fn getValue(self: Tracked) Value {
-        return switch (self.tracker) {
-            .Object => |t| t.value,
+        return switch (self.value) {
+            .Object => |t| Value.fromObjectAddress(t.*),
             .Literal => |t| t,
         };
     }

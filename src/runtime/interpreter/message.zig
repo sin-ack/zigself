@@ -31,7 +31,7 @@ fn getMessageArguments(
     var arguments = try std.ArrayList(Heap.Tracked).initCapacity(allocator, ast_arguments.len);
     errdefer {
         for (arguments.items) |argument| {
-            argument.untrackAndDestroy(heap);
+            argument.untrack(heap);
         }
         arguments.deinit();
     }
@@ -39,7 +39,7 @@ fn getMessageArguments(
     for (ast_arguments) |argument| {
         var expression_result = try root_interpreter.executeExpression(allocator, heap, argument, context);
         var tracked_result = try heap.track(expression_result);
-        errdefer tracked_result.untrackAndDestroy(heap);
+        errdefer tracked_result.untrack(heap);
 
         try arguments.append(tracked_result);
     }
@@ -142,7 +142,7 @@ pub fn executeBlockMessage(
     var last_expression_result: ?Heap.Tracked = null;
     for (block_object.getStatementsSlice()) |statement| {
         if (last_expression_result) |last_result| {
-            last_result.untrackAndDestroy(heap);
+            last_result.untrack(heap);
         }
 
         const expression_result = root_interpreter.executeStatement(allocator, heap, statement, context) catch |err|
@@ -160,7 +160,7 @@ pub fn executeBlockMessage(
     did_execute_normally = true;
 
     if (last_expression_result) |last_result| {
-        defer last_result.untrackAndDestroy(heap);
+        defer last_result.untrack(heap);
         return last_result.getValue();
     } else {
         return environment.globalNil();
@@ -243,7 +243,7 @@ pub fn executeMethodMessage(
     var last_expression_result: ?Heap.Tracked = null;
     for (method_object.getStatementsSlice()) |statement| {
         if (last_expression_result) |last_result| {
-            last_result.untrackAndDestroy(heap);
+            last_result.untrack(heap);
         }
 
         const expression_result = root_interpreter.executeStatement(allocator, heap, statement, context) catch |err| {
@@ -273,7 +273,7 @@ pub fn executeMethodMessage(
     did_execute_normally = true;
 
     if (last_expression_result) |last_result| {
-        defer last_result.untrackAndDestroy(heap);
+        defer last_result.untrack(heap);
         return last_result.getValue();
     } else {
         return environment.globalNil();
@@ -341,7 +341,7 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
     // Check for assignable slots
     if (message.message_name[message.message_name.len - 1] == ':') {
         var tracked_receiver = try heap.track(receiver);
-        defer tracked_receiver.untrackAndDestroy(heap);
+        defer tracked_receiver.untrack(heap);
 
         if (try executeAssignmentMessage(allocator, heap, tracked_receiver, message.message_name, message.arguments[0], context)) |value| {
             return value;
@@ -359,12 +359,12 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
         }
 
         var tracked_receiver = try heap.track(receiver);
-        defer tracked_receiver.untrackAndDestroy(heap);
+        defer tracked_receiver.untrack(heap);
 
         const arguments = try getMessageArguments(allocator, heap, message.arguments, context);
         defer {
             for (arguments) |argument| {
-                argument.untrackAndDestroy(heap);
+                argument.untrack(heap);
             }
             allocator.free(arguments);
         }
@@ -386,12 +386,12 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
             block_receiver.asObject().asBlockObject().isCorrectMessageForBlockExecution(message.message_name))
         {
             var tracked_receiver = try heap.track(block_receiver);
-            defer tracked_receiver.untrackAndDestroy(heap);
+            defer tracked_receiver.untrack(heap);
 
             const arguments = try getMessageArguments(allocator, heap, message.arguments, context);
             defer {
                 for (arguments) |argument| {
-                    argument.untrackAndDestroy(heap);
+                    argument.untrack(heap);
                 }
                 allocator.free(arguments);
             }
@@ -403,10 +403,10 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
     if (try receiver.lookup(.Read, message.message_name, allocator, context)) |lookup_result| {
         if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
             var tracked_receiver = try heap.track(receiver);
-            defer tracked_receiver.untrackAndDestroy(heap);
+            defer tracked_receiver.untrack(heap);
 
             var tracked_lookup_result = try heap.track(lookup_result);
-            defer tracked_lookup_result.untrackAndDestroy(heap);
+            defer tracked_lookup_result.untrack(heap);
 
             const arguments = try getMessageArguments(allocator, heap, message.arguments, context);
             defer allocator.free(arguments);
