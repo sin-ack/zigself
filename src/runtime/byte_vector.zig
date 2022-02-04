@@ -12,15 +12,18 @@ const Self = @This();
 header: *align(@alignOf(u64)) Header,
 
 pub fn createFromString(heap: *Heap, string: []const u8) !Self {
-    var memory_area = try heap.allocateInByteVectorSegment(requiredSizeForAllocation(string.len));
+    var self = try createUninitialized(heap, string.len);
+    std.mem.copy(u8, self.getValues(), string);
+    return self;
+}
+
+pub fn createUninitialized(heap: *Heap, size: usize) !Self {
+    var memory_area = try heap.allocateInByteVectorSegment(requiredSizeForAllocation(size));
     var header = @ptrCast(*Header, memory_area);
 
-    header.init(string.len);
+    header.init(size);
 
-    var self = Self{ .header = header };
-    std.mem.copy(u8, self.getValues(), string);
-
-    return self;
+    return Self{ .header = header };
 }
 
 pub fn fromAddress(address: [*]u64) Self {
