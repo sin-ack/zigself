@@ -47,7 +47,7 @@ pub fn addressIsObject(address: [*]u64) bool {
 
 pub fn fromAddress(address: [*]u64) Self {
     if (!addressIsObject(address)) {
-        std.debug.panic("!!! Object.fromAddress got an address that does NOT contain an object marker!", .{});
+        std.debug.panic("!!! Object.fromAddress got an address ({*}) that does NOT contain an object marker ({x})!", .{ address, address[0] });
     }
 
     return .{ .header = @ptrCast(*align(@alignOf(u64)) Header, address) };
