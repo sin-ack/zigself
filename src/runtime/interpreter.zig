@@ -46,6 +46,10 @@ pub const InterpreterContext = struct {
         /// its destination.
         value: Heap.Tracked,
     },
+    /// A mapping from argument counts to the related block message names.
+    /// Since block names will not be unique, this mapping allows us to store
+    /// a single instance of each message name for the respective block arities.
+    block_message_names: *std.AutoArrayHashMapUnmanaged(u8, Heap.Tracked),
 };
 
 // FIXME: These aren't very nice. Collect them into a single place.
@@ -74,6 +78,16 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
     var tracked_lobby = try heap.track(lobby);
     defer tracked_lobby.untrack(heap);
 
+    var block_message_names = std.AutoArrayHashMapUnmanaged(u8, Heap.Tracked){};
+    defer {
+        var it = block_message_names.iterator();
+        while (it.next()) |entry| {
+            entry.value_ptr.untrack(heap);
+        }
+
+        block_message_names.deinit(allocator);
+    }
+
     var context = InterpreterContext{
         .self_object = tracked_lobby,
         .lobby = tracked_lobby,
@@ -81,6 +95,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
         .script = script,
         .current_error = null,
         .current_nonlocal_return = null,
+        .block_message_names = &block_message_names,
     };
     var last_expression_result: ?Heap.Tracked = null;
     for (script.value.ast_root.?.statements) |statement| {
@@ -146,6 +161,7 @@ pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, p
         .script = script,
         .current_error = null,
         .current_nonlocal_return = null,
+        .block_message_names = parent_context.block_message_names,
     };
     var last_expression_result: ?Heap.Tracked = null;
     for (script.value.ast_root.?.statements) |statement| {

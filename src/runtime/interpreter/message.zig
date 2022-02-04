@@ -47,6 +47,45 @@ fn getMessageArguments(
     return arguments.toOwnedSlice();
 }
 
+fn requiredSizeForBlockMessageName(argument_count: u8) usize {
+    var needed_space: usize = 5; // value
+    if (argument_count > 0) {
+        needed_space += 1; // :
+        needed_space += 5 * (argument_count - 1); // Any other With:s needed
+    }
+
+    return needed_space;
+}
+
+fn writeBlockMessageName(name: []u8, argument_count: u8) void {
+    std.debug.assert(name.len == requiredSizeForBlockMessageName(argument_count));
+    std.mem.copy(u8, name, "value");
+
+    if (argument_count > 0) {
+        name[5] = ':';
+
+        var remaining_buffer = name[6..];
+        while (remaining_buffer.len > 0) {
+            std.mem.copy(u8, remaining_buffer, "With:");
+            remaining_buffer = remaining_buffer[5..];
+        }
+    }
+}
+
+fn getOrCreateBlockMessageName(allocator: Allocator, heap: *Heap, context: *InterpreterContext, argument_count: u8) !Heap.Tracked {
+    const result = try context.block_message_names.getOrPut(allocator, argument_count);
+    if (result.found_existing) {
+        return result.value_ptr.*;
+    } else {
+        const byte_vector = try ByteVector.createUninitialized(heap, requiredSizeForBlockMessageName(argument_count));
+        writeBlockMessageName(byte_vector.getValues(), argument_count);
+
+        const tracked_value = try heap.track(byte_vector.asValue());
+        result.value_ptr.* = tracked_value;
+        return tracked_value;
+    }
+}
+
 pub fn executeBlockMessage(
     allocator: Allocator,
     heap: *Heap,
@@ -83,20 +122,23 @@ pub fn executeBlockMessage(
         return runtime_error.raiseError(allocator, context, "Maximum stack size reached", .{});
     }
 
-    // Ensure that we won't cause a GC by activating the block.
-    try heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(block_object.getAssignableSlotCount()));
-
-    // Refresh the pointer in case a GC happened
-    block_object = block_value.getValue().asObject().asBlockObject();
-
-    var argument_values = try allocator.alloc(Value, arguments.len);
-    defer allocator.free(argument_values);
-    for (arguments) |argument, i| {
-        argument_values[i] = argument.getValue();
-    }
-
-    context.script.ref();
+    const tracked_message_name = try getOrCreateBlockMessageName(allocator, heap, context, @intCast(u8, arguments.len));
     const block_activation = blk: {
+        errdefer tracked_message_name.untrack(heap);
+
+        // Ensure that we won't cause a GC by activating the block.
+        try heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(block_object.getAssignableSlotCount()));
+
+        // Refresh the pointer in case a GC happened
+        block_object = block_value.getValue().asObject().asBlockObject();
+
+        var argument_values = try allocator.alloc(Value, arguments.len);
+        defer allocator.free(argument_values);
+        for (arguments) |argument, i| {
+            argument_values[i] = argument.getValue();
+        }
+
+        context.script.ref();
         errdefer context.script.unref();
 
         const activation = try block_object.activateBlock(
@@ -104,6 +146,7 @@ pub fn executeBlockMessage(
             heap,
             parent_activation.activation_object,
             argument_values,
+            tracked_message_name,
             message_range,
             context.script,
         );
@@ -204,7 +247,6 @@ pub fn executeMethodMessage(
             heap,
             receiver.getValue(),
             argument_values,
-            ByteVector.fromAddress(method_object.getMap().method_name.asObjectAddress()).getValues(),
             message_range,
             context.script,
         );

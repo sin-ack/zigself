@@ -491,16 +491,16 @@ pub const Method = packed struct {
         heap: *Heap,
         receiver: Value,
         arguments: []Value,
-        message_name: []const u8,
         message_range: Range,
         message_script: Script.Ref,
     ) !*RuntimeActivation {
-        const message_name_copy = try allocator.dupe(u8, message_name);
-        errdefer allocator.free(message_name_copy);
-
         const activation_object = try Activation.create(heap, .Method, self.slots.header.getMap(), self.getAssignableSlots(), receiver);
         activation_object.setArguments(arguments);
-        return try RuntimeActivation.create(allocator, activation_object.asValue(), message_name_copy, message_range, message_script);
+
+        const tracked_method_name = try heap.track(self.getMap().method_name);
+        errdefer tracked_method_name.untrack(heap);
+
+        return try RuntimeActivation.create(allocator, heap, activation_object.asValue(), tracked_method_name, message_range, message_script, true);
     }
 
     pub fn requiredSizeForAllocation(assignable_slot_count: u8) usize {
@@ -607,29 +607,6 @@ pub const Block = packed struct {
         return remaining_message.len == 0;
     }
 
-    fn createMessageNameForBlock(self: *Block, allocator: Allocator) ![]const u8 {
-        var needed_space: usize = 5; // value
-        if (self.getArgumentSlotCount() > 0) {
-            needed_space += 1; // :
-            needed_space += 5 * (self.getArgumentSlotCount() - 1); // Any other With:s needed
-        }
-
-        var message_name = try allocator.alloc(u8, needed_space);
-        std.mem.copy(u8, message_name, "value");
-
-        if (self.getArgumentSlotCount() > 0) {
-            message_name[5] = ':';
-
-            var remaining_buffer = message_name[6..];
-            while (remaining_buffer.len > 0) {
-                std.mem.copy(u8, remaining_buffer, "With:");
-                remaining_buffer = remaining_buffer[5..];
-            }
-        }
-
-        return message_name;
-    }
-
     /// Creates a block activation object for this block and returns it. Borrows
     /// a ref for `message_script`.
     pub fn activateBlock(
@@ -638,16 +615,14 @@ pub const Block = packed struct {
         heap: *Heap,
         receiver: Value,
         arguments: []Value,
+        message_name: Heap.Tracked,
         message_range: Range,
         message_script: Script.Ref,
     ) !*RuntimeActivation {
-        const message_name = try self.createMessageNameForBlock(allocator);
-        errdefer allocator.free(message_name);
-
         const activation_object = try Activation.create(heap, .Block, self.slots.header.getMap(), self.getAssignableSlots(), receiver);
         activation_object.setArguments(arguments);
 
-        const activation = try RuntimeActivation.create(allocator, activation_object.asValue(), message_name, message_range, message_script);
+        const activation = try RuntimeActivation.create(allocator, heap, activation_object.asValue(), message_name, message_range, message_script, false);
         activation.parent_activation = self.getMap().getParentActivation();
         activation.nonlocal_return_target_activation = self.getMap().getNonlocalReturnTargetActivation();
         return activation;
