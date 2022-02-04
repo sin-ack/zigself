@@ -12,6 +12,7 @@ const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
 const ByteVector = @import("./byte_vector.zig");
 const Activation = @import("./activation.zig");
+const ActivationStack = Activation.ActivationStack;
 const debug = @import("../debug.zig");
 
 const GC_DEBUG = debug.GC_DEBUG;
@@ -44,7 +45,8 @@ handle_area: ArenaAllocator,
 handle_allocator: Allocator,
 
 allocator: Allocator,
-activation_stack: ?*std.ArrayList(*Activation),
+/// The stack of activations owned by interpreter code.
+activation_stack: ?*const ActivationStack,
 
 // FIXME: Make eden + new space configurable at runtime
 const EdenSize = 1 * 1024 * 1024;
@@ -106,24 +108,24 @@ fn deinit(self: *Self) void {
 // necessary, garbage collection is performed in the process.
 // The given address must be a multiple of `@sizeOf(u64)`.
 pub fn allocateInObjectSegment(self: *Self, size: usize) ![*]u64 {
-    const stack = if (self.activation_stack) |activation_stack|
-        activation_stack.items
+    const stack: *const ActivationStack = if (self.activation_stack) |activation_stack|
+        activation_stack
     else
-        &[_]*Activation{};
+        &.{};
 
     return try self.eden.allocateInObjectSegment(self.allocator, stack, size);
 }
 
 pub fn allocateInByteVectorSegment(self: *Self, size: usize) ![*]u64 {
-    const stack = if (self.activation_stack) |activation_stack|
-        activation_stack.items
+    const stack: *const ActivationStack = if (self.activation_stack) |activation_stack|
+        activation_stack
     else
-        &[_]*Activation{};
+        &.{};
 
     return try self.eden.allocateInByteVectorSegment(self.allocator, stack, size);
 }
 
-pub fn setActivationStack(self: *Self, activation_stack: ?*std.ArrayList(*Activation)) void {
+pub fn setActivationStack(self: *Self, activation_stack: ?*const ActivationStack) void {
     self.activation_stack = activation_stack;
 }
 
@@ -169,10 +171,10 @@ pub fn untrack(self: *Self, tracked: Tracked) void {
 /// garbage collection won't happen. Performs a pre-emptive garbage collection
 /// if there isn't enough space.
 pub fn ensureSpaceInEden(self: *Self, required_memory: usize) !void {
-    const stack = if (self.activation_stack) |activation_stack|
-        activation_stack.items
+    const stack: *const ActivationStack = if (self.activation_stack) |activation_stack|
+        activation_stack
     else
-        &[_]*Activation{};
+        &.{};
 
     try self.eden.collectGarbage(self.allocator, required_memory, stack);
 }
@@ -363,7 +365,7 @@ const Space = struct {
         // We must have enough space at this point, so the empty activation
         // stack doesn't matter (copyObjectTo is only called from within
         // cheneyCommon).
-        const new_address = target_space.allocateInObjectSegment(allocator, &[_]*Activation{}, object_size) catch unreachable;
+        const new_address = target_space.allocateInObjectSegment(allocator, &.{}, object_size) catch unreachable;
         std.mem.copy(u64, new_address[0..object_size_in_words], address[0..object_size_in_words]);
 
         // Add this object to the target space's finalization set if it is in
@@ -386,7 +388,7 @@ const Space = struct {
 
         const byte_vector_size_in_words = byte_vector_size / @sizeOf(u64);
         // We must have enough space at this point.
-        const new_address = target_space.allocateInByteVectorSegment(allocator, &[_]*Activation{}, byte_vector_size) catch unreachable;
+        const new_address = target_space.allocateInByteVectorSegment(allocator, &.{}, byte_vector_size) catch unreachable;
         std.mem.copy(u64, new_address[0..byte_vector_size_in_words], address[0..byte_vector_size_in_words]);
 
         return new_address;
@@ -410,7 +412,7 @@ const Space = struct {
     pub fn cheneyCommon(
         self: *Space,
         allocator: Allocator,
-        activation_stack: []const *Activation,
+        activation_stack: *const ActivationStack,
         target_space: *Space,
         newer_generation_link: ?*const NewerGenerationLink,
     ) Allocator.Error!void {
@@ -440,7 +442,7 @@ const Space = struct {
 
         // Go through the whole activation stack, copying activation objects
         // that are within this space
-        for (activation_stack) |activation| {
+        for (activation_stack.stack[0..activation_stack.depth]) |*activation| {
             const activation_object_reference = activation.activation_object;
             std.debug.assert(activation_object_reference.isObjectReference());
             const activation_object_address = activation_object_reference.asObjectAddress();
@@ -607,7 +609,7 @@ const Space = struct {
     /// scavenge target, a *tenure* is attempted towards the tenure target of
     /// this space. If a tenure target is not specified either, then the heap is
     /// simply expanded to accomodate the new objects.
-    pub fn collectGarbage(self: *Space, allocator: Allocator, required_memory: usize, activation_stack: []const *Activation) !void {
+    pub fn collectGarbage(self: *Space, allocator: Allocator, required_memory: usize, activation_stack: *const ActivationStack) !void {
         try self.collectGarbageInternal(allocator, required_memory, activation_stack, null);
     }
 
@@ -618,7 +620,7 @@ const Space = struct {
         self: *Space,
         allocator: Allocator,
         required_memory: usize,
-        activation_stack: []const *Activation,
+        activation_stack: *const ActivationStack,
         newer_generation_link: ?*const NewerGenerationLink,
     ) !void {
         // See if we already have the required memory amount.
@@ -689,7 +691,7 @@ const Space = struct {
 
     /// Allocates the requested amount in bytes in the object segment of this
     /// space, garbage collecting if there is not enough space.
-    pub fn allocateInObjectSegment(self: *Space, allocator: Allocator, activation_stack: []const *Activation, size: usize) ![*]u64 {
+    pub fn allocateInObjectSegment(self: *Space, allocator: Allocator, activation_stack: *const ActivationStack, size: usize) ![*]u64 {
         std.debug.assert(size % 8 == 0);
         if (self.freeMemory() < size) try self.collectGarbage(allocator, size, activation_stack);
 
@@ -704,7 +706,7 @@ const Space = struct {
 
     /// Allocates the requested amount in bytes in the byte vector segment of
     /// this space, garbage collecting if there is not enough space.
-    pub fn allocateInByteVectorSegment(self: *Space, allocator: Allocator, activation_stack: []const *Activation, size: usize) ![*]u64 {
+    pub fn allocateInByteVectorSegment(self: *Space, allocator: Allocator, activation_stack: *const ActivationStack, size: usize) ![*]u64 {
         std.debug.assert(size % 8 == 0);
         if (self.freeMemory() < size) try self.collectGarbage(allocator, size, activation_stack);
 

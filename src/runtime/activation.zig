@@ -24,6 +24,38 @@ pub const ActivationCreationContext = struct {
     range: Range,
 };
 
+pub const ActivationStack = struct {
+    stack: []Self = &[_]Self{},
+    depth: usize = 0,
+
+    pub fn init(allocator: Allocator, max_depth: usize) !ActivationStack {
+        const stack = try allocator.alloc(Self, max_depth);
+
+        return ActivationStack { .stack = stack };
+    }
+
+    pub fn deinit(self: ActivationStack, allocator: Allocator) void {
+        allocator.free(self.stack);
+    }
+
+    pub fn getStack(self: ActivationStack) []Self {
+        return self.stack[0..self.depth];
+    }
+
+    pub fn getNewActivationSlot(self: *ActivationStack) *Self {
+        // NOTE: Will trigger a crash if maximum stack depth was exceeded.
+        const activation = &self.stack[self.depth];
+        self.depth += 1;
+        return activation;
+    }
+
+    pub fn popActivation(self: *ActivationStack) *Self {
+        self.depth -= 1;
+        const activation = &self.stack[self.depth];
+        return activation;
+    }
+};
+
 allocator: Allocator,
 heap: *Heap,
 activation_object: Value,
@@ -42,40 +74,14 @@ parent_activation: ?*Self = null,
 /// Used for bound activations of blocks.
 weak: WeakBlock,
 
-/// Creates a new activation.
-/// Borrows a ref for `activation_object` from the caller.
-/// `creator_message` should be the name of the message that was sent to create
-/// this activation.
-/// Borrows a ref for `creator_script` from the caller.
-pub fn create(
-    allocator: Allocator,
-    heap: *Heap,
-    activation_object: Value,
-    creator_message: Heap.Tracked,
-    creator_range: Range,
-    creator_script: Script.Ref,
-    should_untrack_message_name_on_deinit: bool,
-) !*Self {
-    var self = try allocator.create(Self);
-    errdefer allocator.destroy(self);
-    try self.init(allocator, heap, activation_object, creator_message, creator_script, creator_range, should_untrack_message_name_on_deinit);
-
-    return self;
-}
-
-pub fn destroy(self: *Self) void {
-    self.deinit();
-    self.allocator.destroy(self);
-}
-
-fn init(
+pub fn initInPlace(
     self: *Self,
     allocator: Allocator,
     heap: *Heap,
     activation_object: Value,
     creator_message: Heap.Tracked,
-    creator_script: Script.Ref,
     creator_range: Range,
+    creator_script: Script.Ref,
     should_untrack_message_name_on_deinit: bool,
 ) !void {
     std.debug.assert(activation_object.isObjectReference());
@@ -94,7 +100,7 @@ fn init(
     };
 }
 
-fn deinit(self: *Self) void {
+pub fn deinit(self: *Self) void {
     self.weak.deinit();
     self.creation_context.script.unref();
 

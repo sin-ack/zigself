@@ -493,14 +493,15 @@ pub const Method = packed struct {
         arguments: []Value,
         message_range: Range,
         message_script: Script.Ref,
-    ) !*RuntimeActivation {
+        out_activation: *RuntimeActivation,
+    ) !void {
         const activation_object = try Activation.create(heap, .Method, self.slots.header.getMap(), self.getAssignableSlots(), receiver);
         activation_object.setArguments(arguments);
 
         const tracked_method_name = try heap.track(self.getMap().method_name);
         errdefer tracked_method_name.untrack(heap);
 
-        return try RuntimeActivation.create(allocator, heap, activation_object.asValue(), tracked_method_name, message_range, message_script, true);
+        try out_activation.initInPlace(allocator, heap, activation_object.asValue(), tracked_method_name, message_range, message_script, true);
     }
 
     pub fn requiredSizeForAllocation(assignable_slot_count: u8) usize {
@@ -618,14 +619,14 @@ pub const Block = packed struct {
         message_name: Heap.Tracked,
         message_range: Range,
         message_script: Script.Ref,
-    ) !*RuntimeActivation {
+        out_activation: *RuntimeActivation,
+    ) !void {
         const activation_object = try Activation.create(heap, .Block, self.slots.header.getMap(), self.getAssignableSlots(), receiver);
         activation_object.setArguments(arguments);
 
-        const activation = try RuntimeActivation.create(allocator, heap, activation_object.asValue(), message_name, message_range, message_script, false);
-        activation.parent_activation = self.getMap().getParentActivation();
-        activation.nonlocal_return_target_activation = self.getMap().getNonlocalReturnTargetActivation();
-        return activation;
+        try out_activation.initInPlace(allocator, heap, activation_object.asValue(), message_name, message_range, message_script, false);
+        out_activation.parent_activation = self.getMap().getParentActivation();
+        out_activation.nonlocal_return_target_activation = self.getMap().getNonlocalReturnTargetActivation();
     }
 
     pub fn requiredSizeForAllocation(assignable_slot_count: u8) usize {

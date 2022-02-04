@@ -21,7 +21,7 @@ pub fn raiseError(allocator: Allocator, context: *InterpreterContext, comptime f
 
 /// Using the given activation object stack, print a stack trace to stderr.
 /// The stack trace is indented with two spaces.
-pub fn printTraceFromActivationStack(stack: []*Activation) void {
+pub fn printTraceFromActivationStack(stack: []Activation) void {
     if (stack.len == 0) {
         return;
     }

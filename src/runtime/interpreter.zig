@@ -16,8 +16,11 @@ const ByteVector = @import("./byte_vector.zig");
 const environment = @import("./environment.zig");
 const runtime_error = @import("./error.zig");
 const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
+const ActivationStack = Activation.ActivationStack;
 
 const message_interpreter = @import("./interpreter/message.zig");
+
+pub const MaximumStackDepth = 2048;
 
 pub const InterpreterContext = struct {
     /// The object that is the current context. The identifier "self" will
@@ -28,9 +31,8 @@ pub const InterpreterContext = struct {
     /// The method/block activation stack. This is used with blocks in order to
     /// verify that the block is executed within its enclosing method and for
     /// stack traces. When the activation completes, the activation object is
-    /// popped; when a new activation occurs, it is pushed. Pushed objects must
-    /// be pushed with the assumption that 1 ref is borrowed by this stack.
-    activation_stack: *std.ArrayList(*Activation),
+    /// popped; when a new activation occurs, it is pushed.
+    activation_stack: *ActivationStack,
     /// The script file that is currently executing, used to resolve the
     /// relative paths of other script files.
     script: Script.Ref,
@@ -64,11 +66,11 @@ pub const InterpreterError = Allocator.Error || runtime_error.SelfRuntimeError |
 pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobby: Value) InterpreterError!?Value {
     defer script.unref();
 
-    var activation_stack = std.ArrayList(*Activation).init(allocator);
-    defer activation_stack.deinit();
+    var activation_stack = try ActivationStack.init(allocator, MaximumStackDepth);
+    defer activation_stack.deinit(allocator);
     errdefer {
-        for (activation_stack.items) |activation| {
-            activation.destroy();
+        for (activation_stack.getStack()) |*activation| {
+            activation.deinit();
         }
     }
 
@@ -99,7 +101,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
     };
     var last_expression_result: ?Heap.Tracked = null;
     for (script.value.ast_root.?.statements) |statement| {
-        std.debug.assert(activation_stack.items.len == 0);
+        std.debug.assert(activation_stack.depth == 0);
 
         if (last_expression_result) |result| {
             result.untrack(heap);
@@ -112,26 +114,26 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
                     defer allocator.free(error_message);
 
                     std.debug.print("Received error at top level: {s}\n", .{error_message});
-                    runtime_error.printTraceFromActivationStack(activation_stack.items);
+                    runtime_error.printTraceFromActivationStack(activation_stack.getStack());
 
                     // Since the execution was abruptly stopped the activation
                     // stack wasn't properly unwound, so let's do that now.
-                    for (activation_stack.items) |activation| {
-                        activation.destroy();
+                    for (activation_stack.getStack()) |*activation| {
+                        activation.deinit();
                     }
 
                     return null;
                 },
                 NonlocalReturnError.NonlocalReturn => {
                     std.debug.print("A non-local return has bubbled up to the top! This is likely a bug!", .{});
-                    runtime_error.printTraceFromActivationStack(activation_stack.items);
+                    runtime_error.printTraceFromActivationStack(activation_stack.getStack());
                     context.current_nonlocal_return.?.target_activation.deinit();
                     context.current_nonlocal_return.?.value.untrack(heap);
 
                     // Since the execution was abruptly stopped the activation
                     // stack wasn't properly unwound, so let's do that now.
-                    for (activation_stack.items) |activation| {
-                        activation.destroy();
+                    for (activation_stack.getStack()) |*activation| {
+                        activation.deinit();
                     }
 
                     return null;
@@ -378,7 +380,7 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
     // The latest activation is where the block was created, so it will always
     // be the parent activation (i.e., where we look for parent blocks' and the
     // method's slots).
-    const parent_activation = context.activation_stack.items[context.activation_stack.items.len - 1];
+    const parent_activation = &context.activation_stack.stack[context.activation_stack.depth - 1];
     // However, we want the _method_ as the non-local return target; because the
     // non-local return can only be returned by the method in which the block
     // making the non-local return was defined, this needs to be separate from
@@ -467,7 +469,7 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
 
 pub fn executeReturn(allocator: Allocator, heap: *Heap, return_node: AST.ReturnNode, context: *InterpreterContext) InterpreterError {
     _ = heap;
-    const latest_activation = context.activation_stack.items[context.activation_stack.items.len - 1];
+    const latest_activation = context.activation_stack.stack[context.activation_stack.depth - 1];
     const target_activation = latest_activation.nonlocal_return_target_activation.?;
     std.debug.assert(target_activation.nonlocal_return_target_activation == null);
 

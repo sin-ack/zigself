@@ -19,8 +19,7 @@ const runtime_error = @import("../error.zig");
 
 const root_interpreter = @import("../interpreter.zig");
 const InterpreterContext = root_interpreter.InterpreterContext;
-
-const MaximumStackDepth = 2048;
+const MaximumStackDepth = root_interpreter.MaximumStackDepth;
 
 fn getMessageArguments(
     allocator: Allocator,
@@ -103,9 +102,9 @@ pub fn executeBlockMessage(
     if (block_object.getMap().getParentActivation()) |parent_activation_ptr| {
         parent_activation = parent_activation_ptr;
 
-        var i = @intCast(isize, context.activation_stack.items.len - 1);
+        var i = @intCast(isize, context.activation_stack.depth - 1);
         while (i >= 0) : (i -= 1) {
-            const activation = context.activation_stack.items[@intCast(usize, i)];
+            const activation = &context.activation_stack.stack[@intCast(usize, i)];
 
             if (activation == parent_activation) {
                 did_find_activation_in_stack = true;
@@ -118,7 +117,7 @@ pub fn executeBlockMessage(
         return runtime_error.raiseError(allocator, context, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
     }
 
-    if (context.activation_stack.items.len >= MaximumStackDepth) {
+    if (context.activation_stack.depth >= MaximumStackDepth) {
         return runtime_error.raiseError(allocator, context, "Maximum stack size reached", .{});
     }
 
@@ -141,7 +140,8 @@ pub fn executeBlockMessage(
         context.script.ref();
         errdefer context.script.unref();
 
-        const activation = try block_object.activateBlock(
+        const new_activation = context.activation_stack.getNewActivationSlot();
+        try block_object.activateBlock(
             allocator,
             heap,
             parent_activation.activation_object,
@@ -149,9 +149,9 @@ pub fn executeBlockMessage(
             tracked_message_name,
             message_range,
             context.script,
+            new_activation,
         );
-        try context.activation_stack.append(activation);
-        break :blk activation;
+        break :blk new_activation;
     };
 
     // NOTE: We shouldn't pop from the activation stack if we didn't execute
@@ -160,9 +160,11 @@ pub fn executeBlockMessage(
     var did_nonlocal_return = false;
     defer {
         if (did_execute_normally or did_nonlocal_return) {
-            const popped_activation = context.activation_stack.pop();
+            const popped_activation = context.activation_stack.popActivation();
+            // NOTE: This isn't perfect but should be a good enough heuristic that something is
+            //       seriously wrong if it fails.
             std.debug.assert(popped_activation == block_activation);
-            popped_activation.destroy();
+            popped_activation.deinit();
         }
     }
 
@@ -220,7 +222,7 @@ pub fn executeMethodMessage(
     arguments: []Heap.Tracked,
     context: *InterpreterContext,
 ) !Value {
-    if (context.activation_stack.items.len >= MaximumStackDepth) {
+    if (context.activation_stack.depth >= MaximumStackDepth) {
         return runtime_error.raiseError(allocator, context, "Maximum stack size reached", .{});
     }
 
@@ -242,16 +244,17 @@ pub fn executeMethodMessage(
     const method_activation = blk: {
         errdefer context.script.unref();
 
-        const activation = try method_object.activateMethod(
+        const new_activation = context.activation_stack.getNewActivationSlot();
+        try method_object.activateMethod(
             allocator,
             heap,
             receiver.getValue(),
             argument_values,
             message_range,
             context.script,
+            new_activation,
         );
-        try context.activation_stack.append(activation);
-        break :blk activation;
+        break :blk new_activation;
     };
 
     // NOTE: We shouldn't pop from the activation stack if we didn't execute
@@ -260,9 +263,10 @@ pub fn executeMethodMessage(
     var did_nonlocal_return = false;
     defer {
         if (did_execute_normally or did_nonlocal_return) {
-            const popped_activation = context.activation_stack.pop();
+            const popped_activation = context.activation_stack.popActivation();
+            // NOTE: Same deal as in executeBlockMessage.
             std.debug.assert(popped_activation == method_activation);
-            popped_activation.destroy();
+            popped_activation.deinit();
         }
     }
 
