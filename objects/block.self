@@ -9,7 +9,7 @@ traits block _AddSlots: (|
 
     "FIXME: This is a terrible way of implementing loops! Either replace this
             with the original Self VM's _Restart primitive, or implement TCO."
-    loop = (value. loop).
+    loop = (value. _Restart).
 
     whileTrue: blk = (| s |
         [

@@ -123,3 +123,16 @@ pub fn Error(allocator: Allocator, heap: *Heap, message_range: Range, receiver: 
 
     return runtime_error.raiseError(allocator, context, "Error raised in Self code: {s}", .{argument.asObject().asByteVectorObject().getValues()});
 }
+
+/// Restarts the current method, executing it from the first statement.
+/// This primitive is intended to be used internally only.
+pub fn Restart(allocator: Allocator, heap: *Heap, message_range: Range, receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Value {
+    _ = allocator;
+    _ = heap;
+    _ = message_range;
+    _ = receiver;
+    _ = arguments;
+
+    context.restart_method = true;
+    return environment.globalNil();
+}

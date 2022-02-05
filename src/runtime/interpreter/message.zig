@@ -287,7 +287,11 @@ pub fn executeMethodMessage(
     }
 
     var last_expression_result: ?Heap.Tracked = null;
-    for (method_object.getStatementsSlice()) |statement| {
+    var statement_offset: usize = 0;
+    const statements_slice = method_object.getStatementsSlice();
+    while (statement_offset < statements_slice.len) {
+        const statement = statements_slice[statement_offset];
+
         if (last_expression_result) |last_result| {
             last_result.untrack(heap);
         }
@@ -313,7 +317,15 @@ pub fn executeMethodMessage(
             }
         };
 
+        if (context.restart_method) {
+            context.restart_method = false;
+            statement_offset = 0;
+            last_expression_result = null;
+            continue;
+        }
+
         last_expression_result = try heap.track(expression_result);
+        statement_offset += 1;
     }
 
     did_execute_normally = true;

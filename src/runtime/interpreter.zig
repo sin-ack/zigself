@@ -52,6 +52,8 @@ pub const InterpreterContext = struct {
     /// Since block names will not be unique, this mapping allows us to store
     /// a single instance of each message name for the respective block arities.
     block_message_names: *std.AutoArrayHashMapUnmanaged(u8, Heap.Tracked),
+    /// Whether the current method should restart. Set by the _Restart primitive.
+    restart_method: bool,
 };
 
 // FIXME: These aren't very nice. Collect them into a single place.
@@ -98,6 +100,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
         .current_error = null,
         .current_nonlocal_return = null,
         .block_message_names = &block_message_names,
+        .restart_method = false,
     };
     var last_expression_result: ?Heap.Tracked = null;
     for (script.value.ast_root.?.statements) |statement| {
@@ -164,6 +167,7 @@ pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, p
         .current_error = null,
         .current_nonlocal_return = null,
         .block_message_names = parent_context.block_message_names,
+        .restart_method = false,
     };
     var last_expression_result: ?Heap.Tracked = null;
     for (script.value.ast_root.?.statements) |statement| {
