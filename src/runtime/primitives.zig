@@ -9,6 +9,7 @@ const Heap = @import("./heap.zig");
 const Value = @import("./value.zig").Value;
 const Range = @import("../language/location_range.zig");
 const Object = @import("./object.zig");
+const Completion = @import("./completion.zig");
 const runtime_error = @import("./error.zig");
 const interpreter = @import("./interpreter.zig");
 const InterpreterContext = interpreter.InterpreterContext;
@@ -31,7 +32,7 @@ const PrimitiveSpec = struct {
         receiver: Heap.Tracked,
         arguments: []Heap.Tracked,
         context: *InterpreterContext,
-    ) interpreter.InterpreterError!Value,
+    ) interpreter.InterpreterError!Completion,
 };
 
 const PrimitiveRegistry = &[_]PrimitiveSpec{
@@ -87,12 +88,12 @@ pub fn callPrimitive(
     receiver: Heap.Tracked,
     arguments: []Heap.Tracked,
     context: *InterpreterContext,
-) !Value {
+) interpreter.InterpreterError!Completion {
     for (PrimitiveRegistry) |primitive| {
         if (std.mem.eql(u8, primitive.name, selector)) {
             return try primitive.function(allocator, heap, message_range, receiver, arguments, context);
         }
     }
 
-    return runtime_error.raiseError(allocator, context, "Unknown primitive \"{s}\" called", .{selector});
+    return Completion.initRuntimeError(allocator, "Unknown primitive \"{s}\" called", .{selector});
 }

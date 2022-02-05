@@ -17,6 +17,7 @@ const environment = @import("./environment.zig");
 const runtime_error = @import("./error.zig");
 const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
 const ActivationStack = Activation.ActivationStack;
+const Completion = @import("./completion.zig");
 
 const message_interpreter = @import("./interpreter/message.zig");
 
@@ -36,29 +37,13 @@ pub const InterpreterContext = struct {
     /// The script file that is currently executing, used to resolve the
     /// relative paths of other script files.
     script: Script.Ref,
-    /// The current error message value. executeScript catches this and displays
-    /// the error with a stack trace. The user must free it.
-    current_error: ?[]const u8,
-    /// The current non-local return value. Should *NOT* rise to executeScript.
-    current_nonlocal_return: ?struct {
-        /// The activation at which this non-local return should become the
-        /// regular return value.
-        target_activation: Activation.Weak,
-        /// The value that should be returned when the non-local return reaches
-        /// its destination.
-        value: Heap.Tracked,
-    },
     /// A mapping from argument counts to the related block message names.
     /// Since block names will not be unique, this mapping allows us to store
     /// a single instance of each message name for the respective block arities.
     block_message_names: *std.AutoArrayHashMapUnmanaged(u8, Heap.Tracked),
-    /// Whether the current method should restart. Set by the _Restart primitive.
-    restart_method: bool,
 };
 
-// FIXME: These aren't very nice. Collect them into a single place.
-pub const NonlocalReturnError = error{NonlocalReturn};
-pub const InterpreterError = Allocator.Error || runtime_error.SelfRuntimeError || NonlocalReturnError;
+pub const InterpreterError = Allocator.Error;
 
 /// Executes a script node. `lobby` is ref'd for the function lifetime. The last
 /// expression result is returned, or if no statements were available, null is
@@ -68,12 +53,19 @@ pub const InterpreterError = Allocator.Error || runtime_error.SelfRuntimeError |
 pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobby: Value) InterpreterError!?Value {
     defer script.unref();
 
+    // Did this script execute normally?
+    var did_execute_normally = false;
+
     var activation_stack = try ActivationStack.init(allocator, MaximumStackDepth);
-    defer activation_stack.deinit(allocator);
-    errdefer {
-        for (activation_stack.getStack()) |*activation| {
-            activation.deinit();
+    defer {
+        if (!did_execute_normally) {
+            // Since the execution was abruptly stopped the activation stack
+            // wasn't properly unwound, so let's do that now.
+            for (activation_stack.getStack()) |*activation| {
+                activation.deinit();
+            }
         }
+        activation_stack.deinit(allocator);
     }
 
     heap.setActivationStack(&activation_stack);
@@ -97,10 +89,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
         .lobby = tracked_lobby,
         .activation_stack = &activation_stack,
         .script = script,
-        .current_error = null,
-        .current_nonlocal_return = null,
         .block_message_names = &block_message_names,
-        .restart_method = false,
     };
     var last_expression_result: ?Heap.Tracked = null;
     for (script.value.ast_root.?.statements) |statement| {
@@ -110,53 +99,37 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
             result.untrack(heap);
         }
 
-        const expression_result = executeStatement(allocator, heap, statement, &context) catch |err| {
-            switch (err) {
-                runtime_error.SelfRuntimeError.RuntimeError => {
-                    var error_message = context.current_error.?;
-                    defer allocator.free(error_message);
+        var completion = try executeStatement(allocator, heap, statement, &context);
+        defer completion.deinit(allocator);
 
-                    std.debug.print("Received error at top level: {s}\n", .{error_message});
-                    runtime_error.printTraceFromActivationStack(activation_stack.getStack());
-
-                    // Since the execution was abruptly stopped the activation
-                    // stack wasn't properly unwound, so let's do that now.
-                    for (activation_stack.getStack()) |*activation| {
-                        activation.deinit();
-                    }
-
-                    return null;
-                },
-                NonlocalReturnError.NonlocalReturn => {
-                    std.debug.print("A non-local return has bubbled up to the top! This is likely a bug!", .{});
-                    runtime_error.printTraceFromActivationStack(activation_stack.getStack());
-                    context.current_nonlocal_return.?.target_activation.deinit();
-                    context.current_nonlocal_return.?.value.untrack(heap);
-
-                    // Since the execution was abruptly stopped the activation
-                    // stack wasn't properly unwound, so let's do that now.
-                    for (activation_stack.getStack()) |*activation| {
-                        activation.deinit();
-                    }
-
-                    return null;
-                },
-                else => return err,
-            }
-        };
-
-        last_expression_result = try heap.track(expression_result);
+        switch (completion.data) {
+            .Normal => |value| {
+                last_expression_result = try heap.track(value);
+            },
+            .RuntimeError => |error_message| {
+                std.debug.print("Received error at top level: {s}\n", .{error_message});
+                runtime_error.printTraceFromActivationStack(activation_stack.getStack());
+                return null;
+            },
+            .NonlocalReturn => {
+                std.debug.print("A non-local return has bubbled up to the top! This is a bug!", .{});
+                runtime_error.printTraceFromActivationStack(activation_stack.getStack());
+                return null;
+            },
+            else => unreachable,
+        }
     }
 
+    did_execute_normally = true;
     return if (last_expression_result) |result| result.getValue() else null;
 }
 
-/// Execute a script object as a child script of the root script. The root
+/// Execute a script object as a child script of the root script. The parent
 /// interpreter context is passed in order to preserve the activation stack and
 /// various other context objects.
 ///
 /// Borrows a ref for `script` from the caller.
-pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, parent_context: *InterpreterContext) InterpreterError!?Value {
+pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, parent_context: *InterpreterContext) InterpreterError!?Completion {
     defer script.unref();
 
     var child_context = InterpreterContext{
@@ -164,10 +137,7 @@ pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, p
         .lobby = parent_context.lobby,
         .activation_stack = parent_context.activation_stack,
         .script = script,
-        .current_error = null,
-        .current_nonlocal_return = null,
         .block_message_names = parent_context.block_message_names,
-        .restart_method = false,
     };
     var last_expression_result: ?Heap.Tracked = null;
     for (script.value.ast_root.?.statements) |statement| {
@@ -175,33 +145,40 @@ pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, p
             result.untrack(heap);
         }
 
-        const expression_result = executeStatement(allocator, heap, statement, &child_context) catch |err| {
-            switch (err) {
-                runtime_error.SelfRuntimeError.RuntimeError => {
-                    // Pass the error message up the script chain.
-                    parent_context.current_error = child_context.current_error;
-                    // Allow the error to keep bubbling up.
-                    return err;
-                },
-                NonlocalReturnError.NonlocalReturn => {
-                    return runtime_error.raiseError(allocator, parent_context, "A non-local return has bubbled up to the top of a sub-script! This is likely a bug!", .{});
-                },
-                else => return err,
+        var did_complete_statement_successfully = false;
+        var completion = try executeStatement(allocator, heap, statement, &child_context);
+        defer {
+            if (did_complete_statement_successfully) {
+                completion.deinit(allocator);
             }
-        };
-        last_expression_result = try heap.track(expression_result);
+        }
+
+        switch (completion.data) {
+            .Normal => |value| {
+                last_expression_result = try heap.track(value);
+                did_complete_statement_successfully = true;
+            },
+            .RuntimeError => {
+                // Allow the error to keep bubbling up.
+                return completion;
+            },
+            .NonlocalReturn => {
+                return try Completion.initRuntimeError(allocator, "A non-local return has bubbled up to the top of a sub-script! This is a bug!", .{});
+            },
+            else => unreachable,
+        }
     }
 
-    return if (last_expression_result) |result| result.getValue() else null;
+    return if (last_expression_result) |result| Completion.initNormal(result.getValue()) else null;
 }
 
 /// Executes a statement. All refs are forwardded.
-pub fn executeStatement(allocator: Allocator, heap: *Heap, statement: AST.StatementNode, context: *InterpreterContext) InterpreterError!Value {
+pub fn executeStatement(allocator: Allocator, heap: *Heap, statement: AST.StatementNode, context: *InterpreterContext) InterpreterError!Completion {
     return try executeExpression(allocator, heap, statement.expression, context);
 }
 
 /// Executes an expression. All refs are forwarded.
-pub fn executeExpression(allocator: Allocator, heap: *Heap, expression: AST.ExpressionNode, context: *InterpreterContext) InterpreterError!Value {
+pub fn executeExpression(allocator: Allocator, heap: *Heap, expression: AST.ExpressionNode, context: *InterpreterContext) InterpreterError!Completion {
     return switch (expression) {
         .Object => |object| try executeObject(allocator, heap, object.*, context),
         .Block => |block| try executeBlock(allocator, heap, block.*, context),
@@ -223,7 +200,7 @@ fn executeMethod(
     object_node: AST.ObjectNode,
     arguments: [][]const u8,
     context: *InterpreterContext,
-) InterpreterError!Value {
+) InterpreterError!Completion {
     var assignable_slot_values = try std.ArrayList(Heap.Tracked).initCapacity(allocator, arguments.len);
     defer {
         for (assignable_slot_values.items) |value| {
@@ -277,9 +254,12 @@ fn executeMethod(
     defer tracked_method_map.untrack(heap);
 
     for (object_node.slots) |slot_node| {
-        var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Method, tracked_method_map.getValue().asObject().asMap().asMethodMap(), slot_init_offset, context);
-        if (slot_value) |value| {
-            try assignable_slot_values.append(try heap.track(value));
+        const slot_completion = try executeSlot(allocator, heap, slot_node, Object.Map.Method, tracked_method_map.getValue().asObject().asMap().asMethodMap(), slot_init_offset, context);
+        if (slot_completion) |completion| {
+            if (completion.isNormal())
+                try assignable_slot_values.append(try heap.track(completion.data.Normal))
+            else
+                return completion;
         }
 
         slot_init_offset += 1;
@@ -295,7 +275,8 @@ fn executeMethod(
         current_assignable_slot_values[i] = value.getValue();
     }
 
-    return (try Object.Method.create(heap, tracked_method_map.getValue().asObject().asMap().asMethodMap(), current_assignable_slot_values)).asValue();
+    const method_object = try Object.Method.create(heap, tracked_method_map.getValue().asObject().asMap().asMethodMap(), current_assignable_slot_values);
+    return Completion.initNormal(method_object.asValue());
 }
 
 /// Creates a new slot. All refs are forwarded.
@@ -307,21 +288,25 @@ pub fn executeSlot(
     map: *MapType,
     slot_index: usize,
     context: *InterpreterContext,
-) InterpreterError!?Value {
-    var value = blk: {
+) InterpreterError!?Completion {
+    const completion = blk: {
         if (slot_node.value == .Object and slot_node.value.Object.statements.value.statements.len > 0) {
             break :blk try executeMethod(allocator, heap, slot_node.name, slot_node.value.Object.*, slot_node.arguments, context);
         } else {
             break :blk try executeExpression(allocator, heap, slot_node.value, context);
         }
     };
-    const tracked_value = try heap.track(value);
+    if (!completion.isNormal()) {
+        return completion;
+    }
+
+    const tracked_value = try heap.track(completion.data.Normal);
     defer tracked_value.untrack(heap);
 
     const slot_name = try ByteVector.createFromString(heap, slot_node.name);
     if (slot_node.is_mutable) {
         map.getSlots()[slot_index].initMutable(MapType, map, slot_name, if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent);
-        return tracked_value.getValue();
+        return Completion.initNormal(tracked_value.getValue());
     } else {
         map.getSlots()[slot_index].initConstant(slot_name, if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent, tracked_value.getValue());
         return null;
@@ -329,7 +314,7 @@ pub fn executeSlot(
 }
 
 /// Creates a new slots object. All refs are forwarded.
-pub fn executeObject(allocator: Allocator, heap: *Heap, object_node: AST.ObjectNode, context: *InterpreterContext) InterpreterError!Value {
+pub fn executeObject(allocator: Allocator, heap: *Heap, object_node: AST.ObjectNode, context: *InterpreterContext) InterpreterError!Completion {
     // Verify that we are executing a slots object and not a method; methods
     // are created through executeSlot.
     if (object_node.statements.value.statements.len > 0) {
@@ -348,9 +333,13 @@ pub fn executeObject(allocator: Allocator, heap: *Heap, object_node: AST.ObjectN
     const tracked_slots_map = try heap.track(slots_map.asValue());
 
     for (object_node.slots) |slot_node, i| {
-        var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Slots, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), i, context);
-        if (slot_value) |value| {
-            try assignable_slot_values.append(try heap.track(value));
+        var slot_completion = try executeSlot(allocator, heap, slot_node, Object.Map.Slots, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), i, context);
+        if (slot_completion) |completion| {
+            if (completion.isNormal()) {
+                try assignable_slot_values.append(try heap.track(completion.data.Normal));
+            } else {
+                return completion;
+            }
         }
     }
 
@@ -364,10 +353,11 @@ pub fn executeObject(allocator: Allocator, heap: *Heap, object_node: AST.ObjectN
         current_assignable_slot_values[i] = value.getValue();
     }
 
-    return (try Object.Slots.create(heap, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), current_assignable_slot_values)).asValue();
+    const slots_object = try Object.Slots.create(heap, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), current_assignable_slot_values);
+    return Completion.initNormal(slots_object.asValue());
 }
 
-pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, context: *InterpreterContext) InterpreterError!Value {
+pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, context: *InterpreterContext) InterpreterError!Completion {
     var argument_slot_count: u8 = 0;
     for (block.slots) |slot_node| {
         if (slot_node.is_argument) argument_slot_count += 1;
@@ -449,9 +439,21 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
     // Add all the non-argument slots
     for (block.slots) |slot_node| {
         if (!slot_node.is_argument) {
-            var slot_value = try executeSlot(allocator, heap, slot_node, Object.Map.Block, tracked_block_map.getValue().asObject().asMap().asBlockMap(), slot_init_offset, context);
-            if (slot_value) |value| {
-                try assignable_slot_values.append(try heap.track(value));
+            var slot_completion = try executeSlot(
+                allocator,
+                heap,
+                slot_node,
+                Object.Map.Block,
+                tracked_block_map.getValue().asObject().asMap().asBlockMap(),
+                slot_init_offset,
+                context,
+            );
+            if (slot_completion) |completion| {
+                if (completion.isNormal()) {
+                    try assignable_slot_values.append(try heap.track(completion.data.Normal));
+                } else {
+                    return completion;
+                }
             }
 
             slot_init_offset += 1;
@@ -468,25 +470,44 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
         current_assignable_slot_values[i] = value.getValue();
     }
 
-    return (try Object.Block.create(heap, tracked_block_map.getValue().asObject().asMap().asBlockMap(), current_assignable_slot_values)).asValue();
+    const block_object = try Object.Block.create(heap, tracked_block_map.getValue().asObject().asMap().asBlockMap(), current_assignable_slot_values);
+    return Completion.initNormal(block_object.asValue());
 }
 
-pub fn executeReturn(allocator: Allocator, heap: *Heap, return_node: AST.ReturnNode, context: *InterpreterContext) InterpreterError {
+pub fn executeReturn(allocator: Allocator, heap: *Heap, return_node: AST.ReturnNode, context: *InterpreterContext) InterpreterError!Completion {
     _ = heap;
     const latest_activation = context.activation_stack.stack[context.activation_stack.depth - 1];
     const target_activation = latest_activation.nonlocal_return_target_activation.?;
     std.debug.assert(target_activation.nonlocal_return_target_activation == null);
 
-    const value = try executeExpression(allocator, heap, return_node.expression, context);
-    const target_activation_weak = target_activation.makeWeakRef();
-    context.current_nonlocal_return = .{ .target_activation = target_activation_weak, .value = try heap.track(value) };
-
-    return NonlocalReturnError.NonlocalReturn;
+    const completion = try executeExpression(allocator, heap, return_node.expression, context);
+    switch (completion.data) {
+        .Normal => {
+            const target_activation_weak = target_activation.makeWeakRef();
+            return Completion.initNonlocalReturn(target_activation_weak, try heap.track(completion.data.Normal));
+        },
+        .RuntimeError => return completion,
+        .NonlocalReturn => {
+            // It's completely normal to encounter a non-local return while performing one
+            // ourselves. Consider the following situation:
+            //
+            // foo = (
+            //     [ ^ [ ^ 'Well hello friends!' ] value ] value.
+            // ).
+            //
+            // Here we would reach another non-local return before we reach the method in
+            // which the block was defined in the activation stack. The best course
+            // of action here is to use the non-local return that belongs to the completion
+            // we have just encountered (as it wouldn't make sense to disrupt the flow
+            // of the currently bubbling non-local return).
+            return completion;
+        },
+        else => unreachable,
+    }
 }
 
-/// Executes an identifier expression. If the looked up value exists, the value
-/// gains a ref. `self_object` gains a ref during a method execution.
-pub fn executeIdentifier(allocator: Allocator, heap: *Heap, identifier: AST.IdentifierNode, context: *InterpreterContext) InterpreterError!Value {
+/// Executes an identifier expression.
+pub fn executeIdentifier(allocator: Allocator, heap: *Heap, identifier: AST.IdentifierNode, context: *InterpreterContext) InterpreterError!Completion {
     _ = heap;
     if (identifier.value[0] == '_') {
         var receiver = context.self_object.getValue();
@@ -498,7 +519,7 @@ pub fn executeIdentifier(allocator: Allocator, heap: *Heap, identifier: AST.Iden
         var tracked_receiver = try heap.track(receiver);
         defer tracked_receiver.untrack(heap);
 
-        return try message_interpreter.executePrimitiveMessage(allocator, heap, identifier.range, tracked_receiver, identifier.value, &[_]Heap.Tracked{}, context);
+        return message_interpreter.executePrimitiveMessage(allocator, heap, identifier.range, tracked_receiver, identifier.value, &[_]Heap.Tracked{}, context);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
@@ -517,16 +538,21 @@ pub fn executeIdentifier(allocator: Allocator, heap: *Heap, identifier: AST.Iden
             var tracked_receiver = try heap.track(receiver);
             defer tracked_receiver.untrack(heap);
 
-            return try message_interpreter.executeBlockMessage(allocator, heap, identifier.range, tracked_receiver, &[_]Heap.Tracked{}, context);
+            return message_interpreter.executeBlockMessage(allocator, heap, identifier.range, tracked_receiver, &[_]Heap.Tracked{}, context);
         }
     }
 
-    if (try context.self_object.getValue().lookup(.Read, identifier.value, allocator, context)) |lookup_result| {
+    if (try context.self_object.getValue().lookup(.Read, identifier.value, allocator, context)) |lookup_completion| {
+        if (!lookup_completion.isNormal()) {
+            return lookup_completion;
+        }
+
+        const lookup_result = lookup_completion.data.Normal;
         if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
             var tracked_lookup_result = try heap.track(lookup_result);
             defer tracked_lookup_result.untrack(heap);
 
-            return try message_interpreter.executeMethodMessage(
+            return message_interpreter.executeMethodMessage(
                 allocator,
                 heap,
                 identifier.range,
@@ -536,16 +562,16 @@ pub fn executeIdentifier(allocator: Allocator, heap: *Heap, identifier: AST.Iden
                 context,
             );
         } else {
-            return lookup_result;
+            return Completion.initNormal(lookup_result);
         }
     } else {
-        return runtime_error.raiseError(allocator, context, "Failed looking up \"{s}\"", .{identifier.value});
+        return Completion.initRuntimeError(allocator, "Failed looking up \"{s}\"", .{identifier.value});
     }
 }
 
 /// Executes a string literal expression. `lobby` gains a ref during the
 /// lifetime of the function.
-pub fn executeString(allocator: Allocator, heap: *Heap, string: AST.StringNode, context: *InterpreterContext) InterpreterError!Value {
+pub fn executeString(allocator: Allocator, heap: *Heap, string: AST.StringNode, context: *InterpreterContext) InterpreterError!Completion {
     _ = allocator;
     _ = heap;
     _ = context;
@@ -558,18 +584,18 @@ pub fn executeString(allocator: Allocator, heap: *Heap, string: AST.StringNode, 
 
     const byte_vector = try ByteVector.createFromString(heap, string.value);
     const byte_vector_map = try Object.Map.ByteVector.create(heap, byte_vector);
-    return (try Object.ByteVector.create(heap, byte_vector_map)).asValue();
+    return Completion.initNormal((try Object.ByteVector.create(heap, byte_vector_map)).asValue());
 }
 
 /// Executes a number literal expression. `lobby` gains a ref during the
 /// lifetime of the function.
-pub fn executeNumber(allocator: Allocator, heap: *Heap, number: AST.NumberNode, context: *InterpreterContext) InterpreterError!Value {
+pub fn executeNumber(allocator: Allocator, heap: *Heap, number: AST.NumberNode, context: *InterpreterContext) InterpreterError!Completion {
     _ = allocator;
     _ = heap;
     _ = context;
 
-    return switch (number.value) {
+    return Completion.initNormal(switch (number.value) {
         .Integer => Value.fromInteger(number.value.Integer),
         .FloatingPoint => Value.fromFloatingPoint(number.value.FloatingPoint),
-    };
+    });
 }

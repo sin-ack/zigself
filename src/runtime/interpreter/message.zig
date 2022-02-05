@@ -13,37 +13,50 @@ const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const Activation = @import("../activation.zig");
 const ByteVector = @import("../byte_vector.zig");
+const Completion = @import("../completion.zig");
 const primitives = @import("../primitives.zig");
 const environment = @import("../environment.zig");
-const runtime_error = @import("../error.zig");
 
 const root_interpreter = @import("../interpreter.zig");
 const InterpreterContext = root_interpreter.InterpreterContext;
 const MaximumStackDepth = root_interpreter.MaximumStackDepth;
+
+const MessageArgumentsOrCompletion = union(enum) {
+    Arguments: []Heap.Tracked,
+    Completion: Completion,
+};
 
 fn getMessageArguments(
     allocator: Allocator,
     heap: *Heap,
     ast_arguments: []AST.ExpressionNode,
     context: *InterpreterContext,
-) root_interpreter.InterpreterError![]Heap.Tracked {
+) root_interpreter.InterpreterError!MessageArgumentsOrCompletion {
     var arguments = try std.ArrayList(Heap.Tracked).initCapacity(allocator, ast_arguments.len);
-    errdefer {
-        for (arguments.items) |argument| {
-            argument.untrack(heap);
+    var did_complete_normally = false;
+    defer {
+        if (!did_complete_normally) {
+            for (arguments.items) |argument| {
+                argument.untrack(heap);
+            }
+            arguments.deinit();
         }
-        arguments.deinit();
     }
 
     for (ast_arguments) |argument| {
-        var expression_result = try root_interpreter.executeExpression(allocator, heap, argument, context);
-        var tracked_result = try heap.track(expression_result);
-        errdefer tracked_result.untrack(heap);
+        const completion = try root_interpreter.executeExpression(allocator, heap, argument, context);
+        if (completion.isNormal()) {
+            const tracked_result = try heap.track(completion.data.Normal);
+            errdefer tracked_result.untrack(heap);
 
-        try arguments.append(tracked_result);
+            try arguments.append(tracked_result);
+        } else {
+            return MessageArgumentsOrCompletion{ .Completion = completion };
+        }
     }
 
-    return arguments.toOwnedSlice();
+    did_complete_normally = true;
+    return MessageArgumentsOrCompletion{ .Arguments = arguments.toOwnedSlice() };
 }
 
 fn requiredSizeForBlockMessageName(argument_count: u8) usize {
@@ -92,33 +105,17 @@ pub fn executeBlockMessage(
     block_value: Heap.Tracked,
     arguments: []Heap.Tracked,
     context: *InterpreterContext,
-) root_interpreter.InterpreterError!Value {
-    var did_find_activation_in_stack = false;
-    var parent_activation: *Activation = undefined;
+) root_interpreter.InterpreterError!Completion {
+    if (context.activation_stack.depth >= MaximumStackDepth) {
+        return Completion.initRuntimeError(allocator, "Maximum stack size reached", .{});
+    }
 
     var block_object = block_value.getValue().asObject().asBlockObject();
-    // Check if this method can be executed, i.e. whether its enclosing
-    // activation is currently on the stack.
-    if (block_object.getMap().getParentActivation()) |parent_activation_ptr| {
-        parent_activation = parent_activation_ptr;
-
-        var i = @intCast(isize, context.activation_stack.depth - 1);
-        while (i >= 0) : (i -= 1) {
-            const activation = &context.activation_stack.stack[@intCast(usize, i)];
-
-            if (activation == parent_activation) {
-                did_find_activation_in_stack = true;
-                break;
-            }
-        }
-    }
-
-    if (!did_find_activation_in_stack) {
-        return runtime_error.raiseError(allocator, context, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
-    }
-
-    if (context.activation_stack.depth >= MaximumStackDepth) {
-        return runtime_error.raiseError(allocator, context, "Maximum stack size reached", .{});
+    // Check if this method can be executed. A block can only be executed if its
+    // parent completion is on the activation stack (meaning its weak ptr has not
+    // been deactivated).
+    if (block_object.getMap().getParentActivation() == null) {
+        return Completion.initRuntimeError(allocator, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
     }
 
     const tracked_message_name = try getOrCreateBlockMessageName(allocator, heap, context, @intCast(u8, arguments.len));
@@ -144,7 +141,7 @@ pub fn executeBlockMessage(
         try block_object.activateBlock(
             allocator,
             heap,
-            parent_activation.activation_object,
+            block_object.getMap().getParentActivation().?.activation_object,
             argument_values,
             tracked_message_name,
             message_range,
@@ -185,34 +182,44 @@ pub fn executeBlockMessage(
     }
 
     var last_expression_result: ?Heap.Tracked = null;
-    for (block_object.getStatementsSlice()) |statement| {
+    var statement_index: usize = 0;
+    const statements_slice = block_object.getStatementsSlice();
+    while (statement_index < statements_slice.len) {
+        const statement = statements_slice[statement_index];
+
         if (last_expression_result) |last_result| {
             last_result.untrack(heap);
         }
 
-        const expression_result = root_interpreter.executeStatement(allocator, heap, statement, context) catch |err|
-            switch (err) {
-            root_interpreter.NonlocalReturnError.NonlocalReturn => |e| {
-                did_nonlocal_return = true;
-                return e;
+        const completion = try root_interpreter.executeStatement(allocator, heap, statement, context);
+        switch (completion.data) {
+            .Normal => |value| {
+                last_expression_result = try heap.track(value);
+                statement_index += 1;
             },
-            else => |e| return e,
-        };
-
-        last_expression_result = try heap.track(expression_result);
+            .NonlocalReturn => {
+                did_nonlocal_return = true;
+                return completion;
+            },
+            .RuntimeError => return completion,
+            .Restart => {
+                statement_index = 0;
+                last_expression_result = null;
+                continue;
+            },
+        }
     }
 
     did_execute_normally = true;
 
     if (last_expression_result) |last_result| {
         defer last_result.untrack(heap);
-        return last_result.getValue();
+        return Completion.initNormal(last_result.getValue());
     } else {
-        return environment.globalNil();
+        return Completion.initNormal(environment.globalNil());
     }
 }
 
-/// `receiver` handles its own refs. `method_object` is forwarded.
 pub fn executeMethodMessage(
     allocator: Allocator,
     heap: *Heap,
@@ -221,9 +228,9 @@ pub fn executeMethodMessage(
     tracked_method_object: Heap.Tracked,
     arguments: []Heap.Tracked,
     context: *InterpreterContext,
-) !Value {
+) root_interpreter.InterpreterError!Completion {
     if (context.activation_stack.depth >= MaximumStackDepth) {
-        return runtime_error.raiseError(allocator, context, "Maximum stack size reached", .{});
+        return Completion.initRuntimeError(allocator, "Maximum stack size reached", .{});
     }
 
     var method_object = tracked_method_object.getValue().asObject().asMethodObject();
@@ -240,7 +247,6 @@ pub fn executeMethodMessage(
     }
 
     context.script.ref();
-
     const method_activation = blk: {
         errdefer context.script.unref();
 
@@ -287,54 +293,53 @@ pub fn executeMethodMessage(
     }
 
     var last_expression_result: ?Heap.Tracked = null;
-    var statement_offset: usize = 0;
+    var statement_index: usize = 0;
     const statements_slice = method_object.getStatementsSlice();
-    while (statement_offset < statements_slice.len) {
-        const statement = statements_slice[statement_offset];
+    while (statement_index < statements_slice.len) {
+        const statement = statements_slice[statement_index];
 
         if (last_expression_result) |last_result| {
             last_result.untrack(heap);
         }
 
-        const expression_result = root_interpreter.executeStatement(allocator, heap, statement, context) catch |err| {
-            switch (err) {
-                root_interpreter.NonlocalReturnError.NonlocalReturn => {
-                    if (context.current_nonlocal_return.?.target_activation.getPointer()) |target_activation| {
-                        if (target_activation == method_activation) {
-                            context.current_nonlocal_return.?.target_activation.deinit();
-                            last_expression_result = context.current_nonlocal_return.?.value;
-                            context.current_nonlocal_return = null;
-                            break;
-                        }
+        var completion = try root_interpreter.executeStatement(allocator, heap, statement, context);
+        switch (completion.data) {
+            .Normal => |value| {
+                last_expression_result = try heap.track(value);
+                statement_index += 1;
+            },
+            .NonlocalReturn => |nonlocal_return| {
+                if (nonlocal_return.target_activation.getPointer()) |target_activation| {
+                    if (target_activation == method_activation) {
+                        // The target was us! Turn this into a regular completion
+                        // and return with it.
+                        last_expression_result = nonlocal_return.value;
+                        completion.deinit(allocator);
+                        break;
                     }
+                }
 
-                    // The target of the non-local return wasn't us. Allow the
-                    // error to keep bubbling up.
-                    did_nonlocal_return = true;
-                    return err;
-                },
-                else => return err,
-            }
-        };
-
-        if (context.restart_method) {
-            context.restart_method = false;
-            statement_offset = 0;
-            last_expression_result = null;
-            continue;
+                // The target of the non-local return wasn't us. Allow the error
+                // to keep bubbling up.
+                did_nonlocal_return = true;
+                return completion;
+            },
+            .RuntimeError => return completion,
+            .Restart => {
+                statement_index = 0;
+                last_expression_result = null;
+                continue;
+            },
         }
-
-        last_expression_result = try heap.track(expression_result);
-        statement_offset += 1;
     }
 
     did_execute_normally = true;
 
     if (last_expression_result) |last_result| {
         defer last_result.untrack(heap);
-        return last_result.getValue();
+        return Completion.initNormal(last_result.getValue());
     } else {
-        return environment.globalNil();
+        return Completion.initNormal(environment.globalNil());
     }
 }
 
@@ -347,14 +352,14 @@ pub fn executePrimitiveMessage(
     name: []const u8,
     arguments: []Heap.Tracked,
     context: *InterpreterContext,
-) root_interpreter.InterpreterError!Value {
+) root_interpreter.InterpreterError!Completion {
     // All primitives borrow a ref from the caller for the receiver and
     // each argument. It is the primitive's job to unref any argument after
     // its work is done.
     if (primitives.hasPrimitive(name)) {
-        return try primitives.callPrimitive(allocator, heap, message_range, name, receiver, arguments, context);
+        return primitives.callPrimitive(allocator, heap, message_range, name, receiver, arguments, context);
     } else {
-        return runtime_error.raiseError(allocator, context, "Unknown primitive selector \"{s}\"", .{name});
+        return Completion.initRuntimeError(allocator, "Unknown primitive selector \"{s}\"", .{name});
     }
 }
 
@@ -366,8 +371,12 @@ pub fn executeAssignmentMessage(
     message_name: []const u8,
     ast_argument: AST.ExpressionNode,
     context: *InterpreterContext,
-) root_interpreter.InterpreterError!?Value {
-    var argument = try root_interpreter.executeExpression(allocator, heap, ast_argument, context);
+) root_interpreter.InterpreterError!?Completion {
+    const argument_completion = try root_interpreter.executeExpression(allocator, heap, ast_argument, context);
+    if (!argument_completion.isNormal()) {
+        return argument_completion;
+    }
+    var argument = argument_completion.data.Normal;
 
     // NOTE: This is required, for instance, when we are assigning `self` to
     //       a slot (happens more often than you might think!). We need to strip
@@ -379,30 +388,39 @@ pub fn executeAssignmentMessage(
     const message_name_without_colon = message_name[0 .. message_name.len - 1];
     const receiver = tracked_receiver.getValue();
     if (try receiver.lookup(.Assign, message_name_without_colon, allocator, context)) |assign_lookup_result| {
-        const object_that_has_the_assignable_slot = assign_lookup_result.object;
-        const value_ptr = assign_lookup_result.value_ptr;
+        if (assign_lookup_result == .Completion) {
+            return assign_lookup_result.Completion;
+        }
+
+        const result = assign_lookup_result.Result;
+        const object_that_has_the_assignable_slot = result.object;
+        const value_ptr = result.value_ptr;
         value_ptr.* = argument;
 
         // David will remember that.
         try heap.rememberObjectReference(object_that_has_the_assignable_slot.asValue(), argument);
 
-        return environment.globalNil();
+        return Completion.initNormal(environment.globalNil());
     } else {
         return null;
     }
 }
 
 /// Executes a message. All refs are forwarded.
-pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNode, context: *InterpreterContext) root_interpreter.InterpreterError!Value {
-    var receiver = try root_interpreter.executeExpression(allocator, heap, message.receiver, context);
+pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNode, context: *InterpreterContext) root_interpreter.InterpreterError!Completion {
+    const receiver_completion = try root_interpreter.executeExpression(allocator, heap, message.receiver, context);
+    if (!receiver_completion.isNormal()) {
+        return receiver_completion;
+    }
+    var receiver = receiver_completion.data.Normal;
 
     // Check for assignable slots
     if (message.message_name[message.message_name.len - 1] == ':') {
         var tracked_receiver = try heap.track(receiver);
         defer tracked_receiver.untrack(heap);
 
-        if (try executeAssignmentMessage(allocator, heap, tracked_receiver, message.message_name, message.arguments[0], context)) |value| {
-            return value;
+        if (try executeAssignmentMessage(allocator, heap, tracked_receiver, message.message_name, message.arguments[0], context)) |completion| {
+            return completion;
         }
 
         // Make sure to refresh the pointer as executeAssignmentMessage could
@@ -419,7 +437,12 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
         var tracked_receiver = try heap.track(receiver);
         defer tracked_receiver.untrack(heap);
 
-        const arguments = try getMessageArguments(allocator, heap, message.arguments, context);
+        const arguments_or_completion = try getMessageArguments(allocator, heap, message.arguments, context);
+        if (arguments_or_completion == .Completion) {
+            return arguments_or_completion.Completion;
+        }
+
+        var arguments = arguments_or_completion.Arguments;
         defer {
             for (arguments) |argument| {
                 argument.untrack(heap);
@@ -427,7 +450,7 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
             allocator.free(arguments);
         }
 
-        return try executePrimitiveMessage(allocator, heap, message.range, tracked_receiver, message.message_name, arguments, context);
+        return executePrimitiveMessage(allocator, heap, message.range, tracked_receiver, message.message_name, arguments, context);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
@@ -446,7 +469,12 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
             var tracked_receiver = try heap.track(block_receiver);
             defer tracked_receiver.untrack(heap);
 
-            const arguments = try getMessageArguments(allocator, heap, message.arguments, context);
+            const arguments_or_completion = try getMessageArguments(allocator, heap, message.arguments, context);
+            if (arguments_or_completion == .Completion) {
+                return arguments_or_completion.Completion;
+            }
+
+            var arguments = arguments_or_completion.Arguments;
             defer {
                 for (arguments) |argument| {
                     argument.untrack(heap);
@@ -454,11 +482,16 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
                 allocator.free(arguments);
             }
 
-            return try executeBlockMessage(allocator, heap, message.range, tracked_receiver, arguments, context);
+            return executeBlockMessage(allocator, heap, message.range, tracked_receiver, arguments, context);
         }
     }
 
-    if (try receiver.lookup(.Read, message.message_name, allocator, context)) |lookup_result| {
+    if (try receiver.lookup(.Read, message.message_name, allocator, context)) |lookup_completion| {
+        if (!lookup_completion.isNormal()) {
+            return lookup_completion;
+        }
+
+        const lookup_result = lookup_completion.data.Normal;
         if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
             var tracked_receiver = try heap.track(receiver);
             defer tracked_receiver.untrack(heap);
@@ -466,14 +499,24 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
             var tracked_lookup_result = try heap.track(lookup_result);
             defer tracked_lookup_result.untrack(heap);
 
-            const arguments = try getMessageArguments(allocator, heap, message.arguments, context);
-            defer allocator.free(arguments);
+            const arguments_or_completion = try getMessageArguments(allocator, heap, message.arguments, context);
+            if (arguments_or_completion == .Completion) {
+                return arguments_or_completion.Completion;
+            }
 
-            return try executeMethodMessage(allocator, heap, message.range, tracked_receiver, tracked_lookup_result, arguments, context);
+            var arguments = arguments_or_completion.Arguments;
+            defer {
+                for (arguments) |argument| {
+                    argument.untrack(heap);
+                }
+                allocator.free(arguments);
+            }
+
+            return executeMethodMessage(allocator, heap, message.range, tracked_receiver, tracked_lookup_result, arguments, context);
         } else {
-            return lookup_result;
+            return Completion.initNormal(lookup_result);
         }
     } else {
-        return runtime_error.raiseError(allocator, context, "Unknown selector \"{s}\"", .{message.message_name});
+        return Completion.initRuntimeError(allocator, "Unknown selector \"{s}\"", .{message.message_name});
     }
 }

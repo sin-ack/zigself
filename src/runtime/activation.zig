@@ -31,7 +31,7 @@ pub const ActivationStack = struct {
     pub fn init(allocator: Allocator, max_depth: usize) !ActivationStack {
         const stack = try allocator.alloc(Self, max_depth);
 
-        return ActivationStack { .stack = stack };
+        return ActivationStack{ .stack = stack };
     }
 
     pub fn deinit(self: ActivationStack, allocator: Allocator) void {

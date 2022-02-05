@@ -9,9 +9,9 @@ const Heap = @import("../heap.zig");
 const Value = @import("../value.zig").Value;
 const Range = @import("../../language/location_range.zig");
 const Object = @import("../object.zig");
+const Completion = @import("../completion.zig");
 const ByteVector = @import("../byte_vector.zig");
 const environment = @import("../environment.zig");
-const runtime_error = @import("../error.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
 /// Copy the receiver vector and create a new one with the size given as the
@@ -27,18 +27,19 @@ pub fn VectorCopySize_FillingExtrasWith(
     tracked_receiver: Heap.Tracked,
     arguments: []Heap.Tracked,
     context: *InterpreterContext,
-) !Value {
+) !Completion {
     _ = tracked_receiver;
     _ = message_range;
+    _ = context;
 
     const size_value = arguments[0].getValue();
     if (!size_value.isInteger()) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as the first argument of _VectorCopySize:FillingExtrasWith:", .{});
+        return Completion.initRuntimeError(allocator, "Expected Integer as the first argument of _VectorCopySize:FillingExtrasWith:", .{});
     }
 
     const size = size_value.asInteger();
     if (size < 0) {
-        return runtime_error.raiseError(allocator, context, "First argument of _VectorCopySize:FillingExtrasWith: must be positive", .{});
+        return Completion.initRuntimeError(allocator, "First argument of _VectorCopySize:FillingExtrasWith: must be positive", .{});
     }
 
     const required_memory = Object.Map.Vector.requiredSizeForAllocation() + Object.Vector.requiredSizeForAllocation(@intCast(u64, size));
@@ -47,11 +48,11 @@ pub fn VectorCopySize_FillingExtrasWith(
     if (size == 0) {
         const vector_map = try Object.Map.Vector.create(heap, 0);
         const vector = try Object.Vector.createWithValues(heap, vector_map, &[_]Value{}, null);
-        return vector.asValue();
+        return Completion.initNormal(vector.asValue());
     } else {
         var receiver = tracked_receiver.getValue();
         if (!(receiver.isObjectReference() and receiver.asObject().isVectorObject())) {
-            return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorCopySize:FillingExtrasWith:", .{});
+            return Completion.initRuntimeError(allocator, "Expected Vector as the receiver of _VectorCopySize:FillingExtrasWith:", .{});
         }
 
         const filler = arguments[1].getValue();
@@ -61,7 +62,7 @@ pub fn VectorCopySize_FillingExtrasWith(
         //        that's actually extra.
         const new_vector_map = try Object.Map.Vector.create(heap, @intCast(u64, size));
         const new_vector = try Object.Vector.createWithValues(heap, new_vector_map, receiver.asObject().asVectorObject().getValues(), filler);
-        return new_vector.asValue();
+        return Completion.initNormal(new_vector.asValue());
     }
 }
 
@@ -73,7 +74,7 @@ pub fn VectorSize(
     tracked_receiver: Heap.Tracked,
     arguments: []Heap.Tracked,
     context: *InterpreterContext,
-) !Value {
+) !Completion {
     _ = allocator;
     _ = heap;
     _ = message_range;
@@ -82,10 +83,10 @@ pub fn VectorSize(
 
     const receiver = tracked_receiver.getValue();
     if (!(receiver.isObjectReference() and receiver.asObject().isVectorObject())) {
-        return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorSize", .{});
+        return Completion.initRuntimeError(allocator, "Expected Vector as the receiver of _VectorSize", .{});
     }
 
-    return Value.fromUnsignedInteger(receiver.asObject().asVectorObject().getSize());
+    return Completion.initNormal(Value.fromUnsignedInteger(receiver.asObject().asVectorObject().getSize()));
 }
 
 /// Return the value at the given position of the receiver vector. If the given
@@ -97,28 +98,29 @@ pub fn VectorAt(
     tracked_receiver: Heap.Tracked,
     arguments: []Heap.Tracked,
     context: *InterpreterContext,
-) !Value {
+) !Completion {
     _ = heap;
     _ = message_range;
+    _ = context;
 
     const receiver = tracked_receiver.getValue();
     const position_value = arguments[0].getValue();
 
     if (!(receiver.isObjectReference() and receiver.asObject().isVectorObject())) {
-        return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorAt:", .{});
+        return Completion.initRuntimeError(allocator, "Expected Vector as the receiver of _VectorAt:", .{});
     }
 
     if (!position_value.isInteger()) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as the first argument of _VectorAt:", .{});
+        return Completion.initRuntimeError(allocator, "Expected Integer as the first argument of _VectorAt:", .{});
     }
 
     const position = position_value.asInteger();
     const vector_values = receiver.asObject().asVectorObject().getValues();
     if (position < 0 or position >= vector_values.len) {
-        return runtime_error.raiseError(allocator, context, "Position passed to _VectorAt: is out of bounds (position: {d}, size: {d})", .{ position, vector_values.len });
+        return Completion.initRuntimeError(allocator, "Position passed to _VectorAt: is out of bounds (position: {d}, size: {d})", .{ position, vector_values.len });
     }
 
-    return vector_values[@intCast(u64, position)];
+    return Completion.initNormal(vector_values[@intCast(u64, position)]);
 }
 
 /// Place the object in the second argument to the integer position in the first
@@ -131,26 +133,27 @@ pub fn VectorAt_Put(
     tracked_receiver: Heap.Tracked,
     arguments: []Heap.Tracked,
     context: *InterpreterContext,
-) !Value {
+) !Completion {
     _ = heap;
     _ = message_range;
+    _ = context;
 
     const receiver = tracked_receiver.getValue();
     const position_value = arguments[0].getValue();
     const new_value = arguments[1].getValue();
 
     if (!(receiver.isObjectReference() and receiver.asObject().isVectorObject())) {
-        return runtime_error.raiseError(allocator, context, "Expected Vector as the receiver of _VectorAt:Put:", .{});
+        return Completion.initRuntimeError(allocator, "Expected Vector as the receiver of _VectorAt:Put:", .{});
     }
 
     if (!position_value.isInteger()) {
-        return runtime_error.raiseError(allocator, context, "Expected Integer as the first argument of _VectorAt:Put:", .{});
+        return Completion.initRuntimeError(allocator, "Expected Integer as the first argument of _VectorAt:Put:", .{});
     }
 
     const position = position_value.asInteger();
     const vector_values = receiver.asObject().asVectorObject().getValues();
     if (position < 0 or position >= vector_values.len) {
-        return runtime_error.raiseError(allocator, context, "Position passed to _VectorAt:Put: is out of bounds (position: {d}, size: {d})", .{ position, vector_values.len });
+        return Completion.initRuntimeError(allocator, "Position passed to _VectorAt:Put: is out of bounds (position: {d}, size: {d})", .{ position, vector_values.len });
     }
 
     vector_values[@intCast(u64, position)] = new_value;
@@ -158,5 +161,5 @@ pub fn VectorAt_Put(
     // value stored in it, let's add the vector object to the remembered set.
     try heap.rememberObjectReference(receiver, new_value);
 
-    return tracked_receiver.getValue();
+    return Completion.initNormal(tracked_receiver.getValue());
 }
