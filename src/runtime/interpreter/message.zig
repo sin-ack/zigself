@@ -176,6 +176,8 @@ pub fn executeBlockMessage(
     // NOTE: We don't care about this if an error is bubbling up.
     defer {
         if (did_execute_normally) {
+            context.self_object.untrack(heap);
+
             context.script = previous_script;
             context.self_object = previous_self_object;
         }
@@ -287,6 +289,8 @@ pub fn executeMethodMessage(
     // NOTE: We don't care about this if an error is bubbling up.
     defer {
         if (did_execute_normally) {
+            context.self_object.untrack(heap);
+
             context.script = previous_script;
             context.self_object = previous_self_object;
         }
