@@ -352,16 +352,24 @@ pub fn executePrimitiveMessage(
     allocator: Allocator,
     heap: *Heap,
     message_range: Range,
-    receiver: Heap.Tracked,
+    tracked_receiver: Heap.Tracked,
     name: []const u8,
     arguments: []Heap.Tracked,
     context: *InterpreterContext,
 ) root_interpreter.InterpreterError!Completion {
+    var receiver = tracked_receiver.getValue();
+    if (receiver.isObjectReference() and receiver.asObject().isActivationObject()) {
+        receiver = receiver.asObject().asActivationObject().findActivationReceiver();
+    }
+
+    var tracked_bare_receiver = try heap.track(receiver);
+    defer tracked_bare_receiver.untrack(heap);
+
     // All primitives borrow a ref from the caller for the receiver and
     // each argument. It is the primitive's job to unref any argument after
     // its work is done.
     if (primitives.hasPrimitive(name)) {
-        return primitives.callPrimitive(allocator, heap, message_range, name, receiver, arguments, context);
+        return primitives.callPrimitive(allocator, heap, message_range, name, tracked_bare_receiver, arguments, context);
     } else {
         return Completion.initRuntimeError(allocator, "Unknown primitive selector \"{s}\"", .{name});
     }
@@ -373,15 +381,11 @@ pub fn executeAssignmentMessage(
     heap: *Heap,
     tracked_receiver: Heap.Tracked,
     message_name: []const u8,
-    ast_argument: AST.ExpressionNode,
+    tracked_argument: Heap.Tracked,
     context: *InterpreterContext,
 ) root_interpreter.InterpreterError!?Completion {
-    const argument_completion = try root_interpreter.executeExpression(allocator, heap, ast_argument, context);
-    if (!argument_completion.isNormal()) {
-        return argument_completion;
-    }
-    var argument = argument_completion.data.Normal;
-
+    const receiver = tracked_receiver.getValue();
+    var argument = tracked_argument.getValue();
     // NOTE: This is required, for instance, when we are assigning `self` to
     //       a slot (happens more often than you might think!). We need to strip
     //       the activation object to get to the actual value inside.
@@ -390,7 +394,6 @@ pub fn executeAssignmentMessage(
     }
 
     const message_name_without_colon = message_name[0 .. message_name.len - 1];
-    const receiver = tracked_receiver.getValue();
     if (try receiver.lookup(.Assign, message_name_without_colon, allocator, context)) |assign_lookup_result| {
         if (assign_lookup_result == .Completion) {
             return assign_lookup_result.Completion;
@@ -416,105 +419,64 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
     if (!receiver_completion.isNormal()) {
         return receiver_completion;
     }
-    var receiver = receiver_completion.data.Normal;
+    var tracked_receiver = try heap.track(receiver_completion.data.Normal);
+    defer tracked_receiver.untrack(heap);
+
+    const arguments_or_completion = try getMessageArguments(allocator, heap, message.arguments, context);
+    if (arguments_or_completion == .Completion) {
+        return arguments_or_completion.Completion;
+    }
+
+    var arguments = arguments_or_completion.Arguments;
+    defer {
+        for (arguments) |argument| {
+            argument.untrack(heap);
+        }
+        allocator.free(arguments);
+    }
 
     // Check for assignable slots
-    if (message.message_name[message.message_name.len - 1] == ':') {
-        var tracked_receiver = try heap.track(receiver);
-        defer tracked_receiver.untrack(heap);
-
-        if (try executeAssignmentMessage(allocator, heap, tracked_receiver, message.message_name, message.arguments[0], context)) |completion| {
+    if (message.message_name[message.message_name.len - 1] == ':' and arguments.len == 1) {
+        if (try executeAssignmentMessage(allocator, heap, tracked_receiver, message.message_name, arguments[0], context)) |completion| {
             return completion;
         }
-
-        // Make sure to refresh the pointer as executeAssignmentMessage could
-        // have caused a GC
-        receiver = tracked_receiver.getValue();
     }
 
     // Primitive check
     if (message.message_name[0] == '_') {
-        if (receiver.isObjectReference() and receiver.asObject().isActivationObject()) {
-            receiver = receiver.asObject().asActivationObject().findActivationReceiver();
-        }
-
-        var tracked_receiver = try heap.track(receiver);
-        defer tracked_receiver.untrack(heap);
-
-        const arguments_or_completion = try getMessageArguments(allocator, heap, message.arguments, context);
-        if (arguments_or_completion == .Completion) {
-            return arguments_or_completion.Completion;
-        }
-
-        var arguments = arguments_or_completion.Arguments;
-        defer {
-            for (arguments) |argument| {
-                argument.untrack(heap);
-            }
-            allocator.free(arguments);
-        }
-
         return executePrimitiveMessage(allocator, heap, message.range, tracked_receiver, message.message_name, arguments, context);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
     // method on traits block, this is actually executing the block itself via
     // the virtual method.
+    // FIXME: Only activate this when the message looks like a block execution.
     {
-        var block_receiver = receiver;
+        var block_receiver = tracked_receiver.getValue();
         if (block_receiver.isObjectReference() and block_receiver.asObject().isActivationObject()) {
-            block_receiver = receiver.asObject().asActivationObject().findActivationReceiver();
+            block_receiver = block_receiver.asObject().asActivationObject().findActivationReceiver();
         }
 
         if (block_receiver.isObjectReference() and
             block_receiver.asObject().isBlockObject() and
             block_receiver.asObject().asBlockObject().isCorrectMessageForBlockExecution(message.message_name))
         {
-            var tracked_receiver = try heap.track(block_receiver);
-            defer tracked_receiver.untrack(heap);
+            var tracked_block_receiver = try heap.track(block_receiver);
+            defer tracked_block_receiver.untrack(heap);
 
-            const arguments_or_completion = try getMessageArguments(allocator, heap, message.arguments, context);
-            if (arguments_or_completion == .Completion) {
-                return arguments_or_completion.Completion;
-            }
-
-            var arguments = arguments_or_completion.Arguments;
-            defer {
-                for (arguments) |argument| {
-                    argument.untrack(heap);
-                }
-                allocator.free(arguments);
-            }
-
-            return executeBlockMessage(allocator, heap, message.range, tracked_receiver, arguments, context);
+            return executeBlockMessage(allocator, heap, message.range, tracked_block_receiver, arguments, context);
         }
     }
 
-    if (try receiver.lookup(.Read, message.message_name, allocator, context)) |lookup_completion| {
+    if (try tracked_receiver.getValue().lookup(.Read, message.message_name, allocator, context)) |lookup_completion| {
         if (!lookup_completion.isNormal()) {
             return lookup_completion;
         }
 
         const lookup_result = lookup_completion.data.Normal;
         if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
-            var tracked_receiver = try heap.track(receiver);
-            defer tracked_receiver.untrack(heap);
-
             var tracked_lookup_result = try heap.track(lookup_result);
             defer tracked_lookup_result.untrack(heap);
-
-            const arguments_or_completion = try getMessageArguments(allocator, heap, message.arguments, context);
-            if (arguments_or_completion == .Completion) {
-                return arguments_or_completion.Completion;
-            }
-
-            var arguments = arguments_or_completion.Arguments;
-            defer {
-                for (arguments) |argument| {
-                    argument.untrack(heap);
-                }
-                allocator.free(arguments);
-            }
 
             return executeMethodMessage(allocator, heap, message.range, tracked_receiver, tracked_lookup_result, arguments, context);
         } else {
