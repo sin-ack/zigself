@@ -121,7 +121,12 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
     }
 
     did_execute_normally = true;
-    return if (last_expression_result) |result| result.getValue() else null;
+    if (last_expression_result) |result| {
+        defer result.untrack(heap);
+        return result.getValue();
+    }
+
+    return null;
 }
 
 /// Execute a script object as a child script of the root script. The parent
@@ -169,7 +174,12 @@ pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, p
         }
     }
 
-    return if (last_expression_result) |result| Completion.initNormal(result.getValue()) else null;
+    if (last_expression_result) |result| {
+        defer result.untrack(heap);
+        return Completion.initNormal(result.getValue());
+    }
+
+    return null;
 }
 
 /// Executes a statement. All refs are forwardded.
@@ -331,6 +341,7 @@ pub fn executeObject(allocator: Allocator, heap: *Heap, object_node: AST.ObjectN
 
     var slots_map = try Object.Map.Slots.create(heap, @intCast(u32, object_node.slots.len));
     const tracked_slots_map = try heap.track(slots_map.asValue());
+    defer tracked_slots_map.untrack(heap);
 
     for (object_node.slots) |slot_node, i| {
         var slot_completion = try executeSlot(allocator, heap, slot_node, Object.Map.Slots, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), i, context);
