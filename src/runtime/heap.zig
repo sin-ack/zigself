@@ -16,6 +16,7 @@ const ActivationStack = Activation.ActivationStack;
 const debug = @import("../debug.zig");
 
 const GC_DEBUG = debug.GC_DEBUG;
+const GC_TRACK_SOURCE_DEBUG = debug.GC_TRACK_SOURCE_DEBUG;
 const REMEMBERED_SET_DEBUG = debug.REMEMBERED_SET_DEBUG;
 
 const Self = @This();
@@ -48,6 +49,9 @@ allocator: Allocator,
 /// The stack of activations owned by interpreter code.
 activation_stack: ?*const ActivationStack,
 
+/// Tracks which return addresses track which addresses.
+caller_tracked_mapping: if (GC_TRACK_SOURCE_DEBUG) std.AutoArrayHashMap(*[*]u64, usize) else void,
+
 // FIXME: Make eden + new space configurable at runtime
 const EdenSize = 1 * 1024 * 1024;
 const NewSpaceSize = 4 * 1024 * 1024;
@@ -70,16 +74,16 @@ fn init(self: *Self, allocator: Allocator) !void {
     self.allocator = allocator;
     self.activation_stack = null;
 
-    self.old_space = try Space.init(allocator, "old space", InitialOldSpaceSize);
+    self.old_space = try Space.init(self, allocator, "old space", InitialOldSpaceSize);
     errdefer self.old_space.deinit(allocator);
 
-    self.from_space = try Space.init(allocator, "from space", NewSpaceSize);
+    self.from_space = try Space.init(self, allocator, "from space", NewSpaceSize);
     errdefer self.from_space.deinit(allocator);
 
-    self.to_space = try Space.init(allocator, "to space", NewSpaceSize);
+    self.to_space = try Space.init(self, allocator, "to space", NewSpaceSize);
     errdefer self.to_space.deinit(allocator);
 
-    self.eden = try Space.init(allocator, "eden", EdenSize);
+    self.eden = try Space.init(self, allocator, "eden", EdenSize);
 
     self.from_space.scavenge_target = &self.to_space;
     self.from_space.tenure_target = &self.old_space;
@@ -87,6 +91,10 @@ fn init(self: *Self, allocator: Allocator) !void {
 
     self.handle_area = std.heap.ArenaAllocator.init(allocator);
     self.handle_allocator = self.handle_area.allocator();
+
+    if (GC_TRACK_SOURCE_DEBUG) {
+        self.caller_tracked_mapping = std.AutoArrayHashMap(*[*]u64, usize).init(allocator);
+    }
 
     if (GC_DEBUG) {
         std.debug.print("Heap.init: Eden is {*}-{*}\n", .{ self.eden.memory.ptr, self.eden.memory.ptr + self.eden.memory.len });
@@ -102,6 +110,10 @@ fn deinit(self: *Self) void {
     self.to_space.deinit(self.allocator);
     self.old_space.deinit(self.allocator);
     self.handle_area.deinit();
+
+    if (GC_TRACK_SOURCE_DEBUG) {
+        self.caller_tracked_mapping.deinit();
+    }
 }
 
 // Attempts to allocate `size` bytes in the object segment of the eden. If
@@ -151,6 +163,11 @@ pub fn track(self: *Self, value: Value) !Tracked {
         const handle = try self.allocateHandle();
         handle.* = value.asObjectAddress();
 
+        if (GC_TRACK_SOURCE_DEBUG) {
+            const address = @returnAddress();
+            try self.caller_tracked_mapping.put(handle, address);
+        }
+
         const tracked = Tracked.createWithObject(handle);
         _ = try self.eden.startTracking(self.allocator, handle);
 
@@ -163,6 +180,10 @@ pub fn track(self: *Self, value: Value) !Tracked {
 /// Untracks the given value.
 pub fn untrack(self: *Self, tracked: Tracked) void {
     if (tracked.value == .Object) {
+        if (GC_TRACK_SOURCE_DEBUG) {
+            _ = self.caller_tracked_mapping.swapRemove(tracked.value.Object);
+        }
+
         _ = self.eden.stopTracking(tracked.value.Object);
     }
 }
@@ -240,6 +261,32 @@ pub fn rememberObjectReference(self: *Self, referrer: Value, target: Value) !voi
     try target_space.?.addToRememberedSet(self.allocator, referrer_address, referrer.asObject().getSizeInMemory());
 }
 
+pub fn printTrackLocationCounts(self: *Self) void {
+    const debug_info = std.debug.getSelfDebugInfo() catch unreachable;
+    const stderr = std.io.getStdErr().writer();
+    const tty_config = std.debug.detectTTYConfig();
+
+    var address_counts = std.AutoArrayHashMap(usize, usize).init(self.allocator);
+    defer address_counts.deinit();
+
+    var mapping_it = self.caller_tracked_mapping.iterator();
+    while (mapping_it.next()) |entry| {
+        var result = address_counts.getOrPut(entry.value_ptr.*) catch unreachable;
+        if (result.found_existing) {
+            result.value_ptr.* += 1;
+        } else {
+            result.value_ptr.* = 1;
+        }
+    }
+
+    std.debug.print("Leftover trackings:\n", .{});
+    var count_it = address_counts.iterator();
+    while (count_it.next()) |entry| {
+        std.debug.printSourceAtAddress(debug_info, stderr, entry.key_ptr.*, tty_config) catch unreachable;
+        std.debug.print("Count: {}\n\n", .{entry.value_ptr.*});
+    }
+}
+
 /// A mapping from an address to its size. This area of memory is checked for
 /// any object references in the current space which are then copied during a
 /// scavenge.
@@ -250,6 +297,9 @@ const FinalizationSet = std.AutoArrayHashMapUnmanaged([*]u64, void);
 /// A set of objects which are tracked across garbage collection events.
 const TrackedSet = std.AutoArrayHashMapUnmanaged(*[*]u64, void);
 const Space = struct {
+    /// A reference back to the heap. Only used when GC_TRACK_SOURCE_DEBUG is enabled.
+    heap: if (GC_TRACK_SOURCE_DEBUG) *Self else void,
+
     /// The raw memory contents of the space. The space capacity can be learned
     /// with `memory.len`.
     memory: []u64,
@@ -306,9 +356,10 @@ const Space = struct {
         previous: ?*const NewerGenerationLink,
     };
 
-    pub fn init(allocator: Allocator, comptime name: [*:0]const u8, size: usize) !Space {
+    pub fn init(heap: *Self, allocator: Allocator, comptime name: [*:0]const u8, size: usize) !Space {
         var memory = try allocator.alloc(u64, size / @sizeOf(u64));
         return Space{
+            .heap = if (GC_TRACK_SOURCE_DEBUG) heap else .{},
             .memory = memory,
             .object_cursor = memory.ptr,
             .byte_vector_cursor = memory.ptr + memory.len,
@@ -667,6 +718,10 @@ const Space = struct {
                 }
             }
             return;
+        }
+
+        if (GC_TRACK_SOURCE_DEBUG) {
+            self.heap.printTrackLocationCounts();
         }
 
         std.debug.panic("TODO expanding a space which doesn't have a tenure or scavenge target", .{});
