@@ -170,14 +170,16 @@ pub fn executeBlockMessage(
 
     const block_script = block_object.getDefinitionScript();
     const block_activation_object = block_activation.activation_object;
+    const tracked_block_activation_object = try heap.track(block_activation_object);
+
     context.script = block_script;
-    context.self_object = try heap.track(block_activation_object);
+    context.self_object = tracked_block_activation_object;
 
-    // NOTE: We don't care about this if an error is bubbling up.
     defer {
-        if (did_execute_normally) {
-            context.self_object.untrack(heap);
+        tracked_block_activation_object.untrack(heap);
 
+        // NOTE: We don't care about this if an error is bubbling up.
+        if (did_execute_normally) {
             context.script = previous_script;
             context.self_object = previous_self_object;
         }
@@ -283,14 +285,15 @@ pub fn executeMethodMessage(
 
     const method_script = method_object.getDefinitionScript();
     const method_activation_object = method_activation.activation_object;
+    const tracked_method_activation_object = try heap.track(method_activation_object);
     context.script = method_script;
-    context.self_object = try heap.track(method_activation_object);
+    context.self_object = tracked_method_activation_object;
 
     // NOTE: We don't care about this if an error is bubbling up.
     defer {
-        if (did_execute_normally) {
-            context.self_object.untrack(heap);
+        tracked_method_activation_object.untrack(heap);
 
+        if (did_execute_normally) {
             context.script = previous_script;
             context.self_object = previous_self_object;
         }
