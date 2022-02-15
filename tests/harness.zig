@@ -79,9 +79,8 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !void {
     var lobby = try environment.prepareRuntimeEnvironment(heap);
     defer environment.teardownGlobalObjects(heap);
 
-    var did_pass_stdlib_script_to_interpreter = false;
     const stdlib_script = try Script.createFromFilePath(allocator, stdlib_entrypoint);
-    defer if (!did_pass_stdlib_script_to_interpreter) stdlib_script.unref();
+    defer stdlib_script.unref();
 
     var did_parse_without_errors = try stdlib_script.value.parseScript();
     try stdlib_script.value.reportDiagnostics(std.io.getStdErr().writer());
@@ -89,7 +88,6 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !void {
         std.debug.panic("!!! Encountered errors while parsing the standard library entrypoint!", .{});
     }
 
-    did_pass_stdlib_script_to_interpreter = true;
     _ = try interpreter.executeScript(allocator, heap, stdlib_script, lobby);
 
     const root_progress_node = progress.start("Run zigSelf tests", tests.items.len);
@@ -116,9 +114,8 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !void {
         const path_to_test = try std.fs.path.resolve(allocator, &[_][]const u8{ harness_dirname, the_test.path });
         defer allocator.free(path_to_test);
 
-        var did_pass_test_script_to_interpreter = false;
         const script = try Script.createFromFilePath(allocator, path_to_test);
-        defer if (!did_pass_test_script_to_interpreter) script.unref();
+        defer script.unref();
 
         did_parse_without_errors = try script.value.parseScript();
         try script.value.reportDiagnostics(std.io.getStdErr().writer());
@@ -127,7 +124,6 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !void {
             continue :next_test;
         }
 
-        did_pass_test_script_to_interpreter = true;
         const result = interpreter.executeScript(allocator, heap, script, lobby) catch |err| {
             const test_name_without_extension = the_test.basename[0 .. the_test.basename.len - 5];
             std.debug.print("Caught error when executing test {s}: {}\n", .{ test_name_without_extension, err });
