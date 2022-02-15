@@ -68,9 +68,8 @@ pub fn main() !u8 {
     const file_path_sentinel = arguments.positionals[0];
     const file_path = std.mem.sliceTo(file_path_sentinel, 0);
 
-    var did_pass_script_to_interpreter = false;
     var entrypoint_script = try Script.createFromFilePath(allocator, file_path);
-    errdefer if (!did_pass_script_to_interpreter) entrypoint_script.unref();
+    defer entrypoint_script.unref();
 
     const did_parse_without_errors = try entrypoint_script.value.parseScript();
     try entrypoint_script.value.reportDiagnostics(std.io.getStdErr().writer());
@@ -93,8 +92,6 @@ pub fn main() !u8 {
     var lobby = try environment.prepareRuntimeEnvironment(heap);
     defer environment.teardownGlobalObjects(heap);
 
-    did_pass_script_to_interpreter = true;
     const result = try interpreter.executeScript(allocator, heap, entrypoint_script, lobby);
-
     return if (result == null) 1 else 0;
 }

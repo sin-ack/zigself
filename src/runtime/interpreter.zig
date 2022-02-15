@@ -49,8 +49,9 @@ pub const InterpreterError = Allocator.Error;
 /// expression result is returned, or if no statements were available, null is
 /// returned.
 ///
-/// Borrows a ref for `script` from the caller.
+/// Refs `script`.
 pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobby: Value) InterpreterError!?Value {
+    script.ref();
     defer script.unref();
 
     // Did this script execute normally?
@@ -133,8 +134,9 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
 /// interpreter context is passed in order to preserve the activation stack and
 /// various other context objects.
 ///
-/// Borrows a ref for `script` from the caller.
+/// Refs `script`.
 pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, parent_context: *InterpreterContext) InterpreterError!?Completion {
+    script.ref();
     defer script.unref();
 
     var child_context = InterpreterContext{

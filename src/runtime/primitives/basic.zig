@@ -83,29 +83,19 @@ pub fn RunScript(allocator: Allocator, heap: *Heap, message_range: Range, tracke
     } else {
         return Completion.initRuntimeError(allocator, "An unexpected error was raised from script.initInPlaceFromFilePath: {s}", .{@errorName(err)});
     };
+    defer script.unref();
 
+    const did_parse_without_errors = script.value.parseScript() catch |err|
+        if (error_set_utils.errSetContains(Allocator.Error, err))
     {
-        var did_successfully_parse_script = false;
-        defer {
-            if (!did_successfully_parse_script) {
-                defer script.unref();
-            }
-        }
+        return @errSetCast(Allocator.Error, err);
+    } else {
+        return Completion.initRuntimeError(allocator, "An unexpected error was raised from script.parseScript: {s}", .{@errorName(err)});
+    };
+    script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
 
-        const did_parse_without_errors = script.value.parseScript() catch |err|
-            if (error_set_utils.errSetContains(Allocator.Error, err))
-        {
-            return @errSetCast(Allocator.Error, err);
-        } else {
-            return Completion.initRuntimeError(allocator, "An unexpected error was raised from script.parseScript: {s}", .{@errorName(err)});
-        };
-        script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
-
-        if (!did_parse_without_errors) {
-            return Completion.initRuntimeError(allocator, "Failed parsing the script passed to _RunScript", .{});
-        }
-
-        did_successfully_parse_script = true;
+    if (!did_parse_without_errors) {
+        return Completion.initRuntimeError(allocator, "Failed parsing the script passed to _RunScript", .{});
     }
 
     // FIXME: This is too much work. Just return the original value.
