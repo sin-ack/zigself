@@ -35,7 +35,6 @@ pub fn build(b: *std.build.Builder) void {
     var test_harness_exe = b.addExecutable("self-test", "tests/harness.zig");
     test_harness_exe.setTarget(target);
     test_harness_exe.setBuildMode(mode);
-    test_harness_exe.install();
     test_harness_exe.addPackage(.{
         .name = "zigself",
         .path = .{ .path = "src/package.zig" },
