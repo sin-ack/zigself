@@ -61,6 +61,7 @@ That's it!
     - [x] Old space -> new space tracking
     - [x] New space -> old space tracking
     - [x] VM tracking of values in primitives and interpreter
+- [ ] Test harness
 - [ ] Standard library
   - [ ] Move to std namespace
   - [ ] String operations and text processing
