@@ -32,9 +32,21 @@ pub fn build(b: *std.build.Builder) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    var exe_tests = b.addTest("src/main.zig");
-    exe_tests.setBuildMode(mode);
+    var test_harness_exe = b.addExecutable("self-test", "tests/harness.zig");
+    test_harness_exe.setTarget(target);
+    test_harness_exe.setBuildMode(mode);
+    test_harness_exe.install();
+    test_harness_exe.addPackage(.{
+        .name = "zigself",
+        .path = .{ .path = "src/package.zig" },
+    });
 
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
+    const test_harness_run_cmd = test_harness_exe.run();
+    test_harness_run_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        test_harness_run_cmd.addArgs(args);
+    }
+
+    const test_harness_step = b.step("test", "Run zigSelf test harness");
+    test_harness_step.dependOn(&test_harness_run_cmd.step);
 }
