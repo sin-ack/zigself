@@ -16,8 +16,12 @@ state on other objects.
 
 ## Build-time requirements
 
-You need the latest Zig compiler. You can find the source code, instructions
-for building, and more on the [Zig repository](https://github.com/ziglang/zig).
+You need the Zig compiler, preferably one built with the known-good version
+commit. You can find the source code, instructions for building, and more on the
+[Zig repository](https://github.com/ziglang/zig).
+
+Latest Zig commit known to work is [`cf5009f`](https://github.com/ziglang/zig/commit/cf5009f).
+Earlier and later versions may work but there are no guarantees.
 
 ## Building zigSelf
 
@@ -30,8 +34,41 @@ That's it!
 
 - [x] Lexer
 - [x] **Milestone 1:** Parser
-- [x] Initial VM and runtime
+- [ ] Initial VM and runtime
+  - [x] Values
+  - [x] Objects
+    - [x] Slots objects
+    - [x] Method objects
+    - [x] Block objects
+    - [x] Byte vector objects
+    - [x] Activation objects
+    - [x] Vector objects
+  - [x] Value lookups on objects
+  - [x] Assignments to mutable slots
+  - [ ] Primitives
+    - [x] Basic primitives
+    - [x] Integer primitives
+    - [x] Byte vector primitives
+    - [x] Vector primitives
+    - [ ] Object primitives
+      - [x] `_AddSlots:`
+      - [x] `_Eq:`
+      - [ ] `_Inspect:`
+      - [ ] `_RemoveSlot:IfFail:`
+  - [x] Heap and object allocation
+  - [x] Generational scavenging garbage collection
+    - [x] Basic implementation
+    - [x] Old space -> new space tracking
+    - [x] New space -> old space tracking
+    - [x] VM tracking of values in primitives and interpreter
 - [ ] Standard library
+  - [ ] Move to std namespace
+  - [ ] String operations and text processing
+  - [ ] Integer operations
+  - [ ] Math
+  - [ ] System calls
+  - [ ] Low-level I/O (fd based)
+  - and more...
 - [ ] **Milestone 2:** A REPL
 - [ ] World building script
 - [ ] Transporter (Self modules)
