@@ -1,3 +1,7 @@
+// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-only
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
