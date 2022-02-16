@@ -4,8 +4,8 @@ Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
 SPDX-License-Identifier: GPL-3.0-only
 "
 
-traits string _AddSlots: (|
-    parent* = traits clonable.
+std traits string _AddSlots: (|
+    parent* = std traits clonable.
 
     splitOn: substring = (| indicesList. substrings. head. index |
         indicesList: list copyRemoveAll.
@@ -91,7 +91,7 @@ traits string _AddSlots: (|
     copySize: size = ( _ByteVectorCopySize: size ).
 |).
 
-traits string _AddSlots: (|
+std traits string _AddSlots: (|
     toInteger = (| value. zeroByte = '0' at: 0. nineByte = '9' at: 0 |
         isEmpty ifTrue: [ _Error: 'empty string cannot be converted to integer' ].
 
@@ -108,6 +108,6 @@ traits string _AddSlots: (|
     ).
 |).
 
-globals _AddSlots: (|
+std _AddSlots: (|
     string = ''.
 |).

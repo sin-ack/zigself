@@ -45,6 +45,8 @@ fn makeTraitsObject(heap: *Heap) !*Object.Slots {
     return try Object.Slots.create(heap, traits_map, &.{});
 }
 
+// FIXME: Move these to the std namespace. They should live under globals std
+//        traits.
 fn makeTraitsMap(heap: *Heap) !*Object.Map.Slots {
     var integer_name = try ByteVector.createFromString(heap, "integer");
     var float_name = try ByteVector.createFromString(heap, "float");

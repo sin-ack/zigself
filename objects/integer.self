@@ -4,8 +4,8 @@ Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
 SPDX-License-Identifier: GPL-3.0-only
 "
 
-traits integer _AddSlots: (|
-    parent* = traits clonable.
+std traits integer _AddSlots: (|
+    parent* = std traits clonable.
 
     succ = (self + 1).
     prec = (self - 1).

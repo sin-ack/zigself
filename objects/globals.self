@@ -5,7 +5,14 @@ SPDX-License-Identifier: GPL-3.0-only
 "
 
 _AddSlots: (|
-    "This is the place where useful prototypes and other objects are placed.
-     It is the 'standard library', so to speak."
-    globals* = ().
+    "This is the place where libraries can place their objects.
+     New objects should be namespaced in their respective objects.
+     The standard library lives in std."
+    globals* = (|
+        std = (|
+            "FIXME: The location of traits for native object types should be
+             here."
+            traits = traits.
+        |).
+    |).
 |).

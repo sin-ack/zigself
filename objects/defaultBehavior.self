@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-only
 
 _AddSlots: (|
     "The default behavior for all Self objects who inherit from lobby or some
-     descendant (like traits clonable)."
+     descendant (like std traits clonable)."
     defaultBehavior* = (|
         "These are convenience helpers. They allow for blocks that take less
          arguments than the caller expects to be called properly:
@@ -16,8 +16,7 @@ _AddSlots: (|
          Here, `do:` on `list` would expect the block it is passed to receive
          `value:With:` so it can pass the item and its index. However, since
          the block only accepts `value:`, that would fail. These methods allow
-         `value:With:` to delegate to `value:` which makes for nicer behavior.
-         "
+         `value:With:` to delegate to `value:` which makes for nicer behavior."
         value: a = (value).
         value: a With: b = (value: a).
         value: a With: b With: c = (value: a With: b).
