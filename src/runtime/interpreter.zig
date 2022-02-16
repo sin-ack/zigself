@@ -110,12 +110,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
             },
             .RuntimeError => |err| {
                 std.debug.print("Received error at top level: {s}\n", .{err.message});
-                runtime_error.printTraceFromActivationStack(activation_stack.getStack());
-                return null;
-            },
-            .NonlocalReturn => {
-                std.debug.print("A non-local return has bubbled up to the top! This is a bug!", .{});
-                runtime_error.printTraceFromActivationStack(activation_stack.getStack());
+                runtime_error.printTraceFromActivationStack(activation_stack.getStack(), err.source_range);
                 return null;
             },
             else => unreachable,
@@ -136,7 +131,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
 /// various other context objects.
 ///
 /// Refs `script`.
-pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, source_range: SourceRange, parent_context: *InterpreterContext) InterpreterError!?Completion {
+pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, parent_context: *InterpreterContext) InterpreterError!?Completion {
     script.ref();
     defer script.unref();
 
@@ -169,9 +164,6 @@ pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, s
             .RuntimeError => {
                 // Allow the error to keep bubbling up.
                 return completion;
-            },
-            .NonlocalReturn => {
-                return try Completion.initRuntimeError(allocator, source_range, "A non-local return has bubbled up to the top of a sub-script! This is a bug!", .{});
             },
             else => unreachable,
         }

@@ -100,7 +100,7 @@ pub fn RunScript(allocator: Allocator, heap: *Heap, tracked_receiver: Heap.Track
     var result_value: Heap.Tracked = try heap.track(environment.globalNil());
     defer result_value.untrack(heap);
 
-    if (try interpreter.executeSubScript(allocator, heap, script, source_range, context)) |script_completion| {
+    if (try interpreter.executeSubScript(allocator, heap, script, context)) |script_completion| {
         if (script_completion.isNormal()) {
             result_value.untrack(heap);
             result_value = try heap.track(script_completion.data.Normal);
