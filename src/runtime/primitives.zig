@@ -7,9 +7,9 @@ const Allocator = std.mem.Allocator;
 
 const Heap = @import("./heap.zig");
 const Value = @import("./value.zig").Value;
-const Range = @import("../language/location_range.zig");
 const Object = @import("./object.zig");
 const Completion = @import("./completion.zig");
+const SourceRange = @import("../language/source_range.zig");
 const runtime_error = @import("./error.zig");
 const interpreter = @import("./interpreter.zig");
 const InterpreterContext = interpreter.InterpreterContext;
@@ -28,9 +28,9 @@ const PrimitiveSpec = struct {
     function: fn (
         allocator: Allocator,
         heap: *Heap,
-        message_range: Range,
         receiver: Heap.Tracked,
         arguments: []Heap.Tracked,
+        source_range: SourceRange,
         context: *InterpreterContext,
     ) interpreter.InterpreterError!Completion,
 };
@@ -83,17 +83,17 @@ pub fn hasPrimitive(selector: []const u8) bool {
 pub fn callPrimitive(
     allocator: Allocator,
     heap: *Heap,
-    message_range: Range,
-    selector: []const u8,
     receiver: Heap.Tracked,
+    selector: []const u8,
     arguments: []Heap.Tracked,
+    source_range: SourceRange,
     context: *InterpreterContext,
 ) interpreter.InterpreterError!Completion {
     for (PrimitiveRegistry) |primitive| {
         if (std.mem.eql(u8, primitive.name, selector)) {
-            return try primitive.function(allocator, heap, message_range, receiver, arguments, context);
+            return try primitive.function(allocator, heap, receiver, arguments, source_range, context);
         }
     }
 
-    return Completion.initRuntimeError(allocator, "Unknown primitive \"{s}\" called", .{selector});
+    return Completion.initRuntimeError(allocator, source_range, "Unknown primitive \"{s}\" called", .{selector});
 }

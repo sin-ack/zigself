@@ -8,7 +8,6 @@ const Allocator = std.mem.Allocator;
 const AST = @import("../../language/ast.zig");
 const Slot = @import("../slot.zig").Slot;
 const Heap = @import("../heap.zig");
-const Range = @import("../../language/location_range.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const Activation = @import("../activation.zig");
@@ -102,13 +101,13 @@ fn getOrCreateBlockMessageName(allocator: Allocator, heap: *Heap, context: *Inte
 pub fn executeBlockMessage(
     allocator: Allocator,
     heap: *Heap,
-    message_range: Range,
     block_value: Heap.Tracked,
     arguments: []Heap.Tracked,
+    source_range: SourceRange,
     context: *InterpreterContext,
 ) root_interpreter.InterpreterError!Completion {
     if (context.activation_stack.depth >= MaximumStackDepth) {
-        return Completion.initRuntimeError(allocator, "Maximum stack size reached", .{});
+        return Completion.initRuntimeError(allocator, source_range, "Maximum stack size reached", .{});
     }
 
     var block_object = block_value.getValue().asObject().asBlockObject();
@@ -116,7 +115,7 @@ pub fn executeBlockMessage(
     // parent completion is on the activation stack (meaning its weak ptr has not
     // been deactivated).
     if (block_object.getMap().getParentActivation() == null) {
-        return Completion.initRuntimeError(allocator, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
+        return Completion.initRuntimeError(allocator, source_range, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
     }
 
     const tracked_message_name = try getOrCreateBlockMessageName(allocator, heap, context, @intCast(u8, arguments.len));
@@ -134,9 +133,6 @@ pub fn executeBlockMessage(
         for (arguments) |argument, i| {
             argument_values[i] = argument.getValue();
         }
-
-        var source_range = SourceRange.init(context.script, message_range);
-        errdefer source_range.deinit();
 
         const new_activation = context.activation_stack.getNewActivationSlot();
         try block_object.activateBlock(
@@ -227,14 +223,14 @@ pub fn executeBlockMessage(
 pub fn executeMethodMessage(
     allocator: Allocator,
     heap: *Heap,
-    message_range: Range,
     receiver: Heap.Tracked,
     tracked_method_object: Heap.Tracked,
     arguments: []Heap.Tracked,
+    source_range: SourceRange,
     context: *InterpreterContext,
 ) root_interpreter.InterpreterError!Completion {
     if (context.activation_stack.depth >= MaximumStackDepth) {
-        return Completion.initRuntimeError(allocator, "Maximum stack size reached", .{});
+        return Completion.initRuntimeError(allocator, source_range, "Maximum stack size reached", .{});
     }
 
     var method_object = tracked_method_object.getValue().asObject().asMethodObject();
@@ -251,9 +247,6 @@ pub fn executeMethodMessage(
     }
 
     const method_activation = blk: {
-        var source_range = SourceRange.init(context.script, message_range);
-        errdefer source_range.deinit();
-
         const new_activation = context.activation_stack.getNewActivationSlot();
         try method_object.activateMethod(
             allocator,
@@ -353,10 +346,10 @@ pub fn executeMethodMessage(
 pub fn executePrimitiveMessage(
     allocator: Allocator,
     heap: *Heap,
-    message_range: Range,
     tracked_receiver: Heap.Tracked,
     name: []const u8,
     arguments: []Heap.Tracked,
+    source_range: SourceRange,
     context: *InterpreterContext,
 ) root_interpreter.InterpreterError!Completion {
     var receiver = tracked_receiver.getValue();
@@ -371,9 +364,9 @@ pub fn executePrimitiveMessage(
     // each argument. It is the primitive's job to unref any argument after
     // its work is done.
     if (primitives.hasPrimitive(name)) {
-        return primitives.callPrimitive(allocator, heap, message_range, name, tracked_bare_receiver, arguments, context);
+        return primitives.callPrimitive(allocator, heap, tracked_bare_receiver, name, arguments, source_range, context);
     } else {
-        return Completion.initRuntimeError(allocator, "Unknown primitive selector \"{s}\"", .{name});
+        return Completion.initRuntimeError(allocator, source_range, "Unknown primitive selector \"{s}\"", .{name});
     }
 }
 
@@ -384,6 +377,7 @@ pub fn executeAssignmentMessage(
     tracked_receiver: Heap.Tracked,
     message_name: []const u8,
     tracked_argument: Heap.Tracked,
+    source_range: SourceRange,
     context: *InterpreterContext,
 ) root_interpreter.InterpreterError!?Completion {
     const receiver = tracked_receiver.getValue();
@@ -396,7 +390,7 @@ pub fn executeAssignmentMessage(
     }
 
     const message_name_without_colon = message_name[0 .. message_name.len - 1];
-    if (try receiver.lookup(.Assign, message_name_without_colon, allocator, context)) |assign_lookup_result| {
+    if (try receiver.lookup(.Assign, message_name_without_colon, source_range, allocator, context)) |assign_lookup_result| {
         if (assign_lookup_result == .Completion) {
             return assign_lookup_result.Completion;
         }
@@ -424,6 +418,10 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
     var tracked_receiver = try heap.track(receiver_completion.data.Normal);
     defer tracked_receiver.untrack(heap);
 
+    var source_range = SourceRange.init(context.script, message.range);
+    defer source_range.deinit();
+
+    // FIXME: Avoid allocating a slice here
     const arguments_or_completion = try getMessageArguments(allocator, heap, message.arguments, context);
     if (arguments_or_completion == .Completion) {
         return arguments_or_completion.Completion;
@@ -439,14 +437,14 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
 
     // Check for assignable slots
     if (message.message_name[message.message_name.len - 1] == ':' and arguments.len == 1) {
-        if (try executeAssignmentMessage(allocator, heap, tracked_receiver, message.message_name, arguments[0], context)) |completion| {
+        if (try executeAssignmentMessage(allocator, heap, tracked_receiver, message.message_name, arguments[0], source_range, context)) |completion| {
             return completion;
         }
     }
 
     // Primitive check
     if (message.message_name[0] == '_') {
-        return executePrimitiveMessage(allocator, heap, message.range, tracked_receiver, message.message_name, arguments, context);
+        return executePrimitiveMessage(allocator, heap, tracked_receiver, message.message_name, arguments, source_range, context);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
@@ -466,11 +464,11 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
             var tracked_block_receiver = try heap.track(block_receiver);
             defer tracked_block_receiver.untrack(heap);
 
-            return executeBlockMessage(allocator, heap, message.range, tracked_block_receiver, arguments, context);
+            return executeBlockMessage(allocator, heap, tracked_block_receiver, arguments, source_range, context);
         }
     }
 
-    if (try tracked_receiver.getValue().lookup(.Read, message.message_name, allocator, context)) |lookup_completion| {
+    if (try tracked_receiver.getValue().lookup(.Read, message.message_name, source_range, allocator, context)) |lookup_completion| {
         if (!lookup_completion.isNormal()) {
             return lookup_completion;
         }
@@ -480,11 +478,11 @@ pub fn executeMessage(allocator: Allocator, heap: *Heap, message: AST.MessageNod
             var tracked_lookup_result = try heap.track(lookup_result);
             defer tracked_lookup_result.untrack(heap);
 
-            return executeMethodMessage(allocator, heap, message.range, tracked_receiver, tracked_lookup_result, arguments, context);
+            return executeMethodMessage(allocator, heap, tracked_receiver, tracked_lookup_result, arguments, source_range, context);
         } else {
             return Completion.initNormal(lookup_result);
         }
     } else {
-        return Completion.initRuntimeError(allocator, "Unknown selector \"{s}\"", .{message.message_name});
+        return Completion.initRuntimeError(allocator, source_range, "Unknown selector \"{s}\"", .{message.message_name});
     }
 }

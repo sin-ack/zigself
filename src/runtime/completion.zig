@@ -9,6 +9,7 @@ const Heap = @import("./heap.zig");
 const Value = @import("./value.zig").Value;
 const Activation = @import("./activation.zig");
 const interpreter = @import("./interpreter.zig");
+const SourceRange = @import("../language/source_range.zig");
 
 const Self = @This();
 
@@ -21,7 +22,7 @@ pub const CompletionData = union(enum) {
     /// a normal completion.
     NonlocalReturn: NonlocalReturnCompletionData,
     /// A runtime error.
-    RuntimeError: []const u8,
+    RuntimeError: RuntimeErrorCompletionData,
     /// A completion telling the current method or block to restart its execution
     /// from the first statement.
     Restart: void,
@@ -39,6 +40,14 @@ pub const NonlocalReturnCompletionData = struct {
     value: Heap.Tracked,
 };
 
+/// The data that's required to perform a runtime error return.
+pub const RuntimeErrorCompletionData = struct {
+    /// The error message. Should be deinitialized by the handler.
+    message: []const u8,
+    /// The source range at which this error occurred.
+    source_range: SourceRange,
+};
+
 data: CompletionData,
 
 /// Initializes a new normal completion with the given value.
@@ -52,9 +61,10 @@ pub fn initNonlocalReturn(target_activation: Activation.Weak, value: Heap.Tracke
 }
 
 /// Creates a new runtime error completion with the given format string and parameters.
-pub fn initRuntimeError(allocator: Allocator, comptime fmt: []const u8, args: anytype) interpreter.InterpreterError!Self {
+/// Copies the source range object.
+pub fn initRuntimeError(allocator: Allocator, source_range: SourceRange, comptime fmt: []const u8, args: anytype) interpreter.InterpreterError!Self {
     const error_message = try std.fmt.allocPrint(allocator, fmt, args);
-    return Self{ .data = .{ .RuntimeError = error_message } };
+    return Self{ .data = .{ .RuntimeError = .{ .message = error_message, .source_range = source_range.copy() } } };
 }
 
 /// Creates a restart completion.
@@ -71,7 +81,10 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
             // NOTE: We explicitly DON'T untrack the heap value here, as that will be borrowed by
             //       executeMethodMessage when the value has arrived to its intended destination.
         },
-        .RuntimeError => |err| allocator.free(err),
+        .RuntimeError => |*err| {
+            allocator.free(err.message);
+            err.source_range.deinit();
+        },
     }
 }
 

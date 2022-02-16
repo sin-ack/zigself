@@ -14,6 +14,7 @@ const Script = @import("../language/script.zig");
 const Activation = @import("./activation.zig");
 const ByteVector = @import("./byte_vector.zig");
 const environment = @import("./environment.zig");
+const SourceRange = @import("../language/source_range.zig");
 const runtime_error = @import("./error.zig");
 const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
 const ActivationStack = Activation.ActivationStack;
@@ -107,8 +108,8 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
             .Normal => |value| {
                 last_expression_result = try heap.track(value);
             },
-            .RuntimeError => |error_message| {
-                std.debug.print("Received error at top level: {s}\n", .{error_message});
+            .RuntimeError => |err| {
+                std.debug.print("Received error at top level: {s}\n", .{err.message});
                 runtime_error.printTraceFromActivationStack(activation_stack.getStack());
                 return null;
             },
@@ -135,7 +136,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
 /// various other context objects.
 ///
 /// Refs `script`.
-pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, parent_context: *InterpreterContext) InterpreterError!?Completion {
+pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, source_range: SourceRange, parent_context: *InterpreterContext) InterpreterError!?Completion {
     script.ref();
     defer script.unref();
 
@@ -170,7 +171,7 @@ pub fn executeSubScript(allocator: Allocator, heap: *Heap, script: Script.Ref, p
                 return completion;
             },
             .NonlocalReturn => {
-                return try Completion.initRuntimeError(allocator, "A non-local return has bubbled up to the top of a sub-script! This is a bug!", .{});
+                return try Completion.initRuntimeError(allocator, source_range, "A non-local return has bubbled up to the top of a sub-script! This is a bug!", .{});
             },
             else => unreachable,
         }
@@ -522,6 +523,10 @@ pub fn executeReturn(allocator: Allocator, heap: *Heap, return_node: AST.ReturnN
 /// Executes an identifier expression.
 pub fn executeIdentifier(allocator: Allocator, heap: *Heap, identifier: AST.IdentifierNode, context: *InterpreterContext) InterpreterError!Completion {
     _ = heap;
+
+    var source_range = SourceRange.init(context.script, identifier.range);
+    defer source_range.deinit();
+
     if (identifier.value[0] == '_') {
         var receiver = context.self_object.getValue();
 
@@ -532,7 +537,7 @@ pub fn executeIdentifier(allocator: Allocator, heap: *Heap, identifier: AST.Iden
         var tracked_receiver = try heap.track(receiver);
         defer tracked_receiver.untrack(heap);
 
-        return message_interpreter.executePrimitiveMessage(allocator, heap, identifier.range, tracked_receiver, identifier.value, &[_]Heap.Tracked{}, context);
+        return message_interpreter.executePrimitiveMessage(allocator, heap, tracked_receiver, identifier.value, &[_]Heap.Tracked{}, source_range, context);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
@@ -551,11 +556,11 @@ pub fn executeIdentifier(allocator: Allocator, heap: *Heap, identifier: AST.Iden
             var tracked_receiver = try heap.track(receiver);
             defer tracked_receiver.untrack(heap);
 
-            return message_interpreter.executeBlockMessage(allocator, heap, identifier.range, tracked_receiver, &[_]Heap.Tracked{}, context);
+            return message_interpreter.executeBlockMessage(allocator, heap, tracked_receiver, &[_]Heap.Tracked{}, source_range, context);
         }
     }
 
-    if (try context.self_object.getValue().lookup(.Read, identifier.value, allocator, context)) |lookup_completion| {
+    if (try context.self_object.getValue().lookup(.Read, identifier.value, source_range, allocator, context)) |lookup_completion| {
         if (!lookup_completion.isNormal()) {
             return lookup_completion;
         }
@@ -568,17 +573,17 @@ pub fn executeIdentifier(allocator: Allocator, heap: *Heap, identifier: AST.Iden
             return message_interpreter.executeMethodMessage(
                 allocator,
                 heap,
-                identifier.range,
                 context.self_object,
                 tracked_lookup_result,
                 &[_]Heap.Tracked{},
+                source_range,
                 context,
             );
         } else {
             return Completion.initNormal(lookup_result);
         }
     } else {
-        return Completion.initRuntimeError(allocator, "Failed looking up \"{s}\"", .{identifier.value});
+        return Completion.initRuntimeError(allocator, source_range, "Failed looking up \"{s}\"", .{identifier.value});
     }
 }
 

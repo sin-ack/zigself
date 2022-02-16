@@ -9,6 +9,7 @@ const hash = @import("../utility/hash.zig");
 const Object = @import("./object.zig");
 const Completion = @import("./completion.zig");
 const ByteVector = @import("./byte_vector.zig");
+const SourceRange = @import("../language/source_range.zig");
 const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 const object_lookup = @import("./object/lookup.zig");
 const Heap = @import("./heap.zig");
@@ -115,31 +116,33 @@ pub const Value = packed struct {
         self: Value,
         comptime intent: LookupIntent,
         selector: []const u8,
+        source_range: SourceRange,
         allocator: ?Allocator,
         context: ?*InterpreterContext,
     ) object_lookup.lookupReturnType(intent) {
         const selector_hash = hash.stringHash(selector);
         if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up \"{s}\" (hash: {x}) on {}\n", .{ selector, selector_hash, self });
 
-        return try self.lookupByHash(intent, selector_hash, allocator, context);
+        return try self.lookupByHash(intent, selector_hash, source_range, allocator, context);
     }
 
     pub fn lookupByHash(
         self: Value,
         comptime intent: LookupIntent,
         selector_hash: u32,
+        source_range: SourceRange,
         allocator: ?Allocator,
         context: ?*InterpreterContext,
     ) object_lookup.lookupReturnType(intent) {
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
-            .ObjectReference => self.asObject().lookupByHash(intent, selector_hash, allocator, context),
+            .ObjectReference => self.asObject().lookupByHash(intent, selector_hash, source_range, allocator, context),
 
             .Integer => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits integer\n", .{});
 
                 if (context) |ctx| {
-                    const traits_integer_completion = try Object.findTraitsObject("integer", allocator.?, ctx);
+                    const traits_integer_completion = try Object.findTraitsObject("integer", source_range, allocator.?, ctx);
                     if (traits_integer_completion.isNormal()) {
                         const traits_integer = traits_integer_completion.data.Normal;
                         if (intent == .Read) {
@@ -147,7 +150,7 @@ pub const Value = packed struct {
                                 return @as(?Completion, Completion.initNormal(traits_integer));
                         }
 
-                        return try traits_integer.lookupByHash(intent, selector_hash, allocator, context);
+                        return try traits_integer.lookupByHash(intent, selector_hash, source_range, allocator, context);
                     }
 
                     return object_lookup.lookupCompletionReturn(intent, traits_integer_completion);
@@ -159,7 +162,7 @@ pub const Value = packed struct {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits float\n", .{});
 
                 if (context) |ctx| {
-                    const traits_float_completion = try Object.findTraitsObject("float", allocator.?, ctx);
+                    const traits_float_completion = try Object.findTraitsObject("float", source_range, allocator.?, ctx);
                     if (traits_float_completion.isNormal()) {
                         const traits_float = traits_float_completion.data.Normal;
                         if (intent == .Read) {
@@ -167,7 +170,7 @@ pub const Value = packed struct {
                                 return @as(?Completion, Completion.initNormal(traits_float));
                         }
 
-                        return try traits_float.lookupByHash(intent, selector_hash, allocator, context);
+                        return try traits_float.lookupByHash(intent, selector_hash, source_range, allocator, context);
                     }
 
                     return object_lookup.lookupCompletionReturn(intent, traits_float_completion);

@@ -484,7 +484,7 @@ pub const Method = packed struct {
     }
 
     /// Creates a method activation object for this block and returns it.
-    /// Borrows a ref for `message_script`.
+    /// Copies `source_range`.
     pub fn activateMethod(
         self: *Method,
         allocator: Allocator,
@@ -607,8 +607,8 @@ pub const Block = packed struct {
         return remaining_message.len == 0;
     }
 
-    /// Creates a block activation object for this block and returns it. Borrows
-    /// a ref for `message_script`.
+    /// Creates a block activation object for this block and returns it. Copies
+    /// `source_range`.
     pub fn activateBlock(
         self: *Block,
         allocator: Allocator,

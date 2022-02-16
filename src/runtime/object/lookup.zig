@@ -10,6 +10,7 @@ const Slot = @import("../slot.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const Completion = @import("../completion.zig");
+const SourceRange = @import("../../language/source_range.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 const debug = @import("../../debug.zig");
 
@@ -28,23 +29,23 @@ pub const AssignLookupResult = union(enum) {
     Completion: Completion,
 };
 
-pub fn findTraitsObject(comptime selector: []const u8, allocator: Allocator, context: *InterpreterContext) !Completion {
-    if (try context.lobby.getValue().lookup(.Read, "traits", allocator, context)) |traits_completion| {
+pub fn findTraitsObject(comptime selector: []const u8, source_range: SourceRange, allocator: Allocator, context: *InterpreterContext) !Completion {
+    if (try context.lobby.getValue().lookup(.Read, "traits", source_range, allocator, context)) |traits_completion| {
         if (!traits_completion.isNormal())
             return traits_completion;
 
         const traits = traits_completion.data.Normal;
-        if (try traits.lookup(.Read, selector, allocator, context)) |traits_object_completion| {
+        if (try traits.lookup(.Read, selector, source_range, allocator, context)) |traits_object_completion| {
             if (!traits_object_completion.isNormal())
                 return traits_object_completion;
 
             const traits_object = traits_object_completion.data.Normal;
             return Completion.initNormal(traits_object);
         } else {
-            return Completion.initRuntimeError(allocator, "Could not find " ++ selector ++ " in traits", .{});
+            return Completion.initRuntimeError(allocator, source_range, "Could not find " ++ selector ++ " in traits", .{});
         }
     } else {
-        return Completion.initRuntimeError(allocator, "Could not find traits in lobby", .{});
+        return Completion.initRuntimeError(allocator, source_range, "Could not find traits in lobby", .{});
     }
 }
 
@@ -74,6 +75,7 @@ pub fn lookupByHash(
     self: Object,
     comptime intent: LookupIntent,
     selector_hash: u32,
+    source_range: SourceRange,
     allocator: ?Allocator,
     context: ?*InterpreterContext,
 ) lookupReturnType(intent) {
@@ -85,7 +87,7 @@ pub fn lookupByHash(
         }
     }
 
-    return try lookupInternal(self, intent, selector_hash, null, allocator, context);
+    return try lookupInternal(self, intent, selector_hash, null, source_range, allocator, context);
 }
 
 fn lookupInternal(
@@ -93,25 +95,26 @@ fn lookupInternal(
     comptime intent: LookupIntent,
     selector_hash: u32,
     previously_visited: ?*const VisitedValueLink,
+    source_range: SourceRange,
     allocator: ?Allocator,
     context: ?*InterpreterContext,
 ) lookupReturnType(intent) {
     switch (self.header.getObjectType()) {
         .ForwardingReference, .Map, .Method => unreachable,
         .Slots => {
-            if (try slotsLookup(intent, Object.Slots, self.asSlotsObject(), selector_hash, previously_visited, allocator, context)) |result| {
+            if (try slotsLookup(intent, Object.Slots, self.asSlotsObject(), selector_hash, previously_visited, source_range, allocator, context)) |result| {
                 return result;
             }
 
             return null;
         },
         .Activation => {
-            if (try slotsLookup(intent, Object.Activation, self.asActivationObject(), selector_hash, previously_visited, allocator, context)) |result| {
+            if (try slotsLookup(intent, Object.Activation, self.asActivationObject(), selector_hash, previously_visited, source_range, allocator, context)) |result| {
                 return result;
             }
 
             // Receiver lookup
-            if (try self.asActivationObject().receiver.lookupByHash(intent, selector_hash, allocator, context)) |result| {
+            if (try self.asActivationObject().receiver.lookupByHash(intent, selector_hash, source_range, allocator, context)) |result| {
                 return result;
             }
 
@@ -121,7 +124,7 @@ fn lookupInternal(
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits block\n", .{});
             // NOTE: executeMessage will handle the execution of the block itself.
             if (context) |ctx| {
-                const traits_block_completion = try findTraitsObject("block", allocator.?, ctx);
+                const traits_block_completion = try findTraitsObject("block", source_range, allocator.?, ctx);
                 if (traits_block_completion.isNormal()) {
                     const traits_block = traits_block_completion.data.Normal;
                     if (intent == .Read) {
@@ -129,7 +132,7 @@ fn lookupInternal(
                             return Completion.initNormal(traits_block);
                     }
 
-                    return try traits_block.lookupByHash(intent, selector_hash, allocator, context);
+                    return try traits_block.lookupByHash(intent, selector_hash, source_range, allocator, context);
                 }
 
                 return lookupCompletionReturn(intent, traits_block_completion);
@@ -140,7 +143,7 @@ fn lookupInternal(
         .Vector => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits vector\n", .{});
             if (context) |ctx| {
-                const traits_vector_completion = try findTraitsObject("vector", allocator.?, ctx);
+                const traits_vector_completion = try findTraitsObject("vector", source_range, allocator.?, ctx);
                 if (traits_vector_completion.isNormal()) {
                     const traits_vector = traits_vector_completion.data.Normal;
                     if (intent == .Read) {
@@ -148,7 +151,7 @@ fn lookupInternal(
                             return @as(?Completion, Completion.initNormal(traits_vector));
                     }
 
-                    return try traits_vector.lookupByHash(intent, selector_hash, allocator, context);
+                    return try traits_vector.lookupByHash(intent, selector_hash, source_range, allocator, context);
                 }
 
                 return lookupCompletionReturn(intent, traits_vector_completion);
@@ -159,7 +162,7 @@ fn lookupInternal(
         .ByteVector => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits string\n", .{});
             if (context) |ctx| {
-                const traits_string_completion = try findTraitsObject("string", allocator.?, ctx);
+                const traits_string_completion = try findTraitsObject("string", source_range, allocator.?, ctx);
                 if (traits_string_completion.isNormal()) {
                     const traits_string = traits_string_completion.data.Normal;
                     if (intent == .Read) {
@@ -167,7 +170,7 @@ fn lookupInternal(
                             return @as(?Completion, Completion.initNormal(traits_string));
                     }
 
-                    return try traits_string.lookupByHash(intent, selector_hash, allocator, context);
+                    return try traits_string.lookupByHash(intent, selector_hash, source_range, allocator, context);
                 }
 
                 return lookupCompletionReturn(intent, traits_string_completion);
@@ -185,6 +188,7 @@ fn slotsLookup(
     object: *ObjectType,
     selector_hash: u32,
     previously_visited: ?*const VisitedValueLink,
+    source_range: SourceRange,
     allocator: ?Allocator,
     context: ?*InterpreterContext,
 ) lookupReturnType(intent) {
@@ -247,7 +251,7 @@ fn slotsLookup(
     for (object.getSlots()) |slot| {
         if (slot.isParent()) {
             if (slot.value.isObjectReference()) {
-                if (try lookupInternal(slot.value.asObject(), intent, selector_hash, &currently_visited, allocator, context)) |result| {
+                if (try lookupInternal(slot.value.asObject(), intent, selector_hash, &currently_visited, source_range, allocator, context)) |result| {
                     return result;
                 }
             } else {

@@ -7,38 +7,37 @@ const Allocator = std.mem.Allocator;
 
 const Heap = @import("../heap.zig");
 const Value = @import("../value.zig").Value;
-const Range = @import("../../language/location_range.zig");
 const Script = @import("../../language/script.zig");
 const Completion = @import("../completion.zig");
 const environment = @import("../environment.zig");
 const interpreter = @import("../interpreter.zig");
+const SourceRange = @import("../../language/source_range.zig");
 const runtime_error = @import("../error.zig");
 const error_set_utils = @import("../../utility/error_set.zig");
 
 const InterpreterContext = interpreter.InterpreterContext;
 
 /// Return the static "nil" slots object.
-pub fn Nil(allocator: Allocator, heap: *Heap, message_range: Range, receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Completion {
+pub fn Nil(allocator: Allocator, heap: *Heap, receiver: Heap.Tracked, arguments: []Heap.Tracked, source_range: SourceRange, context: *InterpreterContext) !Completion {
     _ = allocator;
     _ = heap;
-    _ = message_range;
     _ = receiver;
     _ = arguments;
+    _ = source_range;
     _ = context;
 
     return Completion.initNormal(environment.globalNil());
 }
 
 /// Exit with the given return code.
-pub fn Exit(allocator: Allocator, heap: *Heap, message_range: Range, receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Completion {
+pub fn Exit(allocator: Allocator, heap: *Heap, receiver: Heap.Tracked, arguments: []Heap.Tracked, source_range: SourceRange, context: *InterpreterContext) !Completion {
     _ = heap;
-    _ = message_range;
     _ = receiver;
     _ = context;
 
     var status_code = arguments[0].getValue();
     if (!status_code.isInteger()) {
-        return Completion.initRuntimeError(allocator, "Expected integer for the status code argument of _Exit:, got {s}", .{@tagName(status_code.getType())});
+        return Completion.initRuntimeError(allocator, source_range, "Expected integer for the status code argument of _Exit:, got {s}", .{@tagName(status_code.getType())});
     }
 
     // The ultimate in garbage collection.
@@ -46,13 +45,12 @@ pub fn Exit(allocator: Allocator, heap: *Heap, message_range: Range, receiver: H
 }
 
 /// Run the given script file, and return the result of the last expression.
-pub fn RunScript(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Completion {
+pub fn RunScript(allocator: Allocator, heap: *Heap, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, source_range: SourceRange, context: *InterpreterContext) !Completion {
     _ = arguments;
-    _ = message_range;
 
     const receiver = tracked_receiver.getValue();
     if (!(receiver.isObjectReference() and receiver.asObject().isByteVectorObject())) {
-        return Completion.initRuntimeError(allocator, "Expected ByteVector for the receiver of _RunScript", .{});
+        return Completion.initRuntimeError(allocator, source_range, "Expected ByteVector for the receiver of _RunScript", .{});
     }
 
     const receiver_byte_vector = receiver.asObject().asByteVectorObject();
@@ -72,7 +70,7 @@ pub fn RunScript(allocator: Allocator, heap: *Heap, message_range: Range, tracke
     {
         return @errSetCast(Allocator.Error, err);
     } else {
-        return Completion.initRuntimeError(allocator, "An unexpected error was raised from std.fs.path.relative: {s}", .{@errorName(err)});
+        return Completion.initRuntimeError(allocator, source_range, "An unexpected error was raised from std.fs.path.relative: {s}", .{@errorName(err)});
     };
     defer allocator.free(target_path);
 
@@ -81,7 +79,7 @@ pub fn RunScript(allocator: Allocator, heap: *Heap, message_range: Range, tracke
     {
         return @errSetCast(Allocator.Error, err);
     } else {
-        return Completion.initRuntimeError(allocator, "An unexpected error was raised from script.initInPlaceFromFilePath: {s}", .{@errorName(err)});
+        return Completion.initRuntimeError(allocator, source_range, "An unexpected error was raised from script.initInPlaceFromFilePath: {s}", .{@errorName(err)});
     };
     defer script.unref();
 
@@ -90,19 +88,19 @@ pub fn RunScript(allocator: Allocator, heap: *Heap, message_range: Range, tracke
     {
         return @errSetCast(Allocator.Error, err);
     } else {
-        return Completion.initRuntimeError(allocator, "An unexpected error was raised from script.parseScript: {s}", .{@errorName(err)});
+        return Completion.initRuntimeError(allocator, source_range, "An unexpected error was raised from script.parseScript: {s}", .{@errorName(err)});
     };
     script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
 
     if (!did_parse_without_errors) {
-        return Completion.initRuntimeError(allocator, "Failed parsing the script passed to _RunScript", .{});
+        return Completion.initRuntimeError(allocator, source_range, "Failed parsing the script passed to _RunScript", .{});
     }
 
     // FIXME: This is too much work. Just return the original value.
     var result_value: Heap.Tracked = try heap.track(environment.globalNil());
     defer result_value.untrack(heap);
 
-    if (try interpreter.executeSubScript(allocator, heap, script, context)) |script_completion| {
+    if (try interpreter.executeSubScript(allocator, heap, script, source_range, context)) |script_completion| {
         if (script_completion.isNormal()) {
             result_value.untrack(heap);
             result_value = try heap.track(script_completion.data.Normal);
@@ -115,28 +113,27 @@ pub fn RunScript(allocator: Allocator, heap: *Heap, message_range: Range, tracke
 }
 
 /// Raise the argument as an error. The argument must be a byte vector.
-pub fn Error(allocator: Allocator, heap: *Heap, message_range: Range, receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Completion {
+pub fn Error(allocator: Allocator, heap: *Heap, receiver: Heap.Tracked, arguments: []Heap.Tracked, source_range: SourceRange, context: *InterpreterContext) !Completion {
     _ = heap;
-    _ = message_range;
     _ = receiver;
     _ = context;
 
     var argument = arguments[0].getValue();
     if (!(argument.isObjectReference() and argument.asObject().isByteVectorObject())) {
-        return Completion.initRuntimeError(allocator, "Expected ByteVector as _Error: argument", .{});
+        return Completion.initRuntimeError(allocator, source_range, "Expected ByteVector as _Error: argument", .{});
     }
 
-    return Completion.initRuntimeError(allocator, "Error raised in Self code: {s}", .{argument.asObject().asByteVectorObject().getValues()});
+    return Completion.initRuntimeError(allocator, source_range, "Error raised in Self code: {s}", .{argument.asObject().asByteVectorObject().getValues()});
 }
 
 /// Restarts the current method, executing it from the first statement.
 /// This primitive is intended to be used internally only.
-pub fn Restart(allocator: Allocator, heap: *Heap, message_range: Range, receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Completion {
+pub fn Restart(allocator: Allocator, heap: *Heap, receiver: Heap.Tracked, arguments: []Heap.Tracked, source_range: SourceRange, context: *InterpreterContext) !Completion {
     _ = allocator;
     _ = heap;
-    _ = message_range;
     _ = receiver;
     _ = arguments;
+    _ = source_range;
     _ = context;
 
     return Completion.initRestart();

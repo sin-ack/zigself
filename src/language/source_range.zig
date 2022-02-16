@@ -25,6 +25,10 @@ pub fn deinit(self: *Self) void {
     self.script.unref();
 }
 
+pub fn copy(self: Self) Self {
+    return init(self.script, self.range);
+}
+
 pub fn getStartLine(self: Self) ![]const u8 {
     return self.script.value.parser.lexer.getLineForLocation(self.range.start);
 }

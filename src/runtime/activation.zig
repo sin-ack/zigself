@@ -91,7 +91,7 @@ pub fn initInPlace(
         .creation_context = .{
             .should_untrack_message_name_on_deinit = should_untrack_message_name_on_deinit,
             .message = creator_message,
-            .source_range = source_range,
+            .source_range = source_range.copy(),
         },
     };
 }

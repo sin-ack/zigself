@@ -7,30 +7,29 @@ const Allocator = std.mem.Allocator;
 
 const Slot = @import("../slot.zig");
 const Heap = @import("../heap.zig");
-const Range = @import("../../language/location_range.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const Completion = @import("../completion.zig");
 const environment = @import("../environment.zig");
+const SourceRange = @import("../../language/source_range.zig");
 const object_inspector = @import("../object_inspector.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 const message_interpreter = @import("../interpreter/message.zig");
 
 /// Adds the slots in the argument object to the receiver object. The slots
 /// are copied. The objects at each slot are not cloned, however.
-pub fn AddSlots(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Completion {
-    _ = message_range;
+pub fn AddSlots(allocator: Allocator, heap: *Heap, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, source_range: SourceRange, context: *InterpreterContext) !Completion {
     _ = context;
 
     const receiver = tracked_receiver.getValue();
     const argument = arguments[0].getValue();
 
     if (!(receiver.isObjectReference() and receiver.asObject().isSlotsObject())) {
-        return Completion.initRuntimeError(allocator, "Expected Slots as the receiver to _AddSlots:", .{});
+        return Completion.initRuntimeError(allocator, source_range, "Expected Slots as the receiver to _AddSlots:", .{});
     }
 
     if (!(argument.isObjectReference() and argument.asObject().isSlotsObject())) {
-        return Completion.initRuntimeError(allocator, "Expected Slots as the argument to _AddSlots:", .{});
+        return Completion.initRuntimeError(allocator, source_range, "Expected Slots as the argument to _AddSlots:", .{});
     }
 
     var receiver_object = receiver.asObject().asSlotsObject();
@@ -49,28 +48,28 @@ pub fn AddSlots(allocator: Allocator, heap: *Heap, message_range: Range, tracked
 
 /// Removes the given slot. If the slot isn't found or otherwise cannot be
 /// removed, the second argument is evaluated as a block.
-pub fn RemoveSlot_IfFail(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Completion {
+pub fn RemoveSlot_IfFail(allocator: Allocator, heap: *Heap, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, source_range: SourceRange, context: *InterpreterContext) !Completion {
     var receiver = tracked_receiver.getValue();
     var slot_name = arguments[0].getValue();
     var fail_block = arguments[1].getValue();
 
     if (!slot_name.value.is(.ByteVector)) {
-        return Completion.initRuntimeError(allocator, "Expected ByteVector for the slot name argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(slot_name.value.content)});
+        return Completion.initRuntimeError(allocator, source_range, "Expected ByteVector for the slot name argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(slot_name.value.content)});
     }
 
     if (!fail_block.value.is(.Block)) {
-        return Completion.initRuntimeError(allocator, "Expected Block for the failure block argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(fail_block.value.content)});
+        return Completion.initRuntimeError(allocator, source_range, "Expected Block for the failure block argument of _RemoveSlot:IfFail:, got {s}", .{@tagName(fail_block.value.content)});
     }
 
     const did_remove_slot = receiver.value.removeSlot(allocator, slot_name.value.content.ByteVector.values) catch |err| switch (err) {
         error.ObjectDoesNotAcceptSlots => {
-            return Completion.initRuntimeError(allocator, "Attempted to remove a slot from an object which does not accept slots", .{});
+            return Completion.initRuntimeError(allocator, source_range, "Attempted to remove a slot from an object which does not accept slots", .{});
         },
         else => return @errSetCast(Allocator.Error, err),
     };
 
     if (!did_remove_slot) {
-        const returned_value = try message_interpreter.executeBlockMessage(allocator, heap, message_range, fail_block, &[_]Value{}, context);
+        const returned_value = try message_interpreter.executeBlockMessage(allocator, heap, fail_block, &[_]Value{}, source_range, context);
         returned_value.unrefWithAllocator(allocator);
     }
 
@@ -78,11 +77,11 @@ pub fn RemoveSlot_IfFail(allocator: Allocator, heap: *Heap, message_range: Range
 }
 
 /// Inspect the receiver and print it to stderr. Return the receiver.
-pub fn Inspect(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Completion {
+pub fn Inspect(allocator: Allocator, heap: *Heap, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, source_range: SourceRange, context: *InterpreterContext) !Completion {
     _ = heap;
     _ = context;
     _ = arguments;
-    _ = message_range;
+    _ = source_range;
 
     const receiver = tracked_receiver.getValue();
     try object_inspector.inspectObject(allocator, receiver, .Multiline);
@@ -91,10 +90,10 @@ pub fn Inspect(allocator: Allocator, heap: *Heap, message_range: Range, tracked_
 }
 
 /// Make an identical shallow copy of the receiver and return it.
-pub fn Clone(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) !Completion {
+pub fn Clone(allocator: Allocator, heap: *Heap, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, source_range: SourceRange, context: *InterpreterContext) !Completion {
     _ = allocator;
-    _ = message_range;
     _ = arguments;
+    _ = source_range;
     _ = context;
 
     const receiver = tracked_receiver.getValue();
@@ -103,11 +102,11 @@ pub fn Clone(allocator: Allocator, heap: *Heap, message_range: Range, tracked_re
 
 /// Return whether the receiver and argument are identical. Returns either
 /// the global "true" or "false" object.
-pub fn Eq(allocator: Allocator, heap: *Heap, message_range: Range, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, context: *InterpreterContext) error{}!Completion {
+pub fn Eq(allocator: Allocator, heap: *Heap, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, source_range: SourceRange, context: *InterpreterContext) error{}!Completion {
     _ = allocator;
     _ = heap;
+    _ = source_range;
     _ = context;
-    _ = message_range;
 
     return Completion.initNormal(
         if (tracked_receiver.getValue().data == arguments[0].getValue().data)
