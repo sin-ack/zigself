@@ -10,8 +10,6 @@ _AddSlots: (|
      The standard library lives in std."
     globals* = (|
         std = (|
-            "FIXME: The location of traits for native object types should be
-             here."
             traits = traits.
         |).
     |).

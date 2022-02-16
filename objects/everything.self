@@ -18,3 +18,4 @@ _AddSlots: (| nil = _Nil |).
 'vector.self' _RunScript.
 
 'list.self' _RunScript.
+'testing.self' _RunScript.
