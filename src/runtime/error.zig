@@ -22,20 +22,21 @@ pub fn printTraceFromActivationStack(stack: []Activation) void {
         // const activation_object = activation.activation_object;
         // const receiver = activation_object.asObject().asActivationObject().receiver;
 
-        std.debug.print("  at {s} ({s}:{})\n", .{ context.message.getValue().asByteVector().getValues(), context.script.value.file_path, context.range.format() });
+        std.debug.print("  at {s} ({})\n", .{ context.message.getValue().asByteVector().getValues(), context.source_range.format() });
 
-        const source_line = context.script.value.parser.lexer.getLineForLocation(context.range.start) catch unreachable;
+        const range = context.source_range.range;
+        const source_line = context.source_range.getStartLine() catch unreachable;
         // NOTE: The spaces are to get the arrow aligned with the source code
-        std.debug.print("  \x1b[37m{d:<3} |\x1b[0m {s}\n\x1b[92m        ", .{ context.range.start.line, source_line });
+        std.debug.print("  \x1b[37m{d:<3} |\x1b[0m {s}\n\x1b[92m        ", .{ context.source_range.range.start.line, source_line });
 
         // FIXME: Make this nicer
         const writer = std.io.getStdErr().writer();
 
-        writer.writeByteNTimes(' ', context.range.start.column - 1) catch unreachable;
-        if (context.range.start.line == context.range.end.line) {
-            writer.writeByteNTimes('^', std.math.max(1, context.range.end.column - context.range.start.column)) catch unreachable;
+        writer.writeByteNTimes(' ', range.start.column - 1) catch unreachable;
+        if (range.start.line == range.end.line) {
+            writer.writeByteNTimes('^', std.math.max(1, range.end.column - range.start.column)) catch unreachable;
         } else {
-            writer.writeByteNTimes('^', source_line.len - context.range.start.column + 1) catch unreachable;
+            writer.writeByteNTimes('^', source_line.len - range.start.column + 1) catch unreachable;
             writer.writeByteNTimes('.', 3) catch unreachable;
         }
         std.debug.print("\x1b[0m\n", .{});

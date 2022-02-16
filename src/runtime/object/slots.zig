@@ -11,12 +11,12 @@ const hash = @import("../../utility/hash.zig");
 const Heap = @import("../heap.zig");
 const Slot = @import("../slot.zig").Slot;
 const Value = @import("../value.zig").Value;
-const Range = @import("../../language/location_range.zig");
 const Script = @import("../../language/script.zig");
 const Object = @import("../object.zig");
 const MapType = @import("./map.zig").MapType;
 const Location = @import("../../language/location.zig");
 const ByteVector = @import("../byte_vector.zig");
+const SourceRange = @import("../../language/source_range.zig");
 const RuntimeActivation = @import("../activation.zig");
 
 /// A slots object. A slots object does not contain all the slots that are
@@ -491,8 +491,7 @@ pub const Method = packed struct {
         heap: *Heap,
         receiver: Value,
         arguments: []Value,
-        message_range: Range,
-        message_script: Script.Ref,
+        source_range: SourceRange,
         out_activation: *RuntimeActivation,
     ) !void {
         const activation_object = try Activation.create(heap, .Method, self.slots.header.getMap(), self.getAssignableSlots(), receiver);
@@ -501,7 +500,7 @@ pub const Method = packed struct {
         const tracked_method_name = try heap.track(self.getMap().method_name);
         errdefer tracked_method_name.untrack(heap);
 
-        try out_activation.initInPlace(allocator, heap, activation_object.asValue(), tracked_method_name, message_range, message_script, true);
+        try out_activation.initInPlace(allocator, heap, activation_object.asValue(), tracked_method_name, source_range, true);
     }
 
     pub fn requiredSizeForAllocation(assignable_slot_count: u8) usize {
@@ -617,14 +616,13 @@ pub const Block = packed struct {
         receiver: Value,
         arguments: []Value,
         message_name: Heap.Tracked,
-        message_range: Range,
-        message_script: Script.Ref,
+        source_range: SourceRange,
         out_activation: *RuntimeActivation,
     ) !void {
         const activation_object = try Activation.create(heap, .Block, self.slots.header.getMap(), self.getAssignableSlots(), receiver);
         activation_object.setArguments(arguments);
 
-        try out_activation.initInPlace(allocator, heap, activation_object.asValue(), message_name, message_range, message_script, false);
+        try out_activation.initInPlace(allocator, heap, activation_object.asValue(), message_name, source_range, false);
         out_activation.parent_activation = self.getMap().getParentActivation();
         out_activation.nonlocal_return_target_activation = self.getMap().getNonlocalReturnTargetActivation();
     }

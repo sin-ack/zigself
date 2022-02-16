@@ -15,6 +15,7 @@ const Activation = @import("../activation.zig");
 const ByteVector = @import("../byte_vector.zig");
 const Completion = @import("../completion.zig");
 const primitives = @import("../primitives.zig");
+const SourceRange = @import("../../language/source_range.zig");
 const environment = @import("../environment.zig");
 
 const root_interpreter = @import("../interpreter.zig");
@@ -134,8 +135,8 @@ pub fn executeBlockMessage(
             argument_values[i] = argument.getValue();
         }
 
-        context.script.ref();
-        errdefer context.script.unref();
+        var source_range = SourceRange.init(context.script, message_range);
+        errdefer source_range.deinit();
 
         const new_activation = context.activation_stack.getNewActivationSlot();
         try block_object.activateBlock(
@@ -144,8 +145,7 @@ pub fn executeBlockMessage(
             block_object.getMap().getParentActivation().?.activation_object,
             argument_values,
             tracked_message_name,
-            message_range,
-            context.script,
+            source_range,
             new_activation,
         );
         break :blk new_activation;
@@ -250,9 +250,9 @@ pub fn executeMethodMessage(
         argument_values[i] = argument.getValue();
     }
 
-    context.script.ref();
     const method_activation = blk: {
-        errdefer context.script.unref();
+        var source_range = SourceRange.init(context.script, message_range);
+        errdefer source_range.deinit();
 
         const new_activation = context.activation_stack.getNewActivationSlot();
         try method_object.activateMethod(
@@ -260,8 +260,7 @@ pub fn executeMethodMessage(
             heap,
             receiver.getValue(),
             argument_values,
-            message_range,
-            context.script,
+            source_range,
             new_activation,
         );
         break :blk new_activation;

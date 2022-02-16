@@ -7,9 +7,8 @@ const Allocator = std.mem.Allocator;
 
 const Heap = @import("./heap.zig");
 const Value = @import("./value.zig").Value;
-const Script = @import("../language/script.zig");
-const Range = @import("../language/location_range.zig");
 const weak_ref = @import("../utility/weak_ref.zig");
+const SourceRange = @import("../language/source_range.zig");
 
 const Self = @This();
 const WeakBlock = weak_ref.WeakPtrBlock(Self);
@@ -20,8 +19,7 @@ pub const Weak = weak_ref.WeakPtr(Self);
 pub const ActivationCreationContext = struct {
     should_untrack_message_name_on_deinit: bool,
     message: Heap.Tracked,
-    script: Script.Ref,
-    range: Range,
+    source_range: SourceRange,
 };
 
 pub const ActivationStack = struct {
@@ -80,8 +78,7 @@ pub fn initInPlace(
     heap: *Heap,
     activation_object: Value,
     creator_message: Heap.Tracked,
-    creator_range: Range,
-    creator_script: Script.Ref,
+    source_range: SourceRange,
     should_untrack_message_name_on_deinit: bool,
 ) !void {
     std.debug.assert(activation_object.isObjectReference());
@@ -94,15 +91,14 @@ pub fn initInPlace(
         .creation_context = .{
             .should_untrack_message_name_on_deinit = should_untrack_message_name_on_deinit,
             .message = creator_message,
-            .script = creator_script,
-            .range = creator_range,
+            .source_range = source_range,
         },
     };
 }
 
 pub fn deinit(self: *Self) void {
     self.weak.deinit();
-    self.creation_context.script.unref();
+    self.creation_context.source_range.deinit();
 
     if (self.creation_context.should_untrack_message_name_on_deinit) {
         self.creation_context.message.untrack(self.heap);

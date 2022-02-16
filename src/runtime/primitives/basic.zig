@@ -103,8 +103,8 @@ pub fn RunScript(allocator: Allocator, heap: *Heap, message_range: Range, tracke
     defer result_value.untrack(heap);
 
     if (try interpreter.executeSubScript(allocator, heap, script, context)) |script_completion| {
-        result_value.untrack(heap);
         if (script_completion.isNormal()) {
+            result_value.untrack(heap);
             result_value = try heap.track(script_completion.data.Normal);
         } else {
             return script_completion;
