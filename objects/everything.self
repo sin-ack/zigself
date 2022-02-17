@@ -10,6 +10,9 @@ _AddSlots: (| nil = _Nil |).
 'globals.self' _RunScript.
 'basicTraits.self' _RunScript.
 
+"Nil objects are singletons."
+nil _AddSlots: (| parent* = std traits singleton |).
+
 'defaultBehavior.self' _RunScript.
 'booleans.self' _RunScript.
 'string.self' _RunScript.
