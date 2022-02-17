@@ -26,9 +26,10 @@ Earlier and later versions may work but there are no guarantees.
 ## Building zigSelf
 
 1. Clone the repository with submodules: `git clone --recurse-submodules https://github.com/sin-ack/zigself`
-2. Run the code: `zig build run -- test.self`
+2. Run the code: `zig build run -- examples/fibonacci.self`
 
-That's it!
+That's it! If you want to build a release version, you can build one with
+`zig build -Drelease-fast=true` and the binary will be in `zig-out/bin/`.
 
 ## Current status of zigSelf
 
@@ -53,7 +54,7 @@ That's it!
     - [ ] Object primitives
       - [x] `_AddSlots:`
       - [x] `_Eq:`
-      - [ ] `_Inspect:`
+      - [x] `_Inspect:`
       - [ ] `_RemoveSlot:IfFail:`
   - [x] Heap and object allocation
   - [x] Generational scavenging garbage collection
