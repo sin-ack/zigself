@@ -1,0 +1,43 @@
+name: Run zigSelf tests
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+  workflow_dispatch:
+
+env:
+  ZIG: ${{ runner.workspace }}/zig/zig
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+      
+      - name: Grab the latest version of the Zig compiler
+        run: |
+          sudo apt update
+          sudo apt install -y jq
+          
+          JSON_DATA=$(curl https://ziglang.org/download/index.json)
+          ZIG_URL=$(echo $JSON_DATA | jq -r ".master.x86_64-linux.tarball")
+          ZIG_SHASUM=$(echo $JSON_DATA | jq -r ".master.x86_64-linux.shasum")
+          
+          wget $ZIG_URL -O zig.tar.xz
+          if [ x"$(sha256sum zig.tar.xz) != x"$ZIG_SHASUM" ]; then
+            echo "!!! Zig tarball signature check failed!"
+            exit 1
+          fi
+          
+          tar xvf zig.tar.xz
+          mv zig-linux-* zig
+      
+      - name: Run zigSelf tests
+        working-directory: ${{ github.workspace }}
+        run: $ZIG build test
