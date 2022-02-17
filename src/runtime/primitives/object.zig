@@ -12,7 +12,7 @@ const Object = @import("../object.zig");
 const Completion = @import("../completion.zig");
 const environment = @import("../environment.zig");
 const SourceRange = @import("../../language/source_range.zig");
-const object_inspector = @import("../object_inspector.zig");
+const value_inspector = @import("../value_inspector.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 const message_interpreter = @import("../interpreter/message.zig");
 
@@ -78,13 +78,14 @@ pub fn RemoveSlot_IfFail(allocator: Allocator, heap: *Heap, tracked_receiver: He
 
 /// Inspect the receiver and print it to stderr. Return the receiver.
 pub fn Inspect(allocator: Allocator, heap: *Heap, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, source_range: SourceRange, context: *InterpreterContext) !Completion {
+    _ = allocator;
     _ = heap;
     _ = context;
     _ = arguments;
     _ = source_range;
 
     const receiver = tracked_receiver.getValue();
-    try object_inspector.inspectObject(allocator, receiver, .Multiline);
+    try value_inspector.inspectValue(.Multiline, receiver);
 
     return Completion.initNormal(receiver);
 }

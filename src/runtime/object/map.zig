@@ -332,6 +332,11 @@ const SlotsAndStatementsMap = packed struct {
         return self.getSlots(MapSize)[0..self.getArgumentSlotCount()];
     }
 
+    /// Return slots that don't belong to any arguments.
+    pub fn getNonArgumentSlots(self: *SlotsAndStatementsMap, comptime MapSize: usize) []Slot {
+        return self.getSlots(MapSize)[self.getArgumentSlotCount()..];
+    }
+
     pub fn getAssignableSlotCount(self: *SlotsAndStatementsMap) u8 {
         return self.slots_map.getAssignableSlotCount();
     }
@@ -411,6 +416,10 @@ const MethodMap = packed struct {
 
     pub fn getSlots(self: *MethodMap) []Slot {
         return self.base_map.getSlots(@sizeOf(MethodMap));
+    }
+
+    pub fn getNonArgumentSlots(self: *MethodMap) []Slot {
+        return self.base_map.getNonArgumentSlots(@sizeOf(MethodMap));
     }
 
     pub fn getSizeInMemory(self: *MethodMap) usize {
@@ -532,6 +541,10 @@ const BlockMap = packed struct {
 
     pub fn getSlots(self: *BlockMap) []Slot {
         return self.base_map.getSlots(@sizeOf(BlockMap));
+    }
+
+    pub fn getNonArgumentSlots(self: *BlockMap) []Slot {
+        return self.base_map.getNonArgumentSlots(@sizeOf(BlockMap));
     }
 
     pub fn getParentActivation(self: *BlockMap) ?*Activation {
