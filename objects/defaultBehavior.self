@@ -29,5 +29,8 @@ _AddSlots: (|
         "Return whether the given object is identical to the receiver according
          to the VM."
         == v = (_Eq: v).
+        "Return whether the two objects are equal. The objects do not have to
+         be identical to be equal."
+        = v = (self == v).
     |).
 |)
