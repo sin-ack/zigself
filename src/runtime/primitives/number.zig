@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -96,8 +96,9 @@ pub fn IntLT(allocator: Allocator, heap: *Heap, tracked_receiver: Heap.Tracked, 
     );
 }
 
-/// Return whether the receiver is less than its argument. The return value is
-/// either "true" or "false".
+/// Return whether the receiver is equal to its argument. The return value is
+/// either "true" or "false". Note that passing a non-integer term is not an
+/// error and simply returns false.
 pub fn IntEq(allocator: Allocator, heap: *Heap, tracked_receiver: Heap.Tracked, arguments: []Heap.Tracked, source_range: SourceRange, context: *InterpreterContext) !Completion {
     _ = heap;
     _ = context;
@@ -110,7 +111,7 @@ pub fn IntEq(allocator: Allocator, heap: *Heap, tracked_receiver: Heap.Tracked, 
     }
 
     if (!term.isInteger()) {
-        return Completion.initRuntimeError(allocator, source_range, "Expected integer as _IntEq: argument", .{});
+        return Completion.initNormal(environment.globalFalse());
     }
 
     return Completion.initNormal(
