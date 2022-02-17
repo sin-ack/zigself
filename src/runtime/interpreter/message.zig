@@ -11,7 +11,7 @@ const Heap = @import("../heap.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const Activation = @import("../activation.zig");
-const ByteVector = @import("../byte_vector.zig");
+const ByteVector = @import("../byte_array.zig");
 const Completion = @import("../completion.zig");
 const primitives = @import("../primitives.zig");
 const SourceRange = @import("../../language/source_range.zig");
@@ -89,10 +89,10 @@ fn getOrCreateBlockMessageName(allocator: Allocator, heap: *Heap, context: *Inte
     if (result.found_existing) {
         return result.value_ptr.*;
     } else {
-        const byte_vector = try ByteVector.createUninitialized(heap, requiredSizeForBlockMessageName(argument_count));
-        writeBlockMessageName(byte_vector.getValues(), argument_count);
+        const byte_array = try ByteVector.createUninitialized(heap, requiredSizeForBlockMessageName(argument_count));
+        writeBlockMessageName(byte_array.getValues(), argument_count);
 
-        const tracked_value = try heap.track(byte_vector.asValue());
+        const tracked_value = try heap.track(byte_array.asValue());
         result.value_ptr.* = tracked_value;
         return tracked_value;
     }

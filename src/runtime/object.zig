@@ -8,8 +8,8 @@ const Allocator = std.mem.Allocator;
 const Heap = @import("./heap.zig");
 const Value = @import("./value.zig").Value;
 const slots_objects = @import("./object/slots.zig");
-const byte_vector_object = @import("./object/byte_vector.zig");
-const vector_object = @import("./object/vector.zig");
+const byte_array_object = @import("./object/byte_array.zig");
+const array_object = @import("./object/array.zig");
 const map_objects = @import("./object/map.zig");
 
 const Self = @This();
@@ -18,8 +18,8 @@ pub const Slots = slots_objects.Slots;
 pub const Activation = slots_objects.Activation;
 pub const Method = slots_objects.Method;
 pub const Block = slots_objects.Block;
-pub const ByteVector = byte_vector_object.ByteVectorObject;
-pub const Vector = vector_object.VectorObject;
+pub const ByteArray = byte_array_object.ByteArrayObject;
+pub const Array = array_object.ArrayObject;
 pub const Map = map_objects.Map;
 
 pub usingnamespace @import("./object/lookup.zig");
@@ -34,8 +34,8 @@ const ObjectType = enum(u64) {
     Activation = 0b010 << ObjectTypeShift,
     Method = 0b011 << ObjectTypeShift,
     Block = 0b100 << ObjectTypeShift,
-    ByteVector = 0b101 << ObjectTypeShift,
-    Vector = 0b110 << ObjectTypeShift,
+    ByteArray = 0b101 << ObjectTypeShift,
+    Array = 0b110 << ObjectTypeShift,
     Map = 0b111 << ObjectTypeShift,
 };
 
@@ -64,8 +64,8 @@ pub fn getSizeInMemory(self: Self) usize {
         .Activation => self.asActivationObject().getSizeInMemory(),
         .Method => self.asMethodObject().getSizeInMemory(),
         .Block => self.asBlockObject().getSizeInMemory(),
-        .ByteVector => self.asByteVectorObject().getSizeInMemory(),
-        .Vector => self.asVectorObject().getSizeInMemory(),
+        .ByteArray => self.asByteArrayObject().getSizeInMemory(),
+        .Array => self.asArrayObject().getSizeInMemory(),
         .Map => self.asMap().getSizeInMemory(),
     };
 }
@@ -125,7 +125,7 @@ fn formatObject(
 
 pub fn finalize(self: Self, allocator: Allocator) void {
     switch (self.header.getObjectType()) {
-        .ForwardingReference, .Slots, .Activation, .Method, .Block, .Vector, .ByteVector => unreachable,
+        .ForwardingReference, .Slots, .Activation, .Method, .Block, .Array, .ByteArray => unreachable,
         .Map => self.asMap().finalize(allocator),
     }
 }
@@ -139,8 +139,8 @@ pub fn clone(self: Self, heap: *Heap) !Self {
         .ForwardingReference, .Activation, .Method, .Map => unreachable,
         .Slots => fromAddress((try self.asSlotsObject().clone(heap)).asObjectAddress()),
         .Block => fromAddress((try self.asBlockObject().clone(heap)).asObjectAddress()),
-        .ByteVector => fromAddress((try self.asByteVectorObject().clone(heap)).asObjectAddress()),
-        .Vector => fromAddress((try self.asVectorObject().clone(heap)).asObjectAddress()),
+        .ByteArray => fromAddress((try self.asByteArrayObject().clone(heap)).asObjectAddress()),
+        .Array => fromAddress((try self.asArrayObject().clone(heap)).asObjectAddress()),
     };
 }
 
@@ -212,38 +212,38 @@ pub fn asBlockObject(self: Self) *Block {
     return @ptrCast(*Block, self.header);
 }
 
-// Byte vector objects
+// Byte array objects
 
-pub fn isByteVectorObject(self: Self) bool {
-    return self.header.getObjectType() == .ByteVector;
+pub fn isByteArrayObject(self: Self) bool {
+    return self.header.getObjectType() == .ByteArray;
 }
 
-fn mustBeByteVectorObject(self: Self) void {
-    if (!self.isByteVectorObject()) {
-        std.debug.panic("Expected the object at {*} to be a byte vector object", .{self.header});
+fn mustBeByteArrayObject(self: Self) void {
+    if (!self.isByteArrayObject()) {
+        std.debug.panic("Expected the object at {*} to be a byte array object", .{self.header});
     }
 }
 
-pub fn asByteVectorObject(self: Self) *ByteVector {
-    self.mustBeByteVectorObject();
-    return @ptrCast(*ByteVector, self.header);
+pub fn asByteArrayObject(self: Self) *ByteArray {
+    self.mustBeByteArrayObject();
+    return @ptrCast(*ByteArray, self.header);
 }
 
-// Vector objects
+// Array objects
 
-pub fn isVectorObject(self: Self) bool {
-    return self.header.getObjectType() == .Vector;
+pub fn isArrayObject(self: Self) bool {
+    return self.header.getObjectType() == .Array;
 }
 
-fn mustBeVectorObject(self: Self) void {
-    if (!self.isVectorObject()) {
-        std.debug.panic("Expected the object at {*} to be a vector object", .{self.header});
+fn mustBeArrayObject(self: Self) void {
+    if (!self.isArrayObject()) {
+        std.debug.panic("Expected the object at {*} to be a array object", .{self.header});
     }
 }
 
-pub fn asVectorObject(self: Self) *Vector {
-    self.mustBeVectorObject();
-    return @ptrCast(*Vector, self.header);
+pub fn asArrayObject(self: Self) *Array {
+    self.mustBeArrayObject();
+    return @ptrCast(*Array, self.header);
 }
 
 // Map objects

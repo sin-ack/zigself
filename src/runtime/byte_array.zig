@@ -59,8 +59,8 @@ pub const Header = packed struct {
     /// header.
     length: Value,
 
-    pub fn init(self: *Header, byte_vector_length: u64) void {
-        self.length = Value.fromUnsignedInteger(@sizeOf(Header) + byte_vector_length);
+    pub fn init(self: *Header, byte_array_length: u64) void {
+        self.length = Value.fromUnsignedInteger(@sizeOf(Header) + byte_array_length);
     }
 
     pub fn asByteVector(self: *Header) Self {

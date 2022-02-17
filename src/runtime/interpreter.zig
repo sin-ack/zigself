@@ -12,7 +12,7 @@ const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
 const Script = @import("../language/script.zig");
 const Activation = @import("./activation.zig");
-const ByteVector = @import("./byte_vector.zig");
+const ByteArray = @import("./byte_array.zig");
 const environment = @import("./environment.zig");
 const SourceRange = @import("../language/source_range.zig");
 const runtime_error = @import("./error.zig");
@@ -216,10 +216,10 @@ fn executeMethod(
 
     // This will prevent garbage collections until the execution of slots at
     // least.
-    var required_memory: usize = ByteVector.requiredSizeForAllocation(name.len);
+    var required_memory: usize = ByteArray.requiredSizeForAllocation(name.len);
     required_memory += Object.Map.Method.requiredSizeForAllocation(@intCast(u32, object_node.slots.len + arguments.len));
     for (arguments) |argument| {
-        required_memory += ByteVector.requiredSizeForAllocation(argument.len);
+        required_memory += ByteArray.requiredSizeForAllocation(argument.len);
     }
 
     try heap.ensureSpaceInEden(required_memory);
@@ -233,7 +233,7 @@ fn executeMethod(
         errdefer context.script.unref();
         errdefer object_node.statements.unrefWithAllocator(allocator);
 
-        const method_name_in_heap = try ByteVector.createFromString(heap, name);
+        const method_name_in_heap = try ByteArray.createFromString(heap, name);
         break :blk try Object.Map.Method.create(
             heap,
             @intCast(u8, arguments.len),
@@ -248,7 +248,7 @@ fn executeMethod(
 
     const argument_slots = method_map.getArgumentSlots();
     for (arguments) |argument| {
-        const argument_in_heap = try ByteVector.createFromString(heap, argument);
+        const argument_in_heap = try ByteArray.createFromString(heap, argument);
         argument_slots[slot_init_offset].initMutable(Object.Map.Method, method_map, argument_in_heap, .NotParent);
         assignable_slot_values.appendAssumeCapacity(try heap.track(environment.globalNil()));
 
@@ -308,7 +308,7 @@ pub fn executeSlot(
     const tracked_value = try heap.track(completion.data.Normal);
     defer tracked_value.untrack(heap);
 
-    const slot_name = try ByteVector.createFromString(heap, slot_node.name);
+    const slot_name = try ByteArray.createFromString(heap, slot_node.name);
     if (slot_node.is_mutable) {
         map.getSlots()[slot_index].initMutable(MapType, map, slot_name, if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent);
         return Completion.initNormal(tracked_value.getValue());
@@ -393,7 +393,7 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
     var required_memory: usize = Object.Map.Block.requiredSizeForAllocation(@intCast(u32, block.slots.len));
     for (block.slots) |slot_node| {
         if (slot_node.is_argument) {
-            required_memory += ByteVector.requiredSizeForAllocation(slot_node.name.len);
+            required_memory += ByteArray.requiredSizeForAllocation(slot_node.name.len);
         }
     }
 
@@ -425,7 +425,7 @@ pub fn executeBlock(allocator: Allocator, heap: *Heap, block: AST.BlockNode, con
     var argument_slots = block_map.getArgumentSlots();
     for (block.slots) |slot_node| {
         if (slot_node.is_argument) {
-            const slot_name = try ByteVector.createFromString(heap, slot_node.name);
+            const slot_name = try ByteArray.createFromString(heap, slot_node.name);
 
             argument_slots[slot_init_offset].initMutable(
                 Object.Map.Block,
@@ -587,14 +587,14 @@ pub fn executeString(allocator: Allocator, heap: *Heap, string: AST.StringNode, 
     _ = context;
 
     try heap.ensureSpaceInEden(
-        ByteVector.requiredSizeForAllocation(string.value.len) +
-            Object.Map.ByteVector.requiredSizeForAllocation() +
-            Object.ByteVector.requiredSizeForAllocation(),
+        ByteArray.requiredSizeForAllocation(string.value.len) +
+            Object.Map.ByteArray.requiredSizeForAllocation() +
+            Object.ByteArray.requiredSizeForAllocation(),
     );
 
-    const byte_vector = try ByteVector.createFromString(heap, string.value);
-    const byte_vector_map = try Object.Map.ByteVector.create(heap, byte_vector);
-    return Completion.initNormal((try Object.ByteVector.create(heap, byte_vector_map)).asValue());
+    const byte_array = try ByteArray.createFromString(heap, string.value);
+    const byte_array_map = try Object.Map.ByteArray.create(heap, byte_array);
+    return Completion.initNormal((try Object.ByteArray.create(heap, byte_array_map)).asValue());
 }
 
 /// Executes a number literal expression. `lobby` gains a ref during the

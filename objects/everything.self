@@ -1,5 +1,5 @@
 "
-Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 
 SPDX-License-Identifier: GPL-3.0-only
 "
@@ -15,7 +15,7 @@ _AddSlots: (| nil = _Nil |).
 'string.self' _RunScript.
 'integer.self' _RunScript.
 'block.self' _RunScript.
-'vector.self' _RunScript.
+'array.self' _RunScript.
 
 'list.self' _RunScript.
 'testing.self' _RunScript.

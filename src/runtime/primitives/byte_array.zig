@@ -9,13 +9,13 @@ const Heap = @import("../heap.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const Completion = @import("../completion.zig");
-const ByteVector = @import("../byte_vector.zig");
+const ByteArray = @import("../byte_array.zig");
 const environment = @import("../environment.zig");
 const SourceRange = @import("../../language/source_range.zig");
 const runtime_error = @import("../error.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
-/// Print the given ByteVector to stdout, followed by a newline.
+/// Print the given ByteArray to stdout, followed by a newline.
 pub fn StringPrint(
     allocator: Allocator,
     heap: *Heap,
@@ -40,11 +40,11 @@ pub fn StringPrint(
             writer.print("{d}", .{receiver.asFloatingPoint()}) catch unreachable;
         },
         .ObjectReference => {
-            if (!(receiver.asObject().isByteVectorObject())) {
-                return Completion.initRuntimeError(allocator, source_range, "Expected ByteVector as the receiver of _StringPrint", .{});
+            if (!(receiver.asObject().isByteArrayObject())) {
+                return Completion.initRuntimeError(allocator, source_range, "Expected ByteArray as the receiver of _StringPrint", .{});
             }
 
-            writer.print("{s}", .{receiver.asObject().asByteVectorObject().getValues()}) catch unreachable;
+            writer.print("{s}", .{receiver.asObject().asByteArrayObject().getValues()}) catch unreachable;
         },
         else => unreachable,
     }
@@ -53,7 +53,7 @@ pub fn StringPrint(
 }
 
 /// Return the size of the byte vector in bytes.
-pub fn ByteVectorSize(
+pub fn ByteArraySize(
     allocator: Allocator,
     heap: *Heap,
     tracked_receiver: Heap.Tracked,
@@ -66,11 +66,11 @@ pub fn ByteVectorSize(
     _ = context;
 
     const receiver = tracked_receiver.getValue();
-    if (!(receiver.isObjectReference() and receiver.asObject().isByteVectorObject())) {
-        return Completion.initRuntimeError(allocator, source_range, "Expected ByteVector as _ByteVectorSize receiver", .{});
+    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
+        return Completion.initRuntimeError(allocator, source_range, "Expected ByteArray as _ByteArraySize receiver", .{});
     }
 
-    return Completion.initNormal(Value.fromInteger(@intCast(i64, receiver.asObject().asByteVectorObject().getValues().len)));
+    return Completion.initNormal(Value.fromInteger(@intCast(i64, receiver.asObject().asByteArrayObject().getValues().len)));
 }
 
 /// Return a byte at the given (integer) position of the receiver, which is a
@@ -90,15 +90,15 @@ pub fn ByteAt(
     const receiver = tracked_receiver.getValue();
     const argument = arguments[0].getValue();
 
-    if (!(receiver.isObjectReference() and receiver.asObject().isByteVectorObject())) {
-        return Completion.initRuntimeError(allocator, source_range, "Expected ByteVector as _ByteAt: receiver", .{});
+    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
+        return Completion.initRuntimeError(allocator, source_range, "Expected ByteArray as _ByteAt: receiver", .{});
     }
 
     if (!argument.isInteger()) {
         return Completion.initRuntimeError(allocator, source_range, "Expected integer as _ByteAt: argument", .{});
     }
 
-    const values = receiver.asObject().asByteVectorObject().getValues();
+    const values = receiver.asObject().asByteArrayObject().getValues();
     const position = @intCast(usize, argument.asInteger());
     if (position < 0 or position >= values.len) {
         return Completion.initRuntimeError(
@@ -130,8 +130,8 @@ pub fn ByteAt_Put(
     const first_argument = arguments[0].getValue();
     const second_argument = arguments[1].getValue();
 
-    if (!(receiver.isObjectReference() and receiver.asObject().isByteVectorObject())) {
-        return Completion.initRuntimeError(allocator, source_range, "Expected ByteVector as _ByteAt:Put: receiver", .{});
+    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
+        return Completion.initRuntimeError(allocator, source_range, "Expected ByteArray as _ByteAt:Put: receiver", .{});
     }
 
     if (!first_argument.isInteger()) {
@@ -141,7 +141,7 @@ pub fn ByteAt_Put(
         return Completion.initRuntimeError(allocator, source_range, "Expected integer as second _ByteAt:Put: argument", .{});
     }
 
-    var values = receiver.asObject().asByteVectorObject().getValues();
+    var values = receiver.asObject().asByteArrayObject().getValues();
     const position = @intCast(usize, first_argument.asInteger());
     const new_value = second_argument.asInteger();
 
@@ -165,7 +165,7 @@ pub fn ByteAt_Put(
 
 /// Copy the byte vector receiver with a new size. Size cannot exceed the
 /// receiver's size.
-pub fn ByteVectorCopySize(
+pub fn ByteArrayCopySize(
     allocator: Allocator,
     heap: *Heap,
     tracked_receiver: Heap.Tracked,
@@ -178,31 +178,31 @@ pub fn ByteVectorCopySize(
     const receiver = tracked_receiver.getValue();
     var argument = arguments[0].getValue();
 
-    if (!(receiver.isObjectReference() and receiver.asObject().isByteVectorObject())) {
-        return Completion.initRuntimeError(allocator, source_range, "Expected ByteVector as _ByteVectorCopySize: receiver", .{});
+    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
+        return Completion.initRuntimeError(allocator, source_range, "Expected ByteArray as _ByteArrayCopySize: receiver", .{});
     }
 
     if (!argument.isInteger()) {
-        return Completion.initRuntimeError(allocator, source_range, "Expected Integer as _ByteVectorCopySize: argument", .{});
+        return Completion.initRuntimeError(allocator, source_range, "Expected Integer as _ByteArrayCopySize: argument", .{});
     }
 
-    var values = receiver.asObject().asByteVectorObject().getValues();
+    var values = receiver.asObject().asByteArrayObject().getValues();
     const size = argument.asInteger();
     if (size >= values.len) {
-        return Completion.initRuntimeError(allocator, source_range, "_ByteVectorCopySize: argument exceeds receiver's size", .{});
+        return Completion.initRuntimeError(allocator, source_range, "_ByteArrayCopySize: argument exceeds receiver's size", .{});
     }
 
     if (size < 0) {
-        return Completion.initRuntimeError(allocator, source_range, "_ByteVectorCopySize: argument must be positive", .{});
+        return Completion.initRuntimeError(allocator, source_range, "_ByteArrayCopySize: argument must be positive", .{});
     }
 
     try heap.ensureSpaceInEden(
-        ByteVector.requiredSizeForAllocation(@intCast(u64, size)) +
-            Object.Map.ByteVector.requiredSizeForAllocation() +
-            Object.ByteVector.requiredSizeForAllocation(),
+        ByteArray.requiredSizeForAllocation(@intCast(u64, size)) +
+            Object.Map.ByteArray.requiredSizeForAllocation() +
+            Object.ByteArray.requiredSizeForAllocation(),
     );
 
-    const byte_vector = try ByteVector.createFromString(heap, values[0..@intCast(u64, size)]);
-    const byte_vector_map = try Object.Map.ByteVector.create(heap, byte_vector);
-    return Completion.initNormal((try Object.ByteVector.create(heap, byte_vector_map)).asValue());
+    const byte_array = try ByteArray.createFromString(heap, values[0..@intCast(u64, size)]);
+    const byte_array_map = try Object.Map.ByteArray.create(heap, byte_array);
+    return Completion.initNormal((try Object.ByteArray.create(heap, byte_array_map)).asValue());
 }

@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const Heap = @import("./heap.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
-const ByteVector = @import("./byte_vector.zig");
+const ByteArray = @import("./byte_array.zig");
 
 var global_nil: ?Heap.Tracked = null;
 var global_true: ?Heap.Tracked = null;
@@ -32,7 +32,7 @@ pub fn prepareRuntimeEnvironment(heap: *Heap) !Value {
 
 fn makeLobbyObject(heap: *Heap) !*Object.Slots {
     var traits_object = try makeTraitsObject(heap);
-    var traits_name = try ByteVector.createFromString(heap, "traits");
+    var traits_name = try ByteArray.createFromString(heap, "traits");
 
     var lobby_map = try Object.Map.Slots.create(heap, 1);
     lobby_map.getSlots()[0].initConstant(traits_name, .NotParent, traits_object.asValue());
@@ -48,11 +48,11 @@ fn makeTraitsObject(heap: *Heap) !*Object.Slots {
 // FIXME: Move these to the std namespace. They should live under globals std
 //        traits.
 fn makeTraitsMap(heap: *Heap) !*Object.Map.Slots {
-    var integer_name = try ByteVector.createFromString(heap, "integer");
-    var float_name = try ByteVector.createFromString(heap, "float");
-    var string_name = try ByteVector.createFromString(heap, "string");
-    var block_name = try ByteVector.createFromString(heap, "block");
-    var vector_name = try ByteVector.createFromString(heap, "vector");
+    var integer_name = try ByteArray.createFromString(heap, "integer");
+    var float_name = try ByteArray.createFromString(heap, "float");
+    var string_name = try ByteArray.createFromString(heap, "string");
+    var block_name = try ByteArray.createFromString(heap, "block");
+    var array_name = try ByteArray.createFromString(heap, "array");
 
     var empty_map = try Object.Map.Slots.create(heap, 0);
 
@@ -60,7 +60,7 @@ fn makeTraitsMap(heap: *Heap) !*Object.Map.Slots {
     var float_object = try Object.Slots.create(heap, empty_map, &.{});
     var string_object = try Object.Slots.create(heap, empty_map, &.{});
     var block_object = try Object.Slots.create(heap, empty_map, &.{});
-    var vector_object = try Object.Slots.create(heap, empty_map, &.{});
+    var array_object = try Object.Slots.create(heap, empty_map, &.{});
 
     var traits_map = try Object.Map.Slots.create(heap, 5);
     var traits_slots = traits_map.getSlots();
@@ -69,7 +69,7 @@ fn makeTraitsMap(heap: *Heap) !*Object.Map.Slots {
     traits_slots[1].initConstant(float_name, .NotParent, float_object.asValue());
     traits_slots[2].initConstant(string_name, .NotParent, string_object.asValue());
     traits_slots[3].initConstant(block_name, .NotParent, block_object.asValue());
-    traits_slots[4].initConstant(vector_name, .NotParent, vector_object.asValue());
+    traits_slots[4].initConstant(array_name, .NotParent, array_object.asValue());
 
     return traits_map;
 }

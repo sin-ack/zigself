@@ -15,7 +15,7 @@ const Script = @import("../../language/script.zig");
 const Object = @import("../object.zig");
 const MapType = @import("./map.zig").MapType;
 const Location = @import("../../language/location.zig");
-const ByteVector = @import("../byte_vector.zig");
+const ByteVector = @import("../byte_array.zig");
 const SourceRange = @import("../../language/source_range.zig");
 const RuntimeActivation = @import("../activation.zig");
 

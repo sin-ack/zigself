@@ -140,26 +140,26 @@ fn lookupInternal(
                 @panic("Context MUST be passed for Block objects!");
             }
         },
-        .Vector => {
-            if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits vector\n", .{});
+        .Array => {
+            if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits array\n", .{});
             if (context) |ctx| {
-                const traits_vector_completion = try findTraitsObject("vector", source_range, allocator.?, ctx);
-                if (traits_vector_completion.isNormal()) {
-                    const traits_vector = traits_vector_completion.data.Normal;
+                const traits_array_completion = try findTraitsObject("array", source_range, allocator.?, ctx);
+                if (traits_array_completion.isNormal()) {
+                    const traits_array = traits_array_completion.data.Normal;
                     if (intent == .Read) {
                         if (selector_hash == parent_hash)
-                            return @as(?Completion, Completion.initNormal(traits_vector));
+                            return @as(?Completion, Completion.initNormal(traits_array));
                     }
 
-                    return try traits_vector.lookupByHash(intent, selector_hash, source_range, allocator, context);
+                    return try traits_array.lookupByHash(intent, selector_hash, source_range, allocator, context);
                 }
 
-                return lookupCompletionReturn(intent, traits_vector_completion);
+                return lookupCompletionReturn(intent, traits_array_completion);
             } else {
-                @panic("Context MUST be passed for Vector objects!");
+                @panic("Context MUST be passed for Array objects!");
             }
         },
-        .ByteVector => {
+        .ByteArray => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits string\n", .{});
             if (context) |ctx| {
                 const traits_string_completion = try findTraitsObject("string", source_range, allocator.?, ctx);
@@ -175,7 +175,7 @@ fn lookupInternal(
 
                 return lookupCompletionReturn(intent, traits_string_completion);
             } else {
-                @panic("Context MUST be passed for ByteVector objects!");
+                @panic("Context MUST be passed for ByteArray objects!");
             }
         },
     }
@@ -214,7 +214,7 @@ fn slotsLookup(
     var assignable_slots_cursor: usize = 0;
     // Direct lookup
     for (object.getSlots()) |slot| {
-        if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing slot \"{s}\" (hash {x}) vs. our hash {x}\n", .{ slot.name.asByteVector().getValues(), slot.hash, selector_hash });
+        if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing slot \"{s}\" (hash {x}) vs. our hash {x}\n", .{ slot.name.asByteArray().getValues(), slot.hash, selector_hash });
         if (slot.hash == selector_hash) {
             if (intent == .Assign) {
                 if (slot.isMutable()) {

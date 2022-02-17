@@ -15,8 +15,8 @@ const interpreter = @import("./interpreter.zig");
 const InterpreterContext = interpreter.InterpreterContext;
 
 const basic_primitives = @import("./primitives/basic.zig");
-const bytevector_primitives = @import("./primitives/bytevector.zig");
-const vector_primitives = @import("./primitives/vector.zig");
+const byte_array_primitives = @import("./primitives/byte_array.zig");
+const array_primitives = @import("./primitives/array.zig");
 const number_primitives = @import("./primitives/number.zig");
 const object_primitives = @import("./primitives/object.zig");
 
@@ -42,17 +42,17 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_RunScript", .function = basic_primitives.RunScript },
     .{ .name = "_Error:", .function = basic_primitives.Error },
     .{ .name = "_Restart", .function = basic_primitives.Restart },
-    // byte vector primitives
-    .{ .name = "_StringPrint", .function = bytevector_primitives.StringPrint },
-    .{ .name = "_ByteVectorSize", .function = bytevector_primitives.ByteVectorSize },
-    .{ .name = "_ByteAt:", .function = bytevector_primitives.ByteAt },
-    .{ .name = "_ByteAt:Put:", .function = bytevector_primitives.ByteAt_Put },
-    .{ .name = "_ByteVectorCopySize:", .function = bytevector_primitives.ByteVectorCopySize },
-    // vector primitives
-    .{ .name = "_VectorCopySize:FillingExtrasWith:", .function = vector_primitives.VectorCopySize_FillingExtrasWith },
-    .{ .name = "_VectorSize", .function = vector_primitives.VectorSize },
-    .{ .name = "_VectorAt:", .function = vector_primitives.VectorAt },
-    .{ .name = "_VectorAt:Put:", .function = vector_primitives.VectorAt_Put },
+    // byte array primitives
+    .{ .name = "_StringPrint", .function = byte_array_primitives.StringPrint },
+    .{ .name = "_ByteArraySize", .function = byte_array_primitives.ByteArraySize },
+    .{ .name = "_ByteAt:", .function = byte_array_primitives.ByteAt },
+    .{ .name = "_ByteAt:Put:", .function = byte_array_primitives.ByteAt_Put },
+    .{ .name = "_ByteArrayCopySize:", .function = byte_array_primitives.ByteArrayCopySize },
+    // array primitives
+    .{ .name = "_ArrayCopySize:FillingExtrasWith:", .function = array_primitives.ArrayCopySize_FillingExtrasWith },
+    .{ .name = "_ArraySize", .function = array_primitives.ArraySize },
+    .{ .name = "_ArrayAt:", .function = array_primitives.ArrayAt },
+    .{ .name = "_ArrayAt:Put:", .function = array_primitives.ArrayAt_Put },
     // number primitives
     .{ .name = "_IntAdd:", .function = number_primitives.IntAdd },
     .{ .name = "_IntSub:", .function = number_primitives.IntSub },

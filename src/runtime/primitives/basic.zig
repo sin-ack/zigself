@@ -49,15 +49,15 @@ pub fn RunScript(allocator: Allocator, heap: *Heap, tracked_receiver: Heap.Track
     _ = arguments;
 
     const receiver = tracked_receiver.getValue();
-    if (!(receiver.isObjectReference() and receiver.asObject().isByteVectorObject())) {
-        return Completion.initRuntimeError(allocator, source_range, "Expected ByteVector for the receiver of _RunScript", .{});
+    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
+        return Completion.initRuntimeError(allocator, source_range, "Expected ByteArray for the receiver of _RunScript", .{});
     }
 
-    const receiver_byte_vector = receiver.asObject().asByteVectorObject();
+    const receiver_byte_array = receiver.asObject().asByteArrayObject();
 
     // FIXME: Find a way to handle errors here. These hacks are nasty.
 
-    const requested_script_path = receiver_byte_vector.getValues();
+    const requested_script_path = receiver_byte_array.getValues();
     const running_script_path = context.script.value.file_path;
 
     const paths_to_join = &[_][]const u8{
@@ -119,11 +119,11 @@ pub fn Error(allocator: Allocator, heap: *Heap, receiver: Heap.Tracked, argument
     _ = context;
 
     var argument = arguments[0].getValue();
-    if (!(argument.isObjectReference() and argument.asObject().isByteVectorObject())) {
-        return Completion.initRuntimeError(allocator, source_range, "Expected ByteVector as _Error: argument", .{});
+    if (!(argument.isObjectReference() and argument.asObject().isByteArrayObject())) {
+        return Completion.initRuntimeError(allocator, source_range, "Expected ByteArray as _Error: argument", .{});
     }
 
-    return Completion.initRuntimeError(allocator, source_range, "Error raised in Self code: {s}", .{argument.asObject().asByteVectorObject().getValues()});
+    return Completion.initRuntimeError(allocator, source_range, "Error raised in Self code: {s}", .{argument.asObject().asByteArrayObject().getValues()});
 }
 
 /// Restarts the current method, executing it from the first statement.

@@ -13,7 +13,7 @@ const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const Script = @import("../../language/script.zig");
 // Zig's shadowing rules are annoying.
-const ByteVectorTheFirst = @import("../byte_vector.zig");
+const ByteArrayTheFirst = @import("../byte_array.zig");
 const Activation = @import("../activation.zig");
 
 var static_map_map: ?Value = null;
@@ -47,8 +47,8 @@ pub const MapType = enum(u64) {
     Slots = 0b000 << MapTypeShift,
     Method = 0b001 << MapTypeShift,
     Block = 0b010 << MapTypeShift,
-    ByteVector = 0b011 << MapTypeShift,
-    Vector = 0b100 << MapTypeShift,
+    ByteArray = 0b011 << MapTypeShift,
+    Array = 0b100 << MapTypeShift,
 };
 
 pub const Map = packed struct {
@@ -57,8 +57,8 @@ pub const Map = packed struct {
     pub const Slots = SlotsMap;
     pub const Method = MethodMap;
     pub const Block = BlockMap;
-    pub const ByteVector = ByteVectorMap;
-    pub const Vector = VectorMap;
+    pub const ByteArray = ByteArrayMap;
+    pub const Array = ArrayMap;
 
     fn init(self: *Map, map_type: MapType, map_map: Value) void {
         self.header.init(.Map, map_map);
@@ -67,7 +67,7 @@ pub const Map = packed struct {
 
     pub fn finalize(self: *Map, allocator: Allocator) void {
         switch (self.getMapType()) {
-            .Slots, .Vector, .ByteVector => unreachable,
+            .Slots, .Array, .ByteArray => unreachable,
             .Method => self.asMethodMap().finalize(allocator),
             .Block => self.asBlockMap().finalize(allocator),
         }
@@ -132,34 +132,34 @@ pub const Map = packed struct {
         return @ptrCast(*Block, self);
     }
 
-    pub fn isByteVectorMap(self: *Map) bool {
-        return self.getMapType() == .ByteVector;
+    pub fn isByteArrayMap(self: *Map) bool {
+        return self.getMapType() == .ByteArray;
     }
 
-    fn mustBeByteVectorMap(self: *Map) void {
-        if (!self.isByteVectorMap()) {
-            std.debug.panic("Expected the object at {*} to be a byte vector map", .{self});
+    fn mustBeByteArrayMap(self: *Map) void {
+        if (!self.isByteArrayMap()) {
+            std.debug.panic("Expected the object at {*} to be a byte array map", .{self});
         }
     }
 
-    pub fn asByteVectorMap(self: *Map) *ByteVector {
-        self.mustBeByteVectorMap();
-        return @ptrCast(*ByteVector, self);
+    pub fn asByteArrayMap(self: *Map) *ByteArray {
+        self.mustBeByteArrayMap();
+        return @ptrCast(*ByteArray, self);
     }
 
-    pub fn isVectorMap(self: *Map) bool {
-        return self.getMapType() == .Vector;
+    pub fn isArrayMap(self: *Map) bool {
+        return self.getMapType() == .Array;
     }
 
-    fn mustBeVectorMap(self: *Map) void {
-        if (!self.isVectorMap()) {
-            std.debug.panic("Expected the object at {*} to be a vector map", .{self});
+    fn mustBeArrayMap(self: *Map) void {
+        if (!self.isArrayMap()) {
+            std.debug.panic("Expected the object at {*} to be an array map", .{self});
         }
     }
 
-    pub fn asVectorMap(self: *Map) *Vector {
-        self.mustBeVectorMap();
-        return @ptrCast(*Vector, self);
+    pub fn asArrayMap(self: *Map) *Array {
+        self.mustBeArrayMap();
+        return @ptrCast(*Array, self);
     }
 
     pub fn getSizeInMemory(self: *Map) usize {
@@ -167,8 +167,8 @@ pub const Map = packed struct {
             .Slots => self.asSlotsMap().getSizeInMemory(),
             .Method => self.asMethodMap().getSizeInMemory(),
             .Block => self.asBlockMap().getSizeInMemory(),
-            .ByteVector => self.asByteVectorMap().getSizeInMemory(),
-            .Vector => self.asVectorMap().getSizeInMemory(),
+            .ByteArray => self.asByteArrayMap().getSizeInMemory(),
+            .Array => self.asArrayMap().getSizeInMemory(),
         };
     }
 
@@ -358,7 +358,7 @@ const MethodMap = packed struct {
         argument_slot_count: u8,
         regular_slot_count: u32,
         statements: AST.Statements.Ref,
-        method_name: ByteVectorTheFirst,
+        method_name: ByteArrayTheFirst,
         script: Script.Ref,
     ) !*MethodMap {
         const size = requiredSizeForAllocation(regular_slot_count + argument_slot_count);
@@ -378,7 +378,7 @@ const MethodMap = packed struct {
         argument_slot_count: u8,
         regular_slot_count: u32,
         statements: AST.Statements.Ref,
-        method_name: ByteVectorTheFirst,
+        method_name: ByteArrayTheFirst,
         script: Script.Ref,
     ) void {
         self.base_map.init(.Method, map_map, argument_slot_count, regular_slot_count, statements, script);
@@ -566,85 +566,85 @@ const BlockMap = packed struct {
     }
 };
 
-// A byte vector map. A simple map holding a reference to the byte vector.
-const ByteVectorMap = packed struct {
+// A byte array map. A simple map holding a reference to the byte array.
+const ByteArrayMap = packed struct {
     map: Map,
-    /// A reference to the byte vector in question.
-    byte_vector: Value,
+    /// A reference to the byte array in question.
+    byte_array: Value,
 
-    pub fn create(heap: *Heap, byte_vector: ByteVectorTheFirst) !*ByteVectorMap {
+    pub fn create(heap: *Heap, byte_array: ByteArrayTheFirst) !*ByteArrayMap {
         const size = requiredSizeForAllocation();
         const map_map = try getMapMap(heap);
 
         var memory_area = try heap.allocateInObjectSegment(size);
-        var self = @ptrCast(*ByteVectorMap, memory_area);
-        self.init(map_map, byte_vector);
+        var self = @ptrCast(*ByteArrayMap, memory_area);
+        self.init(map_map, byte_array);
 
         return self;
     }
 
-    fn init(self: *ByteVectorMap, map_map: Value, byte_vector: ByteVectorTheFirst) void {
-        self.map.init(.ByteVector, map_map);
-        self.byte_vector = byte_vector.asValue();
+    fn init(self: *ByteArrayMap, map_map: Value, byte_array: ByteArrayTheFirst) void {
+        self.map.init(.ByteArray, map_map);
+        self.byte_array = byte_array.asValue();
     }
 
-    pub fn asValue(self: *ByteVectorMap) Value {
+    pub fn asValue(self: *ByteArrayMap) Value {
         return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
     }
 
-    pub fn getByteVector(self: *ByteVectorMap) ByteVectorTheFirst {
-        return ByteVectorTheFirst.fromAddress(self.byte_vector.asObjectAddress());
+    pub fn getByteArray(self: *ByteArrayMap) ByteArrayTheFirst {
+        return ByteArrayTheFirst.fromAddress(self.byte_array.asObjectAddress());
     }
 
-    pub fn getValues(self: *ByteVectorMap) []u8 {
-        return self.getByteVector().getValues();
+    pub fn getValues(self: *ByteArrayMap) []u8 {
+        return self.getByteArray().getValues();
     }
 
-    pub fn getSizeInMemory(self: *ByteVectorMap) usize {
+    pub fn getSizeInMemory(self: *ByteArrayMap) usize {
         _ = self;
         return requiredSizeForAllocation();
     }
 
     pub fn requiredSizeForAllocation() usize {
-        return @sizeOf(ByteVectorMap);
+        return @sizeOf(ByteArrayMap);
     }
 };
 
-/// A map for a vector object.
-const VectorMap = packed struct {
+/// A map for an array object.
+const ArrayMap = packed struct {
     map: Map,
     size: Value,
 
-    pub fn create(heap: *Heap, size: usize) !*VectorMap {
+    pub fn create(heap: *Heap, size: usize) !*ArrayMap {
         const memory_size = requiredSizeForAllocation();
         const map_map = try getMapMap(heap);
 
         var memory_area = try heap.allocateInObjectSegment(memory_size);
-        var self = @ptrCast(*VectorMap, memory_area);
+        var self = @ptrCast(*ArrayMap, memory_area);
         self.init(map_map, size);
 
         return self;
     }
 
-    fn init(self: *VectorMap, map_map: Value, size: usize) void {
-        self.map.init(.Vector, map_map);
+    fn init(self: *ArrayMap, map_map: Value, size: usize) void {
+        self.map.init(.Array, map_map);
         self.size = Value.fromUnsignedInteger(size);
     }
 
-    pub fn asValue(self: *VectorMap) Value {
+    pub fn asValue(self: *ArrayMap) Value {
         return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
     }
 
-    pub fn getSize(self: *VectorMap) usize {
+    pub fn getSize(self: *ArrayMap) usize {
         return self.size.asUnsignedInteger();
     }
 
-    pub fn getSizeInMemory(self: *VectorMap) usize {
+    pub fn getSizeInMemory(self: *ArrayMap) usize {
         _ = self;
         return requiredSizeForAllocation();
     }
 
     pub fn requiredSizeForAllocation() usize {
-        return @sizeOf(VectorMap);
+        return @sizeOf(ArrayMap);
     }
 };

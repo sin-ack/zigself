@@ -10,7 +10,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const hash = @import("../utility/hash.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
-const ByteVector = @import("./byte_vector.zig");
+const ByteVector = @import("./byte_array.zig");
 const Activation = @import("./activation.zig");
 const ActivationStack = Activation.ActivationStack;
 const debug = @import("../debug.zig");
@@ -309,7 +309,7 @@ const Space = struct {
     /// Points to the first used address in this space's bytevector segment
     /// (which grows downwards in memory). May point to the byte after `memory`,
     /// in which case the bytevector segment is empty.
-    byte_vector_cursor: [*]u64,
+    byte_array_cursor: [*]u64,
     /// The set of objects which reference an object in this space. When a
     /// constant or assignable slot from a previous space references this space,
     /// it is added to this set; when it starts referencing another space, it is
@@ -362,7 +362,7 @@ const Space = struct {
             .heap = if (GC_TRACK_SOURCE_DEBUG) heap else .{},
             .memory = memory,
             .object_cursor = memory.ptr,
-            .byte_vector_cursor = memory.ptr + memory.len,
+            .byte_array_cursor = memory.ptr + memory.len,
             .remembered_set = .{},
             .finalization_set = .{},
             .tracked_set = .{},
@@ -391,9 +391,9 @@ const Space = struct {
         const end_of_memory = start_of_memory + memory_word_count;
 
         const object_size = @ptrToInt(self.object_cursor) - @ptrToInt(start_of_memory);
-        const byte_vector_size = @ptrToInt(end_of_memory) - @ptrToInt(self.byte_vector_cursor);
+        const byte_array_size = @ptrToInt(end_of_memory) - @ptrToInt(self.byte_array_cursor);
 
-        return memory_word_count * @sizeOf(u64) - object_size - byte_vector_size;
+        return memory_word_count * @sizeOf(u64) - object_size - byte_array_size;
     }
 
     /// Copy the given address as a new object in the target space. Creates a
@@ -433,14 +433,14 @@ const Space = struct {
 
     /// Same as copyObjectTo, but for byte vectors.
     fn copyByteVectorTo(allocator: Allocator, address: [*]u64, target_space: *Space) [*]u64 {
-        const byte_vector = ByteVector.fromAddress(address);
-        const byte_vector_size = byte_vector.getSizeInMemory();
-        std.debug.assert(byte_vector_size % @sizeOf(u64) == 0);
+        const byte_array = ByteVector.fromAddress(address);
+        const byte_array_size = byte_array.getSizeInMemory();
+        std.debug.assert(byte_array_size % @sizeOf(u64) == 0);
 
-        const byte_vector_size_in_words = byte_vector_size / @sizeOf(u64);
+        const byte_array_size_in_words = byte_array_size / @sizeOf(u64);
         // We must have enough space at this point.
-        const new_address = target_space.allocateInByteVectorSegment(allocator, &.{}, byte_vector_size) catch unreachable;
-        std.mem.copy(u64, new_address[0..byte_vector_size_in_words], address[0..byte_vector_size_in_words]);
+        const new_address = target_space.allocateInByteVectorSegment(allocator, &.{}, byte_array_size) catch unreachable;
+        std.mem.copy(u64, new_address[0..byte_array_size_in_words], address[0..byte_array_size_in_words]);
 
         return new_address;
     }
@@ -646,7 +646,7 @@ const Space = struct {
         // Reset this space's pointers, tracked set, remembered set and
         // finalization set, as it is now effectively empty.
         self.object_cursor = self.memory.ptr;
-        self.byte_vector_cursor = self.memory.ptr + self.memory.len;
+        self.byte_array_cursor = self.memory.ptr + self.memory.len;
         self.remembered_set.clearRetainingCapacity();
         self.finalization_set.clearRetainingCapacity();
         self.tracked_set.clearRetainingCapacity();
@@ -730,7 +730,7 @@ const Space = struct {
     fn swapMemoryWith(self: *Space, target_space: *Space) void {
         std.mem.swap([]u64, &self.memory, &target_space.memory);
         std.mem.swap([*]u64, &self.object_cursor, &target_space.object_cursor);
-        std.mem.swap([*]u64, &self.byte_vector_cursor, &target_space.byte_vector_cursor);
+        std.mem.swap([*]u64, &self.byte_array_cursor, &target_space.byte_array_cursor);
         std.mem.swap(RememberedSet, &self.remembered_set, &target_space.remembered_set);
         std.mem.swap(FinalizationSet, &self.finalization_set, &target_space.finalization_set);
         std.mem.swap(TrackedSet, &self.tracked_set, &target_space.tracked_set);
@@ -741,7 +741,7 @@ const Space = struct {
     }
 
     fn byteVectorSegmentContains(self: *Space, address: [*]u64) bool {
-        return @ptrToInt(address) >= @ptrToInt(self.byte_vector_cursor) and @ptrToInt(address) < @ptrToInt(self.memory.ptr + self.memory.len);
+        return @ptrToInt(address) >= @ptrToInt(self.byte_array_cursor) and @ptrToInt(address) < @ptrToInt(self.memory.ptr + self.memory.len);
     }
 
     /// Allocates the requested amount in bytes in the object segment of this
@@ -765,12 +765,12 @@ const Space = struct {
         std.debug.assert(size % 8 == 0);
         if (self.freeMemory() < size) try self.collectGarbage(allocator, size, activation_stack);
 
-        self.byte_vector_cursor -= size / @sizeOf(u64);
+        self.byte_array_cursor -= size / @sizeOf(u64);
 
         if (builtin.mode == .Debug)
-            std.mem.set(u8, @ptrCast([*]align(@alignOf(u64)) u8, self.byte_vector_cursor)[0..size], UninitializedHeapScrubByte);
+            std.mem.set(u8, @ptrCast([*]align(@alignOf(u64)) u8, self.byte_array_cursor)[0..size], UninitializedHeapScrubByte);
 
-        return self.byte_vector_cursor;
+        return self.byte_array_cursor;
     }
 
     /// Adds the given address to the finalization set of this space.

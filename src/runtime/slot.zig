@@ -6,7 +6,7 @@ const Heap = @import("./heap.zig");
 const hash = @import("../utility/hash.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
-const ByteVector = @import("./byte_vector.zig");
+const ByteVector = @import("./byte_array.zig");
 
 const ParentShift = 2;
 const ParentBit: u32 = 1 << ParentShift;
