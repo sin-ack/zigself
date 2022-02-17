@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const hash = @import("../utility/hash.zig");
 const Object = @import("./object.zig");
 const Completion = @import("./completion.zig");
-const ByteVector = @import("./byte_array.zig");
+const ByteArray = @import("./byte_array.zig");
 const SourceRange = @import("../language/source_range.zig");
 const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 const object_lookup = @import("./object/lookup.zig");
@@ -107,9 +107,9 @@ pub const Value = packed struct {
     }
 
     /// Return the byte vector the address of which is stored in this value.
-    pub fn asByteVector(self: Value) ByteVector {
+    pub fn asByteArray(self: Value) ByteArray {
         std.debug.assert(self.isObjectReference());
-        return ByteVector.fromAddress(self.asObjectAddress());
+        return ByteArray.fromAddress(self.asObjectAddress());
     }
 
     pub fn lookup(

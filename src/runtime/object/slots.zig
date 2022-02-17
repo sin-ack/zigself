@@ -15,7 +15,6 @@ const Script = @import("../../language/script.zig");
 const Object = @import("../object.zig");
 const MapType = @import("./map.zig").MapType;
 const Location = @import("../../language/location.zig");
-const ByteVector = @import("../byte_array.zig");
 const SourceRange = @import("../../language/source_range.zig");
 const RuntimeActivation = @import("../activation.zig");
 
@@ -128,9 +127,9 @@ pub const Slots = packed struct {
 
                 const parent_flag: Slot.ParentFlag = if (slot_to_add.isParent()) .Parent else .NotParent;
                 if (slot_to_add.isMutable()) {
-                    new_map_slots[i].initMutable(Map.Slots, new_map, slot_to_add.name.asByteVector(), parent_flag);
+                    new_map_slots[i].initMutable(Map.Slots, new_map, slot_to_add.name.asByteArray(), parent_flag);
                 } else {
-                    new_map_slots[i].initConstant(slot_to_add.name.asByteVector(), parent_flag, slot_to_add.value);
+                    new_map_slots[i].initConstant(slot_to_add.name.asByteArray(), parent_flag, slot_to_add.value);
                 }
             }
 
@@ -148,9 +147,9 @@ pub const Slots = packed struct {
 
                 const parent_flag: Slot.ParentFlag = if (source_object_slot.isParent()) .Parent else .NotParent;
                 if (source_object_slot.isMutable()) {
-                    new_map_slots[new_slot_offset].initMutable(Map.Slots, new_map, source_object_slot.name.asByteVector(), parent_flag);
+                    new_map_slots[new_slot_offset].initMutable(Map.Slots, new_map, source_object_slot.name.asByteArray(), parent_flag);
                 } else {
-                    new_map_slots[new_slot_offset].initConstant(source_object_slot.name.asByteVector(), parent_flag, source_object_slot.value);
+                    new_map_slots[new_slot_offset].initConstant(source_object_slot.name.asByteArray(), parent_flag, source_object_slot.value);
                 }
 
                 new_slot_offset += 1;

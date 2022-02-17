@@ -43,7 +43,7 @@ pub fn printTraceFromActivationStack(stack: []Activation, first_source_range: So
         const activation = stack[@intCast(usize, i)];
         const context = activation.creation_context;
 
-        const message_name = context.message.getValue().asByteVector().getValues();
+        const message_name = context.message.getValue().asByteArray().getValues();
         writeTraceForFrame(message_name, source_range);
 
         source_range = context.source_range;
