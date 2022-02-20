@@ -117,13 +117,12 @@ pub const Value = packed struct {
         comptime intent: LookupIntent,
         selector: []const u8,
         source_range: SourceRange,
-        allocator: ?Allocator,
-        context: ?*InterpreterContext,
+        context: *InterpreterContext,
     ) object_lookup.lookupReturnType(intent) {
         const selector_hash = hash.stringHash(selector);
         if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up \"{s}\" (hash: {x}) on {}\n", .{ selector, selector_hash, self });
 
-        return try self.lookupByHash(intent, selector_hash, source_range, allocator, context);
+        return try self.lookupByHash(intent, selector_hash, source_range, context);
     }
 
     pub fn lookupByHash(
@@ -131,52 +130,43 @@ pub const Value = packed struct {
         comptime intent: LookupIntent,
         selector_hash: u32,
         source_range: SourceRange,
-        allocator: ?Allocator,
-        context: ?*InterpreterContext,
+        context: *InterpreterContext,
     ) object_lookup.lookupReturnType(intent) {
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
-            .ObjectReference => self.asObject().lookupByHash(intent, selector_hash, source_range, allocator, context),
+            .ObjectReference => self.asObject().lookupByHash(intent, selector_hash, source_range, context),
 
             .Integer => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits integer\n", .{});
 
-                if (context) |ctx| {
-                    const traits_integer_completion = try Object.findTraitsObject("integer", source_range, allocator.?, ctx);
-                    if (traits_integer_completion.isNormal()) {
-                        const traits_integer = traits_integer_completion.data.Normal;
-                        if (intent == .Read) {
-                            if (selector_hash == parent_hash)
-                                return @as(?Completion, Completion.initNormal(traits_integer));
-                        }
-
-                        return try traits_integer.lookupByHash(intent, selector_hash, source_range, allocator, context);
+                const traits_integer_completion = try Object.findTraitsObject("integer", source_range, context);
+                if (traits_integer_completion.isNormal()) {
+                    const traits_integer = traits_integer_completion.data.Normal;
+                    if (intent == .Read) {
+                        if (selector_hash == parent_hash)
+                            return @as(?Completion, Completion.initNormal(traits_integer));
                     }
 
-                    return object_lookup.lookupCompletionReturn(intent, traits_integer_completion);
-                } else {
-                    @panic("Context MUST be passed for Integer objects!");
+                    return try traits_integer.lookupByHash(intent, selector_hash, source_range, context);
                 }
+
+                return object_lookup.lookupCompletionReturn(intent, traits_integer_completion);
             },
             .FloatingPoint => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits float\n", .{});
 
-                if (context) |ctx| {
-                    const traits_float_completion = try Object.findTraitsObject("float", source_range, allocator.?, ctx);
-                    if (traits_float_completion.isNormal()) {
-                        const traits_float = traits_float_completion.data.Normal;
-                        if (intent == .Read) {
-                            if (selector_hash == parent_hash)
-                                return @as(?Completion, Completion.initNormal(traits_float));
-                        }
-
-                        return try traits_float.lookupByHash(intent, selector_hash, source_range, allocator, context);
+                const traits_float_completion = try Object.findTraitsObject("float", source_range, context);
+                if (traits_float_completion.isNormal()) {
+                    const traits_float = traits_float_completion.data.Normal;
+                    if (intent == .Read) {
+                        if (selector_hash == parent_hash)
+                            return @as(?Completion, Completion.initNormal(traits_float));
                     }
 
-                    return object_lookup.lookupCompletionReturn(intent, traits_float_completion);
-                } else {
-                    @panic("Context MUST be passed for FloatingPoint objects!");
+                    return try traits_float.lookupByHash(intent, selector_hash, source_range, context);
                 }
+
+                return object_lookup.lookupCompletionReturn(intent, traits_float_completion);
             },
         };
     }

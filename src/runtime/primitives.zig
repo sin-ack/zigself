@@ -20,19 +20,30 @@ const array_primitives = @import("./primitives/array.zig");
 const number_primitives = @import("./primitives/number.zig");
 const object_primitives = @import("./primitives/object.zig");
 
+/// The context passed to a primitive.
+pub const PrimitiveContext = struct {
+    /// The current context of the interpreter.
+    interpreter_context: *InterpreterContext,
+    /// The receiver of this primitive call. This is the object that the
+    /// primitive is called on. If the primitive was called without an explicit
+    /// receiver, the receiver will be equivalent to context.self_object (unless
+    /// context.self_object is an activation object, in which case the receiver
+    /// will be unwrapped before being passed to the primitive).
+    receiver: Heap.Tracked,
+    /// The arguments that were passed to this primitive. The amount is always
+    /// equivalent to the amount of colons in the primitive name.
+    arguments: []Heap.Tracked,
+    /// The source range which triggered this primitive call. This will be
+    /// passed to runtime error completions in the case of errors.
+    source_range: SourceRange,
+};
+
 /// A primitive specification. The `name` field specifies the exact selector the
 /// primitive uses (i.e. `_DoFoo:WithBar:`, or `_StringPrint`), and the
 /// `function` is the function which is called to execute the primitive.
 const PrimitiveSpec = struct {
     name: []const u8,
-    function: fn (
-        allocator: Allocator,
-        heap: *Heap,
-        receiver: Heap.Tracked,
-        arguments: []Heap.Tracked,
-        source_range: SourceRange,
-        context: *InterpreterContext,
-    ) interpreter.InterpreterError!Completion,
+    function: fn (context: PrimitiveContext) interpreter.InterpreterError!Completion,
 };
 
 const PrimitiveRegistry = &[_]PrimitiveSpec{
@@ -81,8 +92,6 @@ pub fn hasPrimitive(selector: []const u8) bool {
 }
 
 pub fn callPrimitive(
-    allocator: Allocator,
-    heap: *Heap,
     receiver: Heap.Tracked,
     selector: []const u8,
     arguments: []Heap.Tracked,
@@ -91,9 +100,14 @@ pub fn callPrimitive(
 ) interpreter.InterpreterError!Completion {
     for (PrimitiveRegistry) |primitive| {
         if (std.mem.eql(u8, primitive.name, selector)) {
-            return try primitive.function(allocator, heap, receiver, arguments, source_range, context);
+            return try primitive.function(PrimitiveContext{
+                .interpreter_context = context,
+                .receiver = receiver,
+                .arguments = arguments,
+                .source_range = source_range,
+            });
         }
     }
 
-    return Completion.initRuntimeError(allocator, source_range, "Unknown primitive \"{s}\" called", .{selector});
+    return Completion.initRuntimeError(context.allocator, source_range, "Unknown primitive \"{s}\" called", .{selector});
 }

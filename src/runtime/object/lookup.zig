@@ -29,23 +29,23 @@ pub const AssignLookupResult = union(enum) {
     Completion: Completion,
 };
 
-pub fn findTraitsObject(comptime selector: []const u8, source_range: SourceRange, allocator: Allocator, context: *InterpreterContext) !Completion {
-    if (try context.lobby.getValue().lookup(.Read, "traits", source_range, allocator, context)) |traits_completion| {
+pub fn findTraitsObject(comptime selector: []const u8, source_range: SourceRange, context: *InterpreterContext) !Completion {
+    if (try context.lobby.getValue().lookup(.Read, "traits", source_range, context)) |traits_completion| {
         if (!traits_completion.isNormal())
             return traits_completion;
 
         const traits = traits_completion.data.Normal;
-        if (try traits.lookup(.Read, selector, source_range, allocator, context)) |traits_object_completion| {
+        if (try traits.lookup(.Read, selector, source_range, context)) |traits_object_completion| {
             if (!traits_object_completion.isNormal())
                 return traits_object_completion;
 
             const traits_object = traits_object_completion.data.Normal;
             return Completion.initNormal(traits_object);
         } else {
-            return Completion.initRuntimeError(allocator, source_range, "Could not find " ++ selector ++ " in traits", .{});
+            return Completion.initRuntimeError(context.allocator, source_range, "Could not find " ++ selector ++ " in traits", .{});
         }
     } else {
-        return Completion.initRuntimeError(allocator, source_range, "Could not find traits in lobby", .{});
+        return Completion.initRuntimeError(context.allocator, source_range, "Could not find traits in lobby", .{});
     }
 }
 
@@ -76,18 +76,16 @@ pub fn lookupByHash(
     comptime intent: LookupIntent,
     selector_hash: u32,
     source_range: SourceRange,
-    allocator: ?Allocator,
-    context: ?*InterpreterContext,
+    context: *InterpreterContext,
 ) lookupReturnType(intent) {
     if (LOOKUP_DEBUG) std.debug.print("Object.lookupByHash: Looking up hash {x} on a {} object at {*}\n", .{ selector_hash, self.header.getObjectType(), self.header });
-
     if (intent == .Read) {
         if (selector_hash == self_hash) {
             return Completion.initNormal(self.asValue());
         }
     }
 
-    return try lookupInternal(self, intent, selector_hash, null, source_range, allocator, context);
+    return try lookupInternal(self, intent, selector_hash, null, source_range, context);
 }
 
 fn lookupInternal(
@@ -96,25 +94,24 @@ fn lookupInternal(
     selector_hash: u32,
     previously_visited: ?*const VisitedValueLink,
     source_range: SourceRange,
-    allocator: ?Allocator,
-    context: ?*InterpreterContext,
+    context: *InterpreterContext,
 ) lookupReturnType(intent) {
     switch (self.header.getObjectType()) {
         .ForwardingReference, .Map, .Method => unreachable,
         .Slots => {
-            if (try slotsLookup(intent, Object.Slots, self.asSlotsObject(), selector_hash, previously_visited, source_range, allocator, context)) |result| {
+            if (try slotsLookup(intent, Object.Slots, self.asSlotsObject(), selector_hash, previously_visited, source_range, context)) |result| {
                 return result;
             }
 
             return null;
         },
         .Activation => {
-            if (try slotsLookup(intent, Object.Activation, self.asActivationObject(), selector_hash, previously_visited, source_range, allocator, context)) |result| {
+            if (try slotsLookup(intent, Object.Activation, self.asActivationObject(), selector_hash, previously_visited, source_range, context)) |result| {
                 return result;
             }
 
             // Receiver lookup
-            if (try self.asActivationObject().receiver.lookupByHash(intent, selector_hash, source_range, allocator, context)) |result| {
+            if (try self.asActivationObject().receiver.lookupByHash(intent, selector_hash, source_range, context)) |result| {
                 return result;
             }
 
@@ -123,60 +120,48 @@ fn lookupInternal(
         .Block => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits block\n", .{});
             // NOTE: executeMessage will handle the execution of the block itself.
-            if (context) |ctx| {
-                const traits_block_completion = try findTraitsObject("block", source_range, allocator.?, ctx);
-                if (traits_block_completion.isNormal()) {
-                    const traits_block = traits_block_completion.data.Normal;
-                    if (intent == .Read) {
-                        if (selector_hash == parent_hash)
-                            return Completion.initNormal(traits_block);
-                    }
-
-                    return try traits_block.lookupByHash(intent, selector_hash, source_range, allocator, context);
+            const traits_block_completion = try findTraitsObject("block", source_range, context);
+            if (traits_block_completion.isNormal()) {
+                const traits_block = traits_block_completion.data.Normal;
+                if (intent == .Read) {
+                    if (selector_hash == parent_hash)
+                        return Completion.initNormal(traits_block);
                 }
 
-                return lookupCompletionReturn(intent, traits_block_completion);
-            } else {
-                @panic("Context MUST be passed for Block objects!");
+                return try traits_block.lookupByHash(intent, selector_hash, source_range, context);
             }
+
+            return lookupCompletionReturn(intent, traits_block_completion);
         },
         .Array => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits array\n", .{});
-            if (context) |ctx| {
-                const traits_array_completion = try findTraitsObject("array", source_range, allocator.?, ctx);
-                if (traits_array_completion.isNormal()) {
-                    const traits_array = traits_array_completion.data.Normal;
-                    if (intent == .Read) {
-                        if (selector_hash == parent_hash)
-                            return @as(?Completion, Completion.initNormal(traits_array));
-                    }
-
-                    return try traits_array.lookupByHash(intent, selector_hash, source_range, allocator, context);
+            const traits_array_completion = try findTraitsObject("array", source_range, context);
+            if (traits_array_completion.isNormal()) {
+                const traits_array = traits_array_completion.data.Normal;
+                if (intent == .Read) {
+                    if (selector_hash == parent_hash)
+                        return @as(?Completion, Completion.initNormal(traits_array));
                 }
 
-                return lookupCompletionReturn(intent, traits_array_completion);
-            } else {
-                @panic("Context MUST be passed for Array objects!");
+                return try traits_array.lookupByHash(intent, selector_hash, source_range, context);
             }
+
+            return lookupCompletionReturn(intent, traits_array_completion);
         },
         .ByteArray => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits string\n", .{});
-            if (context) |ctx| {
-                const traits_string_completion = try findTraitsObject("string", source_range, allocator.?, ctx);
-                if (traits_string_completion.isNormal()) {
-                    const traits_string = traits_string_completion.data.Normal;
-                    if (intent == .Read) {
-                        if (selector_hash == parent_hash)
-                            return @as(?Completion, Completion.initNormal(traits_string));
-                    }
-
-                    return try traits_string.lookupByHash(intent, selector_hash, source_range, allocator, context);
+            const traits_string_completion = try findTraitsObject("string", source_range, context);
+            if (traits_string_completion.isNormal()) {
+                const traits_string = traits_string_completion.data.Normal;
+                if (intent == .Read) {
+                    if (selector_hash == parent_hash)
+                        return @as(?Completion, Completion.initNormal(traits_string));
                 }
 
-                return lookupCompletionReturn(intent, traits_string_completion);
-            } else {
-                @panic("Context MUST be passed for ByteArray objects!");
+                return try traits_string.lookupByHash(intent, selector_hash, source_range, context);
             }
+
+            return lookupCompletionReturn(intent, traits_string_completion);
         },
     }
 }
@@ -189,8 +174,7 @@ fn slotsLookup(
     selector_hash: u32,
     previously_visited: ?*const VisitedValueLink,
     source_range: SourceRange,
-    allocator: ?Allocator,
-    context: ?*InterpreterContext,
+    context: *InterpreterContext,
 ) lookupReturnType(intent) {
     if (previously_visited) |visited| {
         var link: ?*const VisitedValueLink = visited;
@@ -251,7 +235,7 @@ fn slotsLookup(
     for (object.getSlots()) |slot| {
         if (slot.isParent()) {
             if (slot.value.isObjectReference()) {
-                if (try lookupInternal(slot.value.asObject(), intent, selector_hash, &currently_visited, source_range, allocator, context)) |result| {
+                if (try lookupInternal(slot.value.asObject(), intent, selector_hash, &currently_visited, source_range, context)) |result| {
                     return result;
                 }
             } else {
