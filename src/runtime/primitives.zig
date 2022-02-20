@@ -44,6 +44,21 @@ pub const PrimitiveContext = struct {
 const PrimitiveSpec = struct {
     name: []const u8,
     function: fn (context: PrimitiveContext) interpreter.InterpreterError!Completion,
+
+    pub fn call(
+        self: PrimitiveSpec,
+        context: *InterpreterContext,
+        receiver: Heap.Tracked,
+        arguments: []Heap.Tracked,
+        source_range: SourceRange,
+    ) interpreter.InterpreterError!Completion {
+        return try self.function(PrimitiveContext{
+            .interpreter_context = context,
+            .receiver = receiver,
+            .arguments = arguments,
+            .source_range = source_range,
+        });
+    }
 };
 
 const PrimitiveRegistry = &[_]PrimitiveSpec{
@@ -81,33 +96,12 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
 
 // FIXME: This is very naive! We shouldn't need to linear search every single
 //        time.
-pub fn hasPrimitive(selector: []const u8) bool {
+pub fn getPrimitive(selector: []const u8) ?PrimitiveSpec {
     for (PrimitiveRegistry) |primitive| {
         if (std.mem.eql(u8, primitive.name, selector)) {
-            return true;
+            return primitive;
         }
     }
 
-    return false;
-}
-
-pub fn callPrimitive(
-    context: *InterpreterContext,
-    receiver: Heap.Tracked,
-    selector: []const u8,
-    arguments: []Heap.Tracked,
-    source_range: SourceRange,
-) interpreter.InterpreterError!Completion {
-    for (PrimitiveRegistry) |primitive| {
-        if (std.mem.eql(u8, primitive.name, selector)) {
-            return try primitive.function(PrimitiveContext{
-                .interpreter_context = context,
-                .receiver = receiver,
-                .arguments = arguments,
-                .source_range = source_range,
-            });
-        }
-    }
-
-    return Completion.initRuntimeError(context.allocator, source_range, "Unknown primitive \"{s}\" called", .{selector});
+    return null;
 }

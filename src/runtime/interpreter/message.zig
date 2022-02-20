@@ -355,8 +355,8 @@ pub fn executePrimitiveMessage(
     // All primitives borrow a ref from the caller for the receiver and
     // each argument. It is the primitive's job to unref any argument after
     // its work is done.
-    if (primitives.hasPrimitive(name)) {
-        return primitives.callPrimitive(context, tracked_bare_receiver, name, arguments, source_range);
+    if (primitives.getPrimitive(name)) |primitive| {
+        return primitive.call(context, tracked_bare_receiver, arguments, source_range);
     } else {
         return Completion.initRuntimeError(context.allocator, source_range, "Unknown primitive selector \"{s}\"", .{name});
     }
