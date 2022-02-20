@@ -107,7 +107,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
             result.untrack(heap);
         }
 
-        var completion = try executeStatement(statement, &context);
+        var completion = try executeStatement(&context, statement);
         defer completion.deinit(allocator);
 
         switch (completion.data) {
@@ -137,7 +137,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
 /// various other context objects.
 ///
 /// Refs `script`.
-pub fn executeSubScript(script: Script.Ref, parent_context: *InterpreterContext) InterpreterError!?Completion {
+pub fn executeSubScript(parent_context: *InterpreterContext, script: Script.Ref) InterpreterError!?Completion {
     script.ref();
     defer script.unref();
 
@@ -157,7 +157,7 @@ pub fn executeSubScript(script: Script.Ref, parent_context: *InterpreterContext)
         }
 
         var did_complete_statement_successfully = false;
-        var completion = try executeStatement(statement, &child_context);
+        var completion = try executeStatement(&child_context, statement);
         defer {
             if (did_complete_statement_successfully) {
                 completion.deinit(parent_context.allocator);
@@ -186,32 +186,27 @@ pub fn executeSubScript(script: Script.Ref, parent_context: *InterpreterContext)
 }
 
 /// Executes a statement. All refs are forwardded.
-pub fn executeStatement(statement: AST.StatementNode, context: *InterpreterContext) InterpreterError!Completion {
-    return try executeExpression(statement.expression, context);
+pub fn executeStatement(context: *InterpreterContext, statement: AST.StatementNode) InterpreterError!Completion {
+    return try executeExpression(context, statement.expression);
 }
 
 /// Executes an expression. All refs are forwarded.
-pub fn executeExpression(expression: AST.ExpressionNode, context: *InterpreterContext) InterpreterError!Completion {
+pub fn executeExpression(context: *InterpreterContext, expression: AST.ExpressionNode) InterpreterError!Completion {
     return switch (expression) {
-        .Object => |object| try executeObject(object.*, context),
-        .Block => |block| try executeBlock(block.*, context),
-        .Message => |message| try message_interpreter.executeMessage(message.*, context),
-        .Return => |return_node| return executeReturn(return_node.*, context),
+        .Object => |object| try executeObject(context, object.*),
+        .Block => |block| try executeBlock(context, block.*),
+        .Message => |message| try message_interpreter.executeMessage(context, message.*),
+        .Return => |return_node| return executeReturn(context, return_node.*),
 
-        .Identifier => |identifier| try executeIdentifier(identifier, context),
-        .String => |string| try executeString(string, context),
-        .Number => |number| try executeNumber(number, context),
+        .Identifier => |identifier| try executeIdentifier(context, identifier),
+        .String => |string| try executeString(context, string),
+        .Number => |number| try executeNumber(context, number),
     };
 }
 
 /// Creates a new method object. All refs are forwarded. `arguments` and
 /// `object_node`'s statements are copied.
-fn executeMethod(
-    name: []const u8,
-    object_node: AST.ObjectNode,
-    arguments: [][]const u8,
-    context: *InterpreterContext,
-) InterpreterError!Completion {
+fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AST.ObjectNode, arguments: [][]const u8) InterpreterError!Completion {
     var assignable_slot_values = try std.ArrayList(Heap.Tracked).initCapacity(context.allocator, arguments.len);
     defer {
         for (assignable_slot_values.items) |value| {
@@ -265,7 +260,7 @@ fn executeMethod(
     defer tracked_method_map.untrack(context.heap);
 
     for (object_node.slots) |slot_node| {
-        const slot_completion = try executeSlot(slot_node, Object.Map.Method, tracked_method_map.getValue().asObject().asMap().asMethodMap(), slot_init_offset, context);
+        const slot_completion = try executeSlot(context, slot_node, Object.Map.Method, tracked_method_map.getValue().asObject().asMap().asMethodMap(), slot_init_offset);
         if (slot_completion) |completion| {
             if (completion.isNormal())
                 try assignable_slot_values.append(try context.heap.track(completion.data.Normal))
@@ -291,18 +286,12 @@ fn executeMethod(
 }
 
 /// Creates a new slot. All refs are forwarded.
-pub fn executeSlot(
-    slot_node: AST.SlotNode,
-    comptime MapType: type,
-    map: *MapType,
-    slot_index: usize,
-    context: *InterpreterContext,
-) InterpreterError!?Completion {
+pub fn executeSlot(context: *InterpreterContext, slot_node: AST.SlotNode, comptime MapType: type, map: *MapType, slot_index: usize) InterpreterError!?Completion {
     const completion = blk: {
         if (slot_node.value == .Object and slot_node.value.Object.statements.value.statements.len > 0) {
-            break :blk try executeMethod(slot_node.name, slot_node.value.Object.*, slot_node.arguments, context);
+            break :blk try executeMethod(context, slot_node.name, slot_node.value.Object.*, slot_node.arguments);
         } else {
-            break :blk try executeExpression(slot_node.value, context);
+            break :blk try executeExpression(context, slot_node.value);
         }
     };
     if (!completion.isNormal()) {
@@ -323,7 +312,7 @@ pub fn executeSlot(
 }
 
 /// Creates a new slots object. All refs are forwarded.
-pub fn executeObject(object_node: AST.ObjectNode, context: *InterpreterContext) InterpreterError!Completion {
+pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) InterpreterError!Completion {
     // Verify that we are executing a slots object and not a method; methods
     // are created through executeSlot.
     if (object_node.statements.value.statements.len > 0) {
@@ -343,7 +332,7 @@ pub fn executeObject(object_node: AST.ObjectNode, context: *InterpreterContext) 
     defer tracked_slots_map.untrack(context.heap);
 
     for (object_node.slots) |slot_node, i| {
-        var slot_completion = try executeSlot(slot_node, Object.Map.Slots, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), i, context);
+        var slot_completion = try executeSlot(context, slot_node, Object.Map.Slots, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), i);
         if (slot_completion) |completion| {
             if (completion.isNormal()) {
                 try assignable_slot_values.append(try context.heap.track(completion.data.Normal));
@@ -367,7 +356,7 @@ pub fn executeObject(object_node: AST.ObjectNode, context: *InterpreterContext) 
     return Completion.initNormal(slots_object.asValue());
 }
 
-pub fn executeBlock(block: AST.BlockNode, context: *InterpreterContext) InterpreterError!Completion {
+pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) InterpreterError!Completion {
     var argument_slot_count: u8 = 0;
     for (block.slots) |slot_node| {
         if (slot_node.is_argument) argument_slot_count += 1;
@@ -450,11 +439,11 @@ pub fn executeBlock(block: AST.BlockNode, context: *InterpreterContext) Interpre
     for (block.slots) |slot_node| {
         if (!slot_node.is_argument) {
             var slot_completion = try executeSlot(
+                context,
                 slot_node,
                 Object.Map.Block,
                 tracked_block_map.getValue().asObject().asMap().asBlockMap(),
                 slot_init_offset,
-                context,
             );
             if (slot_completion) |completion| {
                 if (completion.isNormal()) {
@@ -482,12 +471,12 @@ pub fn executeBlock(block: AST.BlockNode, context: *InterpreterContext) Interpre
     return Completion.initNormal(block_object.asValue());
 }
 
-pub fn executeReturn(return_node: AST.ReturnNode, context: *InterpreterContext) InterpreterError!Completion {
+pub fn executeReturn(context: *InterpreterContext, return_node: AST.ReturnNode) InterpreterError!Completion {
     const latest_activation = context.activation_stack.stack[context.activation_stack.depth - 1];
     const target_activation = latest_activation.nonlocal_return_target_activation.?;
     std.debug.assert(target_activation.nonlocal_return_target_activation == null);
 
-    const completion = try executeExpression(return_node.expression, context);
+    const completion = try executeExpression(context, return_node.expression);
     switch (completion.data) {
         .Normal => {
             const target_activation_weak = target_activation.makeWeakRef();
@@ -514,7 +503,7 @@ pub fn executeReturn(return_node: AST.ReturnNode, context: *InterpreterContext) 
 }
 
 /// Executes an identifier expression.
-pub fn executeIdentifier(identifier: AST.IdentifierNode, context: *InterpreterContext) InterpreterError!Completion {
+pub fn executeIdentifier(context: *InterpreterContext, identifier: AST.IdentifierNode) InterpreterError!Completion {
     var source_range = SourceRange.init(context.script, identifier.range);
     defer source_range.deinit();
 
@@ -528,7 +517,7 @@ pub fn executeIdentifier(identifier: AST.IdentifierNode, context: *InterpreterCo
         var tracked_receiver = try context.heap.track(receiver);
         defer tracked_receiver.untrack(context.heap);
 
-        return message_interpreter.executePrimitiveMessage(tracked_receiver, identifier.value, &[_]Heap.Tracked{}, source_range, context);
+        return message_interpreter.executePrimitiveMessage(context, tracked_receiver, identifier.value, &[_]Heap.Tracked{}, source_range);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
@@ -547,11 +536,11 @@ pub fn executeIdentifier(identifier: AST.IdentifierNode, context: *InterpreterCo
             var tracked_receiver = try context.heap.track(receiver);
             defer tracked_receiver.untrack(context.heap);
 
-            return message_interpreter.executeBlockMessage(tracked_receiver, &[_]Heap.Tracked{}, source_range, context);
+            return message_interpreter.executeBlockMessage(context, tracked_receiver, &[_]Heap.Tracked{}, source_range);
         }
     }
 
-    if (try context.self_object.getValue().lookup(.Read, identifier.value, source_range, context)) |lookup_completion| {
+    if (try context.self_object.getValue().lookup(.Read, context, identifier.value, source_range)) |lookup_completion| {
         if (!lookup_completion.isNormal()) {
             return lookup_completion;
         }
@@ -562,11 +551,11 @@ pub fn executeIdentifier(identifier: AST.IdentifierNode, context: *InterpreterCo
             defer tracked_lookup_result.untrack(context.heap);
 
             return message_interpreter.executeMethodMessage(
+                context,
                 context.self_object,
                 tracked_lookup_result,
                 &[_]Heap.Tracked{},
                 source_range,
-                context,
             );
         } else {
             return Completion.initNormal(lookup_result);
@@ -578,7 +567,7 @@ pub fn executeIdentifier(identifier: AST.IdentifierNode, context: *InterpreterCo
 
 /// Executes a string literal expression. `lobby` gains a ref during the
 /// lifetime of the function.
-pub fn executeString(string: AST.StringNode, context: *InterpreterContext) InterpreterError!Completion {
+pub fn executeString(context: *InterpreterContext, string: AST.StringNode) InterpreterError!Completion {
     try context.heap.ensureSpaceInEden(
         ByteArray.requiredSizeForAllocation(string.value.len) +
             Object.Map.ByteArray.requiredSizeForAllocation() +
@@ -592,7 +581,7 @@ pub fn executeString(string: AST.StringNode, context: *InterpreterContext) Inter
 
 /// Executes a number literal expression. `lobby` gains a ref during the
 /// lifetime of the function.
-pub fn executeNumber(number: AST.NumberNode, context: *InterpreterContext) InterpreterError!Completion {
+pub fn executeNumber(context: *InterpreterContext, number: AST.NumberNode) InterpreterError!Completion {
     _ = context;
 
     return Completion.initNormal(switch (number.value) {

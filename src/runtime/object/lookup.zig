@@ -29,13 +29,13 @@ pub const AssignLookupResult = union(enum) {
     Completion: Completion,
 };
 
-pub fn findTraitsObject(comptime selector: []const u8, source_range: SourceRange, context: *InterpreterContext) !Completion {
-    if (try context.lobby.getValue().lookup(.Read, "traits", source_range, context)) |traits_completion| {
+pub fn findTraitsObject(context: *InterpreterContext, comptime selector: []const u8, source_range: SourceRange) !Completion {
+    if (try context.lobby.getValue().lookup(.Read, context, "traits", source_range)) |traits_completion| {
         if (!traits_completion.isNormal())
             return traits_completion;
 
         const traits = traits_completion.data.Normal;
-        if (try traits.lookup(.Read, selector, source_range, context)) |traits_object_completion| {
+        if (try traits.lookup(.Read, context, selector, source_range)) |traits_object_completion| {
             if (!traits_object_completion.isNormal())
                 return traits_object_completion;
 
@@ -74,9 +74,9 @@ const parent_hash = hash.stringHash("parent");
 pub fn lookupByHash(
     self: Object,
     comptime intent: LookupIntent,
+    context: *InterpreterContext,
     selector_hash: u32,
     source_range: SourceRange,
-    context: *InterpreterContext,
 ) lookupReturnType(intent) {
     if (LOOKUP_DEBUG) std.debug.print("Object.lookupByHash: Looking up hash {x} on a {} object at {*}\n", .{ selector_hash, self.header.getObjectType(), self.header });
     if (intent == .Read) {
@@ -85,33 +85,33 @@ pub fn lookupByHash(
         }
     }
 
-    return try lookupInternal(self, intent, selector_hash, null, source_range, context);
+    return try lookupInternal(self, intent, context, selector_hash, null, source_range);
 }
 
 fn lookupInternal(
     self: Object,
     comptime intent: LookupIntent,
+    context: *InterpreterContext,
     selector_hash: u32,
     previously_visited: ?*const VisitedValueLink,
     source_range: SourceRange,
-    context: *InterpreterContext,
 ) lookupReturnType(intent) {
     switch (self.header.getObjectType()) {
         .ForwardingReference, .Map, .Method => unreachable,
         .Slots => {
-            if (try slotsLookup(intent, Object.Slots, self.asSlotsObject(), selector_hash, previously_visited, source_range, context)) |result| {
+            if (try slotsLookup(intent, context, Object.Slots, self.asSlotsObject(), selector_hash, previously_visited, source_range)) |result| {
                 return result;
             }
 
             return null;
         },
         .Activation => {
-            if (try slotsLookup(intent, Object.Activation, self.asActivationObject(), selector_hash, previously_visited, source_range, context)) |result| {
+            if (try slotsLookup(intent, context, Object.Activation, self.asActivationObject(), selector_hash, previously_visited, source_range)) |result| {
                 return result;
             }
 
             // Receiver lookup
-            if (try self.asActivationObject().receiver.lookupByHash(intent, selector_hash, source_range, context)) |result| {
+            if (try self.asActivationObject().receiver.lookupByHash(intent, context, selector_hash, source_range)) |result| {
                 return result;
             }
 
@@ -120,7 +120,7 @@ fn lookupInternal(
         .Block => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits block\n", .{});
             // NOTE: executeMessage will handle the execution of the block itself.
-            const traits_block_completion = try findTraitsObject("block", source_range, context);
+            const traits_block_completion = try findTraitsObject(context, "block", source_range);
             if (traits_block_completion.isNormal()) {
                 const traits_block = traits_block_completion.data.Normal;
                 if (intent == .Read) {
@@ -128,14 +128,14 @@ fn lookupInternal(
                         return Completion.initNormal(traits_block);
                 }
 
-                return try traits_block.lookupByHash(intent, selector_hash, source_range, context);
+                return try traits_block.lookupByHash(intent, context, selector_hash, source_range);
             }
 
             return lookupCompletionReturn(intent, traits_block_completion);
         },
         .Array => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits array\n", .{});
-            const traits_array_completion = try findTraitsObject("array", source_range, context);
+            const traits_array_completion = try findTraitsObject(context, "array", source_range);
             if (traits_array_completion.isNormal()) {
                 const traits_array = traits_array_completion.data.Normal;
                 if (intent == .Read) {
@@ -143,14 +143,14 @@ fn lookupInternal(
                         return @as(?Completion, Completion.initNormal(traits_array));
                 }
 
-                return try traits_array.lookupByHash(intent, selector_hash, source_range, context);
+                return try traits_array.lookupByHash(intent, context, selector_hash, source_range);
             }
 
             return lookupCompletionReturn(intent, traits_array_completion);
         },
         .ByteArray => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits string\n", .{});
-            const traits_string_completion = try findTraitsObject("string", source_range, context);
+            const traits_string_completion = try findTraitsObject(context, "string", source_range);
             if (traits_string_completion.isNormal()) {
                 const traits_string = traits_string_completion.data.Normal;
                 if (intent == .Read) {
@@ -158,7 +158,7 @@ fn lookupInternal(
                         return @as(?Completion, Completion.initNormal(traits_string));
                 }
 
-                return try traits_string.lookupByHash(intent, selector_hash, source_range, context);
+                return try traits_string.lookupByHash(intent, context, selector_hash, source_range);
             }
 
             return lookupCompletionReturn(intent, traits_string_completion);
@@ -169,12 +169,12 @@ fn lookupInternal(
 /// Self Handbook, §3.3.8 The lookup algorithm
 fn slotsLookup(
     comptime intent: LookupIntent,
+    context: *InterpreterContext,
     comptime ObjectType: type,
     object: *ObjectType,
     selector_hash: u32,
     previously_visited: ?*const VisitedValueLink,
     source_range: SourceRange,
-    context: *InterpreterContext,
 ) lookupReturnType(intent) {
     if (previously_visited) |visited| {
         var link: ?*const VisitedValueLink = visited;
@@ -235,7 +235,7 @@ fn slotsLookup(
     for (object.getSlots()) |slot| {
         if (slot.isParent()) {
             if (slot.value.isObjectReference()) {
-                if (try lookupInternal(slot.value.asObject(), intent, selector_hash, &currently_visited, source_range, context)) |result| {
+                if (try lookupInternal(slot.value.asObject(), intent, context, selector_hash, &currently_visited, source_range)) |result| {
                     return result;
                 }
             } else {

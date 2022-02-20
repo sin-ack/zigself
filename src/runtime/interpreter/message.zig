@@ -27,8 +27,8 @@ const MessageArgumentsOrCompletion = union(enum) {
 };
 
 fn getMessageArguments(
-    ast_arguments: []AST.ExpressionNode,
     context: *InterpreterContext,
+    ast_arguments: []AST.ExpressionNode,
 ) root_interpreter.InterpreterError!MessageArgumentsOrCompletion {
     var arguments = try std.ArrayList(Heap.Tracked).initCapacity(context.allocator, ast_arguments.len);
     var did_complete_normally = false;
@@ -42,7 +42,7 @@ fn getMessageArguments(
     }
 
     for (ast_arguments) |argument| {
-        const completion = try root_interpreter.executeExpression(argument, context);
+        const completion = try root_interpreter.executeExpression(context, argument);
         if (completion.isNormal()) {
             const tracked_result = try context.heap.track(completion.data.Normal);
             errdefer tracked_result.untrack(context.heap);
@@ -97,10 +97,10 @@ fn getOrCreateBlockMessageName(context: *InterpreterContext, argument_count: u8)
 }
 
 pub fn executeBlockMessage(
+    context: *InterpreterContext,
     block_value: Heap.Tracked,
     arguments: []Heap.Tracked,
     source_range: SourceRange,
-    context: *InterpreterContext,
 ) root_interpreter.InterpreterError!Completion {
     if (context.activation_stack.depth >= MaximumStackDepth) {
         return Completion.initRuntimeError(context.allocator, source_range, "Maximum stack size reached", .{});
@@ -187,7 +187,7 @@ pub fn executeBlockMessage(
             last_result.untrack(context.heap);
         }
 
-        const completion = try root_interpreter.executeStatement(statement, context);
+        const completion = try root_interpreter.executeStatement(context, statement);
         switch (completion.data) {
             .Normal => |value| {
                 last_expression_result = try context.heap.track(value);
@@ -217,11 +217,11 @@ pub fn executeBlockMessage(
 }
 
 pub fn executeMethodMessage(
+    context: *InterpreterContext,
     receiver: Heap.Tracked,
     tracked_method_object: Heap.Tracked,
     arguments: []Heap.Tracked,
     source_range: SourceRange,
-    context: *InterpreterContext,
 ) root_interpreter.InterpreterError!Completion {
     if (context.activation_stack.depth >= MaximumStackDepth) {
         return Completion.initRuntimeError(context.allocator, source_range, "Maximum stack size reached", .{});
@@ -295,7 +295,7 @@ pub fn executeMethodMessage(
             last_result.untrack(context.heap);
         }
 
-        var completion = try root_interpreter.executeStatement(statement, context);
+        var completion = try root_interpreter.executeStatement(context, statement);
         switch (completion.data) {
             .Normal => |value| {
                 last_expression_result = try context.heap.track(value);
@@ -338,11 +338,11 @@ pub fn executeMethodMessage(
 
 /// Refs `receiver`.
 pub fn executePrimitiveMessage(
+    context: *InterpreterContext,
     tracked_receiver: Heap.Tracked,
     name: []const u8,
     arguments: []Heap.Tracked,
     source_range: SourceRange,
-    context: *InterpreterContext,
 ) root_interpreter.InterpreterError!Completion {
     var receiver = tracked_receiver.getValue();
     if (receiver.isObjectReference() and receiver.asObject().isActivationObject()) {
@@ -356,7 +356,7 @@ pub fn executePrimitiveMessage(
     // each argument. It is the primitive's job to unref any argument after
     // its work is done.
     if (primitives.hasPrimitive(name)) {
-        return primitives.callPrimitive(tracked_bare_receiver, name, arguments, source_range, context);
+        return primitives.callPrimitive(context, tracked_bare_receiver, name, arguments, source_range);
     } else {
         return Completion.initRuntimeError(context.allocator, source_range, "Unknown primitive selector \"{s}\"", .{name});
     }
@@ -364,11 +364,11 @@ pub fn executePrimitiveMessage(
 
 /// The original value in `slot` is unref'd.
 pub fn executeAssignmentMessage(
+    context: *InterpreterContext,
     tracked_receiver: Heap.Tracked,
     message_name: []const u8,
     tracked_argument: Heap.Tracked,
     source_range: SourceRange,
-    context: *InterpreterContext,
 ) root_interpreter.InterpreterError!?Completion {
     const receiver = tracked_receiver.getValue();
     var argument = tracked_argument.getValue();
@@ -380,7 +380,7 @@ pub fn executeAssignmentMessage(
     }
 
     const message_name_without_colon = message_name[0 .. message_name.len - 1];
-    if (try receiver.lookup(.Assign, message_name_without_colon, source_range, context)) |assign_lookup_result| {
+    if (try receiver.lookup(.Assign, context, message_name_without_colon, source_range)) |assign_lookup_result| {
         if (assign_lookup_result == .Completion) {
             return assign_lookup_result.Completion;
         }
@@ -400,8 +400,8 @@ pub fn executeAssignmentMessage(
 }
 
 /// Executes a message. All refs are forwarded.
-pub fn executeMessage(message: AST.MessageNode, context: *InterpreterContext) root_interpreter.InterpreterError!Completion {
-    const receiver_completion = try root_interpreter.executeExpression(message.receiver, context);
+pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) root_interpreter.InterpreterError!Completion {
+    const receiver_completion = try root_interpreter.executeExpression(context, message.receiver);
     if (!receiver_completion.isNormal()) {
         return receiver_completion;
     }
@@ -412,7 +412,7 @@ pub fn executeMessage(message: AST.MessageNode, context: *InterpreterContext) ro
     defer source_range.deinit();
 
     // FIXME: Avoid allocating a slice here
-    const arguments_or_completion = try getMessageArguments(message.arguments, context);
+    const arguments_or_completion = try getMessageArguments(context, message.arguments);
     if (arguments_or_completion == .Completion) {
         return arguments_or_completion.Completion;
     }
@@ -427,14 +427,14 @@ pub fn executeMessage(message: AST.MessageNode, context: *InterpreterContext) ro
 
     // Check for assignable slots
     if (message.message_name[message.message_name.len - 1] == ':' and arguments.len == 1) {
-        if (try executeAssignmentMessage(tracked_receiver, message.message_name, arguments[0], source_range, context)) |completion| {
+        if (try executeAssignmentMessage(context, tracked_receiver, message.message_name, arguments[0], source_range)) |completion| {
             return completion;
         }
     }
 
     // Primitive check
     if (message.message_name[0] == '_') {
-        return executePrimitiveMessage(tracked_receiver, message.message_name, arguments, source_range, context);
+        return executePrimitiveMessage(context, tracked_receiver, message.message_name, arguments, source_range);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
@@ -454,11 +454,11 @@ pub fn executeMessage(message: AST.MessageNode, context: *InterpreterContext) ro
             var tracked_block_receiver = try context.heap.track(block_receiver);
             defer tracked_block_receiver.untrack(context.heap);
 
-            return executeBlockMessage(tracked_block_receiver, arguments, source_range, context);
+            return executeBlockMessage(context, tracked_block_receiver, arguments, source_range);
         }
     }
 
-    if (try tracked_receiver.getValue().lookup(.Read, message.message_name, source_range, context)) |lookup_completion| {
+    if (try tracked_receiver.getValue().lookup(.Read, context, message.message_name, source_range)) |lookup_completion| {
         if (!lookup_completion.isNormal()) {
             return lookup_completion;
         }
@@ -468,7 +468,7 @@ pub fn executeMessage(message: AST.MessageNode, context: *InterpreterContext) ro
             var tracked_lookup_result = try context.heap.track(lookup_result);
             defer tracked_lookup_result.untrack(context.heap);
 
-            return executeMethodMessage(tracked_receiver, tracked_lookup_result, arguments, source_range, context);
+            return executeMethodMessage(context, tracked_receiver, tracked_lookup_result, arguments, source_range);
         } else {
             return Completion.initNormal(lookup_result);
         }

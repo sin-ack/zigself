@@ -84,7 +84,7 @@ pub fn RunScript(context: PrimitiveContext) !Completion {
     var result_value: Heap.Tracked = try context.interpreter_context.heap.track(environment.globalNil());
     defer result_value.untrack(context.interpreter_context.heap);
 
-    if (try interpreter.executeSubScript(script, context.interpreter_context)) |script_completion| {
+    if (try interpreter.executeSubScript(context.interpreter_context, script)) |script_completion| {
         if (script_completion.isNormal()) {
             result_value.untrack(context.interpreter_context.heap);
             result_value = try context.interpreter_context.heap.track(script_completion.data.Normal);

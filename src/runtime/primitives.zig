@@ -92,11 +92,11 @@ pub fn hasPrimitive(selector: []const u8) bool {
 }
 
 pub fn callPrimitive(
+    context: *InterpreterContext,
     receiver: Heap.Tracked,
     selector: []const u8,
     arguments: []Heap.Tracked,
     source_range: SourceRange,
-    context: *InterpreterContext,
 ) interpreter.InterpreterError!Completion {
     for (PrimitiveRegistry) |primitive| {
         if (std.mem.eql(u8, primitive.name, selector)) {

@@ -115,31 +115,31 @@ pub const Value = packed struct {
     pub fn lookup(
         self: Value,
         comptime intent: LookupIntent,
+        context: *InterpreterContext,
         selector: []const u8,
         source_range: SourceRange,
-        context: *InterpreterContext,
     ) object_lookup.lookupReturnType(intent) {
         const selector_hash = hash.stringHash(selector);
         if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up \"{s}\" (hash: {x}) on {}\n", .{ selector, selector_hash, self });
 
-        return try self.lookupByHash(intent, selector_hash, source_range, context);
+        return try self.lookupByHash(intent, context, selector_hash, source_range);
     }
 
     pub fn lookupByHash(
         self: Value,
         comptime intent: LookupIntent,
+        context: *InterpreterContext,
         selector_hash: u32,
         source_range: SourceRange,
-        context: *InterpreterContext,
     ) object_lookup.lookupReturnType(intent) {
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
-            .ObjectReference => self.asObject().lookupByHash(intent, selector_hash, source_range, context),
+            .ObjectReference => self.asObject().lookupByHash(intent, context, selector_hash, source_range),
 
             .Integer => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits integer\n", .{});
 
-                const traits_integer_completion = try Object.findTraitsObject("integer", source_range, context);
+                const traits_integer_completion = try Object.findTraitsObject(context, "integer", source_range);
                 if (traits_integer_completion.isNormal()) {
                     const traits_integer = traits_integer_completion.data.Normal;
                     if (intent == .Read) {
@@ -147,7 +147,7 @@ pub const Value = packed struct {
                             return @as(?Completion, Completion.initNormal(traits_integer));
                     }
 
-                    return try traits_integer.lookupByHash(intent, selector_hash, source_range, context);
+                    return try traits_integer.lookupByHash(intent, context, selector_hash, source_range);
                 }
 
                 return object_lookup.lookupCompletionReturn(intent, traits_integer_completion);
@@ -155,7 +155,7 @@ pub const Value = packed struct {
             .FloatingPoint => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits float\n", .{});
 
-                const traits_float_completion = try Object.findTraitsObject("float", source_range, context);
+                const traits_float_completion = try Object.findTraitsObject(context, "float", source_range);
                 if (traits_float_completion.isNormal()) {
                     const traits_float = traits_float_completion.data.Normal;
                     if (intent == .Read) {
@@ -163,7 +163,7 @@ pub const Value = packed struct {
                             return @as(?Completion, Completion.initNormal(traits_float));
                     }
 
-                    return try traits_float.lookupByHash(intent, selector_hash, source_range, context);
+                    return try traits_float.lookupByHash(intent, context, selector_hash, source_range);
                 }
 
                 return object_lookup.lookupCompletionReturn(intent, traits_float_completion);
