@@ -22,7 +22,7 @@ std traits string _AddSlots: (|
         ].
 
         indicesList append: size.
-        substrings: vector copySize: indicesList size prec.
+        substrings: std array copySize: indicesList size prec.
 
         "The first substring must be appended outside because we do not want to add the substring length."
         substrings at: 0 Put: (copyFrom: 0 Until: (indicesList at: 0)).
@@ -54,7 +54,7 @@ std traits string _AddSlots: (|
         absentBlock value.
     ).
 
-    size = (_ByteVectorSize).
+    size = (_ByteArraySize).
     isEmpty = (size = 0).
     at: index = ( _ByteAt: index ).
     at: index PutByte: value = ( _ByteAt: index Put: value ).
@@ -88,7 +88,7 @@ std traits string _AddSlots: (|
         targetBuffer
     ).
 
-    copySize: size = ( _ByteVectorCopySize: size ).
+    copySize: size = ( _ByteArrayCopySize: size ).
 |).
 
 std traits string _AddSlots: (|
