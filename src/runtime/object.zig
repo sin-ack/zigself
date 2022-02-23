@@ -70,59 +70,6 @@ pub fn getSizeInMemory(self: Self) usize {
     };
 }
 
-pub fn format(self: Self) std.fmt.Formatter(formatObject) {
-    return .{ .data = self.header };
-}
-
-fn formatObject(
-    header: *align(@alignOf(u64)) Header,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    _ = fmt;
-
-    try writer.writeAll("Object(");
-    switch (header.getObjectType()) {
-        .ForwardingReference => {
-            try writer.writeAll("ForwardingReference){ .forward_address = 0x");
-            try std.fmt.formatInt(@ptrToInt((Self{ .header = header }).getForwardAddress()), 16, .lower, options, writer);
-            try writer.writeAll(" }");
-        },
-        .Slots => {
-            try writer.writeAll("Slots){ .assignable_slots = ");
-            try std.fmt.formatInt(@ptrCast(*Slots, header).getMap().getAssignableSlotCount(), 10, .lower, options, writer);
-            try writer.writeAll(" }");
-        },
-        .Activation => {
-            try writer.writeAll("Activation){ .assignable_slots = ");
-            try std.fmt.formatInt(@ptrCast(*Activation, header).getMap().getAssignableSlotCount(), 10, .lower, options, writer);
-            try writer.writeAll(" }");
-        },
-        .Map => {
-            var map = @ptrCast(*Map, header);
-            try writer.writeAll("Map(");
-
-            switch (map.getMapType()) {
-                .Slots => {
-                    try writer.writeAll("Slots)) { .slot_count = ");
-                    try std.fmt.formatInt(map.asSlotsMap().slot_count, 10, .lower, options, writer);
-                    try writer.writeAll(", .assignable_slots = ");
-                    try std.fmt.formatInt(map.asSlotsMap().getAssignableSlotCount(), 10, .lower, options, writer);
-                    try writer.writeAll(" }");
-                },
-                .Activation => {
-                    try writer.writeAll("Activation)) { .slot_count = ");
-                    try std.fmt.formatInt(map.asActivationMap().slots_map.slot_count, 10, .lower, options, writer);
-                    try writer.writeAll(", .assignable_slots = ");
-                    try std.fmt.formatInt(map.asActivationMap().getAssignableSlotCount(), 10, .lower, options, writer);
-                    try writer.writeAll(" }");
-                },
-            }
-        },
-    }
-}
-
 pub fn finalize(self: Self, allocator: Allocator) void {
     switch (self.header.getObjectType()) {
         .ForwardingReference, .Slots, .Activation, .Method, .Block, .Array, .ByteArray => unreachable,
