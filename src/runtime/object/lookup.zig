@@ -70,6 +70,7 @@ pub fn lookupCompletionReturn(comptime intent: LookupIntent, completion: Complet
 
 const self_hash = hash.stringHash("self");
 const parent_hash = hash.stringHash("parent");
+const value_hash = hash.stringHash("value");
 
 pub fn lookupByHash(
     self: Object,
@@ -162,6 +163,13 @@ fn lookupInternal(
             }
 
             return lookupCompletionReturn(intent, traits_string_completion);
+        },
+        .Managed => {
+            if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at a managed object type: {}\n", .{self.asManaged().getManagedType()});
+            if (intent == .Read and selector_hash == value_hash) {
+                return @as(?Completion, Completion.initNormal(self.asManaged().value));
+            }
+            return null;
         },
     }
 }

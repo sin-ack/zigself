@@ -155,6 +155,11 @@ fn inspectObject(
                 printWithIndent(display_type, indent, "]", .{});
             }
         },
+        .Managed => {
+            const managed = object.asManaged();
+            std.debug.print("<managed object: {}> ", .{managed.getManagedType()});
+            try inspectValueInternal(display_type, managed.value, indent, &my_link);
+        },
     }
 }
 

@@ -316,7 +316,7 @@ pub const Activation = packed struct {
         self.receiver = receiver;
     }
 
-    const ActivationTypeShift = 5;
+    const ActivationTypeShift = Object.ObjectTypeShift + Object.ObjectTypeBits;
     const ActivationTypeBit: u64 = 1 << ActivationTypeShift;
 
     pub const ActivationType = enum(u64) {

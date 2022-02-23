@@ -39,9 +39,9 @@ pub fn getMapMap(heap: *Heap) !Value {
     return map_value;
 }
 
-// 2 bits for marker + 3 bits for object type
-const MapTypeShift = 2 + 3;
-const MapTypeMask: u64 = 0b111 << MapTypeShift;
+const MapTypeShift = Object.ObjectTypeShift + Object.ObjectTypeBits;
+const MapTypeBits = 3;
+const MapTypeMask: u64 = ((1 << MapTypeBits) - 1) << MapTypeShift;
 
 pub const MapType = enum(u64) {
     Slots = 0b000 << MapTypeShift,

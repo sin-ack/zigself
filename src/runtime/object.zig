@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -10,6 +10,7 @@ const Value = @import("./value.zig").Value;
 const slots_objects = @import("./object/slots.zig");
 const byte_array_object = @import("./object/byte_array.zig");
 const array_object = @import("./object/array.zig");
+const managed_object = @import("./object/managed.zig");
 const map_objects = @import("./object/map.zig");
 
 const Self = @This();
@@ -20,23 +21,26 @@ pub const Method = slots_objects.Method;
 pub const Block = slots_objects.Block;
 pub const ByteArray = byte_array_object.ByteArrayObject;
 pub const Array = array_object.ArrayObject;
+pub const Managed = managed_object.ManagedObject;
 pub const Map = map_objects.Map;
 
 pub usingnamespace @import("./object/lookup.zig");
 
-const ObjectTypeShift = 2;
-const ObjectTypeMask: u64 = 0b111 << ObjectTypeShift;
+pub const ObjectTypeShift = 2;
+pub const ObjectTypeBits = 4;
+const ObjectTypeMask: u64 = ((1 << ObjectTypeBits) - 1) << ObjectTypeShift;
 
 /// The object types that are available in the system.
 const ObjectType = enum(u64) {
-    ForwardingReference = 0b000 << ObjectTypeShift,
-    Slots = 0b001 << ObjectTypeShift,
-    Activation = 0b010 << ObjectTypeShift,
-    Method = 0b011 << ObjectTypeShift,
-    Block = 0b100 << ObjectTypeShift,
-    ByteArray = 0b101 << ObjectTypeShift,
-    Array = 0b110 << ObjectTypeShift,
-    Map = 0b111 << ObjectTypeShift,
+    ForwardingReference = 0b0000 << ObjectTypeShift,
+    Slots = 0b0001 << ObjectTypeShift,
+    Activation = 0b0010 << ObjectTypeShift,
+    Method = 0b0011 << ObjectTypeShift,
+    Block = 0b0100 << ObjectTypeShift,
+    ByteArray = 0b0101 << ObjectTypeShift,
+    Array = 0b0110 << ObjectTypeShift,
+    Managed = 0b0111 << ObjectTypeShift,
+    Map = 0b1111 << ObjectTypeShift,
 };
 
 header: *align(@alignOf(u64)) Header,
@@ -66,6 +70,7 @@ pub fn getSizeInMemory(self: Self) usize {
         .Block => self.asBlockObject().getSizeInMemory(),
         .ByteArray => self.asByteArrayObject().getSizeInMemory(),
         .Array => self.asArrayObject().getSizeInMemory(),
+        .Managed => self.asManaged().getSizeInMemory(),
         .Map => self.asMap().getSizeInMemory(),
     };
 }
@@ -74,6 +79,7 @@ pub fn finalize(self: Self, allocator: Allocator) void {
     switch (self.header.getObjectType()) {
         .ForwardingReference, .Slots, .Activation, .Method, .Block, .Array, .ByteArray => unreachable,
         .Map => self.asMap().finalize(allocator),
+        .Managed => self.asManaged().finalize(allocator),
     }
 }
 
@@ -88,6 +94,8 @@ pub fn clone(self: Self, heap: *Heap) !Self {
         .Block => fromAddress((try self.asBlockObject().clone(heap)).asObjectAddress()),
         .ByteArray => fromAddress((try self.asByteArrayObject().clone(heap)).asObjectAddress()),
         .Array => fromAddress((try self.asArrayObject().clone(heap)).asObjectAddress()),
+        // Managed values are not clonable. Instead we return the same (immutable) reference.
+        .Managed => self,
     };
 }
 
@@ -191,6 +199,23 @@ fn mustBeArrayObject(self: Self) void {
 pub fn asArrayObject(self: Self) *Array {
     self.mustBeArrayObject();
     return @ptrCast(*Array, self.header);
+}
+
+// Managed values
+
+pub fn isManaged(self: Self) bool {
+    return self.header.getObjectType() == .Managed;
+}
+
+fn mustBeManaged(self: Self) void {
+    if (!self.isManaged()) {
+        std.debug.panic("Expected the object at {*} to be a managed value", .{self.header});
+    }
+}
+
+pub fn asManaged(self: Self) *Managed {
+    self.mustBeManaged();
+    return @ptrCast(*Managed, self.header);
 }
 
 // Map objects
