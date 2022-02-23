@@ -36,6 +36,19 @@ std _AddSlots: (|
                     _Error: 'Expected unequal values'
                 ].
             ).
+
+            "Passes a block that takes a single argument to blk, and expects it
+             to not be called."
+            expectToNotFail: blk = (
+                blk value: [| :err | _Error: 'Unexpected failure' ]
+            ).
+
+            "Passes a block that takes a single argument to blk, and expects it
+             to be called."
+            expectToFail: blk = (
+                blk value: [| :err | ^ nil ].
+                _Error: 'Expected failure block to be called'.
+            ).
         |).
     |).
 |).
