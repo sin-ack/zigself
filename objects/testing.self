@@ -10,7 +10,7 @@ std _AddSlots: (|
         test = (|
             parent* = std traits singleton.
 
-            "Checks whether the expected value is identical to the actual value."
+            "Expects the expected value to be identical to the actual value."
             expect: actual ToBeIdenticalTo: expected = (
                 (expected == actual) ifFalse: [
                     'Expected: ' print. expected _Inspect. '' printLine.
@@ -19,12 +19,21 @@ std _AddSlots: (|
                 ].
             ).
 
-            "Checks whether the expected value is equal to the actual value."
+            "Expects the expected value to be equal to the actual value."
             expect: actual ToBe: expected = (
                 (expected = actual) ifFalse: [
                     'Expected: ' print. expected _Inspect. '' printLine.
                     'Actual: ' print. actual _Inspect. '' printLine.
                     _Error: 'Expected equal values'
+                ].
+            ).
+
+            "Expects the expected value to NOT be equal to the actual value."
+            expect: actual ToNotBe: expected = (
+                (expected = actual) ifTrue: [
+                    'Expected: ' print. expected _Inspect. '' printLine.
+                    'Actual: ' print. actual _Inspect. '' printLine.
+                    _Error: 'Expected unequal values'
                 ].
             ).
         |).
