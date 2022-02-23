@@ -19,6 +19,7 @@ const byte_array_primitives = @import("./primitives/byte_array.zig");
 const array_primitives = @import("./primitives/array.zig");
 const number_primitives = @import("./primitives/number.zig");
 const object_primitives = @import("./primitives/object.zig");
+const system_call_primitives = @import("./primitives/system_call.zig");
 
 /// The context passed to a primitive.
 pub const PrimitiveContext = struct {
@@ -92,6 +93,10 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_Inspect", .function = object_primitives.Inspect },
     .{ .name = "_Clone", .function = object_primitives.Clone },
     .{ .name = "_Eq:", .function = object_primitives.Eq },
+    // System call primitives
+    .{ .name = "_Open:WithFlags:IfFail:", .function = system_call_primitives.Open_WithFlags_IfFail },
+    .{ .name = "_Read:BytesInto:From:IfFail:", .function = system_call_primitives.Read_BytesInto_From_IfFail },
+    .{ .name = "_Close:", .function = system_call_primitives.Close },
 };
 
 // FIXME: This is very naive! We shouldn't need to linear search every single
