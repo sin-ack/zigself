@@ -153,3 +153,26 @@ pub fn ByteArrayCopySize(context: PrimitiveContext) !Completion {
     const byte_array_map = try Object.Map.ByteArray.create(context.interpreter_context.heap, byte_array);
     return Completion.initNormal((try Object.ByteArray.create(context.interpreter_context.heap, byte_array_map)).asValue());
 }
+
+/// Return whether the receiver byte array is equal to the argument.
+/// Note that the argument not being a byte array is not an error
+/// and this primitive simply returns false in that case.
+pub fn ByteArrayEq(context: PrimitiveContext) !Completion {
+    const receiver = context.receiver.getValue();
+    var argument = context.arguments[0].getValue();
+
+    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
+        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected ByteArray as _ByteArrayEq: receiver", .{});
+    }
+
+    if (!(argument.isObjectReference() and argument.asObject().isByteArrayObject())) {
+        return Completion.initNormal(environment.globalFalse());
+    }
+
+    return Completion.initNormal(
+        if (std.mem.eql(u8, receiver.asObject().asByteArrayObject().getValues(), argument.asObject().asByteArrayObject().getValues()))
+            environment.globalTrue()
+        else
+            environment.globalFalse(),
+    );
+}

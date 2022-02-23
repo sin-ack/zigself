@@ -7,6 +7,8 @@ SPDX-License-Identifier: GPL-3.0-only
 std traits string _AddSlots: (|
     parent* = std traits clonable.
 
+    = v = (_ByteArrayEq: v).
+
     splitOn: substring = (| indicesList. substrings. head. index |
         indicesList: list copyRemoveAll.
         index: 0.
