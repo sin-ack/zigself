@@ -92,7 +92,9 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
         std.debug.panic("!!! Encountered errors while parsing the standard library entrypoint!", .{});
     }
 
-    _ = try interpreter.executeScript(allocator, heap, stdlib_script, lobby);
+    if ((try interpreter.executeScript(allocator, heap, stdlib_script, lobby)) == null) {
+        std.debug.panic("!!! Standard library script failed to execute!", .{});
+    }
 
     const root_progress_node = progress.start("Run zigSelf tests", tests.items.len);
     root_progress_node.activate();
