@@ -11,15 +11,24 @@ std traits block _AddSlots: (|
      returns)."
     loop = (value. _Restart).
 
-    "While this block evaluates to true, execute blk with no arguments."
-    whileTrue: blk = (| s |
-        [
-            value ifFalse: [ ^ nil ].
-            blk value
-        ] loop.
+    "Call the block with a block argument which exits from this method when
+     called, ending the loop."
+    loopBreak = (| break |
+        break: [ ^ nil ].
+        [ value: break ] loop.
     ).
 
-    "While this block evaluates to false, execute blk with no arguments."
+    "While this block evaluates to true, execute blk with a block argument to
+     break from the block."
+    whileTrue: blk = (| s |
+        [| :break |
+            value ifFalse: break.
+            blk value: break.
+        ] loopBreak.
+    ).
+
+    "While this block evaluates to false, execute blk with a block argument to
+     break from the block."
     whileFalse: blk = (
         [ value not ] whileTrue: blk
     ).
