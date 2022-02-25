@@ -4,10 +4,10 @@ Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
 SPDX-License-Identifier: GPL-3.0-only
 "
 
-traits _AddSlots: (|
+std traits _AddSlots: (|
     "A node of a linked list."
     link = (|
-        parent* = traits clonable.
+        parent* = std traits clonable.
 
         "Remove all items by disconnecting them."
         removeAll = (
@@ -110,25 +110,23 @@ traits _AddSlots: (|
     |).
 |).
 
-globals _AddSlots: (|
+std _AddSlots: (|
     link = (|
-        parent* = traits link.
+        parent* = std traits link.
         value <- 'First object, no value'.
         prev.
         next.
     |).
 |).
 
-globals _AddSlots: (|
+std _AddSlots: (|
     list = (|
-        parent* = traits list.
+        parent* = std traits list.
         size <- 0.
-        nodes <- link.
+        nodes <- std link.
     |).
 |).
 
 "Make the link reference itself."
-"Note that this probably causes a reference cycle and isn't destructible
- at exit due to zigSelf's current reference counting-only mechanism."
-link prev: link.
-link next: link.
+std link prev: std link.
+std link next: std link.
