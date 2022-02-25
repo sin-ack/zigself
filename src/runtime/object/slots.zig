@@ -582,8 +582,8 @@ pub const Block = packed struct {
     /// - For blocks with more than one argument, `value:With:`, with as many
     ///   `With:`s as needed (number of colons should match number of arguments)
     pub fn isCorrectMessageForBlockExecution(self: *Block, message: []const u8) bool {
-        if (self.getArgumentSlotCount() == 0 and std.mem.eql(u8, message, "value")) {
-            return true;
+        if (self.getArgumentSlotCount() == 0) {
+            return std.mem.eql(u8, message, "value");
         }
 
         if (message.len < 6 or !std.mem.eql(u8, message[0..6], "value:")) {
