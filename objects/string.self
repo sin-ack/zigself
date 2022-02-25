@@ -94,6 +94,34 @@ std traits string _AddSlots: (|
 
     copySize: size = ( copySize: size FillingExtrasWith: filler ).
     copySize: size FillingExtrasWith: filler = ( _ByteArrayCopySize: size FillingExtrasWith: filler ).
+
+    "Join the given collection of strings into a single string, using the
+     receiver as the delimiter."
+    join: strings = (|
+        totalLength.
+        joined.
+        offset.
+
+        write: str = (
+            0 to: str size Do: [| :strOffset |
+                joined at: offset + strOffset
+                       PutByte: str at: strOffset.
+            ].
+            offset: offset + str size.
+        ).
+    |
+        totalLength: strings size prec * size.
+        strings do: [| :node | totalLength: totalLength + node value size ].
+
+        joined: std string copySize: totalLength.
+        offset: 0.
+        strings do: [| :node. :i |
+            (i > 0) ifTrue: [ write: self ].
+            write: node value.
+        ].
+
+        joined
+    ).
 |).
 
 std traits string _AddSlots: (|
