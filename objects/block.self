@@ -11,11 +11,27 @@ std traits block _AddSlots: (|
      returns)."
     loop = (value. _Restart).
 
-    "Call the block with a block argument which exits from this method when
-     called, ending the loop."
+    "Call the block with a block arguments which exits from this method when
+     called, halting the block's execution."
+    break = (value: [ ^ nil ]).
+
+    "Call the block repeatedly with a block argument which exits from this
+     method when called, ending the loop."
     loopBreak = (| break |
         break: [ ^ nil ].
         [ value: break ] loop.
+    ).
+
+    "Call the block repeatedly with a block argument which restarts the block.
+     This is useful when the loop should start from scratch without executing
+     the statements after the statement which invokes continue."
+    restart = (
+        [| :outerBreak |
+            [| :innerBreak |
+               value: innerBreak.
+               outerBreak value.
+            ] break.
+        ] loopBreak.
     ).
 
     "While this block evaluates to true, execute blk with a block argument to
