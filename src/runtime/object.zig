@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
+const builtin = @import("builtin");
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
@@ -112,7 +113,7 @@ fn mustBeSlotsObject(self: Self) void {
 }
 
 pub fn asSlotsObject(self: Self) *Slots {
-    self.mustBeSlotsObject();
+    if (builtin.mode == .Debug) self.mustBeSlotsObject();
     return @ptrCast(*Slots, self.header);
 }
 
@@ -129,7 +130,7 @@ fn mustBeActivationObject(self: Self) void {
 }
 
 pub fn asActivationObject(self: Self) *Activation {
-    self.mustBeActivationObject();
+    if (builtin.mode == .Debug) self.mustBeActivationObject();
     return @ptrCast(*Activation, self.header);
 }
 
@@ -146,7 +147,7 @@ fn mustBeMethodObject(self: Self) void {
 }
 
 pub fn asMethodObject(self: Self) *Method {
-    self.mustBeMethodObject();
+    if (builtin.mode == .Debug) self.mustBeMethodObject();
     return @ptrCast(*Method, self.header);
 }
 
@@ -163,7 +164,7 @@ fn mustBeBlockObject(self: Self) void {
 }
 
 pub fn asBlockObject(self: Self) *Block {
-    self.mustBeBlockObject();
+    if (builtin.mode == .Debug) self.mustBeBlockObject();
     return @ptrCast(*Block, self.header);
 }
 
@@ -180,7 +181,7 @@ fn mustBeByteArrayObject(self: Self) void {
 }
 
 pub fn asByteArrayObject(self: Self) *ByteArray {
-    self.mustBeByteArrayObject();
+    if (builtin.mode == .Debug) self.mustBeByteArrayObject();
     return @ptrCast(*ByteArray, self.header);
 }
 
@@ -197,7 +198,7 @@ fn mustBeArrayObject(self: Self) void {
 }
 
 pub fn asArrayObject(self: Self) *Array {
-    self.mustBeArrayObject();
+    if (builtin.mode == .Debug) self.mustBeArrayObject();
     return @ptrCast(*Array, self.header);
 }
 
@@ -214,7 +215,7 @@ fn mustBeManaged(self: Self) void {
 }
 
 pub fn asManaged(self: Self) *Managed {
-    self.mustBeManaged();
+    if (builtin.mode == .Debug) self.mustBeManaged();
     return @ptrCast(*Managed, self.header);
 }
 
@@ -231,7 +232,7 @@ fn mustBeMap(self: Self) void {
 }
 
 pub fn asMap(self: Self) *Map {
-    self.mustBeMap();
+    if (builtin.mode == .Debug) self.mustBeMap();
     return @ptrCast(*Map, self.header);
 }
 
@@ -248,7 +249,7 @@ fn mustBeForwardingReference(self: Self) void {
 }
 
 pub fn getForwardAddress(self: Self) [*]u64 {
-    self.mustBeForwardingReference();
+    if (builtin.mode == .Debug) self.mustBeForwardingReference();
     return self.header.map_pointer.asObjectAddress();
 }
 

@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
+const builtin = @import("builtin");
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
@@ -98,7 +99,7 @@ pub const Map = packed struct {
     }
 
     pub fn asSlotsMap(self: *Map) *Slots {
-        self.mustBeSlotsMap();
+        if (builtin.mode == .Debug) self.mustBeSlotsMap();
         return @ptrCast(*Slots, self);
     }
 
@@ -113,7 +114,7 @@ pub const Map = packed struct {
     }
 
     pub fn asMethodMap(self: *Map) *Method {
-        self.mustBeMethodMap();
+        if (builtin.mode == .Debug) self.mustBeMethodMap();
         return @ptrCast(*Method, self);
     }
 
@@ -128,7 +129,7 @@ pub const Map = packed struct {
     }
 
     pub fn asBlockMap(self: *Map) *Block {
-        self.mustBeBlockMap();
+        if (builtin.mode == .Debug) self.mustBeBlockMap();
         return @ptrCast(*Block, self);
     }
 
@@ -143,7 +144,7 @@ pub const Map = packed struct {
     }
 
     pub fn asByteArrayMap(self: *Map) *ByteArray {
-        self.mustBeByteArrayMap();
+        if (builtin.mode == .Debug) self.mustBeByteArrayMap();
         return @ptrCast(*ByteArray, self);
     }
 
@@ -158,7 +159,7 @@ pub const Map = packed struct {
     }
 
     pub fn asArrayMap(self: *Map) *Array {
-        self.mustBeArrayMap();
+        if (builtin.mode == .Debug) self.mustBeArrayMap();
         return @ptrCast(*Array, self);
     }
 
