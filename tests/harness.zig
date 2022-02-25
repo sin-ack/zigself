@@ -68,7 +68,7 @@ fn collectTests(allocator: Allocator, directory: std.fs.Dir) !std.ArrayList(Test
     return tests;
 }
 
-fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !void {
+fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
     const harness_dirname = std.fs.path.dirname(@src().file) orelse ".";
     const project_root = try std.fs.path.resolve(allocator, &[_][]const u8{ harness_dirname, ".." });
     defer allocator.free(project_root);
@@ -161,28 +161,36 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !void {
         passing_expect_error_tests.items.len,
     });
 
+    var did_fail = false;
+
     if (failed_tests.items.len > 0) {
+        did_fail = true;
         std.debug.print("Failed tests:\n", .{});
         for (failed_tests.items) |name| std.debug.print("  {s}\n", .{name});
     }
 
     if (parse_failed_tests.items.len > 0) {
+        did_fail = true;
         std.debug.print("Tests that failed to parse:\n", .{});
         for (parse_failed_tests.items) |name| std.debug.print("  {s}\n", .{name});
     }
 
     if (crashed_tests.items.len > 0) {
+        did_fail = true;
         std.debug.print("Crashed tests:\n", .{});
         for (crashed_tests.items) |name| std.debug.print("  {s}\n", .{name});
     }
 
     if (passing_expect_error_tests.items.len > 0) {
+        did_fail = true;
         std.debug.print("Passing expected-error tests:\n", .{});
         for (passing_expect_error_tests.items) |name| std.debug.print("  {s}\n", .{name});
     }
+
+    return did_fail;
 }
 
-pub fn main() !void {
+pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -203,5 +211,5 @@ pub fn main() !void {
         tests.deinit();
     }
 
-    try runTests(allocator, tests);
+    return if (try runTests(allocator, tests)) 1 else 0;
 }
