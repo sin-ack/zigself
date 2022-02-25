@@ -174,6 +174,8 @@ fn inspectSlots(
     const map = object.getMap();
     const slots: []Slot = @call(.{}, @field(map, slot_getter), .{});
 
+    var assignable_slot_offset: usize = 0;
+
     for (slots) |slot| {
         const parent_marker: []const u8 = if (slot.isParent()) "*" else "";
         const mutability_marker: []const u8 = if (slot.isMutable()) "<-" else "=";
@@ -183,8 +185,14 @@ fn inspectSlots(
             // FIXME: Figure out creator slots, and give the path to this object
             std.debug.print("<parent object>", .{});
         } else {
-            try inspectValueInternal(display_type, slot.value, indent, visited_object_link);
+            if (slot.isMutable()) {
+                try inspectValueInternal(display_type, object.getAssignableSlots()[assignable_slot_offset], indent, visited_object_link);
+            } else {
+                try inspectValueInternal(display_type, slot.value, indent, visited_object_link);
+            }
         }
+
+        if (slot.isMutable()) assignable_slot_offset += 1;
 
         std.debug.print(".{s}", .{separator});
     }
