@@ -16,7 +16,11 @@ const message_interpreter = @import("../interpreter/message.zig");
 
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
-fn callFailureBlock(context: PrimitiveContext, errno: std.c.E, block: Heap.Tracked) !Completion {
+fn callFailureBlock(
+    context: PrimitiveContext,
+    errno: std.os.system.E,
+    block: Heap.Tracked,
+) !Completion {
     const errno_int = @enumToInt(errno);
     const errno_value = Value.fromInteger(errno_int);
     const tracked_errno_value = try context.interpreter_context.heap.track(errno_value);
@@ -90,21 +94,22 @@ pub fn Open_WithFlags_IfFail(context: PrimitiveContext) !Completion {
     return callFailureBlock(context, errno, context.arguments[2]);
 }
 
-/// Read the given amount of bytes into the given byte array from the given file
-/// descriptor. If the byte array is smaller than the given amount of bytes,
-/// raises an error. On success, returns the amount of bytes read. On failure,
-/// call the given block with the errno as the argument.
-pub fn Read_BytesInto_From_IfFail(context: PrimitiveContext) !Completion {
+/// Read the given amount of bytes into the given byte array at the given offset
+/// from the given file descriptor. If the byte array is smaller than the given
+/// amount of bytes, raises an error. On success, returns the amount of bytes
+/// read. On failure, call the given block with the errno as the argument.
+pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Completion {
     const bytes_to_read_value = context.arguments[0].getValue();
     const byte_array_value = context.arguments[1].getValue();
-    const fd_value = context.arguments[2].getValue();
-    const failure_block = context.arguments[3].getValue();
+    const offset_value = context.arguments[2].getValue();
+    const fd_value = context.arguments[3].getValue();
+    const failure_block = context.arguments[4].getValue();
 
     if (!bytes_to_read_value.isInteger()) {
         return Completion.initRuntimeError(
             context.interpreter_context.allocator,
             context.source_range,
-            "Expected integer as the first argument to _Read:BytesInto:From:IfFail:",
+            "Expected integer as the first argument to _Read:BytesInto:AtOffset:From:IfFail:",
             .{},
         );
     }
@@ -113,7 +118,16 @@ pub fn Read_BytesInto_From_IfFail(context: PrimitiveContext) !Completion {
         return Completion.initRuntimeError(
             context.interpreter_context.allocator,
             context.source_range,
-            "Expected byte array object as the second argument to _Read:BytesInto:From:IfFail:",
+            "Expected byte array object as the second argument to _Read:BytesInto:AtOffset:From:IfFail:",
+            .{},
+        );
+    }
+
+    if (!offset_value.isInteger()) {
+        return Completion.initRuntimeError(
+            context.interpreter_context.allocator,
+            context.source_range,
+            "Expected integer as the third argument to _Read:BytesInto:AtOffset:From:IfFail:",
             .{},
         );
     }
@@ -122,7 +136,7 @@ pub fn Read_BytesInto_From_IfFail(context: PrimitiveContext) !Completion {
         return Completion.initRuntimeError(
             context.interpreter_context.allocator,
             context.source_range,
-            "Expected file descriptor as the third argument to _Read:BytesInto:From:IfFail:",
+            "Expected file descriptor as the fourth argument to _Read:BytesInto:AtOffset:From:IfFail:",
             .{},
         );
     }
@@ -131,7 +145,7 @@ pub fn Read_BytesInto_From_IfFail(context: PrimitiveContext) !Completion {
         return Completion.initRuntimeError(
             context.interpreter_context.allocator,
             context.source_range,
-            "Expected block as the fourth argument to _Read:BytesInto:From:IfFail:",
+            "Expected block as the fifth argument to _Read:BytesInto:AtOffset:From:IfFail:",
             .{},
         );
     }
@@ -141,7 +155,17 @@ pub fn Read_BytesInto_From_IfFail(context: PrimitiveContext) !Completion {
         return Completion.initRuntimeError(
             context.interpreter_context.allocator,
             context.source_range,
-            "Bytes to read argument to _Read:BytesInto:From:IfFail: must be positive",
+            "Bytes to read argument to _Read:BytesInto:AtOffset:From:IfFail: must be positive",
+            .{},
+        );
+    }
+
+    const offset = offset_value.asInteger();
+    if (offset < 0) {
+        return Completion.initRuntimeError(
+            context.interpreter_context.allocator,
+            context.source_range,
+            "Offset argument to _Read:BytesInto:AtOffset:From:IfFail: must be positive",
             .{},
         );
     }
@@ -157,7 +181,7 @@ pub fn Read_BytesInto_From_IfFail(context: PrimitiveContext) !Completion {
     }
 
     const fd = FileDescriptor.fromValue(fd_value.asObject().asManaged().value).fd;
-    const rc = std.os.system.read(fd, byte_array.getValues().ptr, @intCast(usize, bytes_to_read));
+    const rc = std.os.system.read(fd, byte_array.getValues().ptr + @intCast(usize, offset), @intCast(usize, bytes_to_read));
 
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {

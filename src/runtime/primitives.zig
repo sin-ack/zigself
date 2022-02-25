@@ -96,7 +96,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_Eq:", .function = object_primitives.Eq },
     // System call primitives
     .{ .name = "_Open:WithFlags:IfFail:", .function = system_call_primitives.Open_WithFlags_IfFail },
-    .{ .name = "_Read:BytesInto:From:IfFail:", .function = system_call_primitives.Read_BytesInto_From_IfFail },
+    .{ .name = "_Read:BytesInto:AtOffset:From:IfFail:", .function = system_call_primitives.Read_BytesInto_AtOffset_From_IfFail },
     .{ .name = "_Close:", .function = system_call_primitives.Close },
 };
 
