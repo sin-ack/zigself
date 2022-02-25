@@ -90,7 +90,10 @@ std traits string _AddSlots: (|
         targetBuffer
     ).
 
-    copySize: size = ( _ByteArrayCopySize: size ).
+    filler = ' '.
+
+    copySize: size = ( copySize: size FillingExtrasWith: filler ).
+    copySize: size FillingExtrasWith: filler = ( _ByteArrayCopySize: size FillingExtrasWith: filler ).
 |).
 
 std traits string _AddSlots: (|

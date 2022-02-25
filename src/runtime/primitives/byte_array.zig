@@ -119,29 +119,63 @@ pub fn ByteAt_Put(context: PrimitiveContext) !Completion {
     return Completion.initNormal(receiver);
 }
 
-/// Copy the byte vector receiver with a new size. Size cannot exceed the
-/// receiver's size.
-pub fn ByteArrayCopySize(context: PrimitiveContext) !Completion {
+/// Copy the byte vector receiver with a new size. Extra space is filled
+/// with the second argument (must be a byte array of length 1).
+pub fn ByteArrayCopySize_FillingExtrasWith(context: PrimitiveContext) !Completion {
     const receiver = context.receiver.getValue();
-    var argument = context.arguments[0].getValue();
+    const size_value = context.arguments[0].getValue();
+    const filler_value = context.arguments[1].getValue();
 
     if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected ByteArray as _ByteArrayCopySize: receiver", .{});
+        return Completion.initRuntimeError(
+            context.interpreter_context.allocator,
+            context.source_range,
+            "Expected byte array as receiver of _ByteArrayCopySize:FillingExtrasWith:",
+            .{},
+        );
     }
 
-    if (!argument.isInteger()) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected Integer as _ByteArrayCopySize: argument", .{});
+    if (!size_value.isInteger()) {
+        return Completion.initRuntimeError(
+            context.interpreter_context.allocator,
+            context.source_range,
+            "Expected integer as the first argument to _ByteArrayCopySize:FillingExtrasWith:",
+            .{},
+        );
     }
 
-    var values = receiver.asObject().asByteArrayObject().getValues();
-    const size = argument.asInteger();
-    if (size >= values.len) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "_ByteArrayCopySize: argument exceeds receiver's size", .{});
+    if (!(filler_value.isObjectReference() and filler_value.asObject().isByteArrayObject())) {
+        return Completion.initRuntimeError(
+            context.interpreter_context.allocator,
+            context.source_range,
+            "Expected byte array as the second argument to _ByteArrayCopySize:FillingExtrasWith:",
+            .{},
+        );
     }
 
+    const size = size_value.asInteger();
     if (size < 0) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "_ByteArrayCopySize: argument must be positive", .{});
+        return Completion.initRuntimeError(
+            context.interpreter_context.allocator,
+            context.source_range,
+            "Size argument to _ByteArrayCopySize:FillingExtrasWith: must be positive",
+            .{},
+        );
     }
+
+    const filler_contents = filler_value.asObject().asByteArrayObject().getValues();
+    if (filler_contents.len != 1) {
+        return Completion.initRuntimeError(
+            context.interpreter_context.allocator,
+            context.source_range,
+            "Filler argument to _ByteArrayCopySize:FillingExtrasWith: must have a length of 1",
+            .{},
+        );
+    }
+
+    const filler = filler_contents[0];
+
+    const values = receiver.asObject().asByteArrayObject().getValues();
 
     try context.interpreter_context.heap.ensureSpaceInEden(
         ByteArray.requiredSizeForAllocation(@intCast(u64, size)) +
@@ -149,8 +183,15 @@ pub fn ByteArrayCopySize(context: PrimitiveContext) !Completion {
             Object.ByteArray.requiredSizeForAllocation(),
     );
 
-    const byte_array = try ByteArray.createFromString(context.interpreter_context.heap, values[0..@intCast(u64, size)]);
-    const byte_array_map = try Object.Map.ByteArray.create(context.interpreter_context.heap, byte_array);
+    const new_byte_array = try ByteArray.createUninitialized(context.interpreter_context.heap, @intCast(usize, size));
+    const bytes_to_copy = @intCast(usize, std.math.min(size, values.len));
+    std.mem.copy(u8, new_byte_array.getValues(), values[0..bytes_to_copy]);
+
+    if (size > values.len) {
+        std.mem.set(u8, new_byte_array.getValues()[bytes_to_copy..], filler);
+    }
+
+    const byte_array_map = try Object.Map.ByteArray.create(context.interpreter_context.heap, new_byte_array);
     return Completion.initNormal((try Object.ByteArray.create(context.interpreter_context.heap, byte_array_map)).asValue());
 }
 
