@@ -41,7 +41,6 @@ pub fn build(b: *std.build.Builder) void {
     });
 
     const test_harness_run_cmd = test_harness_exe.run();
-    test_harness_run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         test_harness_run_cmd.addArgs(args);
     }
