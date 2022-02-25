@@ -115,6 +115,12 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
         script_progress_node.activate();
         defer script_progress_node.end();
 
+        // NOTE: Our tests run too fast, so maybeRefresh doesn't get a chance to
+        //       print the test name. This causes us to not be able to easily
+        //       tell which test failed. So let's directly use refresh() and
+        //       print each test name.
+        progress.refresh();
+
         const path_to_test = try std.fs.path.resolve(allocator, &[_][]const u8{ harness_dirname, the_test.path });
         defer allocator.free(path_to_test);
 
