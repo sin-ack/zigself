@@ -22,3 +22,7 @@ nil _AddSlots: (| parent* = std traits singleton |).
 
 'list.self' _RunScript.
 'testing.self' _RunScript.
+
+'os.self' _RunScript.
+
+'file.self' _RunScript.
