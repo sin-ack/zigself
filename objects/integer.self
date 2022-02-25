@@ -22,6 +22,10 @@ std traits integer _AddSlots: (|
 
     max: n = ((self < n) ifTrue: [ n ] False: [ self ]).
 
+    kib = (self * 1024).
+    mib = (kib * 1024).
+    gib = (mib * 1024).
+
     to: upper Do: block = (| i |
         (self < upper) ifFalse: [ ^ nil ].
 
