@@ -32,5 +32,11 @@ _AddSlots: (|
         "Return whether the two objects are equal. The objects do not have to
          be identical to be equal."
         = v = (self == v).
+
+        "Convenient failure block for when you want the error to be fatal."
+        raiseError = (|
+            value = ( _Error: 'Error raised' ).
+            value: err = ( _Error: 'Error raised (FIXME: Print the error)' ).
+        |).
     |).
 |)
