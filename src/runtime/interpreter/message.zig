@@ -20,9 +20,53 @@ const environment = @import("../environment.zig");
 const root_interpreter = @import("../interpreter.zig");
 const InterpreterContext = root_interpreter.InterpreterContext;
 const MaximumStackDepth = root_interpreter.MaximumStackDepth;
+const MaximumArguments = root_interpreter.MaximumArguments;
+
+const ArgumentValuesType = enum { Tracked, Untracked };
+fn ArgumentValues(comptime value_type: ArgumentValuesType) type {
+    return struct {
+        raw_arguments: [MaximumArguments]ValueType = undefined,
+        count: usize = 0,
+
+        const ValueType = switch (value_type) {
+            .Tracked => Heap.Tracked,
+            .Untracked => Value,
+        };
+        const Self = @This();
+
+        pub fn init() Self {
+            return .{};
+        }
+
+        // Omit deinit implementation if we're not tracking values
+        pub usingnamespace switch (value_type) {
+            .Tracked => struct {
+                pub fn deinit(self: *Self, heap: *Heap) void {
+                    for (self.getSlice()) |*value| {
+                        value.untrack(heap);
+                    }
+                }
+            },
+            .Untracked => struct {},
+        };
+
+        pub fn append(self: *Self, value: ValueType) void {
+            if (self.count == MaximumArguments) {
+                std.debug.panic("Attempting to append to ArgumentValues after limit was reached (should've been caught earlier!)", .{});
+            }
+
+            self.raw_arguments[self.count] = value;
+            self.count += 1;
+        }
+
+        pub fn getSlice(self: Self) []const ValueType {
+            return self.raw_arguments[0..self.count];
+        }
+    };
+}
 
 const MessageArgumentsOrCompletion = union(enum) {
-    Arguments: []Heap.Tracked,
+    Arguments: ArgumentValues(.Tracked),
     Completion: Completion,
 };
 
@@ -30,14 +74,12 @@ fn getMessageArguments(
     context: *InterpreterContext,
     ast_arguments: []AST.ExpressionNode,
 ) root_interpreter.InterpreterError!MessageArgumentsOrCompletion {
-    var arguments = try std.ArrayList(Heap.Tracked).initCapacity(context.allocator, ast_arguments.len);
+    var arguments = ArgumentValues(.Tracked).init();
+
     var did_complete_normally = false;
     defer {
         if (!did_complete_normally) {
-            for (arguments.items) |argument| {
-                argument.untrack(context.heap);
-            }
-            arguments.deinit();
+            arguments.deinit(context.heap);
         }
     }
 
@@ -45,16 +87,14 @@ fn getMessageArguments(
         const completion = try root_interpreter.executeExpression(context, argument);
         if (completion.isNormal()) {
             const tracked_result = try context.heap.track(completion.data.Normal);
-            errdefer tracked_result.untrack(context.heap);
-
-            try arguments.append(tracked_result);
+            arguments.append(tracked_result);
         } else {
             return MessageArgumentsOrCompletion{ .Completion = completion };
         }
     }
 
     did_complete_normally = true;
-    return MessageArgumentsOrCompletion{ .Arguments = arguments.toOwnedSlice() };
+    return MessageArgumentsOrCompletion{ .Arguments = arguments };
 }
 
 fn requiredSizeForBlockMessageName(argument_count: u8) usize {
@@ -99,7 +139,7 @@ fn getOrCreateBlockMessageName(context: *InterpreterContext, argument_count: u8)
 pub fn executeBlockMessage(
     context: *InterpreterContext,
     block_value: Heap.Tracked,
-    arguments: []Heap.Tracked,
+    arguments: []const Heap.Tracked,
     source_range: SourceRange,
 ) root_interpreter.InterpreterError!Completion {
     if (context.activation_stack.depth >= MaximumStackDepth) {
@@ -124,18 +164,15 @@ pub fn executeBlockMessage(
         // Refresh the pointer in case a GC happened
         block_object = block_value.getValue().asObject().asBlockObject();
 
-        var argument_values = try context.allocator.alloc(Value, arguments.len);
-        defer context.allocator.free(argument_values);
-        for (arguments) |argument, i| {
-            argument_values[i] = argument.getValue();
-        }
+        var argument_values = ArgumentValues(.Untracked).init();
+        for (arguments) |argument| argument_values.append(argument.getValue());
 
         const new_activation = context.activation_stack.getNewActivationSlot();
         try block_object.activateBlock(
             context.allocator,
             context.heap,
             block_object.getMap().getParentActivation().?.activation_object,
-            argument_values,
+            argument_values.getSlice(),
             tracked_message_name,
             source_range,
             new_activation,
@@ -220,7 +257,7 @@ pub fn executeMethodMessage(
     context: *InterpreterContext,
     receiver: Heap.Tracked,
     tracked_method_object: Heap.Tracked,
-    arguments: []Heap.Tracked,
+    arguments: []const Heap.Tracked,
     source_range: SourceRange,
 ) root_interpreter.InterpreterError!Completion {
     if (context.activation_stack.depth >= MaximumStackDepth) {
@@ -234,11 +271,8 @@ pub fn executeMethodMessage(
     // Refresh the pointer in case a GC happened
     method_object = tracked_method_object.getValue().asObject().asMethodObject();
 
-    var argument_values = try context.allocator.alloc(Value, arguments.len);
-    defer context.allocator.free(argument_values);
-    for (arguments) |argument, i| {
-        argument_values[i] = argument.getValue();
-    }
+    var argument_values = ArgumentValues(.Untracked).init();
+    for (arguments) |argument| argument_values.append(argument.getValue());
 
     const method_activation = blk: {
         const new_activation = context.activation_stack.getNewActivationSlot();
@@ -246,7 +280,7 @@ pub fn executeMethodMessage(
             context.allocator,
             context.heap,
             receiver.getValue(),
-            argument_values,
+            argument_values.getSlice(),
             source_range,
             new_activation,
         );
@@ -341,7 +375,7 @@ pub fn executePrimitiveMessage(
     context: *InterpreterContext,
     tracked_receiver: Heap.Tracked,
     name: []const u8,
-    arguments: []Heap.Tracked,
+    arguments: []const Heap.Tracked,
     source_range: SourceRange,
 ) root_interpreter.InterpreterError!Completion {
     var receiver = tracked_receiver.getValue();
@@ -401,15 +435,21 @@ pub fn executeAssignmentMessage(
 
 /// Executes a message. All refs are forwarded.
 pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) root_interpreter.InterpreterError!Completion {
+    var source_range = SourceRange.init(context.script, message.range);
+    defer source_range.deinit();
+
+    // FIXME: Enforce maximum argument limit for block and method creation, so that we
+    //        can never get this condition.
+    if (message.arguments.len > MaximumArguments) {
+        return Completion.initRuntimeError(context.allocator, source_range, "Maximum argument count exceeded", .{});
+    }
+
     const receiver_completion = try root_interpreter.executeExpression(context, message.receiver);
     if (!receiver_completion.isNormal()) {
         return receiver_completion;
     }
     var tracked_receiver = try context.heap.track(receiver_completion.data.Normal);
     defer tracked_receiver.untrack(context.heap);
-
-    var source_range = SourceRange.init(context.script, message.range);
-    defer source_range.deinit();
 
     // FIXME: Avoid allocating a slice here
     const arguments_or_completion = try getMessageArguments(context, message.arguments);
@@ -418,23 +458,19 @@ pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) ro
     }
 
     var arguments = arguments_or_completion.Arguments;
-    defer {
-        for (arguments) |argument| {
-            argument.untrack(context.heap);
-        }
-        context.allocator.free(arguments);
-    }
+    defer arguments.deinit(context.heap);
+    const arguments_slice = arguments.getSlice();
 
     // Check for assignable slots
-    if (message.message_name[message.message_name.len - 1] == ':' and arguments.len == 1) {
-        if (try executeAssignmentMessage(context, tracked_receiver, message.message_name, arguments[0], source_range)) |completion| {
+    if (message.message_name[message.message_name.len - 1] == ':' and arguments.count == 1) {
+        if (try executeAssignmentMessage(context, tracked_receiver, message.message_name, arguments_slice[0], source_range)) |completion| {
             return completion;
         }
     }
 
     // Primitive check
     if (message.message_name[0] == '_') {
-        return executePrimitiveMessage(context, tracked_receiver, message.message_name, arguments, source_range);
+        return executePrimitiveMessage(context, tracked_receiver, message.message_name, arguments_slice, source_range);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
@@ -454,7 +490,7 @@ pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) ro
             var tracked_block_receiver = try context.heap.track(block_receiver);
             defer tracked_block_receiver.untrack(context.heap);
 
-            return executeBlockMessage(context, tracked_block_receiver, arguments, source_range);
+            return executeBlockMessage(context, tracked_block_receiver, arguments_slice, source_range);
         }
     }
 
@@ -468,7 +504,7 @@ pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) ro
             var tracked_lookup_result = try context.heap.track(lookup_result);
             defer tracked_lookup_result.untrack(context.heap);
 
-            return executeMethodMessage(context, tracked_receiver, tracked_lookup_result, arguments, source_range);
+            return executeMethodMessage(context, tracked_receiver, tracked_lookup_result, arguments_slice, source_range);
         } else {
             return Completion.initNormal(lookup_result);
         }

@@ -23,6 +23,8 @@ const Completion = @import("./completion.zig");
 const message_interpreter = @import("./interpreter/message.zig");
 
 pub const MaximumStackDepth = 2048;
+// FIXME: Enforce this limit on block and method creation. Currently we allow as many arguments as assignable slots.
+pub const MaximumArguments = 128; // Reasonable limit
 
 pub const InterpreterContext = struct {
     /// The allocator object that will be used throughout the interpreter's lifetime.

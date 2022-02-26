@@ -389,7 +389,7 @@ pub const Activation = packed struct {
         return self.getAssignableSlots()[0..self.getArgumentSlotCount()];
     }
 
-    pub fn setArguments(self: *Activation, arguments: []Value) void {
+    pub fn setArguments(self: *Activation, arguments: []const Value) void {
         if (arguments.len != self.getArgumentSlotCount()) {
             std.debug.panic("!!! Passed arguments slice does not equal argument count", .{});
         }
@@ -489,7 +489,7 @@ pub const Method = packed struct {
         allocator: Allocator,
         heap: *Heap,
         receiver: Value,
-        arguments: []Value,
+        arguments: []const Value,
         source_range: SourceRange,
         out_activation: *RuntimeActivation,
     ) !void {
@@ -613,7 +613,7 @@ pub const Block = packed struct {
         allocator: Allocator,
         heap: *Heap,
         receiver: Value,
-        arguments: []Value,
+        arguments: []const Value,
         message_name: Heap.Tracked,
         source_range: SourceRange,
         out_activation: *RuntimeActivation,

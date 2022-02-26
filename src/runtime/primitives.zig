@@ -33,7 +33,7 @@ pub const PrimitiveContext = struct {
     receiver: Heap.Tracked,
     /// The arguments that were passed to this primitive. The amount is always
     /// equivalent to the amount of colons in the primitive name.
-    arguments: []Heap.Tracked,
+    arguments: []const Heap.Tracked,
     /// The source range which triggered this primitive call. This will be
     /// passed to runtime error completions in the case of errors.
     source_range: SourceRange,
@@ -50,7 +50,7 @@ const PrimitiveSpec = struct {
         self: PrimitiveSpec,
         context: *InterpreterContext,
         receiver: Heap.Tracked,
-        arguments: []Heap.Tracked,
+        arguments: []const Heap.Tracked,
         source_range: SourceRange,
     ) interpreter.InterpreterError!Completion {
         return try self.function(PrimitiveContext{
