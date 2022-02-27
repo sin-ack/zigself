@@ -380,8 +380,8 @@ pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) 
 }
 
 pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) InterpreterError!Completion {
-    var argument_slot_count: u8 = 0;
-    var assignable_slot_count: u8 = 0;
+    var argument_slot_count: usize = 0;
+    var assignable_slot_count: usize = 0;
     for (block.slots) |slot_node| {
         if (slot_node.is_argument) {
             argument_slot_count += 1;
@@ -438,8 +438,8 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
 
         break :blk try Object.Map.Block.create(
             context.heap,
-            argument_slot_count,
-            @intCast(u32, block.slots.len) - argument_slot_count,
+            @intCast(u8, argument_slot_count),
+            @intCast(u32, block.slots.len) - @intCast(u8, argument_slot_count),
             block.statements,
             parent_activation,
             nonlocal_return_target_activation,
