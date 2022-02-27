@@ -10,7 +10,7 @@ std traits string _AddSlots: (|
     = v = (_ByteArrayEq: v).
 
     splitOn: substring = (| indicesList. substrings. head. index |
-        indicesList: list copyRemoveAll.
+        indicesList: std list copyRemoveAll.
         index: 0.
 
         [ index < size ] whileTrue: [
@@ -24,13 +24,13 @@ std traits string _AddSlots: (|
         ].
 
         indicesList append: size.
-        substrings: std array copySize: indicesList size prec.
+        substrings: std array copySize: indicesList size.
 
         "The first substring must be appended outside because we do not want to add the substring length."
         substrings at: 0 Put: (copyFrom: 0 Until: (indicesList at: 0)).
 
         "Find and append all the substrings."
-        index: 0.
+        index: 1.
         head: indicesList nodes.
         indicesList nodes do: [| :node |
             (node next == head) ifTrue: [ ^ substrings ].
