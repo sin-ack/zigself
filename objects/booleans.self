@@ -10,6 +10,8 @@ SPDX-License-Identifier: GPL-3.0-only
     addBooleanCapabilities = (| booleanParent. t. f. |
         "FIXME: Make this into traits boolean or something"
         booleanParent: (|
+            parent* = std traits singleton.
+
             ifTrue: tb           = (ifTrue: tb False: []).
             ifFalse: fb          = (ifTrue: [] False: fb).
             ifFalse: fb True: tb = (ifTrue: tb False: fb).
