@@ -12,6 +12,7 @@ const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
 const ByteVector = @import("./byte_array.zig");
 const Activation = @import("./activation.zig");
+const HandleArea = @import("./handle_area.zig");
 const ActivationStack = Activation.ActivationStack;
 const debug = @import("../debug.zig");
 
@@ -40,10 +41,8 @@ to_space: Space,
 /// memory requirements of the program grows.
 old_space: Space,
 
-/// This is where all the handles for tracked objects are stored. This arena
-/// lives as long as the heap does, and will constantly grow.
-handle_area: ArenaAllocator,
-handle_allocator: Allocator,
+/// This is where all the handles for tracked objects are stored.
+handle_area: HandleArea,
 
 allocator: Allocator,
 /// The stack of activations owned by interpreter code.
@@ -89,8 +88,7 @@ fn init(self: *Self, allocator: Allocator) !void {
     self.from_space.tenure_target = &self.old_space;
     self.eden.tenure_target = &self.from_space;
 
-    self.handle_area = std.heap.ArenaAllocator.init(allocator);
-    self.handle_allocator = self.handle_area.allocator();
+    self.handle_area = try HandleArea.create(allocator);
 
     if (GC_TRACK_SOURCE_DEBUG) {
         self.caller_tracked_mapping = std.AutoArrayHashMap(*[*]u64, usize).init(allocator);
@@ -109,7 +107,7 @@ fn deinit(self: *Self) void {
     self.from_space.deinit(self.allocator);
     self.to_space.deinit(self.allocator);
     self.old_space.deinit(self.allocator);
-    self.handle_area.deinit();
+    self.handle_area.destroy();
 
     if (GC_TRACK_SOURCE_DEBUG) {
         self.caller_tracked_mapping.deinit();
@@ -153,7 +151,7 @@ pub fn markAddressAsNeedingFinalization(self: *Self, address: [*]u64) !void {
 }
 
 fn allocateHandle(self: *Self) !*[*]u64 {
-    return self.handle_allocator.create([*]u64);
+    return self.handle_area.allocHandle();
 }
 
 /// Track the given value, returning a Tracked. When a garbage collection
@@ -185,6 +183,7 @@ pub fn untrack(self: *Self, tracked: Tracked) void {
         }
 
         _ = self.eden.stopTracking(tracked.value.Object);
+        self.handle_area.freeHandle(tracked.value.Object);
     }
 }
 
