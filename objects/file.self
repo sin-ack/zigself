@@ -65,6 +65,12 @@ std traits _AddSlots: (|
             (bytesRead = max) ifTrue: [ buffer ] False: [ buffer copySize: bytesRead ].
         ).
 
+        write: data = (write: data IfFail: raiseError).
+        write: data IfFail: failBlock = (
+            "FIXME: Handle writing less than expected!"
+            std os write: data size BytesFrom: data AtOffset: 0 Into: fd IfFail: failBlock.
+        ).
+
         close = (
             _Close: fd.
             fd: nil.

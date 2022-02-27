@@ -15,6 +15,10 @@ std _AddSlots: (|
             _Read: count BytesInto: buffer AtOffset: offset From: fd IfFail: failBlock.
         ).
 
+        write: count BytesFrom: buffer AtOffset: offset Into: fd IfFail: failBlock = (
+            _Write: count BytesFrom: buffer AtOffset: offset Into: fd IfFail: failBlock.
+        ).
+
         tryWhileInterrupted: block IfFail: failBlock = (
             [| :restart |
                 block value: [| :err |
