@@ -87,3 +87,8 @@ std _AddSlots: (|
         atEOF <- false.
     |).
 |).
+
+std _AddSlots: (|
+    in = std file open: '/dev/stdin'.
+    out = std file open: '/dev/stdout' WithFlags: 1.
+|).
