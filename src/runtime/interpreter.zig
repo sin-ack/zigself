@@ -302,7 +302,7 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
 /// Creates a new slot. All refs are forwarded.
 pub fn executeSlot(context: *InterpreterContext, slot_node: AST.SlotNode, comptime MapType: type, map: *MapType, slot_index: usize) InterpreterError!?Completion {
     const completion = blk: {
-        if (slot_node.value == .Object and slot_node.value.Object.statements.value.statements.len > 0) {
+        if (slot_node.value == .Object and (slot_node.value.Object.statements.value.statements.len > 0 or slot_node.arguments.len > 0)) {
             break :blk try executeMethod(context, slot_node.name, slot_node.value.Object.*, slot_node.arguments);
         } else {
             break :blk try executeExpression(context, slot_node.value);
