@@ -31,6 +31,8 @@ Earlier and later versions may work but there are no guarantees.
 That's it! If you want to build a release version, you can build one with
 `zig build -Drelease-fast=true` and the binary will be in `zig-out/bin/`.
 
+There is an (experimental) REPL that you can run with `zig build run -- repl.self`.
+
 ## Current status of zigSelf
 
 - [x] Lexer
@@ -71,7 +73,7 @@ That's it! If you want to build a release version, you can build one with
   - [ ] System calls
   - [ ] Low-level I/O (fd based)
   - and more...
-- [ ] **Milestone 2:** A REPL
+- [x] **Milestone 2:** A REPL
 - [ ] World building script
 - [ ] Transporter (Self modules)
 - [ ] Overlay system for Transporter (more on this later)
