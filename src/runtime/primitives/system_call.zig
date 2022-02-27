@@ -26,7 +26,7 @@ fn callFailureBlock(
     const tracked_errno_value = try context.interpreter_context.heap.track(errno_value);
     defer tracked_errno_value.untrack(context.interpreter_context.heap);
 
-    const completion = try message_interpreter.executeBlockMessage(context.interpreter_context, block, &.{tracked_errno_value}, context.source_range);
+    const completion = try message_interpreter.sendMessage(context.interpreter_context, block, "value:", &.{tracked_errno_value}, context.source_range);
     if (!completion.isNormal()) {
         return completion;
     }
@@ -39,7 +39,7 @@ fn callFailureBlock(
 pub fn Open_WithFlags_IfFail(context: PrimitiveContext) !Completion {
     const file_path = context.arguments[0].getValue();
     const flags_value = context.arguments[1].getValue();
-    const failure_block = context.arguments[2].getValue();
+    const failure_block = context.arguments[2];
 
     if (!(file_path.isObjectReference() and file_path.asObject().isByteArrayObject())) {
         return Completion.initRuntimeError(
@@ -55,15 +55,6 @@ pub fn Open_WithFlags_IfFail(context: PrimitiveContext) !Completion {
             context.interpreter_context.allocator,
             context.source_range,
             "Expected integer as the second argument to _Open:WithFlags:IfFail:",
-            .{},
-        );
-    }
-
-    if (!(failure_block.isObjectReference() and failure_block.asObject().isBlockObject())) {
-        return Completion.initRuntimeError(
-            context.interpreter_context.allocator,
-            context.source_range,
-            "Expected block as the third argument to _Open:WithFlags:IfFail:",
             .{},
         );
     }
@@ -91,7 +82,7 @@ pub fn Open_WithFlags_IfFail(context: PrimitiveContext) !Completion {
         return Completion.initNormal(managed_fd.asValue());
     }
 
-    return callFailureBlock(context, errno, context.arguments[2]);
+    return callFailureBlock(context, errno, failure_block);
 }
 
 /// Read the given amount of bytes into the given byte array at the given offset
@@ -103,7 +94,7 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Completio
     const byte_array_value = context.arguments[1].getValue();
     const offset_value = context.arguments[2].getValue();
     const fd_value = context.arguments[3].getValue();
-    const failure_block = context.arguments[4].getValue();
+    const failure_block = context.arguments[4];
 
     if (!bytes_to_read_value.isInteger()) {
         return Completion.initRuntimeError(
@@ -137,15 +128,6 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Completio
             context.interpreter_context.allocator,
             context.source_range,
             "Expected file descriptor as the fourth argument to _Read:BytesInto:AtOffset:From:IfFail:",
-            .{},
-        );
-    }
-
-    if (!(failure_block.isObjectReference() and failure_block.asObject().isBlockObject())) {
-        return Completion.initRuntimeError(
-            context.interpreter_context.allocator,
-            context.source_range,
-            "Expected block as the fifth argument to _Read:BytesInto:AtOffset:From:IfFail:",
             .{},
         );
     }
@@ -197,7 +179,7 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Completio
         return Completion.initNormal(Value.fromUnsignedInteger(@intCast(usize, rc)));
     }
 
-    return callFailureBlock(context, errno, context.arguments[4]);
+    return callFailureBlock(context, errno, failure_block);
 }
 
 /// Write the given amount of bytes from the given byte array at the given offset
@@ -209,7 +191,7 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Completi
     const byte_array_value = context.arguments[1].getValue();
     const offset_value = context.arguments[2].getValue();
     const fd_value = context.arguments[3].getValue();
-    const failure_block = context.arguments[4].getValue();
+    const failure_block = context.arguments[4];
 
     if (!bytes_to_write_value.isInteger()) {
         return Completion.initRuntimeError(
@@ -243,15 +225,6 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Completi
             context.interpreter_context.allocator,
             context.source_range,
             "Expected file descriptor as the fourth argument to _Write:BytesFrom:AtOffset:Into:IfFail:",
-            .{},
-        );
-    }
-
-    if (!(failure_block.isObjectReference() and failure_block.asObject().isBlockObject())) {
-        return Completion.initRuntimeError(
-            context.interpreter_context.allocator,
-            context.source_range,
-            "Expected block as the fifth argument to _Write:BytesFrom:AtOffset:Into:IfFail:",
             .{},
         );
     }
@@ -303,7 +276,7 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Completi
         return Completion.initNormal(Value.fromUnsignedInteger(@intCast(usize, rc)));
     }
 
-    return callFailureBlock(context, errno, context.arguments[4]);
+    return callFailureBlock(context, errno, failure_block);
 }
 
 /// Closes a file descriptor.

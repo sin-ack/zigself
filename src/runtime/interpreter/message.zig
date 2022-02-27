@@ -423,16 +423,28 @@ pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) ro
     }
     const arguments_slice = arguments.constSlice();
 
+    return sendMessage(context, tracked_receiver, message.message_name, arguments_slice, source_range);
+}
+
+/// Send a message to a receiver with the given arguments. Trusts the caller
+/// to supply the correct amount of arguments.
+pub fn sendMessage(
+    context: *InterpreterContext,
+    tracked_receiver: Heap.Tracked,
+    name: []const u8,
+    arguments: []const Heap.Tracked,
+    source_range: SourceRange,
+) root_interpreter.InterpreterError!Completion {
     // Check for assignable slots
-    if (message.message_name[message.message_name.len - 1] == ':' and arguments.len == 1) {
-        if (try executeAssignmentMessage(context, tracked_receiver, message.message_name, arguments_slice[0], source_range)) |completion| {
+    if (name[name.len - 1] == ':' and arguments.len == 1) {
+        if (try executeAssignmentMessage(context, tracked_receiver, name, arguments[0], source_range)) |completion| {
             return completion;
         }
     }
 
     // Primitive check
-    if (message.message_name[0] == '_') {
-        return executePrimitiveMessage(context, tracked_receiver, message.message_name, arguments_slice, source_range);
+    if (name[0] == '_') {
+        return executePrimitiveMessage(context, tracked_receiver, name, arguments, source_range);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
@@ -447,16 +459,16 @@ pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) ro
 
         if (block_receiver.isObjectReference() and
             block_receiver.asObject().isBlockObject() and
-            block_receiver.asObject().asBlockObject().isCorrectMessageForBlockExecution(message.message_name))
+            block_receiver.asObject().asBlockObject().isCorrectMessageForBlockExecution(name))
         {
             var tracked_block_receiver = try context.heap.track(block_receiver);
             defer tracked_block_receiver.untrack(context.heap);
 
-            return executeBlockMessage(context, tracked_block_receiver, arguments_slice, source_range);
+            return executeBlockMessage(context, tracked_block_receiver, arguments, source_range);
         }
     }
 
-    if (try tracked_receiver.getValue().lookup(.Read, context, message.message_name, source_range)) |lookup_completion| {
+    if (try tracked_receiver.getValue().lookup(.Read, context, name, source_range)) |lookup_completion| {
         if (!lookup_completion.isNormal()) {
             return lookup_completion;
         }
@@ -466,11 +478,11 @@ pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) ro
             var tracked_lookup_result = try context.heap.track(lookup_result);
             defer tracked_lookup_result.untrack(context.heap);
 
-            return executeMethodMessage(context, tracked_receiver, tracked_lookup_result, arguments_slice, source_range);
+            return executeMethodMessage(context, tracked_receiver, tracked_lookup_result, arguments, source_range);
         } else {
             return Completion.initNormal(lookup_result);
         }
     } else {
-        return Completion.initRuntimeError(context.allocator, source_range, "Unknown selector \"{s}\"", .{message.message_name});
+        return Completion.initRuntimeError(context.allocator, source_range, "Unknown selector \"{s}\"", .{name});
     }
 }
