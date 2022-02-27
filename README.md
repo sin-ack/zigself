@@ -20,7 +20,7 @@ You need the Zig compiler, preferably one built with the known-good version
 commit. You can find the source code, instructions for building, and more on the
 [Zig repository](https://github.com/ziglang/zig).
 
-Latest Zig commit known to work is [`cf5009f`](https://github.com/ziglang/zig/commit/cf5009f).
+Latest Zig commit known to work is [`4d658f8`](https://github.com/ziglang/zig/commit/4d658f8).
 Earlier and later versions may work but there are no guarantees.
 
 ## Building zigSelf
@@ -62,10 +62,10 @@ That's it! If you want to build a release version, you can build one with
     - [x] Old space -> new space tracking
     - [x] New space -> old space tracking
     - [x] VM tracking of values in primitives and interpreter
-- [ ] Test harness
+- [x] Test harness
 - [ ] Standard library
-  - [ ] Move to std namespace
-  - [ ] String operations and text processing
+  - [x] Move to std namespace
+  - [x] String operations and text processing
   - [ ] Integer operations
   - [ ] Math
   - [ ] System calls
