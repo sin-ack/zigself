@@ -26,7 +26,7 @@ const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 pub const Slots = packed struct {
     header: Object.Header,
 
-    pub fn create(heap: *Heap, map: *Map.Slots, assignable_slot_values: []Value) !*Slots {
+    pub fn create(heap: *Heap, map: *Map.Slots, assignable_slot_values: []const Value) !*Slots {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -433,7 +433,7 @@ pub const Activation = packed struct {
 pub const Method = packed struct {
     slots: Slots,
 
-    pub fn create(heap: *Heap, map: *Map.Method, assignable_slot_values: []Value) !*Method {
+    pub fn create(heap: *Heap, map: *Map.Method, assignable_slot_values: []const Value) !*Method {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -512,7 +512,7 @@ pub const Method = packed struct {
 pub const Block = packed struct {
     slots: Slots,
 
-    pub fn create(heap: *Heap, map: *Map.Block, assignable_slot_values: []Value) !*Block {
+    pub fn create(heap: *Heap, map: *Map.Block, assignable_slot_values: []const Value) !*Block {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",

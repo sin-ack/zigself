@@ -11,20 +11,20 @@ const Heap = @import("./heap.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
 const Script = @import("../language/script.zig");
-const Activation = @import("./activation.zig");
 const ByteArray = @import("./byte_array.zig");
+const Activation = @import("./activation.zig");
+const Completion = @import("./completion.zig");
 const environment = @import("./environment.zig");
 const SourceRange = @import("../language/source_range.zig");
 const runtime_error = @import("./error.zig");
 const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
 const ActivationStack = Activation.ActivationStack;
-const Completion = @import("./completion.zig");
 
 const message_interpreter = @import("./interpreter/message.zig");
 
 pub const MaximumStackDepth = 2048;
-// FIXME: Enforce this limit on block and method creation. Currently we allow as many arguments as assignable slots.
 pub const MaximumArguments = 128; // Reasonable limit
+pub const MaximumAssignableSlots = 255;
 
 pub const InterpreterContext = struct {
     /// The allocator object that will be used throughout the interpreter's lifetime.
@@ -209,12 +209,25 @@ pub fn executeExpression(context: *InterpreterContext, expression: AST.Expressio
 /// Creates a new method object. All refs are forwarded. `arguments` and
 /// `object_node`'s statements are copied.
 fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AST.ObjectNode, arguments: [][]const u8) InterpreterError!Completion {
-    var assignable_slot_values = try std.ArrayList(Heap.Tracked).initCapacity(context.allocator, arguments.len);
+    // FIXME: Get a better source range for the method itself
+    var source_range = SourceRange.init(context.script, object_node.range);
+    defer source_range.deinit();
+
+    if (arguments.len > MaximumArguments)
+        return Completion.initRuntimeError(context.allocator, source_range, "Maximum argument limit exceeded for method", .{});
+
+    var assignable_slot_count: usize = 0;
+    for (object_node.slots) |slot| {
+        if (slot.is_mutable) assignable_slot_count += 1;
+    }
+    if (arguments.len + object_node.slots.len > MaximumAssignableSlots)
+        return Completion.initRuntimeError(context.allocator, source_range, "Maximum assignable slot limit exceeded for method", .{});
+
+    var assignable_slot_values = std.BoundedArray(Heap.Tracked, MaximumAssignableSlots).init(0) catch unreachable;
     defer {
-        for (assignable_slot_values.items) |value| {
+        for (assignable_slot_values.slice()) |value| {
             value.untrack(context.heap);
         }
-        assignable_slot_values.deinit();
     }
 
     // This will prevent garbage collections until the execution of slots at
@@ -253,7 +266,7 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
     for (arguments) |argument| {
         const argument_in_heap = try ByteArray.createFromString(context.heap, argument);
         argument_slots[slot_init_offset].initMutable(Object.Map.Method, method_map, argument_in_heap, .NotParent);
-        assignable_slot_values.appendAssumeCapacity(try context.heap.track(environment.globalNil()));
+        assignable_slot_values.append(try context.heap.track(environment.globalNil())) catch unreachable;
 
         slot_init_offset += 1;
     }
@@ -265,7 +278,7 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
         const slot_completion = try executeSlot(context, slot_node, Object.Map.Method, tracked_method_map.getValue().asObject().asMap().asMethodMap(), slot_init_offset);
         if (slot_completion) |completion| {
             if (completion.isNormal())
-                try assignable_slot_values.append(try context.heap.track(completion.data.Normal))
+                assignable_slot_values.append(try context.heap.track(completion.data.Normal)) catch unreachable
             else
                 return completion;
         }
@@ -275,15 +288,14 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
 
     // Ensure that creating the method object won't cause a garbage collection
     // before the assignable slot values are copied in.
-    try context.heap.ensureSpaceInEden(Object.Method.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.items.len)));
+    try context.heap.ensureSpaceInEden(Object.Method.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len)));
 
-    var current_assignable_slot_values = try context.allocator.alloc(Value, assignable_slot_values.items.len);
-    defer context.allocator.free(current_assignable_slot_values);
-    for (assignable_slot_values.items) |value, i| {
-        current_assignable_slot_values[i] = value.getValue();
+    var current_assignable_slot_values = std.BoundedArray(Value, MaximumAssignableSlots).init(assignable_slot_values.len) catch unreachable;
+    for (assignable_slot_values.constSlice()) |value, i| {
+        current_assignable_slot_values.set(i, value.getValue());
     }
 
-    const method_object = try Object.Method.create(context.heap, tracked_method_map.getValue().asObject().asMap().asMethodMap(), current_assignable_slot_values);
+    const method_object = try Object.Method.create(context.heap, tracked_method_map.getValue().asObject().asMap().asMethodMap(), current_assignable_slot_values.constSlice());
     return Completion.initNormal(method_object.asValue());
 }
 
@@ -321,12 +333,22 @@ pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) 
         @panic("!!! Attempted to execute a non-slots object! Methods must be created via executeSlot.");
     }
 
-    var assignable_slot_values = std.ArrayList(Heap.Tracked).init(context.allocator);
+    var source_range = SourceRange.init(context.script, object_node.range);
+    defer source_range.deinit();
+
+    // Verify that the assignable slots in this object are within limits
+    var assignable_slot_count: usize = 0;
+    for (object_node.slots) |slot| {
+        if (slot.is_mutable) assignable_slot_count += 1;
+    }
+    if (assignable_slot_count > MaximumAssignableSlots)
+        return Completion.initRuntimeError(context.allocator, source_range, "Maximum assignable slot limit exceeded for slots object", .{});
+
+    var assignable_slot_values = std.BoundedArray(Heap.Tracked, MaximumAssignableSlots).init(0) catch unreachable;
     defer {
-        for (assignable_slot_values.items) |value| {
+        for (assignable_slot_values.slice()) |value| {
             value.untrack(context.heap);
         }
-        assignable_slot_values.deinit();
     }
 
     var slots_map = try Object.Map.Slots.create(context.heap, @intCast(u32, object_node.slots.len));
@@ -337,7 +359,7 @@ pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) 
         var slot_completion = try executeSlot(context, slot_node, Object.Map.Slots, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), i);
         if (slot_completion) |completion| {
             if (completion.isNormal()) {
-                try assignable_slot_values.append(try context.heap.track(completion.data.Normal));
+                assignable_slot_values.append(try context.heap.track(completion.data.Normal)) catch unreachable;
             } else {
                 return completion;
             }
@@ -346,30 +368,41 @@ pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) 
 
     // Ensure that creating the slots object won't cause a garbage collection
     // before the assignable slot values are copied in.
-    try context.heap.ensureSpaceInEden(Object.Slots.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.items.len)));
+    try context.heap.ensureSpaceInEden(Object.Slots.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len)));
 
-    var current_assignable_slot_values = try context.allocator.alloc(Value, assignable_slot_values.items.len);
-    defer context.allocator.free(current_assignable_slot_values);
-    for (assignable_slot_values.items) |value, i| {
-        current_assignable_slot_values[i] = value.getValue();
+    var current_assignable_slot_values = std.BoundedArray(Value, MaximumAssignableSlots).init(assignable_slot_values.len) catch unreachable;
+    for (assignable_slot_values.constSlice()) |value, i| {
+        current_assignable_slot_values.set(i, value.getValue());
     }
 
-    const slots_object = try Object.Slots.create(context.heap, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), current_assignable_slot_values);
+    const slots_object = try Object.Slots.create(context.heap, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), current_assignable_slot_values.constSlice());
     return Completion.initNormal(slots_object.asValue());
 }
 
 pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) InterpreterError!Completion {
     var argument_slot_count: u8 = 0;
+    var assignable_slot_count: u8 = 0;
     for (block.slots) |slot_node| {
-        if (slot_node.is_argument) argument_slot_count += 1;
+        if (slot_node.is_argument) {
+            argument_slot_count += 1;
+        } else if (slot_node.is_mutable) {
+            assignable_slot_count += 1;
+        }
     }
 
-    var assignable_slot_values = try std.ArrayList(Heap.Tracked).initCapacity(context.allocator, argument_slot_count);
+    var source_range = SourceRange.init(context.script, block.range);
+    defer source_range.deinit();
+
+    if (argument_slot_count > MaximumArguments)
+        return Completion.initRuntimeError(context.allocator, source_range, "Maximum argument limit exceeded for block", .{});
+    if (argument_slot_count + assignable_slot_count > MaximumAssignableSlots)
+        return Completion.initRuntimeError(context.allocator, source_range, "Maximum assignable slot limit exceeded for block", .{});
+
+    var assignable_slot_values = std.BoundedArray(Heap.Tracked, MaximumAssignableSlots).init(0) catch unreachable;
     defer {
-        for (assignable_slot_values.items) |value| {
+        for (assignable_slot_values.slice()) |value| {
             value.untrack(context.heap);
         }
-        assignable_slot_values.deinit();
     }
 
     // The latest activation is where the block was created, so it will always
@@ -428,7 +461,7 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
                 slot_name,
                 if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent,
             );
-            assignable_slot_values.appendAssumeCapacity(try context.heap.track(environment.globalNil()));
+            assignable_slot_values.append(try context.heap.track(environment.globalNil())) catch unreachable;
 
             slot_init_offset += 1;
         }
@@ -449,7 +482,7 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
             );
             if (slot_completion) |completion| {
                 if (completion.isNormal()) {
-                    try assignable_slot_values.append(try context.heap.track(completion.data.Normal));
+                    assignable_slot_values.append(try context.heap.track(completion.data.Normal)) catch unreachable;
                 } else {
                     return completion;
                 }
@@ -461,15 +494,14 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
 
     // Ensure that creating the block object won't cause a garbage collection
     // before the assignable slot values are copied in.
-    try context.heap.ensureSpaceInEden(Object.Block.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.items.len)));
+    try context.heap.ensureSpaceInEden(Object.Block.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len)));
 
-    var current_assignable_slot_values = try context.allocator.alloc(Value, assignable_slot_values.items.len);
-    defer context.allocator.free(current_assignable_slot_values);
-    for (assignable_slot_values.items) |value, i| {
-        current_assignable_slot_values[i] = value.getValue();
+    var current_assignable_slot_values = std.BoundedArray(Value, MaximumAssignableSlots).init(assignable_slot_values.len) catch unreachable;
+    for (assignable_slot_values.constSlice()) |value, i| {
+        current_assignable_slot_values.set(i, value.getValue());
     }
 
-    const block_object = try Object.Block.create(context.heap, tracked_block_map.getValue().asObject().asMap().asBlockMap(), current_assignable_slot_values);
+    const block_object = try Object.Block.create(context.heap, tracked_block_map.getValue().asObject().asMap().asBlockMap(), current_assignable_slot_values.constSlice());
     return Completion.initNormal(block_object.asValue());
 }
 

@@ -22,64 +22,17 @@ const InterpreterContext = root_interpreter.InterpreterContext;
 const MaximumStackDepth = root_interpreter.MaximumStackDepth;
 const MaximumArguments = root_interpreter.MaximumArguments;
 
-const ArgumentValuesType = enum { Tracked, Untracked };
-fn ArgumentValues(comptime value_type: ArgumentValuesType) type {
-    return struct {
-        raw_arguments: [MaximumArguments]ValueType = undefined,
-        count: usize = 0,
-
-        const ValueType = switch (value_type) {
-            .Tracked => Heap.Tracked,
-            .Untracked => Value,
-        };
-        const Self = @This();
-
-        pub fn init() Self {
-            return .{};
-        }
-
-        // Omit deinit implementation if we're not tracking values
-        pub usingnamespace switch (value_type) {
-            .Tracked => struct {
-                pub fn deinit(self: *Self, heap: *Heap) void {
-                    for (self.getSlice()) |*value| {
-                        value.untrack(heap);
-                    }
-                }
-            },
-            .Untracked => struct {},
-        };
-
-        pub fn append(self: *Self, value: ValueType) void {
-            if (self.count == MaximumArguments) {
-                std.debug.panic("Attempting to append to ArgumentValues after limit was reached (should've been caught earlier!)", .{});
-            }
-
-            self.raw_arguments[self.count] = value;
-            self.count += 1;
-        }
-
-        pub fn getSlice(self: Self) []const ValueType {
-            return self.raw_arguments[0..self.count];
-        }
-    };
-}
-
-const MessageArgumentsOrCompletion = union(enum) {
-    Arguments: ArgumentValues(.Tracked),
-    Completion: Completion,
-};
-
 fn getMessageArguments(
     context: *InterpreterContext,
     ast_arguments: []AST.ExpressionNode,
-) root_interpreter.InterpreterError!MessageArgumentsOrCompletion {
-    var arguments = ArgumentValues(.Tracked).init();
-
+    arguments: *std.BoundedArray(Heap.Tracked, MaximumArguments),
+) root_interpreter.InterpreterError!?Completion {
     var did_complete_normally = false;
     defer {
         if (!did_complete_normally) {
-            arguments.deinit(context.heap);
+            for (arguments.slice()) |argument| {
+                argument.untrack(context.heap);
+            }
         }
     }
 
@@ -87,14 +40,14 @@ fn getMessageArguments(
         const completion = try root_interpreter.executeExpression(context, argument);
         if (completion.isNormal()) {
             const tracked_result = try context.heap.track(completion.data.Normal);
-            arguments.append(tracked_result);
+            arguments.append(tracked_result) catch unreachable;
         } else {
-            return MessageArgumentsOrCompletion{ .Completion = completion };
+            return completion;
         }
     }
 
     did_complete_normally = true;
-    return MessageArgumentsOrCompletion{ .Arguments = arguments };
+    return null;
 }
 
 fn requiredSizeForBlockMessageName(argument_count: u8) usize {
@@ -164,14 +117,14 @@ pub fn executeBlockMessage(
         // Refresh the pointer in case a GC happened
         block_object = block_value.getValue().asObject().asBlockObject();
 
-        var argument_values = ArgumentValues(.Untracked).init();
-        for (arguments) |argument| argument_values.append(argument.getValue());
+        var argument_values = std.BoundedArray(Value, MaximumArguments).init(0) catch unreachable;
+        for (arguments) |argument| argument_values.append(argument.getValue()) catch unreachable;
 
         const new_activation = context.activation_stack.getNewActivationSlot();
         try block_object.activateBlock(
             context,
             block_object.getMap().parent_activation.get(context).?.activation_object,
-            argument_values.getSlice(),
+            argument_values.constSlice(),
             tracked_message_name,
             source_range,
             new_activation,
@@ -270,15 +223,15 @@ pub fn executeMethodMessage(
     // Refresh the pointer in case a GC happened
     method_object = tracked_method_object.getValue().asObject().asMethodObject();
 
-    var argument_values = ArgumentValues(.Untracked).init();
-    for (arguments) |argument| argument_values.append(argument.getValue());
+    var argument_values = std.BoundedArray(Value, MaximumArguments).init(0) catch unreachable;
+    for (arguments) |argument| argument_values.append(argument.getValue()) catch unreachable;
 
     const method_activation = blk: {
         const new_activation = context.activation_stack.getNewActivationSlot();
         try method_object.activateMethod(
             context.heap,
             receiver.getValue(),
-            argument_values.getSlice(),
+            argument_values.constSlice(),
             source_range,
             new_activation,
         );
@@ -436,12 +389,6 @@ pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) ro
     var source_range = SourceRange.init(context.script, message.range);
     defer source_range.deinit();
 
-    // FIXME: Enforce maximum argument limit for block and method creation, so that we
-    //        can never get this condition.
-    if (message.arguments.len > MaximumArguments) {
-        return Completion.initRuntimeError(context.allocator, source_range, "Maximum argument count exceeded", .{});
-    }
-
     const receiver_completion = try root_interpreter.executeExpression(context, message.receiver);
     if (!receiver_completion.isNormal()) {
         return receiver_completion;
@@ -450,17 +397,20 @@ pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) ro
     defer tracked_receiver.untrack(context.heap);
 
     // FIXME: Avoid allocating a slice here
-    const arguments_or_completion = try getMessageArguments(context, message.arguments);
-    if (arguments_or_completion == .Completion) {
-        return arguments_or_completion.Completion;
+    var arguments = std.BoundedArray(Heap.Tracked, MaximumArguments).init(0) catch unreachable;
+    if (try getMessageArguments(context, message.arguments, &arguments)) |completion| {
+        return completion;
     }
 
-    var arguments = arguments_or_completion.Arguments;
-    defer arguments.deinit(context.heap);
-    const arguments_slice = arguments.getSlice();
+    defer {
+        for (arguments.slice()) |argument| {
+            argument.untrack(context.heap);
+        }
+    }
+    const arguments_slice = arguments.constSlice();
 
     // Check for assignable slots
-    if (message.message_name[message.message_name.len - 1] == ':' and arguments.count == 1) {
+    if (message.message_name[message.message_name.len - 1] == ':' and arguments.len == 1) {
         if (try executeAssignmentMessage(context, tracked_receiver, message.message_name, arguments_slice[0], source_range)) |completion| {
             return completion;
         }
