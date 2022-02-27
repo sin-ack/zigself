@@ -17,6 +17,7 @@ const MapType = @import("./map.zig").MapType;
 const Location = @import("../../language/location.zig");
 const SourceRange = @import("../../language/source_range.zig");
 const RuntimeActivation = @import("../activation.zig");
+const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
 /// A slots object. A slots object does not contain all the slots that are
 /// actually in the object; for that, the map must be consulted. The slot
@@ -486,7 +487,6 @@ pub const Method = packed struct {
     /// Copies `source_range`.
     pub fn activateMethod(
         self: *Method,
-        allocator: Allocator,
         heap: *Heap,
         receiver: Value,
         arguments: []const Value,
@@ -499,7 +499,7 @@ pub const Method = packed struct {
         const tracked_method_name = try heap.track(self.getMap().method_name);
         errdefer tracked_method_name.untrack(heap);
 
-        try out_activation.initInPlace(allocator, heap, activation_object.asValue(), tracked_method_name, source_range, true);
+        try out_activation.initInPlace(heap, activation_object.asValue(), tracked_method_name, source_range, true);
     }
 
     pub fn requiredSizeForAllocation(assignable_slot_count: u8) usize {
@@ -610,20 +610,19 @@ pub const Block = packed struct {
     /// `source_range`.
     pub fn activateBlock(
         self: *Block,
-        allocator: Allocator,
-        heap: *Heap,
+        context: *InterpreterContext,
         receiver: Value,
         arguments: []const Value,
         message_name: Heap.Tracked,
         source_range: SourceRange,
         out_activation: *RuntimeActivation,
     ) !void {
-        const activation_object = try Activation.create(heap, .Block, self.slots.header.getMap(), self.getAssignableSlots(), receiver);
+        const activation_object = try Activation.create(context.heap, .Block, self.slots.header.getMap(), self.getAssignableSlots(), receiver);
         activation_object.setArguments(arguments);
 
-        try out_activation.initInPlace(allocator, heap, activation_object.asValue(), message_name, source_range, false);
-        out_activation.parent_activation = self.getMap().getParentActivation();
-        out_activation.nonlocal_return_target_activation = self.getMap().getNonlocalReturnTargetActivation();
+        try out_activation.initInPlace(context.heap, activation_object.asValue(), message_name, source_range, false);
+        out_activation.parent_activation = self.getMap().parent_activation.get(context);
+        out_activation.nonlocal_return_target_activation = self.getMap().nonlocal_return_target_activation.get(context);
     }
 
     pub fn requiredSizeForAllocation(assignable_slot_count: u8) usize {

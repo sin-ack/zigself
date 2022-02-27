@@ -449,11 +449,11 @@ const BlockMap = packed struct {
     base_map: SlotsAndStatementsMap,
     /// A weak reference to the parent activation of this block. The block must
     /// not be activated if this activation has left the stack.
-    parent_activation_weak: Value,
+    parent_activation: Activation.ActivationRef,
     /// A weak reference to the non-local return target activation of this
     /// block. If a non-local return happens inside this block, then it will
     /// target this activation.
-    nonlocal_return_target_activation_weak: Value,
+    nonlocal_return_target_activation: Activation.ActivationRef,
 
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
@@ -488,36 +488,12 @@ const BlockMap = packed struct {
         script: Script.Ref,
     ) void {
         self.base_map.init(.Block, map_map, argument_slot_count, regular_slot_count, statements, script);
-        self.setParentActivation(parent_activation);
-        self.setNonlocalReturnTargetActivation(nonlocal_return_target_activation);
-    }
-
-    fn setParentActivation(self: *BlockMap, parent_activation: *Activation) void {
-        var weak_ref = parent_activation.makeWeakRef();
-        var weak_handle_address = @ptrToInt(weak_ref.handle.value);
-
-        self.parent_activation_weak = Value.fromUnsignedInteger(weak_handle_address);
-    }
-
-    fn setNonlocalReturnTargetActivation(self: *BlockMap, nonlocal_return_target_activation: *Activation) void {
-        var weak_ref = nonlocal_return_target_activation.makeWeakRef();
-        var weak_handle_address = @ptrToInt(weak_ref.handle.value);
-
-        self.nonlocal_return_target_activation_weak = Value.fromUnsignedInteger(weak_handle_address);
-    }
-
-    fn getParentActivationWeak(self: *BlockMap) Activation.Weak {
-        return Activation.Weak{ .handle = .{ .value = @intToPtr(getActivationHandlePointerType(), self.parent_activation_weak.asUnsignedInteger()) } };
-    }
-
-    fn getNonlocalReturnTargetActivationWeak(self: *BlockMap) Activation.Weak {
-        return Activation.Weak{ .handle = .{ .value = @intToPtr(getActivationHandlePointerType(), self.nonlocal_return_target_activation_weak.asUnsignedInteger()) } };
+        self.parent_activation = parent_activation.takeRef();
+        self.nonlocal_return_target_activation = nonlocal_return_target_activation.takeRef();
     }
 
     pub fn finalize(self: *BlockMap, allocator: Allocator) void {
         self.base_map.finalize(allocator);
-        self.getParentActivationWeak().deinit();
-        self.getNonlocalReturnTargetActivationWeak().deinit();
     }
 
     pub fn asValue(self: *BlockMap) Value {
@@ -548,14 +524,6 @@ const BlockMap = packed struct {
         return self.base_map.getNonArgumentSlots(@sizeOf(BlockMap));
     }
 
-    pub fn getParentActivation(self: *BlockMap) ?*Activation {
-        return self.getParentActivationWeak().getPointer();
-    }
-
-    pub fn getNonlocalReturnTargetActivation(self: *BlockMap) ?*Activation {
-        return self.getNonlocalReturnTargetActivationWeak().getPointer();
-    }
-
     pub fn getSizeInMemory(self: *BlockMap) usize {
         return requiredSizeForAllocation(self.base_map.slots_map.slot_count);
     }
@@ -571,12 +539,6 @@ const BlockMap = packed struct {
     /// Return the size required for the whole map with the given slot count.
     pub fn requiredSizeForAllocation(slot_count: u32) usize {
         return @sizeOf(BlockMap) + slot_count * @sizeOf(Slot);
-    }
-
-    fn getActivationHandlePointerType() type {
-        const weak_type_info = @typeInfo(Activation.Weak);
-        const handle_type_info = @typeInfo(weak_type_info.Struct.fields[0].field_type);
-        return handle_type_info.Struct.fields[0].field_type;
     }
 };
 

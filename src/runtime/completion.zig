@@ -32,7 +32,7 @@ pub const CompletionData = union(enum) {
 pub const NonlocalReturnCompletionData = struct {
     /// The activation at which this non-local return should become the
     /// regular return value.
-    target_activation: Activation.Weak,
+    target_activation: Activation.ActivationRef,
     // FIXME: We shouldn't allocate while a non-local return is bubbling,
     //        so this tracking is pointless. Turn it into a regular Value.
     /// The value that should be returned when the non-local return reaches
@@ -56,7 +56,7 @@ pub fn initNormal(value: Value) Self {
 }
 
 /// Initializes a new non-local return completion.
-pub fn initNonlocalReturn(target_activation: Activation.Weak, value: Heap.Tracked) Self {
+pub fn initNonlocalReturn(target_activation: Activation.ActivationRef, value: Heap.Tracked) Self {
     return .{ .data = .{ .NonlocalReturn = .{ .target_activation = target_activation, .value = value } } };
 }
 
@@ -76,8 +76,7 @@ pub fn initRestart() Self {
 pub fn deinit(self: *Self, allocator: Allocator) void {
     switch (self.data) {
         .Normal, .Restart => {},
-        .NonlocalReturn => |nonlocal_return| {
-            nonlocal_return.target_activation.deinit();
+        .NonlocalReturn => {
             // NOTE: We explicitly DON'T untrack the heap value here, as that will be borrowed by
             //       executeMethodMessage when the value has arrived to its intended destination.
         },

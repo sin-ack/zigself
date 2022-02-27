@@ -2,17 +2,25 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
+const builtin = @import("builtin");
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("./heap.zig");
 const Value = @import("./value.zig").Value;
-const weak_ref = @import("../utility/weak_ref.zig");
 const SourceRange = @import("../language/source_range.zig");
 
+const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
+
 const Self = @This();
-const WeakBlock = weak_ref.WeakPtrBlock(Self);
-pub const Weak = weak_ref.WeakPtr(Self);
+
+// FIXME: This isn't thread safe!
+var id: u64 = 0;
+
+pub fn newActivationID() u64 {
+    id += 1;
+    return id;
+}
 
 /// Used for keeping track of the message that was sent to start the current
 /// activation. This is then used in stack traces.
@@ -54,7 +62,44 @@ pub const ActivationStack = struct {
     }
 };
 
-allocator: Allocator,
+/// A reference to an activation. The pointer and saved ID values are stored as
+/// Values, which makes this struct object heap-safe.
+pub const ActivationRef = packed struct {
+    pointer: Value,
+    saved_id: Value,
+
+    pub fn init(activation: *Self) ActivationRef {
+        const ptr = @ptrToInt(activation);
+        return .{
+            .pointer = Value.fromUnsignedInteger(ptr),
+            .saved_id = Value.fromUnsignedInteger(activation.activation_id),
+        };
+    }
+
+    fn getPointer(self: ActivationRef) *Self {
+        return @intToPtr(*Self, self.pointer.asUnsignedInteger());
+    }
+
+    pub fn isAlive(self: ActivationRef, context: *InterpreterContext) bool {
+        const activation_ptr = self.getPointer();
+
+        // Is this activation outside the currently-valid activation stack?
+        const first_invalid_activation_ptr = context.activation_stack.stack.ptr + context.activation_stack.depth;
+        if (@ptrToInt(activation_ptr) >= @ptrToInt(first_invalid_activation_ptr)) return false;
+        // Does the ID we saved match the currently-stored ID on the activation
+        // we point to?
+        if (self.saved_id.asUnsignedInteger() != activation_ptr.activation_id) return false;
+
+        // It's alive.
+        return true;
+    }
+
+    pub fn get(self: ActivationRef, context: *InterpreterContext) ?*Self {
+        return if (self.isAlive(context)) self.getPointer() else null;
+    }
+};
+
+activation_id: u64,
 heap: *Heap,
 activation_object: Value,
 creation_context: ActivationCreationContext,
@@ -69,12 +114,9 @@ nonlocal_return_target_activation: ?*Self = null,
 /// previous activation objects in methods (that would make the language
 /// dynamically scoped :^).
 parent_activation: ?*Self = null,
-/// Used for bound activations of blocks.
-weak: WeakBlock,
 
 pub fn initInPlace(
     self: *Self,
-    allocator: Allocator,
     heap: *Heap,
     activation_object: Value,
     creator_message: Heap.Tracked,
@@ -84,8 +126,7 @@ pub fn initInPlace(
     std.debug.assert(activation_object.isObjectReference());
 
     self.* = Self{
-        .weak = try WeakBlock.init(allocator, self),
-        .allocator = allocator,
+        .activation_id = newActivationID(),
         .heap = heap,
         .activation_object = activation_object,
         .creation_context = .{
@@ -97,7 +138,6 @@ pub fn initInPlace(
 }
 
 pub fn deinit(self: *Self) void {
-    self.weak.deinit();
     self.creation_context.source_range.deinit();
 
     if (self.creation_context.should_untrack_message_name_on_deinit) {
@@ -105,7 +145,6 @@ pub fn deinit(self: *Self) void {
     }
 }
 
-/// Make a weak reference to this activation.
-pub fn makeWeakRef(self: *Self) Weak {
-    return Weak.init(self);
+pub fn takeRef(self: *Self) ActivationRef {
+    return ActivationRef.init(self);
 }

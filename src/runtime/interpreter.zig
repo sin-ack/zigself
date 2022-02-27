@@ -481,8 +481,7 @@ pub fn executeReturn(context: *InterpreterContext, return_node: AST.ReturnNode) 
     const completion = try executeExpression(context, return_node.expression);
     switch (completion.data) {
         .Normal => {
-            const target_activation_weak = target_activation.makeWeakRef();
-            return Completion.initNonlocalReturn(target_activation_weak, try context.heap.track(completion.data.Normal));
+            return Completion.initNonlocalReturn(target_activation.takeRef(), try context.heap.track(completion.data.Normal));
         },
         .RuntimeError => return completion,
         .NonlocalReturn => {

@@ -150,7 +150,7 @@ pub fn executeBlockMessage(
     // Check if this method can be executed. A block can only be executed if its
     // parent completion is on the activation stack (meaning its weak ptr has not
     // been deactivated).
-    if (block_object.getMap().getParentActivation() == null) {
+    if (!block_object.getMap().parent_activation.isAlive(context)) {
         return Completion.initRuntimeError(context.allocator, source_range, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
     }
 
@@ -169,9 +169,8 @@ pub fn executeBlockMessage(
 
         const new_activation = context.activation_stack.getNewActivationSlot();
         try block_object.activateBlock(
-            context.allocator,
-            context.heap,
-            block_object.getMap().getParentActivation().?.activation_object,
+            context,
+            block_object.getMap().parent_activation.get(context).?.activation_object,
             argument_values.getSlice(),
             tracked_message_name,
             source_range,
@@ -277,7 +276,6 @@ pub fn executeMethodMessage(
     const method_activation = blk: {
         const new_activation = context.activation_stack.getNewActivationSlot();
         try method_object.activateMethod(
-            context.allocator,
             context.heap,
             receiver.getValue(),
             argument_values.getSlice(),
@@ -336,7 +334,7 @@ pub fn executeMethodMessage(
                 statement_index += 1;
             },
             .NonlocalReturn => |nonlocal_return| {
-                if (nonlocal_return.target_activation.getPointer()) |target_activation| {
+                if (nonlocal_return.target_activation.get(context)) |target_activation| {
                     if (target_activation == method_activation) {
                         // The target was us! Turn this into a regular completion
                         // and return with it.
