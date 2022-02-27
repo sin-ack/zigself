@@ -68,9 +68,22 @@ std traits _AddSlots: (|
         ).
 
         write: data = (write: data IfFail: raiseError).
-        write: data IfFail: failBlock = (
-            "FIXME: Handle writing less than expected!"
-            std os write: data size BytesFrom: data AtOffset: 0 Into: fd IfFail: failBlock.
+        write: data IfFail: failBlock = (| bytesWritten |
+            bytesWritten: 0.
+
+            [ bytesWritten < data size ] whileTrue: [
+                std os tryWhileInterrupted: [| :failBlock. nwritten |
+                    nwritten: std os write: data size
+                                     BytesFrom: data
+                                     AtOffset: 0
+                                     Into: fd
+                                     IfFail: failBlock.
+
+                    bytesWritten: bytesWritten + nwritten.
+                ] IfFail: failBlock.
+            ].
+
+            bytesWritten
         ).
 
         close = (
