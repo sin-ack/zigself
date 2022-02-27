@@ -95,6 +95,14 @@ std traits string _AddSlots: (|
     copySize: size = ( copySize: size FillingExtrasWith: filler ).
     copySize: size FillingExtrasWith: filler = ( _ByteArrayCopySize: size FillingExtrasWith: filler ).
 
+    "FIXME: This is doing too much work, implement a primitive to avoid wiping
+            the extra area with a filler."
+    , s = (| newString |
+        newString: copySize: size + s size.
+        0 to: s size Do: [| :i | newString at: size + i PutByte: s at: i ].
+        newString
+    ).
+
     "Join the given collection of strings into a single string, using the
      receiver as the delimiter."
     join: strings = (|

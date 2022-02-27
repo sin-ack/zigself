@@ -67,6 +67,23 @@ std traits _AddSlots: (|
             (bytesRead = max) ifTrue: [ buffer ] False: [ buffer copySize: bytesRead ].
         ).
 
+        readLine = (readLineIfFail: raiseError).
+        "FIXME: This is a pretty bad implementation. Implement some kind of
+                buffering."
+        readLineIfFail: failBlock = (| buffer. offset |
+            buffer: ''.
+
+            [| :break. byte |
+                byte: readMax: 1 IfFail: failBlock.
+                atEOF ifTrue: break.
+                ((byte at: 0) = 10) ifTrue: break.
+
+                buffer: buffer, byte.
+            ] loopBreak.
+
+            buffer.
+        ).
+
         write: data = (write: data IfFail: raiseError).
         write: data IfFail: failBlock = (| bytesWritten |
             bytesWritten: 0.
