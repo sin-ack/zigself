@@ -12,6 +12,7 @@ std traits _AddSlots: (|
 
         "FIXME: Add O_* flags."
         open: path = (open: path IfFail: raiseError).
+        open: path WithFlags: flags = (open: path WithFlags: flags IfFail: raiseError).
         open: path IfFail: failBlock = (open: path WithFlags: 0 IfFail: failBlock).
         open: path WithFlags: flags IfFail: failBlock = (| newFile |
             (fd = nil) ifFalse: [ _Error: 'Attempted to call std file open:WithFlags: on an open file' ].
@@ -26,13 +27,14 @@ std traits _AddSlots: (|
             chunks: std list copyRemoveAll.
 
             [ atEOF ] whileFalse: [
-                chunks append: read.
+                chunks append: readIfFail: failBlock.
             ].
 
             '' join: chunks.
         ).
 
         read = (readMin: 1).
+        readIfFail: failBlock = (readMin: 1 IfFail: failBlock).
 
         readMin: min = (readMin: min IfFail: raiseError).
         readMin: min IfFail: failBlock = (readMin: min Max: defaultReadMaximum IfFail: failBlock).
