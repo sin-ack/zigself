@@ -199,7 +199,14 @@ pub fn executeBlockMessage(
 
     if (last_expression_result) |last_result| {
         defer last_result.untrack(context.heap);
-        return Completion.initNormal(last_result.getValue());
+
+        // Do not return the activation object from the block when returning "self".
+        var result = last_result.getValue();
+        if (result.isObjectReference() and result.asObject().isActivationObject()) {
+            result = result.asObject().asActivationObject().findActivationReceiver();
+        }
+
+        return Completion.initNormal(result);
     } else {
         return Completion.initNormal(environment.globalNil());
     }
@@ -315,7 +322,14 @@ pub fn executeMethodMessage(
 
     if (last_expression_result) |last_result| {
         defer last_result.untrack(context.heap);
-        return Completion.initNormal(last_result.getValue());
+
+        // Do not return the activation object from the method when returning "self".
+        var result = last_result.getValue();
+        if (result.isObjectReference() and result.asObject().isActivationObject()) {
+            result = result.asObject().asActivationObject().findActivationReceiver();
+        }
+
+        return Completion.initNormal(result);
     } else {
         return Completion.initNormal(environment.globalNil());
     }
