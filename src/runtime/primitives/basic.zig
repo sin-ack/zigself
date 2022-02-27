@@ -42,7 +42,7 @@ pub fn RunScript(context: PrimitiveContext) !Completion {
     // FIXME: Find a way to handle errors here. These hacks are nasty.
 
     const requested_script_path = receiver_byte_array.getValues();
-    const running_script_path = context.interpreter_context.script.value.file_path;
+    const running_script_path = context.interpreter_context.script.value.running_path;
 
     const paths_to_join = &[_][]const u8{
         std.fs.path.dirname(running_script_path) orelse ".",
@@ -78,6 +78,47 @@ pub fn RunScript(context: PrimitiveContext) !Completion {
 
     if (!did_parse_without_errors) {
         return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Failed parsing the script passed to _RunScript", .{});
+    }
+
+    // FIXME: This is too much work. Just return the original value.
+    var result_value: Heap.Tracked = try context.interpreter_context.heap.track(environment.globalNil());
+    defer result_value.untrack(context.interpreter_context.heap);
+
+    if (try interpreter.executeSubScript(context.interpreter_context, script)) |script_completion| {
+        if (script_completion.isNormal()) {
+            result_value.untrack(context.interpreter_context.heap);
+            result_value = try context.interpreter_context.heap.track(script_completion.data.Normal);
+        } else {
+            return script_completion;
+        }
+    }
+
+    return Completion.initNormal(result_value.getValue());
+}
+
+pub fn EvaluateString(context: PrimitiveContext) !Completion {
+    const receiver = context.receiver.getValue();
+    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
+        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected ByteArray for the receiver of _RunScript", .{});
+    }
+
+    const receiver_byte_array = receiver.asObject().asByteArrayObject();
+    const running_script_path = context.interpreter_context.script.value.running_path;
+
+    var script = try Script.createFromString(context.interpreter_context.allocator, running_script_path, receiver_byte_array.getValues());
+    defer script.unref();
+
+    const did_parse_without_errors = script.value.parseScript() catch |err|
+        if (error_set_utils.errSetContains(Allocator.Error, err))
+    {
+        return @errSetCast(Allocator.Error, err);
+    } else {
+        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "An unexpected error was raised from script.parseScript: {s}", .{@errorName(err)});
+    };
+    script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
+
+    if (!did_parse_without_errors) {
+        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Failed parsing the script passed to _EvaluateString", .{});
     }
 
     // FIXME: This is too much work. Just return the original value.

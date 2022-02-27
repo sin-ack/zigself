@@ -43,7 +43,19 @@ pub fn initInPlaceFromFilePath(self: *Self, file_path: []const u8, allocator: Al
 
     self.lexer = Lexer{};
     try self.lexer.initInPlaceFromFilePath(file_path, allocator);
+    try self.initCommon(allocator);
+}
 
+pub fn initInPlaceFromString(self: *Self, contents: []const u8, allocator: Allocator) !void {
+    if (self.initialized)
+        @panic("Attempting to initialize already-initialized parser");
+
+    self.lexer = Lexer{};
+    try self.lexer.initInPlaceFromString(contents, allocator);
+    try self.initCommon(allocator);
+}
+
+fn initCommon(self: *Self, allocator: Allocator) !void {
     self.diagnostics = try Diagnostics.init(allocator);
 
     self.allocator = allocator;

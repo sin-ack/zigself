@@ -29,6 +29,20 @@ pub fn initInPlaceFromFilePath(self: *Self, file_path: []const u8, allocator: Al
     var file_contents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
     errdefer allocator.free(file_contents);
 
+    try self.initCommon(file_contents, allocator);
+}
+
+pub fn initInPlaceFromString(self: *Self, contents: []const u8, allocator: Allocator) !void {
+    if (self.initialized)
+        @panic("Attempting to initialize already-initialized lexer");
+
+    var file_contents = try allocator.dupe(u8, contents);
+    errdefer allocator.free(file_contents);
+
+    try self.initCommon(file_contents, allocator);
+}
+
+fn initCommon(self: *Self, file_contents: []const u8, allocator: Allocator) !void {
     var buffer = std.io.fixedBufferStream(@as([]const u8, file_contents));
 
     self.allocator = allocator;
