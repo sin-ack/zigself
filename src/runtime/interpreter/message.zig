@@ -39,7 +39,14 @@ fn getMessageArguments(
     for (ast_arguments) |argument| {
         const completion = try root_interpreter.executeExpression(context, argument);
         if (completion.isNormal()) {
-            const tracked_result = try context.heap.track(completion.data.Normal);
+            // Make sure that we are not adding the activation object to
+            // arguments
+            var result = completion.data.Normal;
+            if (result.isObjectReference() and result.asObject().isActivationObject()) {
+                result = result.asObject().asActivationObject().findActivationReceiver();
+            }
+
+            const tracked_result = try context.heap.track(result);
             arguments.append(tracked_result) catch unreachable;
         } else {
             return completion;
