@@ -10,6 +10,8 @@ std traits integer _AddSlots: (|
     succ = (self + 1).
     prec = (self - 1).
 
+    negate = (0 - self).
+
     + n  = (_IntAdd: n).
     - n  = (_IntSub: n).
     * n  = (_IntMul: n).
