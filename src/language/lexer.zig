@@ -73,12 +73,6 @@ pub fn nextToken(self: *Self) !*tokens.Token {
 
     while (true) {
         try self.skipWhitespace();
-        if (self.eof()) {
-            if (LEXER_DEBUG) std.debug.print("lexer: Reached EOF!\n", .{});
-            self.current_token = tokens.Token{ .EOF = .{} };
-            return &self.current_token;
-        }
-
         self.token_start = self.token_end;
 
         if (try self.lexComment()) |token| {
@@ -87,6 +81,12 @@ pub fn nextToken(self: *Self) !*tokens.Token {
         } else {
             break;
         }
+    }
+
+    if (self.eof()) {
+        if (LEXER_DEBUG) std.debug.print("lexer: Reached EOF!\n", .{});
+        self.current_token = tokens.Token{ .EOF = .{} };
+        return &self.current_token;
     }
 
     if (try self.lexString()) |token| {
