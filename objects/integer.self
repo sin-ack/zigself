@@ -39,4 +39,25 @@ std traits integer _AddSlots: (|
             i: i succ.
         ].
     ).
+
+    "FIXME: This is a naive implementation. Allocate the byte array in one go
+            by counting the digits."
+    asString = (| output. value |
+        output: ''.
+        value: self.
+
+        (value < 0) ifTrue: [
+            value: value negate.
+            output: '-'.
+        ].
+
+        [ value > 0 ] whileTrue: [| char <- ' '. digit |
+            digit: value % 10.
+            char at: 0 PutByte: 48 + digit.
+            output: output, char.
+            value: value / 10.
+        ].
+
+        output reverse
+    ).
 |).
