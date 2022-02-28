@@ -25,6 +25,15 @@ std traits block _AddSlots: (|
     "Call the block repeatedly with a block argument which restarts the block.
      This is useful when the loop should start from scratch without executing
      the statements after the statement which invokes continue."
+    loopContinue = (
+        [
+            [| :continue |
+                value: continue.
+            ] break.
+        ] loop.
+    ).
+
+    "Call the block with a block argument which restarts the block."
     restart = (
         [| :outerBreak |
             [| :innerBreak |

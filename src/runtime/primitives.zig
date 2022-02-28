@@ -67,7 +67,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_Nil", .function = basic_primitives.Nil },
     .{ .name = "_Exit:", .function = basic_primitives.Exit },
     .{ .name = "_RunScript", .function = basic_primitives.RunScript },
-    .{ .name = "_EvaluateString", .function = basic_primitives.EvaluateString },
+    .{ .name = "_EvaluateStringIfFail:", .function = basic_primitives.EvaluateStringIfFail },
     .{ .name = "_Error:", .function = basic_primitives.Error },
     .{ .name = "_Restart", .function = basic_primitives.Restart },
     // byte array primitives

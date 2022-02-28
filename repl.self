@@ -7,16 +7,16 @@
         'Welcome to the ZigSelf REPL!' printLine.
         'The standard library is in std.' printLine.
 
-        [| data. result |
+        [| :continue. data. result |
            std in atEOF ifTrue: [ _Exit: 0 ].
 
            std out write: '> '.
            data: std in readLine.
-           result: data _EvaluateString.
+           result: data _EvaluateStringIfFail: continue.
 
            (true == result) ifTrue: [ 'true' printLine. ] False: [
            (false == result) ifTrue: [ 'false' printLine. ] False: [
            (nil == result) ifFalse: [ result _Inspect. '\n' print. ]]].
-        ] loop.
+        ] loopContinue.
     ).
 |) repl.

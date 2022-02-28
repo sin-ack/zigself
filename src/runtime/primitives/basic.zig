@@ -13,6 +13,9 @@ const interpreter = @import("../interpreter.zig");
 const error_set_utils = @import("../../utility/error_set.zig");
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
+const message_interpreter = @import("../interpreter/message.zig");
+const runtime_error = @import("../error.zig");
+
 /// Return the static "nil" slots object.
 pub fn Nil(context: PrimitiveContext) !Completion {
     _ = context;
@@ -96,7 +99,7 @@ pub fn RunScript(context: PrimitiveContext) !Completion {
     return Completion.initNormal(result_value.getValue());
 }
 
-pub fn EvaluateString(context: PrimitiveContext) !Completion {
+pub fn EvaluateStringIfFail(context: PrimitiveContext) !Completion {
     const receiver = context.receiver.getValue();
     if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
         return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected ByteArray for the receiver of _RunScript", .{});
@@ -113,24 +116,37 @@ pub fn EvaluateString(context: PrimitiveContext) !Completion {
     {
         return @errSetCast(Allocator.Error, err);
     } else {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "An unexpected error was raised from script.parseScript: {s}", .{@errorName(err)});
+        // TODO: Instead of printing this error like this, pass it to the failure block.
+        std.debug.print("An unexpected error was raised from script.parseScript: {s}\n", .{@errorName(err)});
+        return message_interpreter.sendMessage(context.interpreter_context, context.arguments[0], "value", &.{}, context.source_range);
     };
     script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
 
     if (!did_parse_without_errors) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Failed parsing the script passed to _EvaluateString", .{});
+        // TODO: Pass error information to the failure block.
+        return message_interpreter.sendMessage(context.interpreter_context, context.arguments[0], "value", &.{}, context.source_range);
     }
 
     // FIXME: This is too much work. Just return the original value.
     var result_value: Heap.Tracked = try context.interpreter_context.heap.track(environment.globalNil());
     defer result_value.untrack(context.interpreter_context.heap);
 
-    if (try interpreter.executeSubScript(context.interpreter_context, script)) |script_completion| {
-        if (script_completion.isNormal()) {
-            result_value.untrack(context.interpreter_context.heap);
-            result_value = try context.interpreter_context.heap.track(script_completion.data.Normal);
-        } else {
-            return script_completion;
+    if (try interpreter.executeSubScript(context.interpreter_context, script)) |*script_completion| {
+        switch (script_completion.data) {
+            .Normal => |result| {
+                result_value.untrack(context.interpreter_context.heap);
+                result_value = try context.interpreter_context.heap.track(result);
+            },
+            .RuntimeError => |err| {
+                defer script_completion.deinit(context.interpreter_context.allocator);
+
+                // TODO: Pass error information to failure block
+                std.debug.print("Received error while evaluating string: {s}\n", .{err.message});
+                runtime_error.printTraceFromActivationStack(context.interpreter_context.activation_stack.getStack(), err.source_range);
+
+                return message_interpreter.sendMessage(context.interpreter_context, context.arguments[0], "value", &.{}, context.source_range);
+            },
+            else => return script_completion.*,
         }
     }
 
