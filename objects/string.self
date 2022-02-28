@@ -134,7 +134,7 @@ std traits string _AddSlots: (|
 |).
 
 std traits string _AddSlots: (|
-    toInteger = (| value. zeroByte = '0' at: 0. nineByte = '9' at: 0 |
+    asInteger = (| value. zeroByte = '0' at: 0. nineByte = '9' at: 0 |
         isEmpty ifTrue: [ _Error: 'empty string cannot be converted to integer' ].
 
         value: 0.
