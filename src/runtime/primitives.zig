@@ -86,6 +86,8 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_IntAdd:", .function = number_primitives.IntAdd },
     .{ .name = "_IntSub:", .function = number_primitives.IntSub },
     .{ .name = "_IntMul:", .function = number_primitives.IntMul },
+    .{ .name = "_IntDiv:", .function = number_primitives.IntDiv },
+    .{ .name = "_IntMod:", .function = number_primitives.IntMod },
     .{ .name = "_IntLT:", .function = number_primitives.IntLT },
     .{ .name = "_IntEq:", .function = number_primitives.IntEq },
     .{ .name = "_IntGT:", .function = number_primitives.IntGT },

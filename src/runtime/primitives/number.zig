@@ -69,6 +69,26 @@ pub fn IntMul(context: PrimitiveContext) !Completion {
     }.op);
 }
 
+/// Perform integer division on the receiver with the argument. Fraction is
+/// discarded. The returned value is an integer.
+pub fn IntDiv(context: PrimitiveContext) !Completion {
+    return integerOpCommon("IntDiv", context, struct {
+        pub fn op(receiver: i64, term: i64) Value {
+            return Value.fromInteger(@divFloor(receiver, term));
+        }
+    }.op);
+}
+
+/// Perform modulo on the receiver with the argument. The returned value is an
+/// interger.
+pub fn IntMod(context: PrimitiveContext) !Completion {
+    return integerOpCommon("IntMod", context, struct {
+        pub fn op(receiver: i64, term: i64) Value {
+            return Value.fromInteger(@mod(receiver, term));
+        }
+    }.op);
+}
+
 /// Return whether the receiver is less than its argument. The return value is
 /// either "true" or "false".
 pub fn IntLT(context: PrimitiveContext) !Completion {

@@ -13,6 +13,8 @@ std traits integer _AddSlots: (|
     + n  = (_IntAdd: n).
     - n  = (_IntSub: n).
     * n  = (_IntMul: n).
+    / n  = (_IntDiv: n).
+    % n  = (_IntMod: n).
     < n  = (_IntLT: n).
     > n  = (_IntGT: n).
     = n  = (_IntEq: n).
