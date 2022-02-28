@@ -77,6 +77,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "_ByteAt:Put:", .function = byte_array_primitives.ByteAt_Put },
     .{ .name = "_ByteArrayCopySize:FillingExtrasWith:", .function = byte_array_primitives.ByteArrayCopySize_FillingExtrasWith },
     .{ .name = "_ByteArrayEq:", .function = byte_array_primitives.ByteArrayEq },
+    .{ .name = "_ByteArrayConcatenate:", .function = byte_array_primitives.ByteArrayConcatenate },
     // array primitives
     .{ .name = "_ArrayCopySize:FillingExtrasWith:", .function = array_primitives.ArrayCopySize_FillingExtrasWith },
     .{ .name = "_ArraySize", .function = array_primitives.ArraySize },

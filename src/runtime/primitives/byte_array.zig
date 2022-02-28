@@ -217,3 +217,43 @@ pub fn ByteArrayEq(context: PrimitiveContext) !Completion {
             environment.globalFalse(),
     );
 }
+
+pub fn ByteArrayConcatenate(context: PrimitiveContext) !Completion {
+    var receiver_value = context.receiver.getValue();
+    var argument_value = context.arguments[0].getValue();
+
+    if (!(receiver_value.isObjectReference() and receiver_value.asObject().isByteArrayObject())) {
+        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected ByteArray as _ByteArrayConcatenate: receiver", .{});
+    }
+
+    if (!(argument_value.isObjectReference() and argument_value.asObject().isByteArrayObject())) {
+        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected ByteArray as _ByteArrayConcatenate: argument", .{});
+    }
+
+    // FIXME: A byte array can have free capacity in it if its length is not a
+    //        multiple of a machine word. Use this to optimize small
+    //        concatenations.
+
+    var receiver = receiver_value.asObject().asByteArrayObject();
+    var argument = argument_value.asObject().asByteArrayObject();
+
+    const receiver_size = receiver.getValues().len;
+    const argument_size = argument.getValues().len;
+
+    try context.interpreter_context.heap.ensureSpaceInEden(
+        ByteArray.requiredSizeForAllocation(receiver_size + argument_size) +
+            Object.Map.ByteArray.requiredSizeForAllocation() +
+            Object.ByteArray.requiredSizeForAllocation(),
+    );
+
+    // Refresh pointers
+    receiver = context.receiver.getValue().asObject().asByteArrayObject();
+    argument = context.arguments[0].getValue().asObject().asByteArrayObject();
+
+    var new_byte_array = try ByteArray.createUninitialized(context.interpreter_context.heap, receiver_size + argument_size);
+    std.mem.copy(u8, new_byte_array.getValues()[0..receiver_size], receiver.getValues());
+    std.mem.copy(u8, new_byte_array.getValues()[receiver_size..], argument.getValues());
+
+    const byte_array_map = try Object.Map.ByteArray.create(context.interpreter_context.heap, new_byte_array);
+    return Completion.initNormal((try Object.ByteArray.create(context.interpreter_context.heap, byte_array_map)).asValue());
+}
