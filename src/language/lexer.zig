@@ -460,7 +460,7 @@ fn lexSymbol(self: *Self) !?tokens.Token {
 
             // NOTE: Have to branch it like this because otherwise Zig complains.
             if (nread < representation.len) {
-                try self.stream.putBack(slice);
+                try self.stream.putBack(slice[0..nread]);
             } else {
                 if (std.mem.eql(u8, representation, slice)) {
                     self.token_end.advanceNColumns(representation.len);
