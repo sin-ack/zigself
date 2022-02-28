@@ -124,6 +124,13 @@ std traits string _AddSlots: (|
 
         joined
     ).
+
+    reverse = (| newString |
+        "FIXME: Byte array objects should copy their values when cloned."
+        newString: copySize: size.
+        0 to: size Do: [| :i | newString at: size prec - i PutByte: at: i ].
+        newString
+    ).
 |).
 
 std traits string _AddSlots: (|
