@@ -131,6 +131,8 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !Completion {
     var result_value: Heap.Tracked = try context.interpreter_context.heap.track(environment.globalNil());
     defer result_value.untrack(context.interpreter_context.heap);
 
+    const current_activation = context.interpreter_context.activation_stack.getCurrent().?;
+
     if (try interpreter.executeSubScript(context.interpreter_context, script)) |*script_completion| {
         switch (script_completion.data) {
             .Normal => |result| {
@@ -142,7 +144,7 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !Completion {
 
                 // TODO: Pass error information to failure block
                 std.debug.print("Received error while evaluating string: {s}\n", .{err.message});
-                runtime_error.printTraceFromActivationStack(context.interpreter_context.activation_stack.getStack(), err.source_range);
+                runtime_error.printTraceFromActivationStackUntil(context.interpreter_context.activation_stack.getStack(), err.source_range, current_activation);
 
                 return message_interpreter.sendMessage(context.interpreter_context, context.arguments[0], "value", &.{}, context.source_range);
             },

@@ -29,9 +29,10 @@ fn writeTraceForFrame(message_name: []const u8, source_range: SourceRange) void 
     std.debug.print("\x1b[0m\n", .{});
 }
 
-/// Using the given activation object stack, print a stack trace to stderr.
+/// Using the given activation object stack, print a stack trace to stderr until
+/// the end or the activation given at `until` is reached.
 /// The stack trace is indented with two spaces.
-pub fn printTraceFromActivationStack(stack: []Activation, first_source_range: SourceRange) void {
+pub fn printTraceFromActivationStackUntil(stack: []Activation, first_source_range: SourceRange, until: ?*Activation) void {
     if (stack.len == 0) {
         return;
     }
@@ -40,8 +41,12 @@ pub fn printTraceFromActivationStack(stack: []Activation, first_source_range: So
 
     var i = @intCast(isize, stack.len - 1);
     while (i >= 0) : (i -= 1) {
-        const activation = stack[@intCast(usize, i)];
-        const context = activation.creation_context;
+        const activation_ptr = &stack[@intCast(usize, i)];
+        const context = activation_ptr.creation_context;
+
+        if (until) |until_ptr| {
+            if (until_ptr == activation_ptr) break;
+        }
 
         const message_name = context.message.getValue().asByteArray().getValues();
         writeTraceForFrame(message_name, source_range);
@@ -50,4 +55,10 @@ pub fn printTraceFromActivationStack(stack: []Activation, first_source_range: So
     }
 
     writeTraceForFrame("<top level>", source_range);
+}
+
+/// Using the given activation object stack, print a stack trace to stderr.
+/// The stack trace is indented with two spaces.
+pub fn printTraceFromActivationStack(stack: []Activation, first_source_range: SourceRange) void {
+    printTraceFromActivationStackUntil(stack, first_source_range, null);
 }

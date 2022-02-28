@@ -48,6 +48,11 @@ pub const ActivationStack = struct {
         return self.stack[0..self.depth];
     }
 
+    pub fn getCurrent(self: ActivationStack) ?*Self {
+        if (self.depth == 0) return null;
+        return &self.stack[self.depth - 1];
+    }
+
     pub fn getNewActivationSlot(self: *ActivationStack) *Self {
         // NOTE: Will trigger a crash if maximum stack depth was exceeded.
         const activation = &self.stack[self.depth];
