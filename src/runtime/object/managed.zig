@@ -24,6 +24,8 @@ pub const FileDescriptor = struct {
     fd: std.os.fd_t,
     flags: u30,
 
+    const ClosedFlag: u30 = 1;
+
     pub fn adopt(fd: std.os.fd_t) FileDescriptor {
         return .{
             .flags = 0,
@@ -44,16 +46,14 @@ pub const FileDescriptor = struct {
         return Value.fromUnsignedInteger(value);
     }
 
-    // FIXME: Magic numbers aren't great.
-
     /// Return whether this file descriptor has been closed.
     pub fn isClosed(self: FileDescriptor) bool {
-        return self.flags & 1 != 0;
+        return self.flags & ClosedFlag != 0;
     }
 
     /// Set whether this fd is closed or not.
     pub fn setClosed(self: *FileDescriptor, closed: bool) void {
-        self.flags = (self.flags & ~@as(u30, 1)) | @boolToInt(closed);
+        self.flags = (self.flags & ~ClosedFlag) + (if (closed) ClosedFlag else 0);
     }
 
     pub fn close(self: *FileDescriptor) void {
