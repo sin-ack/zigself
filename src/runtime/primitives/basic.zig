@@ -82,20 +82,10 @@ pub fn RunScript(context: PrimitiveContext) !Completion {
         return Completion.initRuntimeError(context.vm, context.source_range, "Failed parsing the script passed to _RunScript", .{});
     }
 
-    // FIXME: This is too much work. Just return the original value.
-    var result_value: Heap.Tracked = try context.vm.heap.track(context.vm.nil());
-    defer result_value.untrack(context.vm.heap);
+    if (try interpreter.executeSubScript(context.interpreter_context, script)) |script_completion|
+        return script_completion;
 
-    if (try interpreter.executeSubScript(context.interpreter_context, script)) |script_completion| {
-        if (script_completion.isNormal()) {
-            result_value.untrack(context.vm.heap);
-            result_value = try context.vm.heap.track(script_completion.data.Normal);
-        } else {
-            return script_completion;
-        }
-    }
-
-    return Completion.initNormal(result_value.getValue());
+    return Completion.initNormal(context.vm.nil());
 }
 
 pub fn EvaluateStringIfFail(context: PrimitiveContext) !Completion {
@@ -126,18 +116,10 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !Completion {
         return message_interpreter.sendMessage(context.interpreter_context, context.arguments[0], "value", &.{}, context.source_range);
     }
 
-    // FIXME: This is too much work. Just return the original value.
-    var result_value: Heap.Tracked = try context.vm.heap.track(context.vm.nil());
-    defer result_value.untrack(context.vm.heap);
-
     const current_activation = context.interpreter_context.activation_stack.getCurrent().?;
 
     if (try interpreter.executeSubScript(context.interpreter_context, script)) |*script_completion| {
         switch (script_completion.data) {
-            .Normal => |result| {
-                result_value.untrack(context.vm.heap);
-                result_value = try context.vm.heap.track(result);
-            },
             .RuntimeError => |err| {
                 defer script_completion.deinit(context.vm);
 
@@ -152,7 +134,7 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !Completion {
         }
     }
 
-    return Completion.initNormal(result_value.getValue());
+    return Completion.initNormal(context.vm.nil());
 }
 
 /// Raise the argument as an error. The argument must be a byte vector.
