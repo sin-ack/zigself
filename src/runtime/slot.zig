@@ -48,11 +48,7 @@ pub const Slot = packed struct {
     /// Initalizes this slot to a mutable value.
     pub fn initMutable(self: *Slot, comptime MapType: type, map: *MapType, name: ByteVector, parent_flag: ParentFlag) void {
         self.init(name);
-        // FIXME: We're initializing this to a safe value to avoid uninitialized
-        //        values in heap for now, but this should be initialized to the
-        //        index of the mutable slot in order to avoid maintaining a
-        //        separate cursor when iterating slots.
-        self.value = Value.fromUnsignedInteger(0);
+        self.value = Value.fromUnsignedInteger(map.getAssignableSlotCount());
 
         self.setParent(parent_flag);
         self.setMutable(MapType, map, .Mutable);

@@ -179,8 +179,6 @@ fn inspectSlots(
     const map = object.getMap();
     const slots: []Slot = @call(.{}, @field(map, slot_getter), .{});
 
-    var assignable_slot_offset: usize = 0;
-
     for (slots) |slot| {
         const parent_marker: []const u8 = if (slot.isParent()) "*" else "";
         const mutability_marker: []const u8 = if (slot.isMutable()) "<-" else "=";
@@ -191,13 +189,11 @@ fn inspectSlots(
             std.debug.print("<parent object>", .{});
         } else {
             if (slot.isMutable()) {
-                try inspectValueInternal(display_type, vm, object.getAssignableSlots()[assignable_slot_offset], indent, visited_object_link);
+                try inspectValueInternal(display_type, vm, object.getAssignableSlots()[slot.value.asUnsignedInteger()], indent, visited_object_link);
             } else {
                 try inspectValueInternal(display_type, vm, slot.value, indent, visited_object_link);
             }
         }
-
-        if (slot.isMutable()) assignable_slot_offset += 1;
 
         std.debug.print(".{s}", .{separator});
     }

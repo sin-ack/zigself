@@ -160,9 +160,6 @@ pub const Slots = packed struct {
             var assignable_slot_values = try std.ArrayList(Value).initCapacity(allocator, new_map.getAssignableSlotCount());
             defer assignable_slot_values.deinit();
 
-            var source_object_assignable_slot_offset: usize = 0;
-            var target_object_assignable_slot_offset: usize = 0;
-
             for (target_object_map.getSlots()) |target_object_slot| {
                 if (!target_object_slot.isMutable())
                     continue;
@@ -170,14 +167,12 @@ pub const Slots = packed struct {
                 const value_to_append = blk: {
                     for (source_object_map.getSlots()) |source_object_slot| {
                         if (target_object_slot.hash == source_object_slot.hash) {
-                            const slot_value = source_object.getAssignableSlots()[source_object_assignable_slot_offset];
-                            source_object_assignable_slot_offset += 1;
+                            const slot_value = source_object.getAssignableSlots()[source_object_slot.value.asUnsignedInteger()];
                             break :blk slot_value;
                         }
                     }
 
-                    const slot_value = self.getAssignableSlots()[target_object_assignable_slot_offset];
-                    target_object_assignable_slot_offset += 1;
+                    const slot_value = self.getAssignableSlots()[target_object_slot.value.asUnsignedInteger()];
                     break :blk slot_value;
                 };
 
@@ -193,8 +188,7 @@ pub const Slots = packed struct {
                         continue :source_assignable_slot_loop;
                 }
 
-                const slot_value = source_object.getAssignableSlots()[source_object_assignable_slot_offset];
-                source_object_assignable_slot_offset += 1;
+                const slot_value = source_object.getAssignableSlots()[source_object_slot.value.asUnsignedInteger()];
                 assignable_slot_values.appendAssumeCapacity(slot_value);
             }
 

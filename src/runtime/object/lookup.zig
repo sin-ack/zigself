@@ -159,7 +159,6 @@ fn slotsLookup(
     // it prevents assigning to constant slots. Perhaps a primitive can help you
     // assign to a constant slot? It will cause a map copy though.
     var assignable_slots = object.getAssignableSlots();
-    var assignable_slots_cursor: usize = 0;
     // Direct lookup
     for (object.getSlots()) |slot| {
         if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing slot \"{s}\" (hash {x}) vs. our hash {x}\n", .{ slot.name.asByteArray().getValues(), slot.hash, selector_hash });
@@ -169,7 +168,7 @@ fn slotsLookup(
                     return AssignLookupResult{
                         .Result = .{
                             .object = Object.fromAddress(object.asObjectAddress()),
-                            .value_ptr = &assignable_slots[assignable_slots_cursor],
+                            .value_ptr = &assignable_slots[slot.value.asUnsignedInteger()],
                         },
                     };
                 } else {
@@ -178,18 +177,11 @@ fn slotsLookup(
                 }
             } else {
                 if (slot.isMutable()) {
-                    return Completion.initNormal(assignable_slots[assignable_slots_cursor]);
+                    return Completion.initNormal(assignable_slots[slot.value.asUnsignedInteger()]);
                 } else {
                     return Completion.initNormal(slot.value);
                 }
             }
-        }
-
-        // FIXME: Don't keep a cursor; use the value field to hold the
-        //        assignable slot index instead. It's currently sitting there
-        //        doing nothing.
-        if (slot.isMutable()) {
-            assignable_slots_cursor += 1;
         }
     }
 
