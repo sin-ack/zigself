@@ -7,9 +7,9 @@ const Allocator = std.mem.Allocator;
 
 const zigself = @import("zigself");
 const Heap = zigself.Heap;
-const environment = zigself.environment;
 const Script = zigself.Script;
 const interpreter = zigself.interpreter;
+const VirtualMachine = zigself.VirtualMachine;
 
 const Test = struct {
     basename: []const u8,
@@ -77,12 +77,6 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
 
     var progress = std.Progress{};
 
-    const heap = try Heap.create(allocator);
-    defer heap.destroy();
-
-    var lobby = try environment.prepareRuntimeEnvironment(heap);
-    defer environment.teardownGlobalObjects(heap);
-
     const stdlib_script = try Script.createFromFilePath(allocator, stdlib_entrypoint);
     defer stdlib_script.unref();
 
@@ -92,7 +86,10 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
         std.debug.panic("!!! Encountered errors while parsing the standard library entrypoint!", .{});
     }
 
-    if ((try interpreter.executeScript(allocator, heap, stdlib_script, lobby)) == null) {
+    const vm = try VirtualMachine.create(allocator);
+    defer vm.destroy();
+
+    if ((try interpreter.executeScript(vm, stdlib_script)) == null) {
         std.debug.panic("!!! Standard library script failed to execute!", .{});
     }
 
@@ -136,7 +133,7 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
             continue :next_test;
         }
 
-        const result = interpreter.executeScript(allocator, heap, script, lobby) catch |err| {
+        const result = interpreter.executeScript(vm, script) catch |err| {
             const test_name_without_extension = the_test.basename[0 .. the_test.basename.len - 5];
             std.debug.print("Caught error when executing test {s}: {}\n", .{ test_name_without_extension, err });
             if (@errorReturnTrace()) |trace| {
