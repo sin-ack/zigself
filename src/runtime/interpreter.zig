@@ -240,7 +240,7 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
         const argument_in_heap = try ByteArray.createFromString(context.vm.heap, argument);
         argument_slots[slot_init_offset].initMutable(Object.Map.Method, method_map, argument_in_heap, .NotParent);
         // FIXME: Avoid this unnecessary tracking of the nil value for arguments.
-        assignable_slot_values.append(try context.vm.heap.track(context.vm.nil())) catch unreachable;
+        assignable_slot_values.appendAssumeCapacity(try context.vm.heap.track(context.vm.nil()));
 
         slot_init_offset += 1;
     }
@@ -252,7 +252,7 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
         const slot_completion = try executeSlot(context, slot_node, Object.Map.Method, tracked_method_map.getValue().asObject().asMap().asMethodMap(), slot_init_offset);
         if (slot_completion) |completion| {
             if (completion.isNormal())
-                assignable_slot_values.append(try context.vm.heap.track(completion.data.Normal)) catch unreachable
+                assignable_slot_values.appendAssumeCapacity(try context.vm.heap.track(completion.data.Normal))
             else
                 return completion;
         }
@@ -337,7 +337,7 @@ pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) 
         var slot_completion = try executeSlot(context, slot_node, Object.Map.Slots, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), i);
         if (slot_completion) |completion| {
             if (completion.isNormal()) {
-                assignable_slot_values.append(try context.vm.heap.track(completion.data.Normal)) catch unreachable;
+                assignable_slot_values.appendAssumeCapacity(try context.vm.heap.track(completion.data.Normal));
             } else {
                 return completion;
             }
@@ -444,7 +444,7 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
                 if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent,
             );
             // FIXME: Avoid tracking all these nil values for arguments.
-            assignable_slot_values.append(try context.vm.heap.track(context.vm.nil())) catch unreachable;
+            assignable_slot_values.appendAssumeCapacity(try context.vm.heap.track(context.vm.nil()));
 
             slot_init_offset += 1;
         }
@@ -465,7 +465,7 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
             );
             if (slot_completion) |completion| {
                 if (completion.isNormal()) {
-                    assignable_slot_values.append(try context.vm.heap.track(completion.data.Normal)) catch unreachable;
+                    assignable_slot_values.appendAssumeCapacity(try context.vm.heap.track(completion.data.Normal));
                 } else {
                     return completion;
                 }

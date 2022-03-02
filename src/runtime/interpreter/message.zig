@@ -46,7 +46,7 @@ fn getMessageArguments(
             }
 
             const tracked_result = try context.vm.heap.track(result);
-            arguments.append(tracked_result) catch unreachable;
+            arguments.appendAssumeCapacity(tracked_result);
         } else {
             return completion;
         }
@@ -83,7 +83,7 @@ pub fn executeBlockMessage(
         block_object = block_value.getValue().asObject().asBlockObject();
 
         var argument_values = std.BoundedArray(Value, MaximumArguments).init(0) catch unreachable;
-        for (arguments) |argument| argument_values.append(argument.getValue()) catch unreachable;
+        for (arguments) |argument| argument_values.appendAssumeCapacity(argument.getValue());
 
         const new_activation = context.activation_stack.getNewActivationSlot();
         try block_object.activateBlock(
@@ -196,7 +196,7 @@ pub fn executeMethodMessage(
     method_object = tracked_method_object.getValue().asObject().asMethodObject();
 
     var argument_values = std.BoundedArray(Value, MaximumArguments).init(0) catch unreachable;
-    for (arguments) |argument| argument_values.append(argument.getValue()) catch unreachable;
+    for (arguments) |argument| argument_values.appendAssumeCapacity(argument.getValue());
 
     const method_activation = blk: {
         const new_activation = context.activation_stack.getNewActivationSlot();
