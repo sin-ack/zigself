@@ -1,5 +1,5 @@
 "
-Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 
 SPDX-License-Identifier: GPL-3.0-only
 "
@@ -61,7 +61,7 @@ std traits _AddSlots: (|
 
     "A linked list object."
     list = (|
-        parent* = traits clonable.
+        parent* = std traits clonable.
 
         "Remove all nodes."
         removeAll = (

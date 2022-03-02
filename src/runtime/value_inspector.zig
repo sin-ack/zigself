@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const Slot = @import("./slot.zig").Slot;
 const Object = @import("./object.zig");
 const Value = @import("./value.zig").Value;
-const environment = @import("./environment.zig");
+const VirtualMachine = @import("./virtual_machine.zig");
 
 pub const InspectDisplayType = enum { Inline, Multiline };
 const VisitedObjectLink = struct {
@@ -16,22 +16,29 @@ const VisitedObjectLink = struct {
     previous: ?*const VisitedObjectLink,
 };
 
-pub fn inspectValue(comptime display_type: InspectDisplayType, value: Value) !void {
-    return inspectValueInternal(display_type, value, 0, null);
+pub fn inspectValue(comptime display_type: InspectDisplayType, vm: *VirtualMachine, value: Value) !void {
+    return inspectValueInternal(display_type, vm, value, 0, null);
 }
 
-fn inspectValueInternal(comptime display_type: InspectDisplayType, value: Value, indent: usize, visited_object_link: ?*const VisitedObjectLink) !void {
+fn inspectValueInternal(
+    comptime display_type: InspectDisplayType,
+    vm: *VirtualMachine,
+    value: Value,
+    indent: usize,
+    visited_object_link: ?*const VisitedObjectLink,
+) !void {
     switch (value.getType()) {
         .ObjectMarker => unreachable,
         .Integer => std.debug.print("<integer> {d}", .{value.asInteger()}),
         .FloatingPoint => std.debug.print("<floating point> {d}", .{value.asFloatingPoint()}),
-        .ObjectReference => return inspectObject(display_type, value.asObject(), indent, visited_object_link),
+        .ObjectReference => return inspectObject(display_type, vm, value.asObject(), indent, visited_object_link),
     }
 }
 
 // FIXME: Move this to object code.
 fn inspectObject(
     comptime display_type: InspectDisplayType,
+    vm: *VirtualMachine,
     object: Object,
     indent: usize,
     visited_object_link: ?*const VisitedObjectLink,
@@ -57,21 +64,18 @@ fn inspectObject(
 
     // If the global objects are printed during inspect and they haven't been
     // printed directly, then print them as a summary.
-    if (!is_root_object and !environment.hasBeenTornDown()) {
-        const nil_value = environment.globalNil();
-        if (object.asValue().data == nil_value.data) {
+    if (!is_root_object) {
+        if (object.asValue().data == vm.nil().data) {
             std.debug.print("<global nil>", .{});
             return;
         }
 
-        const true_value = environment.globalTrue();
-        if (object.asValue().data == true_value.data) {
+        if (object.asValue().data == vm.getTrue().data) {
             std.debug.print("<global true>", .{});
             return;
         }
 
-        const false_value = environment.globalFalse();
-        if (object.asValue().data == false_value.data) {
+        if (object.asValue().data == vm.getFalse().data) {
             std.debug.print("<global false>", .{});
             return;
         }
@@ -83,14 +87,14 @@ fn inspectObject(
             const slots = object.asSlotsObject();
 
             std.debug.print("(|{s}", .{separator});
-            try inspectSlots(display_type, "getSlots", slots, indent + 2, separator, &my_link);
+            try inspectSlots(display_type, "getSlots", vm, slots, indent + 2, separator, &my_link);
             printWithIndent(display_type, indent, "|)", .{});
         },
         .Activation => {
             const activation = object.asSlotsObject();
 
             std.debug.print("<activation object> (|{s}", .{separator});
-            try inspectSlots(display_type, "getSlots", activation, indent + 2, separator, &my_link);
+            try inspectSlots(display_type, "getSlots", vm, activation, indent + 2, separator, &my_link);
             printWithIndent(display_type, indent, "|)", .{});
         },
         .Method => {
@@ -105,7 +109,7 @@ fn inspectObject(
 
             if (method.getMap().getNonArgumentSlots().len > 0) {
                 std.debug.print("(|{s}", .{separator});
-                try inspectSlots(display_type, "getNonArgumentSlots", method, indent + 2, separator, &my_link);
+                try inspectSlots(display_type, "getNonArgumentSlots", vm, method, indent + 2, separator, &my_link);
                 printWithIndent(display_type, indent, "|)", .{});
             } else {
                 std.debug.print("()", .{});
@@ -123,7 +127,7 @@ fn inspectObject(
 
             if (block.getMap().getNonArgumentSlots().len > 0) {
                 std.debug.print("(|{s}", .{separator});
-                try inspectSlots(display_type, "getNonArgumentSlots", block, indent + 2, separator, &my_link);
+                try inspectSlots(display_type, "getNonArgumentSlots", vm, block, indent + 2, separator, &my_link);
                 printWithIndent(display_type, indent, "|)", .{});
             } else {
                 std.debug.print("()", .{});
@@ -146,7 +150,7 @@ fn inspectObject(
 
                 for (values) |value, i| {
                     printWithIndent(display_type, indent + 2, "", .{});
-                    try inspectValueInternal(display_type, value, indent + 2, &my_link);
+                    try inspectValueInternal(display_type, vm, value, indent + 2, &my_link);
 
                     if (i < values.len - 1) std.debug.print(",", .{});
                     std.debug.print(separator, .{});
@@ -158,7 +162,7 @@ fn inspectObject(
         .Managed => {
             const managed = object.asManaged();
             std.debug.print("<managed object: {}> ", .{managed.getManagedType()});
-            try inspectValueInternal(display_type, managed.value, indent, &my_link);
+            try inspectValueInternal(display_type, vm, managed.value, indent, &my_link);
         },
     }
 }
@@ -166,6 +170,7 @@ fn inspectObject(
 fn inspectSlots(
     comptime display_type: InspectDisplayType,
     comptime slot_getter: []const u8,
+    vm: *VirtualMachine,
     object: anytype,
     indent: usize,
     separator: []const u8,
@@ -186,9 +191,9 @@ fn inspectSlots(
             std.debug.print("<parent object>", .{});
         } else {
             if (slot.isMutable()) {
-                try inspectValueInternal(display_type, object.getAssignableSlots()[assignable_slot_offset], indent, visited_object_link);
+                try inspectValueInternal(display_type, vm, object.getAssignableSlots()[assignable_slot_offset], indent, visited_object_link);
             } else {
-                try inspectValueInternal(display_type, slot.value, indent, visited_object_link);
+                try inspectValueInternal(display_type, vm, slot.value, indent, visited_object_link);
             }
         }
 

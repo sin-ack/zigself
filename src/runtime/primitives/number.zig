@@ -7,7 +7,6 @@ const Allocator = std.mem.Allocator;
 
 const Value = @import("../value.zig").Value;
 const Completion = @import("../completion.zig");
-const environment = @import("../environment.zig");
 
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
@@ -16,14 +15,14 @@ const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 fn integerOpCommon(
     comptime primitive_name: [*:0]const u8,
     context: PrimitiveContext,
-    operation: fn (receiver: i64, term: i64) Value,
+    operation: fn (context: PrimitiveContext, receiver: i64, term: i64) Value,
 ) !Completion {
     const receiver = context.receiver.getValue();
     const term = context.arguments[0].getValue();
 
     if (!receiver.isInteger()) {
         return Completion.initRuntimeError(
-            context.interpreter_context.allocator,
+            context.vm,
             context.source_range,
             "Expected integer as _" ++ primitive_name ++ ": receiver",
             .{},
@@ -32,20 +31,21 @@ fn integerOpCommon(
 
     if (!term.isInteger()) {
         return Completion.initRuntimeError(
-            context.interpreter_context.allocator,
+            context.vm,
             context.source_range,
             "Expected integer as _" ++ primitive_name ++ ": argument",
             .{},
         );
     }
 
-    return Completion.initNormal(operation(receiver.asInteger(), term.asInteger()));
+    return Completion.initNormal(operation(context, receiver.asInteger(), term.asInteger()));
 }
 
 /// Add two integer numbers. The returned value is an integer.
 pub fn IntAdd(context: PrimitiveContext) !Completion {
     return integerOpCommon("IntAdd", context, struct {
-        pub fn op(receiver: i64, term: i64) Value {
+        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) Value {
+            _ = ctx;
             return Value.fromInteger(receiver + term);
         }
     }.op);
@@ -54,7 +54,8 @@ pub fn IntAdd(context: PrimitiveContext) !Completion {
 /// Subtract the argument from the receiver. The returned value is an integer.
 pub fn IntSub(context: PrimitiveContext) !Completion {
     return integerOpCommon("IntSub", context, struct {
-        pub fn op(receiver: i64, term: i64) Value {
+        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) Value {
+            _ = ctx;
             return Value.fromInteger(receiver - term);
         }
     }.op);
@@ -63,7 +64,8 @@ pub fn IntSub(context: PrimitiveContext) !Completion {
 /// Multiply the argument with the receiver. The returned value is an integer.
 pub fn IntMul(context: PrimitiveContext) !Completion {
     return integerOpCommon("IntMul", context, struct {
-        pub fn op(receiver: i64, term: i64) Value {
+        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) Value {
+            _ = ctx;
             return Value.fromInteger(receiver * term);
         }
     }.op);
@@ -73,7 +75,8 @@ pub fn IntMul(context: PrimitiveContext) !Completion {
 /// discarded. The returned value is an integer.
 pub fn IntDiv(context: PrimitiveContext) !Completion {
     return integerOpCommon("IntDiv", context, struct {
-        pub fn op(receiver: i64, term: i64) Value {
+        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) Value {
+            _ = ctx;
             return Value.fromInteger(@divFloor(receiver, term));
         }
     }.op);
@@ -83,7 +86,8 @@ pub fn IntDiv(context: PrimitiveContext) !Completion {
 /// interger.
 pub fn IntMod(context: PrimitiveContext) !Completion {
     return integerOpCommon("IntMod", context, struct {
-        pub fn op(receiver: i64, term: i64) Value {
+        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) Value {
+            _ = ctx;
             return Value.fromInteger(@mod(receiver, term));
         }
     }.op);
@@ -93,11 +97,11 @@ pub fn IntMod(context: PrimitiveContext) !Completion {
 /// either "true" or "false".
 pub fn IntLT(context: PrimitiveContext) !Completion {
     return integerOpCommon("IntLT", context, struct {
-        pub fn op(receiver: i64, term: i64) Value {
+        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) Value {
             return if (receiver < term)
-                environment.globalTrue()
+                ctx.vm.getTrue()
             else
-                environment.globalFalse();
+                ctx.vm.getFalse();
         }
     }.op);
 }
@@ -106,11 +110,11 @@ pub fn IntLT(context: PrimitiveContext) !Completion {
 /// is either "true" or "false".
 pub fn IntGT(context: PrimitiveContext) !Completion {
     return integerOpCommon("IntGT", context, struct {
-        pub fn op(receiver: i64, term: i64) Value {
+        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) Value {
             return if (receiver > term)
-                environment.globalTrue()
+                ctx.vm.getTrue()
             else
-                environment.globalFalse();
+                ctx.vm.getFalse();
         }
     }.op);
 }
@@ -124,7 +128,7 @@ pub fn IntEq(context: PrimitiveContext) !Completion {
 
     if (!receiver.isInteger()) {
         return Completion.initRuntimeError(
-            context.interpreter_context.allocator,
+            context.vm,
             context.source_range,
             "Expected integer as _IntEq: receiver",
             .{},
@@ -132,13 +136,13 @@ pub fn IntEq(context: PrimitiveContext) !Completion {
     }
 
     if (!term.isInteger()) {
-        return Completion.initNormal(environment.globalFalse());
+        return Completion.initNormal(context.vm.getFalse());
     }
 
     return Completion.initNormal(
         if (receiver.asInteger() == term.asInteger())
-            environment.globalTrue()
+            context.vm.getTrue()
         else
-            environment.globalFalse(),
+            context.vm.getFalse(),
     );
 }

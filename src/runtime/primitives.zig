@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -11,6 +11,7 @@ const Object = @import("./object.zig");
 const Completion = @import("./completion.zig");
 const SourceRange = @import("../language/source_range.zig");
 const runtime_error = @import("./error.zig");
+const VirtualMachine = @import("./virtual_machine.zig");
 const interpreter = @import("./interpreter.zig");
 const InterpreterContext = interpreter.InterpreterContext;
 
@@ -25,6 +26,8 @@ const system_call_primitives = @import("./primitives/system_call.zig");
 pub const PrimitiveContext = struct {
     /// The current context of the interpreter.
     interpreter_context: *InterpreterContext,
+    /// The virtual machine of the interpreter. Provides easier access.
+    vm: *VirtualMachine,
     /// The receiver of this primitive call. This is the object that the
     /// primitive is called on. If the primitive was called without an explicit
     /// receiver, the receiver will be equivalent to context.self_object (unless
@@ -55,6 +58,7 @@ const PrimitiveSpec = struct {
     ) interpreter.InterpreterError!Completion {
         return try self.function(PrimitiveContext{
             .interpreter_context = context,
+            .vm = context.vm,
             .receiver = receiver,
             .arguments = arguments,
             .source_range = source_range,

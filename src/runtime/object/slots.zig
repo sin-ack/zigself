@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -617,10 +617,10 @@ pub const Block = packed struct {
         source_range: SourceRange,
         out_activation: *RuntimeActivation,
     ) !void {
-        const activation_object = try Activation.create(context.heap, .Block, self.slots.header.getMap(), self.getAssignableSlots(), receiver);
+        const activation_object = try Activation.create(context.vm.heap, .Block, self.slots.header.getMap(), self.getAssignableSlots(), receiver);
         activation_object.setArguments(arguments);
 
-        try out_activation.initInPlace(context.heap, activation_object.asValue(), message_name, source_range, false);
+        try out_activation.initInPlace(context.vm.heap, activation_object.asValue(), message_name, source_range, false);
         out_activation.parent_activation = self.getMap().parent_activation.get(context);
         out_activation.nonlocal_return_target_activation = self.getMap().nonlocal_return_target_activation.get(context);
     }

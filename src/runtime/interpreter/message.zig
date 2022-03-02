@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -15,7 +15,6 @@ const ByteVector = @import("../byte_array.zig");
 const Completion = @import("../completion.zig");
 const primitives = @import("../primitives.zig");
 const SourceRange = @import("../../language/source_range.zig");
-const environment = @import("../environment.zig");
 
 const root_interpreter = @import("../interpreter.zig");
 const InterpreterContext = root_interpreter.InterpreterContext;
@@ -31,7 +30,7 @@ fn getMessageArguments(
     defer {
         if (!did_complete_normally) {
             for (arguments.slice()) |argument| {
-                argument.untrack(context.heap);
+                argument.untrack(context.vm.heap);
             }
         }
     }
@@ -46,7 +45,7 @@ fn getMessageArguments(
                 result = result.asObject().asActivationObject().findActivationReceiver();
             }
 
-            const tracked_result = try context.heap.track(result);
+            const tracked_result = try context.vm.heap.track(result);
             arguments.append(tracked_result) catch unreachable;
         } else {
             return completion;
@@ -57,45 +56,6 @@ fn getMessageArguments(
     return null;
 }
 
-fn requiredSizeForBlockMessageName(argument_count: u8) usize {
-    var needed_space: usize = 5; // value
-    if (argument_count > 0) {
-        needed_space += 1; // :
-        needed_space += 5 * (argument_count - 1); // Any other With:s needed
-    }
-
-    return needed_space;
-}
-
-fn writeBlockMessageName(name: []u8, argument_count: u8) void {
-    std.debug.assert(name.len == requiredSizeForBlockMessageName(argument_count));
-    std.mem.copy(u8, name, "value");
-
-    if (argument_count > 0) {
-        name[5] = ':';
-
-        var remaining_buffer = name[6..];
-        while (remaining_buffer.len > 0) {
-            std.mem.copy(u8, remaining_buffer, "With:");
-            remaining_buffer = remaining_buffer[5..];
-        }
-    }
-}
-
-fn getOrCreateBlockMessageName(context: *InterpreterContext, argument_count: u8) !Heap.Tracked {
-    const result = try context.block_message_names.getOrPut(context.allocator, argument_count);
-    if (result.found_existing) {
-        return result.value_ptr.*;
-    } else {
-        const byte_array = try ByteVector.createUninitialized(context.heap, requiredSizeForBlockMessageName(argument_count));
-        writeBlockMessageName(byte_array.getValues(), argument_count);
-
-        const tracked_value = try context.heap.track(byte_array.asValue());
-        result.value_ptr.* = tracked_value;
-        return tracked_value;
-    }
-}
-
 pub fn executeBlockMessage(
     context: *InterpreterContext,
     block_value: Heap.Tracked,
@@ -103,7 +63,7 @@ pub fn executeBlockMessage(
     source_range: SourceRange,
 ) root_interpreter.InterpreterError!Completion {
     if (context.activation_stack.depth >= MaximumStackDepth) {
-        return Completion.initRuntimeError(context.allocator, source_range, "Maximum stack size reached", .{});
+        return Completion.initRuntimeError(context.vm, source_range, "Maximum stack size reached", .{});
     }
 
     var block_object = block_value.getValue().asObject().asBlockObject();
@@ -111,15 +71,13 @@ pub fn executeBlockMessage(
     // parent completion is on the activation stack (meaning its weak ptr has not
     // been deactivated).
     if (!block_object.getMap().parent_activation.isAlive(context)) {
-        return Completion.initRuntimeError(context.allocator, source_range, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
+        return Completion.initRuntimeError(context.vm, source_range, "Attempted to execute a block after its enclosing method has returned. Use objects for closures.", .{});
     }
 
-    const tracked_message_name = try getOrCreateBlockMessageName(context, @intCast(u8, arguments.len));
+    const tracked_message_name = try context.vm.getOrCreateBlockMessageName(@intCast(u8, arguments.len));
     const block_activation = blk: {
-        errdefer tracked_message_name.untrack(context.heap);
-
         // Ensure that we won't cause a GC by activating the block.
-        try context.heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(block_object.getAssignableSlotCount()));
+        try context.vm.heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(block_object.getAssignableSlotCount()));
 
         // Refresh the pointer in case a GC happened
         block_object = block_value.getValue().asObject().asBlockObject();
@@ -158,13 +116,13 @@ pub fn executeBlockMessage(
 
     const block_script = block_object.getDefinitionScript();
     const block_activation_object = block_activation.activation_object;
-    const tracked_block_activation_object = try context.heap.track(block_activation_object);
+    const tracked_block_activation_object = try context.vm.heap.track(block_activation_object);
 
     context.script = block_script;
     context.self_object = tracked_block_activation_object;
 
     defer {
-        tracked_block_activation_object.untrack(context.heap);
+        tracked_block_activation_object.untrack(context.vm.heap);
 
         // NOTE: We don't care about this if an error is bubbling up.
         if (did_execute_normally) {
@@ -180,13 +138,13 @@ pub fn executeBlockMessage(
         const statement = statements_slice[statement_index];
 
         if (last_expression_result) |last_result| {
-            last_result.untrack(context.heap);
+            last_result.untrack(context.vm.heap);
         }
 
         const completion = try root_interpreter.executeStatement(context, statement);
         switch (completion.data) {
             .Normal => |value| {
-                last_expression_result = try context.heap.track(value);
+                last_expression_result = try context.vm.heap.track(value);
                 statement_index += 1;
             },
             .NonlocalReturn => {
@@ -205,7 +163,7 @@ pub fn executeBlockMessage(
     did_execute_normally = true;
 
     if (last_expression_result) |last_result| {
-        defer last_result.untrack(context.heap);
+        defer last_result.untrack(context.vm.heap);
 
         // Do not return the activation object from the block when returning "self".
         var result = last_result.getValue();
@@ -215,7 +173,7 @@ pub fn executeBlockMessage(
 
         return Completion.initNormal(result);
     } else {
-        return Completion.initNormal(environment.globalNil());
+        return Completion.initNormal(context.vm.nil());
     }
 }
 
@@ -227,12 +185,12 @@ pub fn executeMethodMessage(
     source_range: SourceRange,
 ) root_interpreter.InterpreterError!Completion {
     if (context.activation_stack.depth >= MaximumStackDepth) {
-        return Completion.initRuntimeError(context.allocator, source_range, "Maximum stack size reached", .{});
+        return Completion.initRuntimeError(context.vm, source_range, "Maximum stack size reached", .{});
     }
 
     var method_object = tracked_method_object.getValue().asObject().asMethodObject();
     // Ensure that we won't cause a GC by activating the method.
-    try context.heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(method_object.getAssignableSlotCount()));
+    try context.vm.heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(method_object.getAssignableSlotCount()));
 
     // Refresh the pointer in case a GC happened
     method_object = tracked_method_object.getValue().asObject().asMethodObject();
@@ -243,7 +201,7 @@ pub fn executeMethodMessage(
     const method_activation = blk: {
         const new_activation = context.activation_stack.getNewActivationSlot();
         try method_object.activateMethod(
-            context.heap,
+            context.vm.heap,
             receiver.getValue(),
             argument_values.constSlice(),
             source_range,
@@ -270,13 +228,13 @@ pub fn executeMethodMessage(
 
     const method_script = method_object.getDefinitionScript();
     const method_activation_object = method_activation.activation_object;
-    const tracked_method_activation_object = try context.heap.track(method_activation_object);
+    const tracked_method_activation_object = try context.vm.heap.track(method_activation_object);
     context.script = method_script;
     context.self_object = tracked_method_activation_object;
 
     // NOTE: We don't care about this if an error is bubbling up.
     defer {
-        tracked_method_activation_object.untrack(context.heap);
+        tracked_method_activation_object.untrack(context.vm.heap);
 
         if (did_execute_normally) {
             context.script = previous_script;
@@ -291,13 +249,13 @@ pub fn executeMethodMessage(
         const statement = statements_slice[statement_index];
 
         if (last_expression_result) |last_result| {
-            last_result.untrack(context.heap);
+            last_result.untrack(context.vm.heap);
         }
 
         var completion = try root_interpreter.executeStatement(context, statement);
         switch (completion.data) {
             .Normal => |value| {
-                last_expression_result = try context.heap.track(value);
+                last_expression_result = try context.vm.heap.track(value);
                 statement_index += 1;
             },
             .NonlocalReturn => |nonlocal_return| {
@@ -306,7 +264,7 @@ pub fn executeMethodMessage(
                         // The target was us! Turn this into a regular completion
                         // and return with it.
                         last_expression_result = nonlocal_return.value;
-                        completion.deinit(context.allocator);
+                        completion.deinit(context.vm);
                         break;
                     }
                 }
@@ -328,7 +286,7 @@ pub fn executeMethodMessage(
     did_execute_normally = true;
 
     if (last_expression_result) |last_result| {
-        defer last_result.untrack(context.heap);
+        defer last_result.untrack(context.vm.heap);
 
         // Do not return the activation object from the method when returning "self".
         var result = last_result.getValue();
@@ -338,7 +296,7 @@ pub fn executeMethodMessage(
 
         return Completion.initNormal(result);
     } else {
-        return Completion.initNormal(environment.globalNil());
+        return Completion.initNormal(context.vm.nil());
     }
 }
 
@@ -355,8 +313,8 @@ pub fn executePrimitiveMessage(
         receiver = receiver.asObject().asActivationObject().findActivationReceiver();
     }
 
-    var tracked_bare_receiver = try context.heap.track(receiver);
-    defer tracked_bare_receiver.untrack(context.heap);
+    var tracked_bare_receiver = try context.vm.heap.track(receiver);
+    defer tracked_bare_receiver.untrack(context.vm.heap);
 
     // All primitives borrow a ref from the caller for the receiver and
     // each argument. It is the primitive's job to unref any argument after
@@ -364,7 +322,7 @@ pub fn executePrimitiveMessage(
     if (primitives.getPrimitive(name)) |primitive| {
         return primitive.call(context, tracked_bare_receiver, arguments, source_range);
     } else {
-        return Completion.initRuntimeError(context.allocator, source_range, "Unknown primitive selector \"{s}\"", .{name});
+        return Completion.initRuntimeError(context.vm, source_range, "Unknown primitive selector \"{s}\"", .{name});
     }
 }
 
@@ -397,9 +355,9 @@ pub fn executeAssignmentMessage(
         value_ptr.* = argument;
 
         // David will remember that.
-        try context.heap.rememberObjectReference(object_that_has_the_assignable_slot.asValue(), argument);
+        try context.vm.heap.rememberObjectReference(object_that_has_the_assignable_slot.asValue(), argument);
 
-        return Completion.initNormal(environment.globalNil());
+        return Completion.initNormal(context.vm.nil());
     } else {
         return null;
     }
@@ -414,8 +372,8 @@ pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) ro
     if (!receiver_completion.isNormal()) {
         return receiver_completion;
     }
-    var tracked_receiver = try context.heap.track(receiver_completion.data.Normal);
-    defer tracked_receiver.untrack(context.heap);
+    var tracked_receiver = try context.vm.heap.track(receiver_completion.data.Normal);
+    defer tracked_receiver.untrack(context.vm.heap);
 
     // FIXME: Avoid allocating a slice here
     var arguments = std.BoundedArray(Heap.Tracked, MaximumArguments).init(0) catch unreachable;
@@ -425,7 +383,7 @@ pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) ro
 
     defer {
         for (arguments.slice()) |argument| {
-            argument.untrack(context.heap);
+            argument.untrack(context.vm.heap);
         }
     }
     const arguments_slice = arguments.constSlice();
@@ -468,8 +426,8 @@ pub fn sendMessage(
             block_receiver.asObject().isBlockObject() and
             block_receiver.asObject().asBlockObject().isCorrectMessageForBlockExecution(name))
         {
-            var tracked_block_receiver = try context.heap.track(block_receiver);
-            defer tracked_block_receiver.untrack(context.heap);
+            var tracked_block_receiver = try context.vm.heap.track(block_receiver);
+            defer tracked_block_receiver.untrack(context.vm.heap);
 
             return executeBlockMessage(context, tracked_block_receiver, arguments, source_range);
         }
@@ -482,14 +440,14 @@ pub fn sendMessage(
 
         const lookup_result = lookup_completion.data.Normal;
         if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
-            var tracked_lookup_result = try context.heap.track(lookup_result);
-            defer tracked_lookup_result.untrack(context.heap);
+            var tracked_lookup_result = try context.vm.heap.track(lookup_result);
+            defer tracked_lookup_result.untrack(context.vm.heap);
 
             return executeMethodMessage(context, tracked_receiver, tracked_lookup_result, arguments, source_range);
         } else {
             return Completion.initNormal(lookup_result);
         }
     } else {
-        return Completion.initRuntimeError(context.allocator, source_range, "Unknown selector \"{s}\"", .{name});
+        return Completion.initRuntimeError(context.vm, source_range, "Unknown selector \"{s}\"", .{name});
     }
 }

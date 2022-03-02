@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -29,26 +29,6 @@ pub const AssignLookupResult = union(enum) {
     Completion: Completion,
 };
 
-pub fn findTraitsObject(context: *InterpreterContext, comptime selector: []const u8, source_range: SourceRange) !Completion {
-    if (try context.lobby.getValue().lookup(.Read, context, "traits", source_range)) |traits_completion| {
-        if (!traits_completion.isNormal())
-            return traits_completion;
-
-        const traits = traits_completion.data.Normal;
-        if (try traits.lookup(.Read, context, selector, source_range)) |traits_object_completion| {
-            if (!traits_object_completion.isNormal())
-                return traits_object_completion;
-
-            const traits_object = traits_object_completion.data.Normal;
-            return Completion.initNormal(traits_object);
-        } else {
-            return Completion.initRuntimeError(context.allocator, source_range, "Could not find " ++ selector ++ " in traits", .{});
-        }
-    } else {
-        return Completion.initRuntimeError(context.allocator, source_range, "Could not find traits in lobby", .{});
-    }
-}
-
 // NOTE: Only intended to share with value.zig
 
 pub fn lookupReturnType(comptime intent: LookupIntent) type {
@@ -56,15 +36,6 @@ pub fn lookupReturnType(comptime intent: LookupIntent) type {
         return LookupError!?AssignLookupResult;
     } else {
         return LookupError!?Completion;
-    }
-}
-
-pub fn lookupCompletionReturn(comptime intent: LookupIntent, completion: Completion) lookupReturnType(intent) {
-    if (intent == .Assign) {
-        std.debug.assert(!completion.isNormal());
-        return AssignLookupResult{ .Completion = completion };
-    } else {
-        return completion;
     }
 }
 
@@ -121,53 +92,38 @@ fn lookupInternal(
         .Block => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits block\n", .{});
             // NOTE: executeMessage will handle the execution of the block itself.
-            const traits_block_completion = try findTraitsObject(context, "block", source_range);
-            if (traits_block_completion.isNormal()) {
-                const traits_block = traits_block_completion.data.Normal;
-                if (intent == .Read) {
-                    if (selector_hash == parent_hash)
-                        return Completion.initNormal(traits_block);
-                }
-
-                return try traits_block.lookupByHash(intent, context, selector_hash, source_range);
+            const block_traits = context.vm.block_traits.getValue();
+            if (intent == .Read) {
+                if (selector_hash == parent_hash)
+                    return Completion.initNormal(block_traits);
             }
 
-            return lookupCompletionReturn(intent, traits_block_completion);
+            return try block_traits.lookupByHash(intent, context, selector_hash, source_range);
         },
         .Array => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits array\n", .{});
-            const traits_array_completion = try findTraitsObject(context, "array", source_range);
-            if (traits_array_completion.isNormal()) {
-                const traits_array = traits_array_completion.data.Normal;
-                if (intent == .Read) {
-                    if (selector_hash == parent_hash)
-                        return @as(?Completion, Completion.initNormal(traits_array));
-                }
-
-                return try traits_array.lookupByHash(intent, context, selector_hash, source_range);
+            const array_traits = context.vm.array_traits.getValue();
+            if (intent == .Read) {
+                if (selector_hash == parent_hash)
+                    return Completion.initNormal(array_traits);
             }
 
-            return lookupCompletionReturn(intent, traits_array_completion);
+            return try array_traits.lookupByHash(intent, context, selector_hash, source_range);
         },
         .ByteArray => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits string\n", .{});
-            const traits_string_completion = try findTraitsObject(context, "string", source_range);
-            if (traits_string_completion.isNormal()) {
-                const traits_string = traits_string_completion.data.Normal;
-                if (intent == .Read) {
-                    if (selector_hash == parent_hash)
-                        return @as(?Completion, Completion.initNormal(traits_string));
-                }
-
-                return try traits_string.lookupByHash(intent, context, selector_hash, source_range);
+            const string_traits = context.vm.string_traits.getValue();
+            if (intent == .Read) {
+                if (selector_hash == parent_hash)
+                    return Completion.initNormal(string_traits);
             }
 
-            return lookupCompletionReturn(intent, traits_string_completion);
+            return try string_traits.lookupByHash(intent, context, selector_hash, source_range);
         },
         .Managed => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at a managed object type: {}\n", .{self.asManaged().getManagedType()});
             if (intent == .Read and selector_hash == value_hash) {
-                return @as(?Completion, Completion.initNormal(self.asManaged().value));
+                return Completion.initNormal(self.asManaged().value);
             }
             return null;
         },

@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -10,6 +10,7 @@ const Value = @import("./value.zig").Value;
 const Activation = @import("./activation.zig");
 const interpreter = @import("./interpreter.zig");
 const SourceRange = @import("../language/source_range.zig");
+const VirtualMachine = @import("./virtual_machine.zig");
 
 const Self = @This();
 
@@ -62,8 +63,8 @@ pub fn initNonlocalReturn(target_activation: Activation.ActivationRef, value: He
 
 /// Creates a new runtime error completion with the given format string and parameters.
 /// Copies the source range object.
-pub fn initRuntimeError(allocator: Allocator, source_range: SourceRange, comptime fmt: []const u8, args: anytype) interpreter.InterpreterError!Self {
-    const error_message = try std.fmt.allocPrint(allocator, fmt, args);
+pub fn initRuntimeError(vm: *VirtualMachine, source_range: SourceRange, comptime fmt: []const u8, args: anytype) interpreter.InterpreterError!Self {
+    const error_message = try std.fmt.allocPrint(vm.allocator, fmt, args);
     return Self{ .data = .{ .RuntimeError = .{ .message = error_message, .source_range = source_range.copy() } } };
 }
 
@@ -73,7 +74,7 @@ pub fn initRestart() Self {
 }
 
 /// Deinitializes values in this completion as necessary.
-pub fn deinit(self: *Self, allocator: Allocator) void {
+pub fn deinit(self: *Self, vm: *VirtualMachine) void {
     switch (self.data) {
         .Normal, .Restart => {},
         .NonlocalReturn => {
@@ -81,7 +82,7 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
             //       executeMethodMessage when the value has arrived to its intended destination.
         },
         .RuntimeError => |*err| {
-            allocator.free(err.message);
+            vm.allocator.free(err.message);
             err.source_range.deinit();
         },
     }

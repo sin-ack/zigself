@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -14,9 +14,9 @@ const Script = @import("../language/script.zig");
 const ByteArray = @import("./byte_array.zig");
 const Activation = @import("./activation.zig");
 const Completion = @import("./completion.zig");
-const environment = @import("./environment.zig");
 const SourceRange = @import("../language/source_range.zig");
 const runtime_error = @import("./error.zig");
+const VirtualMachine = @import("./virtual_machine.zig");
 const ASTCopyVisitor = @import("../language/ast_copy_visitor.zig");
 const ActivationStack = Activation.ActivationStack;
 
@@ -27,15 +27,11 @@ pub const MaximumArguments = 128; // Reasonable limit
 pub const MaximumAssignableSlots = 255;
 
 pub const InterpreterContext = struct {
-    /// The allocator object that will be used throughout the interpreter's lifetime.
-    allocator: Allocator,
-    /// The object heap.
-    heap: *Heap,
+    /// The virtual machine that the interpreter is currently executing on.
+    vm: *VirtualMachine,
     /// The object that is the current context. The identifier "self" will
     /// resolve to this object.
     self_object: Heap.Tracked,
-    /// The root of the current Self world.
-    lobby: Heap.Tracked,
     /// The method/block activation stack. This is used with blocks in order to
     /// verify that the block is executed within its enclosing method and for
     /// stack traces. When the activation completes, the activation object is
@@ -44,10 +40,6 @@ pub const InterpreterContext = struct {
     /// The script file that is currently executing, used to resolve the
     /// relative paths of other script files.
     script: Script.Ref,
-    /// A mapping from argument counts to the related block message names.
-    /// Since block names will not be unique, this mapping allows us to store
-    /// a single instance of each message name for the respective block arities.
-    block_message_names: *std.AutoArrayHashMapUnmanaged(u8, Heap.Tracked),
 };
 
 pub const InterpreterError = Allocator.Error;
@@ -57,14 +49,14 @@ pub const InterpreterError = Allocator.Error;
 /// returned.
 ///
 /// Refs `script`.
-pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobby: Value) InterpreterError!?Value {
+pub fn executeScript(vm: *VirtualMachine, script: Script.Ref) InterpreterError!?Value {
     script.ref();
     defer script.unref();
 
     // Did this script execute normally?
     var did_execute_normally = false;
 
-    var activation_stack = try ActivationStack.init(allocator, MaximumStackDepth);
+    var activation_stack = try ActivationStack.init(vm.allocator, MaximumStackDepth);
     defer {
         if (!did_execute_normally) {
             // Since the execution was abruptly stopped the activation stack
@@ -73,48 +65,32 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
                 activation.deinit();
             }
         }
-        activation_stack.deinit(allocator);
+        activation_stack.deinit(vm.allocator);
     }
 
-    heap.setActivationStack(&activation_stack);
-    defer heap.setActivationStack(null);
-
-    var tracked_lobby = try heap.track(lobby);
-    defer tracked_lobby.untrack(heap);
-
-    var block_message_names = std.AutoArrayHashMapUnmanaged(u8, Heap.Tracked){};
-    defer {
-        var it = block_message_names.iterator();
-        while (it.next()) |entry| {
-            entry.value_ptr.untrack(heap);
-        }
-
-        block_message_names.deinit(allocator);
-    }
+    vm.heap.setActivationStack(&activation_stack);
+    defer vm.heap.setActivationStack(null);
 
     var context = InterpreterContext{
-        .allocator = allocator,
-        .heap = heap,
-        .self_object = tracked_lobby,
-        .lobby = tracked_lobby,
+        .vm = vm,
+        .self_object = try vm.heap.track(vm.lobby()),
         .activation_stack = &activation_stack,
         .script = script,
-        .block_message_names = &block_message_names,
     };
     var last_expression_result: ?Heap.Tracked = null;
     for (script.value.ast_root.?.statements) |statement| {
         std.debug.assert(activation_stack.depth == 0);
 
         if (last_expression_result) |result| {
-            result.untrack(heap);
+            result.untrack(vm.heap);
         }
 
         var completion = try executeStatement(&context, statement);
-        defer completion.deinit(allocator);
+        defer completion.deinit(vm);
 
         switch (completion.data) {
             .Normal => |value| {
-                last_expression_result = try heap.track(value);
+                last_expression_result = try vm.heap.track(value);
             },
             .RuntimeError => |err| {
                 std.debug.print("Received error at top level: {s}\n", .{err.message});
@@ -127,7 +103,7 @@ pub fn executeScript(allocator: Allocator, heap: *Heap, script: Script.Ref, lobb
 
     did_execute_normally = true;
     if (last_expression_result) |result| {
-        defer result.untrack(heap);
+        defer result.untrack(vm.heap);
         return result.getValue();
     }
 
@@ -144,31 +120,28 @@ pub fn executeSubScript(parent_context: *InterpreterContext, script: Script.Ref)
     defer script.unref();
 
     var child_context = InterpreterContext{
-        .allocator = parent_context.allocator,
-        .heap = parent_context.heap,
-        .self_object = parent_context.lobby,
-        .lobby = parent_context.lobby,
+        .vm = parent_context.vm,
+        .self_object = try parent_context.vm.heap.track(parent_context.vm.lobby()),
         .activation_stack = parent_context.activation_stack,
         .script = script,
-        .block_message_names = parent_context.block_message_names,
     };
     var last_expression_result: ?Heap.Tracked = null;
     for (script.value.ast_root.?.statements) |statement| {
         if (last_expression_result) |result| {
-            result.untrack(parent_context.heap);
+            result.untrack(parent_context.vm.heap);
         }
 
         var did_complete_statement_successfully = false;
         var completion = try executeStatement(&child_context, statement);
         defer {
             if (did_complete_statement_successfully) {
-                completion.deinit(parent_context.allocator);
+                completion.deinit(parent_context.vm);
             }
         }
 
         switch (completion.data) {
             .Normal => |value| {
-                last_expression_result = try parent_context.heap.track(value);
+                last_expression_result = try parent_context.vm.heap.track(value);
                 did_complete_statement_successfully = true;
             },
             .RuntimeError => {
@@ -180,7 +153,7 @@ pub fn executeSubScript(parent_context: *InterpreterContext, script: Script.Ref)
     }
 
     if (last_expression_result) |result| {
-        defer result.untrack(parent_context.heap);
+        defer result.untrack(parent_context.vm.heap);
         return Completion.initNormal(result.getValue());
     }
 
@@ -214,19 +187,19 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
     defer source_range.deinit();
 
     if (arguments.len > MaximumArguments)
-        return Completion.initRuntimeError(context.allocator, source_range, "Maximum argument limit exceeded for method", .{});
+        return Completion.initRuntimeError(context.vm, source_range, "Maximum argument limit exceeded for method", .{});
 
     var assignable_slot_count: usize = 0;
     for (object_node.slots) |slot| {
         if (slot.is_mutable) assignable_slot_count += 1;
     }
     if (arguments.len + object_node.slots.len > MaximumAssignableSlots)
-        return Completion.initRuntimeError(context.allocator, source_range, "Maximum assignable slot limit exceeded for method", .{});
+        return Completion.initRuntimeError(context.vm, source_range, "Maximum assignable slot limit exceeded for method", .{});
 
     var assignable_slot_values = std.BoundedArray(Heap.Tracked, MaximumAssignableSlots).init(0) catch unreachable;
     defer {
         for (assignable_slot_values.slice()) |value| {
-            value.untrack(context.heap);
+            value.untrack(context.vm.heap);
         }
     }
 
@@ -238,7 +211,7 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
         required_memory += ByteArray.requiredSizeForAllocation(argument.len);
     }
 
-    try context.heap.ensureSpaceInEden(required_memory);
+    try context.vm.heap.ensureSpaceInEden(required_memory);
 
     context.script.ref();
     object_node.statements.ref();
@@ -247,11 +220,11 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
     // of an error.
     var method_map = blk: {
         errdefer context.script.unref();
-        errdefer object_node.statements.unrefWithAllocator(context.allocator);
+        errdefer object_node.statements.unrefWithAllocator(context.vm.allocator);
 
-        const method_name_in_heap = try ByteArray.createFromString(context.heap, name);
+        const method_name_in_heap = try ByteArray.createFromString(context.vm.heap, name);
         break :blk try Object.Map.Method.create(
-            context.heap,
+            context.vm.heap,
             @intCast(u8, arguments.len),
             @intCast(u32, object_node.slots.len),
             object_node.statements,
@@ -264,21 +237,22 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
 
     const argument_slots = method_map.getArgumentSlots();
     for (arguments) |argument| {
-        const argument_in_heap = try ByteArray.createFromString(context.heap, argument);
+        const argument_in_heap = try ByteArray.createFromString(context.vm.heap, argument);
         argument_slots[slot_init_offset].initMutable(Object.Map.Method, method_map, argument_in_heap, .NotParent);
-        assignable_slot_values.append(try context.heap.track(environment.globalNil())) catch unreachable;
+        // FIXME: Avoid this unnecessary tracking of the nil value for arguments.
+        assignable_slot_values.append(try context.vm.heap.track(context.vm.nil())) catch unreachable;
 
         slot_init_offset += 1;
     }
 
-    const tracked_method_map = try context.heap.track(method_map.asValue());
-    defer tracked_method_map.untrack(context.heap);
+    const tracked_method_map = try context.vm.heap.track(method_map.asValue());
+    defer tracked_method_map.untrack(context.vm.heap);
 
     for (object_node.slots) |slot_node| {
         const slot_completion = try executeSlot(context, slot_node, Object.Map.Method, tracked_method_map.getValue().asObject().asMap().asMethodMap(), slot_init_offset);
         if (slot_completion) |completion| {
             if (completion.isNormal())
-                assignable_slot_values.append(try context.heap.track(completion.data.Normal)) catch unreachable
+                assignable_slot_values.append(try context.vm.heap.track(completion.data.Normal)) catch unreachable
             else
                 return completion;
         }
@@ -288,14 +262,18 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
 
     // Ensure that creating the method object won't cause a garbage collection
     // before the assignable slot values are copied in.
-    try context.heap.ensureSpaceInEden(Object.Method.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len)));
+    try context.vm.heap.ensureSpaceInEden(Object.Method.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len)));
 
     var current_assignable_slot_values = std.BoundedArray(Value, MaximumAssignableSlots).init(assignable_slot_values.len) catch unreachable;
     for (assignable_slot_values.constSlice()) |value, i| {
         current_assignable_slot_values.set(i, value.getValue());
     }
 
-    const method_object = try Object.Method.create(context.heap, tracked_method_map.getValue().asObject().asMap().asMethodMap(), current_assignable_slot_values.constSlice());
+    const method_object = try Object.Method.create(
+        context.vm.heap,
+        tracked_method_map.getValue().asObject().asMap().asMethodMap(),
+        current_assignable_slot_values.constSlice(),
+    );
     return Completion.initNormal(method_object.asValue());
 }
 
@@ -312,10 +290,10 @@ pub fn executeSlot(context: *InterpreterContext, slot_node: AST.SlotNode, compti
         return completion;
     }
 
-    const tracked_value = try context.heap.track(completion.data.Normal);
-    defer tracked_value.untrack(context.heap);
+    const tracked_value = try context.vm.heap.track(completion.data.Normal);
+    defer tracked_value.untrack(context.vm.heap);
 
-    const slot_name = try ByteArray.createFromString(context.heap, slot_node.name);
+    const slot_name = try ByteArray.createFromString(context.vm.heap, slot_node.name);
     if (slot_node.is_mutable) {
         map.getSlots()[slot_index].initMutable(MapType, map, slot_name, if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent);
         return Completion.initNormal(tracked_value.getValue());
@@ -342,24 +320,24 @@ pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) 
         if (slot.is_mutable) assignable_slot_count += 1;
     }
     if (assignable_slot_count > MaximumAssignableSlots)
-        return Completion.initRuntimeError(context.allocator, source_range, "Maximum assignable slot limit exceeded for slots object", .{});
+        return Completion.initRuntimeError(context.vm, source_range, "Maximum assignable slot limit exceeded for slots object", .{});
 
     var assignable_slot_values = std.BoundedArray(Heap.Tracked, MaximumAssignableSlots).init(0) catch unreachable;
     defer {
         for (assignable_slot_values.slice()) |value| {
-            value.untrack(context.heap);
+            value.untrack(context.vm.heap);
         }
     }
 
-    var slots_map = try Object.Map.Slots.create(context.heap, @intCast(u32, object_node.slots.len));
-    const tracked_slots_map = try context.heap.track(slots_map.asValue());
-    defer tracked_slots_map.untrack(context.heap);
+    var slots_map = try Object.Map.Slots.create(context.vm.heap, @intCast(u32, object_node.slots.len));
+    const tracked_slots_map = try context.vm.heap.track(slots_map.asValue());
+    defer tracked_slots_map.untrack(context.vm.heap);
 
     for (object_node.slots) |slot_node, i| {
         var slot_completion = try executeSlot(context, slot_node, Object.Map.Slots, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), i);
         if (slot_completion) |completion| {
             if (completion.isNormal()) {
-                assignable_slot_values.append(try context.heap.track(completion.data.Normal)) catch unreachable;
+                assignable_slot_values.append(try context.vm.heap.track(completion.data.Normal)) catch unreachable;
             } else {
                 return completion;
             }
@@ -368,14 +346,18 @@ pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) 
 
     // Ensure that creating the slots object won't cause a garbage collection
     // before the assignable slot values are copied in.
-    try context.heap.ensureSpaceInEden(Object.Slots.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len)));
+    try context.vm.heap.ensureSpaceInEden(Object.Slots.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len)));
 
     var current_assignable_slot_values = std.BoundedArray(Value, MaximumAssignableSlots).init(assignable_slot_values.len) catch unreachable;
     for (assignable_slot_values.constSlice()) |value, i| {
         current_assignable_slot_values.set(i, value.getValue());
     }
 
-    const slots_object = try Object.Slots.create(context.heap, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), current_assignable_slot_values.constSlice());
+    const slots_object = try Object.Slots.create(
+        context.vm.heap,
+        tracked_slots_map.getValue().asObject().asMap().asSlotsMap(),
+        current_assignable_slot_values.constSlice(),
+    );
     return Completion.initNormal(slots_object.asValue());
 }
 
@@ -394,14 +376,14 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
     defer source_range.deinit();
 
     if (argument_slot_count > MaximumArguments)
-        return Completion.initRuntimeError(context.allocator, source_range, "Maximum argument limit exceeded for block", .{});
+        return Completion.initRuntimeError(context.vm, source_range, "Maximum argument limit exceeded for block", .{});
     if (argument_slot_count + assignable_slot_count > MaximumAssignableSlots)
-        return Completion.initRuntimeError(context.allocator, source_range, "Maximum assignable slot limit exceeded for block", .{});
+        return Completion.initRuntimeError(context.vm, source_range, "Maximum assignable slot limit exceeded for block", .{});
 
     var assignable_slot_values = std.BoundedArray(Heap.Tracked, MaximumAssignableSlots).init(0) catch unreachable;
     defer {
         for (assignable_slot_values.slice()) |value| {
-            value.untrack(context.heap);
+            value.untrack(context.vm.heap);
         }
     }
 
@@ -425,7 +407,7 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
         }
     }
 
-    try context.heap.ensureSpaceInEden(required_memory);
+    try context.vm.heap.ensureSpaceInEden(required_memory);
 
     context.script.ref();
     block.statements.ref();
@@ -434,10 +416,10 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
     // of an error.
     var block_map = blk: {
         errdefer context.script.unref();
-        errdefer block.statements.unrefWithAllocator(context.allocator);
+        errdefer block.statements.unrefWithAllocator(context.vm.allocator);
 
         break :blk try Object.Map.Block.create(
-            context.heap,
+            context.vm.heap,
             @intCast(u8, argument_slot_count),
             @intCast(u32, block.slots.len) - @intCast(u8, argument_slot_count),
             block.statements,
@@ -453,7 +435,7 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
     var argument_slots = block_map.getArgumentSlots();
     for (block.slots) |slot_node| {
         if (slot_node.is_argument) {
-            const slot_name = try ByteArray.createFromString(context.heap, slot_node.name);
+            const slot_name = try ByteArray.createFromString(context.vm.heap, slot_node.name);
 
             argument_slots[slot_init_offset].initMutable(
                 Object.Map.Block,
@@ -461,14 +443,15 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
                 slot_name,
                 if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent,
             );
-            assignable_slot_values.append(try context.heap.track(environment.globalNil())) catch unreachable;
+            // FIXME: Avoid tracking all these nil values for arguments.
+            assignable_slot_values.append(try context.vm.heap.track(context.vm.nil())) catch unreachable;
 
             slot_init_offset += 1;
         }
     }
 
-    const tracked_block_map = try context.heap.track(block_map.asValue());
-    defer tracked_block_map.untrack(context.heap);
+    const tracked_block_map = try context.vm.heap.track(block_map.asValue());
+    defer tracked_block_map.untrack(context.vm.heap);
 
     // Add all the non-argument slots
     for (block.slots) |slot_node| {
@@ -482,7 +465,7 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
             );
             if (slot_completion) |completion| {
                 if (completion.isNormal()) {
-                    assignable_slot_values.append(try context.heap.track(completion.data.Normal)) catch unreachable;
+                    assignable_slot_values.append(try context.vm.heap.track(completion.data.Normal)) catch unreachable;
                 } else {
                     return completion;
                 }
@@ -494,14 +477,14 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
 
     // Ensure that creating the block object won't cause a garbage collection
     // before the assignable slot values are copied in.
-    try context.heap.ensureSpaceInEden(Object.Block.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len)));
+    try context.vm.heap.ensureSpaceInEden(Object.Block.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len)));
 
     var current_assignable_slot_values = std.BoundedArray(Value, MaximumAssignableSlots).init(assignable_slot_values.len) catch unreachable;
     for (assignable_slot_values.constSlice()) |value, i| {
         current_assignable_slot_values.set(i, value.getValue());
     }
 
-    const block_object = try Object.Block.create(context.heap, tracked_block_map.getValue().asObject().asMap().asBlockMap(), current_assignable_slot_values.constSlice());
+    const block_object = try Object.Block.create(context.vm.heap, tracked_block_map.getValue().asObject().asMap().asBlockMap(), current_assignable_slot_values.constSlice());
     return Completion.initNormal(block_object.asValue());
 }
 
@@ -513,7 +496,7 @@ pub fn executeReturn(context: *InterpreterContext, return_node: AST.ReturnNode) 
     const completion = try executeExpression(context, return_node.expression);
     switch (completion.data) {
         .Normal => {
-            return Completion.initNonlocalReturn(target_activation.takeRef(), try context.heap.track(completion.data.Normal));
+            return Completion.initNonlocalReturn(target_activation.takeRef(), try context.vm.heap.track(completion.data.Normal));
         },
         .RuntimeError => return completion,
         .NonlocalReturn => {
@@ -547,10 +530,10 @@ pub fn executeIdentifier(context: *InterpreterContext, identifier: AST.Identifie
             receiver = receiver.asObject().asActivationObject().findActivationReceiver();
         }
 
-        var tracked_receiver = try context.heap.track(receiver);
-        defer tracked_receiver.untrack(context.heap);
+        var tracked_receiver = try context.vm.heap.track(receiver);
+        defer tracked_receiver.untrack(context.vm.heap);
 
-        return message_interpreter.executePrimitiveMessage(context, tracked_receiver, identifier.value, &[_]Heap.Tracked{}, source_range);
+        return message_interpreter.executePrimitiveMessage(context, tracked_receiver, identifier.value, &.{}, source_range);
     }
 
     // Check for block activation. Note that this isn't the same as calling a
@@ -566,10 +549,10 @@ pub fn executeIdentifier(context: *InterpreterContext, identifier: AST.Identifie
             receiver.asObject().isBlockObject() and
             receiver.asObject().asBlockObject().isCorrectMessageForBlockExecution(identifier.value))
         {
-            var tracked_receiver = try context.heap.track(receiver);
-            defer tracked_receiver.untrack(context.heap);
+            var tracked_receiver = try context.vm.heap.track(receiver);
+            defer tracked_receiver.untrack(context.vm.heap);
 
-            return message_interpreter.executeBlockMessage(context, tracked_receiver, &[_]Heap.Tracked{}, source_range);
+            return message_interpreter.executeBlockMessage(context, tracked_receiver, &.{}, source_range);
         }
     }
 
@@ -580,36 +563,36 @@ pub fn executeIdentifier(context: *InterpreterContext, identifier: AST.Identifie
 
         const lookup_result = lookup_completion.data.Normal;
         if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
-            var tracked_lookup_result = try context.heap.track(lookup_result);
-            defer tracked_lookup_result.untrack(context.heap);
+            var tracked_lookup_result = try context.vm.heap.track(lookup_result);
+            defer tracked_lookup_result.untrack(context.vm.heap);
 
             return message_interpreter.executeMethodMessage(
                 context,
                 context.self_object,
                 tracked_lookup_result,
-                &[_]Heap.Tracked{},
+                &.{},
                 source_range,
             );
         } else {
             return Completion.initNormal(lookup_result);
         }
     } else {
-        return Completion.initRuntimeError(context.allocator, source_range, "Failed looking up \"{s}\"", .{identifier.value});
+        return Completion.initRuntimeError(context.vm, source_range, "Failed looking up \"{s}\"", .{identifier.value});
     }
 }
 
 /// Executes a string literal expression. `lobby` gains a ref during the
 /// lifetime of the function.
 pub fn executeString(context: *InterpreterContext, string: AST.StringNode) InterpreterError!Completion {
-    try context.heap.ensureSpaceInEden(
+    try context.vm.heap.ensureSpaceInEden(
         ByteArray.requiredSizeForAllocation(string.value.len) +
             Object.Map.ByteArray.requiredSizeForAllocation() +
             Object.ByteArray.requiredSizeForAllocation(),
     );
 
-    const byte_array = try ByteArray.createFromString(context.heap, string.value);
-    const byte_array_map = try Object.Map.ByteArray.create(context.heap, byte_array);
-    return Completion.initNormal((try Object.ByteArray.create(context.heap, byte_array_map)).asValue());
+    const byte_array = try ByteArray.createFromString(context.vm.heap, string.value);
+    const byte_array_map = try Object.Map.ByteArray.create(context.vm.heap, byte_array);
+    return Completion.initNormal((try Object.ByteArray.create(context.vm.heap, byte_array_map)).asValue());
 }
 
 /// Executes a number literal expression. `lobby` gains a ref during the

@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -8,9 +8,8 @@ const zig_args = @import("zig-args");
 const Script = @import("./language/script.zig");
 const ASTPrinter = @import("./language/ast_printer.zig");
 
-const Heap = @import("./runtime/heap.zig");
+const VirtualMachine = @import("./runtime/virtual_machine.zig");
 const interpreter = @import("./runtime/interpreter.zig");
-const environment = @import("./runtime/environment.zig");
 
 const ArgumentSpec = struct {
     help: bool = false,
@@ -86,12 +85,9 @@ pub fn main() !u8 {
         return 1;
     }
 
-    var heap = try Heap.create(allocator);
-    defer heap.destroy();
+    var vm = try VirtualMachine.create(allocator);
+    defer vm.destroy();
 
-    var lobby = try environment.prepareRuntimeEnvironment(heap);
-    defer environment.teardownGlobalObjects(heap);
-
-    const result = try interpreter.executeScript(allocator, heap, entrypoint_script, lobby);
+    const result = try interpreter.executeScript(vm, entrypoint_script);
     return if (result == null) 1 else 0;
 }

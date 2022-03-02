@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -138,35 +138,24 @@ pub const Value = packed struct {
 
             .Integer => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits integer\n", .{});
-
-                const traits_integer_completion = try Object.findTraitsObject(context, "integer", source_range);
-                if (traits_integer_completion.isNormal()) {
-                    const traits_integer = traits_integer_completion.data.Normal;
-                    if (intent == .Read) {
-                        if (selector_hash == parent_hash)
-                            return @as(?Completion, Completion.initNormal(traits_integer));
-                    }
-
-                    return try traits_integer.lookupByHash(intent, context, selector_hash, source_range);
+                const integer_traits = context.vm.integer_traits.getValue();
+                if (intent == .Read) {
+                    if (selector_hash == parent_hash)
+                        return @as(?Completion, Completion.initNormal(integer_traits));
                 }
 
-                return object_lookup.lookupCompletionReturn(intent, traits_integer_completion);
+                return try integer_traits.lookupByHash(intent, context, selector_hash, source_range);
             },
             .FloatingPoint => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits float\n", .{});
 
-                const traits_float_completion = try Object.findTraitsObject(context, "float", source_range);
-                if (traits_float_completion.isNormal()) {
-                    const traits_float = traits_float_completion.data.Normal;
-                    if (intent == .Read) {
-                        if (selector_hash == parent_hash)
-                            return @as(?Completion, Completion.initNormal(traits_float));
-                    }
-
-                    return try traits_float.lookupByHash(intent, context, selector_hash, source_range);
+                const float_traits = context.vm.float_traits.getValue();
+                if (intent == .Read) {
+                    if (selector_hash == parent_hash)
+                        return @as(?Completion, Completion.initNormal(float_traits));
                 }
 
-                return object_lookup.lookupCompletionReturn(intent, traits_float_completion);
+                return try float_traits.lookupByHash(intent, context, selector_hash, source_range);
             },
         };
     }

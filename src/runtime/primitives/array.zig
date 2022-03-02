@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -21,31 +21,31 @@ const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 pub fn ArrayCopySize_FillingExtrasWith(context: PrimitiveContext) !Completion {
     const size_value = context.arguments[0].getValue();
     if (!size_value.isInteger()) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected Integer as the first argument of _ArrayCopySize:FillingExtrasWith:", .{});
+        return Completion.initRuntimeError(context.vm, context.source_range, "Expected Integer as the first argument of _ArrayCopySize:FillingExtrasWith:", .{});
     }
 
     const size = size_value.asInteger();
     if (size < 0) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "First argument of _ArrayCopySize:FillingExtrasWith: must be positive", .{});
+        return Completion.initRuntimeError(context.vm, context.source_range, "First argument of _ArrayCopySize:FillingExtrasWith: must be positive", .{});
     }
 
     const required_memory = Object.Map.Array.requiredSizeForAllocation() + Object.Array.requiredSizeForAllocation(@intCast(u64, size));
-    try context.interpreter_context.heap.ensureSpaceInEden(required_memory);
+    try context.vm.heap.ensureSpaceInEden(required_memory);
 
     if (size == 0) {
-        const array_map = try Object.Map.Array.create(context.interpreter_context.heap, 0);
-        const array = try Object.Array.createWithValues(context.interpreter_context.heap, array_map, &[_]Value{}, null);
+        const array_map = try Object.Map.Array.create(context.vm.heap, 0);
+        const array = try Object.Array.createWithValues(context.vm.heap, array_map, &[_]Value{}, null);
         return Completion.initNormal(array.asValue());
     } else {
         var receiver = context.receiver.getValue();
         if (!(receiver.isObjectReference() and receiver.asObject().isArrayObject())) {
-            return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected Array as the receiver of _ArrayCopySize:FillingExtrasWith:", .{});
+            return Completion.initRuntimeError(context.vm, context.source_range, "Expected Array as the receiver of _ArrayCopySize:FillingExtrasWith:", .{});
         }
 
         const filler = context.arguments[1].getValue();
 
-        const new_array_map = try Object.Map.Array.create(context.interpreter_context.heap, @intCast(u64, size));
-        const new_array = try Object.Array.createWithValues(context.interpreter_context.heap, new_array_map, receiver.asObject().asArrayObject().getValues(), filler);
+        const new_array_map = try Object.Map.Array.create(context.vm.heap, @intCast(u64, size));
+        const new_array = try Object.Array.createWithValues(context.vm.heap, new_array_map, receiver.asObject().asArrayObject().getValues(), filler);
         return Completion.initNormal(new_array.asValue());
     }
 }
@@ -54,7 +54,7 @@ pub fn ArrayCopySize_FillingExtrasWith(context: PrimitiveContext) !Completion {
 pub fn ArraySize(context: PrimitiveContext) !Completion {
     const receiver = context.receiver.getValue();
     if (!(receiver.isObjectReference() and receiver.asObject().isArrayObject())) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected Array as the receiver of _ArraySize", .{});
+        return Completion.initRuntimeError(context.vm, context.source_range, "Expected Array as the receiver of _ArraySize", .{});
     }
 
     return Completion.initNormal(Value.fromUnsignedInteger(receiver.asObject().asArrayObject().getSize()));
@@ -67,17 +67,17 @@ pub fn ArrayAt(context: PrimitiveContext) !Completion {
     const position_value = context.arguments[0].getValue();
 
     if (!(receiver.isObjectReference() and receiver.asObject().isArrayObject())) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected Array as the receiver of _ArrayAt:", .{});
+        return Completion.initRuntimeError(context.vm, context.source_range, "Expected Array as the receiver of _ArrayAt:", .{});
     }
 
     if (!position_value.isInteger()) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected Integer as the first argument of _ArrayAt:", .{});
+        return Completion.initRuntimeError(context.vm, context.source_range, "Expected Integer as the first argument of _ArrayAt:", .{});
     }
 
     const position = position_value.asInteger();
     const array_values = receiver.asObject().asArrayObject().getValues();
     if (position < 0 or position >= array_values.len) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Position passed to _ArrayAt: is out of bounds (position: {d}, size: {d})", .{ position, array_values.len });
+        return Completion.initRuntimeError(context.vm, context.source_range, "Position passed to _ArrayAt: is out of bounds (position: {d}, size: {d})", .{ position, array_values.len });
     }
 
     return Completion.initNormal(array_values[@intCast(u64, position)]);
@@ -92,23 +92,23 @@ pub fn ArrayAt_Put(context: PrimitiveContext) !Completion {
     const new_value = context.arguments[1].getValue();
 
     if (!(receiver.isObjectReference() and receiver.asObject().isArrayObject())) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected Array as the receiver of _ArrayAt:Put:", .{});
+        return Completion.initRuntimeError(context.vm, context.source_range, "Expected Array as the receiver of _ArrayAt:Put:", .{});
     }
 
     if (!position_value.isInteger()) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Expected Integer as the first argument of _ArrayAt:Put:", .{});
+        return Completion.initRuntimeError(context.vm, context.source_range, "Expected Integer as the first argument of _ArrayAt:Put:", .{});
     }
 
     const position = position_value.asInteger();
     const array_values = receiver.asObject().asArrayObject().getValues();
     if (position < 0 or position >= array_values.len) {
-        return Completion.initRuntimeError(context.interpreter_context.allocator, context.source_range, "Position passed to _ArrayAt:Put: is out of bounds (position: {d}, size: {d})", .{ position, array_values.len });
+        return Completion.initRuntimeError(context.vm, context.source_range, "Position passed to _ArrayAt:Put: is out of bounds (position: {d}, size: {d})", .{ position, array_values.len });
     }
 
     array_values[@intCast(u64, position)] = new_value;
     // Since the array object could potentially be in an older space than the
     // value stored in it, let's add the array object to the remembered set.
-    try context.interpreter_context.heap.rememberObjectReference(receiver, new_value);
+    try context.vm.heap.rememberObjectReference(receiver, new_value);
 
     return Completion.initNormal(receiver);
 }
