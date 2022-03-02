@@ -375,7 +375,6 @@ pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) ro
     var tracked_receiver = try context.vm.heap.track(receiver_completion.data.Normal);
     defer tracked_receiver.untrack(context.vm.heap);
 
-    // FIXME: Avoid allocating a slice here
     var arguments = std.BoundedArray(Heap.Tracked, MaximumArguments).init(0) catch unreachable;
     if (try getMessageArguments(context, message.arguments, &arguments)) |completion| {
         return completion;
