@@ -109,7 +109,7 @@ pub fn stringHash(string: []const u8) u32 {
         std.debug.assert(mapped_character != 0);
 
         hash_value = (hash_value + (mapped_character * power)) % M;
-        power = if (i < 64) powers[i] else ((power * P) % M);
+        power = if (i < powers.len - 1) powers[i + 1] else ((power * P) % M);
     }
 
     return @intCast(u32, hash_value);
