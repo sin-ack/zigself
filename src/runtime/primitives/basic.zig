@@ -144,6 +144,7 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !Completion {
                 // TODO: Pass error information to failure block
                 std.debug.print("Received error while evaluating string: {s}\n", .{err.message});
                 runtime_error.printTraceFromActivationStackUntil(context.interpreter_context.activation_stack.getStack(), err.source_range, current_activation);
+                context.interpreter_context.activation_stack.restoreTo(current_activation);
 
                 return message_interpreter.sendMessage(context.interpreter_context, context.arguments[0], "value", &.{}, context.source_range);
             },

@@ -53,6 +53,22 @@ pub const ActivationStack = struct {
         return &self.stack[self.depth - 1];
     }
 
+    /// Unwinds the stack until the given activation is reached.
+    pub fn restoreTo(self: *ActivationStack, activation: *Self) void {
+        if (std.debug.runtime_safety) {
+            std.debug.assert(self.isActivationWithin(activation));
+        }
+
+        const current_activation = self.getCurrent().?;
+        std.debug.assert(@ptrToInt(current_activation) >= @ptrToInt(activation));
+
+        const distance = @divExact(@ptrToInt(current_activation) - @ptrToInt(activation), @sizeOf(Self));
+        const target_depth = self.depth - distance;
+        while (self.depth != target_depth) : (self.depth -= 1) {
+            self.stack[self.depth - 1].deinit();
+        }
+    }
+
     pub fn getNewActivationSlot(self: *ActivationStack) *Self {
         // NOTE: Will trigger a crash if maximum stack depth was exceeded.
         const activation = &self.stack[self.depth];
@@ -64,6 +80,14 @@ pub const ActivationStack = struct {
         self.depth -= 1;
         const activation = &self.stack[self.depth];
         return activation;
+    }
+
+    pub fn isActivationWithin(self: ActivationStack, activation: *Self) bool {
+        const start_of_slice = self.stack.ptr;
+        const end_of_slice = start_of_slice + self.depth;
+
+        return @ptrToInt(activation) >= @ptrToInt(start_of_slice) and
+            @ptrToInt(activation) < @ptrToInt(end_of_slice);
     }
 };
 
@@ -89,8 +113,7 @@ pub const ActivationRef = packed struct {
         const activation_ptr = self.getPointer();
 
         // Is this activation outside the currently-valid activation stack?
-        const first_invalid_activation_ptr = context.activation_stack.stack.ptr + context.activation_stack.depth;
-        if (@ptrToInt(activation_ptr) >= @ptrToInt(first_invalid_activation_ptr)) return false;
+        if (!context.activation_stack.isActivationWithin(activation_ptr)) return false;
         // Does the ID we saved match the currently-stored ID on the activation
         // we point to?
         if (self.saved_id.asUnsignedInteger() != activation_ptr.activation_id) return false;
