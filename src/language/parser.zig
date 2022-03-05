@@ -773,6 +773,7 @@ fn parseSlotName(self: *Self, allocator: Allocator, arguments: *std.ArrayList([]
             "Expected slot name, got {s}",
             .{self.lexer.current_token.toString()},
         );
+        return null;
     }
 
     var binary_message_name = std.BoundedArray(u8, tokens.MaximumIdentifierLength).init(0) catch unreachable;
