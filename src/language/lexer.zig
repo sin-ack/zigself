@@ -11,62 +11,64 @@ const Location = @import("./location.zig");
 const MaximumLookaheadLength = 4096;
 const LEXER_DEBUG = false;
 
+file_contents: []const u8,
+buffer: BufferType = undefined,
+stream: PeekStreamType = undefined,
+reader: PeekStreamType.Reader = undefined,
+current_token: tokens.Token = undefined,
+
+token_start: Location = .{},
+token_end: Location = .{},
+consumed_whitespace: usize = 0,
+
 const Self = @This();
 const BufferType = std.io.FixedBufferStream([]const u8);
 const PeekStreamType = std.io.PeekStream(.{ .Static = MaximumLookaheadLength }, BufferType.Reader);
 
-// TODO: When Zig's RLS actually starts working properly, make this a static
-//       function.
-pub fn initInPlaceFromFilePath(self: *Self, file_path: []const u8, allocator: Allocator) !void {
-    if (self.initialized)
-        @panic("Attempting to initialize already-initialized lexer");
-
-    const current_working_directory = std.fs.cwd();
-
-    const file = try current_working_directory.openFile(file_path, .{});
+pub fn createFromFile(allocator: Allocator, file_path: []const u8) !*Self {
+    const cwd = std.fs.cwd();
+    const file = try cwd.openFile(file_path, .{});
     defer file.close();
 
     var file_contents = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
     errdefer allocator.free(file_contents);
 
-    try self.initCommon(file_contents, allocator);
+    var self = try allocator.create(Self);
+    self.init(file_contents);
+    return self;
 }
 
-pub fn initInPlaceFromString(self: *Self, contents: []const u8, allocator: Allocator) !void {
-    if (self.initialized)
-        @panic("Attempting to initialize already-initialized lexer");
-
+pub fn createFromString(allocator: Allocator, contents: []const u8) !*Self {
     var file_contents = try allocator.dupe(u8, contents);
     errdefer allocator.free(file_contents);
 
-    try self.initCommon(file_contents, allocator);
+    var self = try allocator.create(Self);
+    self.init(file_contents);
+    return self;
 }
 
-fn initCommon(self: *Self, file_contents: []const u8, allocator: Allocator) !void {
+fn init(self: *Self, file_contents: []const u8) void {
     var buffer = std.io.fixedBufferStream(@as([]const u8, file_contents));
 
-    self.allocator = allocator;
-    self.file_contents = file_contents;
+    self.* = .{ .file_contents = file_contents };
     self.buffer = buffer;
     self.stream = std.io.peekStream(MaximumLookaheadLength, self.buffer.reader());
     self.reader = self.stream.reader();
-    self.initialized = true;
 }
 
-pub fn deinit(self: *Self) void {
-    if (!self.initialized)
-        @panic("Attempting to deinit uninitialized lexer");
+fn deinit(self: *Self, allocator: Allocator) void {
+    allocator.free(self.file_contents);
+}
 
-    self.allocator.free(self.file_contents);
+pub fn destroy(self: *Self, allocator: Allocator) void {
+    self.deinit(allocator);
+    allocator.destroy(self);
 }
 
 /// Return the next token from the file stream.
-pub fn nextToken(self: *Self) !*tokens.Token {
-    if (!self.initialized)
-        @panic("Attempting to call Lexer.nextToken on uninitialized lexer");
-
+pub fn nextToken(self: *Self, allocator: Allocator) !*tokens.Token {
     if (self.current_token == .String) {
-        self.allocator.free(self.current_token.String);
+        allocator.free(self.current_token.String);
     }
 
     self.consumed_whitespace = 0;
@@ -89,7 +91,7 @@ pub fn nextToken(self: *Self) !*tokens.Token {
         return &self.current_token;
     }
 
-    if (try self.lexString()) |token| {
+    if (try self.lexString(allocator)) |token| {
         if (LEXER_DEBUG) std.debug.print("lexer: Current token is now a string: \"{s}\"\n", .{token.String});
         self.current_token = token;
         return &self.current_token;
@@ -194,7 +196,7 @@ fn lexComment(self: *Self) !?tokens.Token {
 
 /// Lex a string, if possible.
 /// The allocated string will be owned by the caller.
-fn lexString(self: *Self) !?tokens.Token {
+fn lexString(self: *Self, allocator: Allocator) !?tokens.Token {
     var first_byte: u8 = (try self.readByte()) orelse return null;
     if (first_byte != '\'') {
         try self.stream.putBackByte(first_byte);
@@ -202,7 +204,7 @@ fn lexString(self: *Self) !?tokens.Token {
     }
     self.token_end.advanceForCharacter(first_byte);
 
-    var string_builder = std.ArrayList(u8).init(self.allocator);
+    var string_builder = std.ArrayList(u8).init(allocator);
     defer string_builder.deinit();
 
     var did_escape = false;
@@ -413,11 +415,13 @@ fn lexIdentifier(self: *Self) !?tokens.Token {
     }
     self.token_end.advanceForCharacter(first_byte);
 
-    var token = tokens.Token{ .Identifier = undefined };
+    var buffer: [tokens.MaximumIdentifierLength + 1:0]u8 = undefined;
     var offset: usize = 0;
 
-    token.Identifier[offset] = first_byte;
+    buffer[offset] = first_byte;
     offset += 1;
+
+    const is_capitalized = std.ascii.isUpper(first_byte);
 
     var did_finish_identifier = false;
     var last_byte: u8 = undefined;
@@ -433,16 +437,41 @@ fn lexIdentifier(self: *Self) !?tokens.Token {
             return error.MaximumIdentifierLengthExceeded;
         }
 
-        token.Identifier[offset] = c;
+        buffer[offset] = c;
         offset += 1;
         self.token_end.advanceForCharacter(c);
     }
 
+    var is_keyword = false;
     if (did_finish_identifier) {
-        try self.stream.putBackByte(last_byte);
+        if (last_byte == ':') {
+            is_keyword = true;
+            self.token_end.advanceForCharacter(':');
+            buffer[offset] = ':';
+            offset += 1;
+        } else {
+            try self.stream.putBackByte(last_byte);
+        }
     }
 
-    token.Identifier[offset] = 0;
+    var token: tokens.Token = undefined;
+    var target_slice: []u8 = undefined;
+    if (is_keyword) {
+        if (is_capitalized) {
+            token = .{ .RestKeyword = undefined };
+            target_slice = token.RestKeyword[0..];
+        } else {
+            token = .{ .FirstKeyword = undefined };
+            target_slice = token.FirstKeyword[0..];
+        }
+    } else {
+        token = .{ .Identifier = undefined };
+        target_slice = token.Identifier[0..];
+    }
+
+    std.mem.copy(u8, target_slice, buffer[0..offset]);
+    target_slice[offset] = 0;
+
     return token;
 }
 
@@ -475,16 +504,3 @@ fn lexSymbol(self: *Self) !?tokens.Token {
 
     return null;
 }
-
-// Zig's RLS is currently broken. :^(
-initialized: bool = false,
-allocator: Allocator = undefined,
-file_contents: []const u8 = undefined,
-buffer: BufferType = undefined,
-stream: PeekStreamType = undefined,
-reader: PeekStreamType.Reader = undefined,
-current_token: tokens.Token = undefined,
-
-token_start: Location = .{},
-token_end: Location = .{},
-consumed_whitespace: usize = 0,

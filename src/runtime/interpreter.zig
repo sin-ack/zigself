@@ -78,14 +78,14 @@ pub fn executeScript(vm: *VirtualMachine, script: Script.Ref) InterpreterError!?
         .script = script,
     };
     var last_expression_result: ?Heap.Tracked = null;
-    for (script.value.ast_root.?.statements) |statement| {
+    for (script.value.ast_root.?.statements.value.statements) |expression| {
         std.debug.assert(activation_stack.depth == 0);
 
         if (last_expression_result) |result| {
             result.untrack(vm.heap);
         }
 
-        var completion = try executeStatement(&context, statement);
+        var completion = try executeExpression(&context, expression);
         defer completion.deinit(vm);
 
         switch (completion.data) {
@@ -126,13 +126,13 @@ pub fn executeSubScript(parent_context: *InterpreterContext, script: Script.Ref)
         .script = script,
     };
     var last_expression_result: ?Heap.Tracked = null;
-    for (script.value.ast_root.?.statements) |statement| {
+    for (script.value.ast_root.?.statements.value.statements) |expression| {
         if (last_expression_result) |result| {
             result.untrack(parent_context.vm.heap);
         }
 
         var did_complete_statement_successfully = false;
-        var completion = try executeStatement(&child_context, statement);
+        var completion = try executeExpression(&child_context, expression);
         defer {
             if (did_complete_statement_successfully) {
                 completion.deinit(parent_context.vm);
@@ -158,11 +158,6 @@ pub fn executeSubScript(parent_context: *InterpreterContext, script: Script.Ref)
     }
 
     return null;
-}
-
-/// Executes a statement. All refs are forwardded.
-pub fn executeStatement(context: *InterpreterContext, statement: AST.StatementNode) InterpreterError!Completion {
-    return try executeExpression(context, statement.expression);
 }
 
 /// Executes an expression. All refs are forwarded.
@@ -280,11 +275,15 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
 /// Creates a new slot. All refs are forwarded.
 pub fn executeSlot(context: *InterpreterContext, slot_node: AST.SlotNode, comptime MapType: type, map: *MapType, slot_index: usize) InterpreterError!?Completion {
     const completion = blk: {
-        if (slot_node.value == .Object and (slot_node.value.Object.statements.value.statements.len > 0 or slot_node.arguments.len > 0)) {
-            break :blk try executeMethod(context, slot_node.name, slot_node.value.Object.*, slot_node.arguments);
-        } else {
-            break :blk try executeExpression(context, slot_node.value);
+        if (slot_node.value) |value| {
+            if (value == .Object and (value.Object.statements.value.statements.len > 0 or slot_node.arguments.len > 0)) {
+                break :blk try executeMethod(context, slot_node.name, value.Object.*, slot_node.arguments);
+            } else {
+                break :blk try executeExpression(context, value);
+            }
         }
+
+        break :blk Completion.initNormal(context.vm.nil());
     };
     if (!completion.isNormal()) {
         return completion;

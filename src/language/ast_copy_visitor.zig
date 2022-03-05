@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const AST = @import("./ast.zig");
 
 pub fn visitScript(script: AST.ScriptNode, allocator: Allocator) !AST.ScriptNode {
-    const statements = try std.ArrayList(AST.StatementNode).initCapacity(allocator, script.statements.len);
+    const statements = try std.ArrayList(AST.ExpressionNode).initCapacity(allocator, script.statements.len);
     errdefer {
         for (statements.items) |*statement| {
             statement.deinit(allocator);
@@ -23,8 +23,8 @@ pub fn visitScript(script: AST.ScriptNode, allocator: Allocator) !AST.ScriptNode
     return AST.ScriptNode{ .statements = statements.toOwnedSlice() };
 }
 
-pub fn visitStatement(statement: AST.StatementNode, allocator: Allocator) !AST.StatementNode {
-    return AST.StatementNode{ .expression = try visitExpression(statement.expression, allocator), .range = statement.range };
+pub fn visitStatement(statement: AST.ExpressionNode, allocator: Allocator) !AST.ExpressionNode {
+    return AST.ExpressionNode{ .expression = try visitExpression(statement.expression, allocator), .range = statement.range };
 }
 
 pub fn visitExpression(expression: AST.ExpressionNode, allocator: Allocator) Allocator.Error!AST.ExpressionNode {
@@ -68,9 +68,9 @@ pub fn visitSlot(slot: AST.SlotNode, allocator: Allocator) !AST.SlotNode {
 
 fn visitSlotsStatementsCommon(
     slots: []AST.SlotNode,
-    statements: []AST.StatementNode,
+    statements: []AST.ExpressionNode,
     out_slots: *[]AST.SlotNode,
-    out_statements: *[]AST.StatementNode,
+    out_statements: *[]AST.ExpressionNode,
     allocator: Allocator,
 ) !void {
     var slots_copy = try std.ArrayList(AST.SlotNode).initCapacity(allocator, slots.len);
@@ -81,7 +81,7 @@ fn visitSlotsStatementsCommon(
         slots_copy.deinit();
     }
 
-    var statements_copy = try std.ArrayList(AST.StatementNode).initCapacity(allocator, statements.len);
+    var statements_copy = try std.ArrayList(AST.ExpressionNode).initCapacity(allocator, statements.len);
     errdefer {
         for (statements_copy.items) |*statement| {
             statement.deinit(allocator);
@@ -103,14 +103,14 @@ fn visitSlotsStatementsCommon(
 
 pub fn visitObject(object: AST.ObjectNode, allocator: Allocator) !*AST.ObjectNode {
     var slots: []AST.SlotNode = undefined;
-    var statements: []AST.StatementNode = undefined;
+    var statements: []AST.ExpressionNode = undefined;
 
     var object_copy = try allocator.create(AST.ObjectNode);
     errdefer allocator.destroy(object_copy);
 
     try visitSlotsStatementsCommon(object.slots, object.statements.value.statements, &slots, &statements, allocator);
     object_copy.slots = slots;
-    object_copy.statements = try AST.Statements.create(allocator, statements);
+    object_copy.statements = try AST.StatementList.create(allocator, statements);
     object_copy.range = object.range;
 
     return object_copy;
@@ -118,14 +118,14 @@ pub fn visitObject(object: AST.ObjectNode, allocator: Allocator) !*AST.ObjectNod
 
 pub fn visitBlock(block: AST.BlockNode, allocator: Allocator) !*AST.BlockNode {
     var slots: []AST.SlotNode = undefined;
-    var statements: []AST.StatementNode = undefined;
+    var statements: []AST.ExpressionNode = undefined;
 
     var block_copy = try allocator.create(AST.BlockNode);
     errdefer allocator.destroy(block_copy);
 
     try visitSlotsStatementsCommon(block.slots, block.statements.value.statements, &slots, &statements, allocator);
     block_copy.slots = slots;
-    block_copy.statements = try AST.Statements.create(allocator, statements);
+    block_copy.statements = try AST.StatementList.create(allocator, statements);
     block_copy.range = block.range;
 
     return block_copy;

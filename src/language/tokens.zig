@@ -21,7 +21,6 @@ pub const TokenRepresentation = struct {
     pub const Hash = "#";
     pub const Dollar = "$";
     pub const Percent = "%";
-    pub const Cap = "^";
     pub const Ampersand = "&";
     pub const Asterisk = "*";
     pub const Comma = ",";
@@ -36,9 +35,16 @@ pub const TokenRepresentation = struct {
     pub const QuestionMark = "?";
     pub const Backtick = "`";
     pub const Tilde = "~";
+    // Double-pipe, allowed for "or" operator on booleans.
+    pub const DoublePipe = "||";
+    // Double-cap, allowed for "xor" operator on booleans.
+    pub const DoubleCap = "^^";
 
     /// Used in keyword messages.
     pub const Colon = ":";
+
+    /// Used for non-local returns.
+    pub const Cap = "^";
 
     /// Statement terminator, or floating point number.
     pub const Period = ".";
@@ -56,12 +62,13 @@ pub const TokenRepresentation = struct {
 };
 
 pub const OperatorTokens = [_]std.meta.Tag(Token){
+    .DoublePipe,
+    .DoubleCap,
     .Bang,
     .Sigil,
     .Hash,
     .Dollar,
     .Percent,
-    .Cap,
     .Ampersand,
     .Asterisk,
     .Comma,
@@ -87,7 +94,6 @@ pub const Token = union(enum) {
     Hash: void,
     Dollar: void,
     Percent: void,
-    Cap: void,
     Ampersand: void,
     Asterisk: void,
     Comma: void,
@@ -102,7 +108,10 @@ pub const Token = union(enum) {
     QuestionMark: void,
     Backtick: void,
     Tilde: void,
+    DoublePipe: void,
+    DoubleCap: void,
     Colon: void,
+    Cap: void,
     Period: void,
     Pipe: void,
     ParenOpen: void,
@@ -118,6 +127,8 @@ pub const Token = union(enum) {
 
     String: []const u8,
     Identifier: [MaximumIdentifierLength:0]u8,
+    FirstKeyword: [MaximumIdentifierLength + 1:0]u8,
+    RestKeyword: [MaximumIdentifierLength + 1:0]u8,
     Integer: i64,
     FloatingPoint: f64,
 
@@ -125,6 +136,7 @@ pub const Token = union(enum) {
         return switch (self) {
             .String => "<string>",
             .Identifier => "<identifier>",
+            .FirstKeyword, .RestKeyword => "<keyword>",
             .Integer => "<integer>",
             .FloatingPoint => "<floating point>",
             .EOF => "<end of file>",
@@ -162,6 +174,7 @@ pub fn tokenTypeToString(token_type: std.meta.Tag(Token)) []const u8 {
     return switch (token_type) {
         .String => "<string>",
         .Identifier => "<identifier>",
+        .FirstKeyword, .RestKeyword => "<keyword>",
         .Integer => "<integer>",
         .FloatingPoint => "<floating point>",
         .EOF => "<end of file>",

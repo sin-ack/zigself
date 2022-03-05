@@ -135,13 +135,13 @@ pub fn executeBlockMessage(
     var statement_index: usize = 0;
     const statements_slice = block_object.getStatementsSlice();
     while (statement_index < statements_slice.len) {
-        const statement = statements_slice[statement_index];
+        const expression = statements_slice[statement_index];
 
         if (last_expression_result) |last_result| {
             last_result.untrack(context.vm.heap);
         }
 
-        const completion = try root_interpreter.executeStatement(context, statement);
+        const completion = try root_interpreter.executeExpression(context, expression);
         switch (completion.data) {
             .Normal => |value| {
                 last_expression_result = try context.vm.heap.track(value);
@@ -246,13 +246,13 @@ pub fn executeMethodMessage(
     var statement_index: usize = 0;
     const statements_slice = method_object.getStatementsSlice();
     while (statement_index < statements_slice.len) {
-        const statement = statements_slice[statement_index];
+        const expression = statements_slice[statement_index];
 
         if (last_expression_result) |last_result| {
             last_result.untrack(context.vm.heap);
         }
 
-        var completion = try root_interpreter.executeStatement(context, statement);
+        var completion = try root_interpreter.executeExpression(context, expression);
         switch (completion.data) {
             .Normal => |value| {
                 last_expression_result = try context.vm.heap.track(value);
@@ -368,11 +368,14 @@ pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) ro
     var source_range = SourceRange.init(context.script, message.range);
     defer source_range.deinit();
 
-    const receiver_completion = try root_interpreter.executeExpression(context, message.receiver);
-    if (!receiver_completion.isNormal()) {
-        return receiver_completion;
-    }
-    var tracked_receiver = try context.vm.heap.track(receiver_completion.data.Normal);
+    const receiver = if (message.receiver) |expr| blk: {
+        const receiver_completion = try root_interpreter.executeExpression(context, expr);
+        if (!receiver_completion.isNormal())
+            return receiver_completion;
+        break :blk receiver_completion.data.Normal;
+    } else context.self_object.getValue();
+
+    var tracked_receiver = try context.vm.heap.track(receiver);
     defer tracked_receiver.untrack(context.vm.heap);
 
     var arguments = std.BoundedArray(Heap.Tracked, MaximumArguments).init(0) catch unreachable;

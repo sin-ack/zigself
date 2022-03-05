@@ -1,102 +1,863 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Location = @import("./location.zig");
-const Lexer = @import("./lexer.zig");
 const AST = @import("./ast.zig");
-const tokens = @import("./tokens.zig");
 const Diagnostics = @import("./diagnostics.zig");
+const Lexer = @import("./lexer.zig");
+const tokens = @import("./tokens.zig");
 
+lexer: *Lexer,
+diagnostics: Diagnostics,
+
+pub const ParseError = errorSetOf(Lexer.nextToken);
 const Self = @This();
 
-const SlotName = struct {
-    name: []const u8,
-    arguments: [][]const u8,
+pub fn createFromFile(allocator: Allocator, file_path: []const u8) !*Self {
+    var lexer = try Lexer.createFromFile(allocator, file_path);
+    errdefer lexer.destroy(allocator);
+    var diagnostics = try Diagnostics.init(allocator);
+    errdefer diagnostics.deinit();
 
-    pub fn deinit(self: *SlotName, allocator: Allocator) void {
-        allocator.free(self.name);
+    var self = try allocator.create(Self);
+    self.init(lexer, diagnostics);
+    return self;
+}
 
-        for (self.arguments) |argument| {
-            allocator.free(argument);
-        }
-        allocator.free(self.arguments);
+pub fn createFromString(allocator: Allocator, contents: []const u8) !*Self {
+    var lexer = try Lexer.createFromString(allocator, contents);
+    errdefer lexer.destroy(allocator);
+    var diagnostics = try Diagnostics.init(allocator);
+    errdefer diagnostics.deinit();
+
+    var self = try allocator.create(Self);
+    self.init(lexer, diagnostics);
+    return self;
+}
+
+fn init(self: *Self, lexer: *Lexer, diagnostics: Diagnostics) void {
+    self.lexer = lexer;
+    self.diagnostics = diagnostics;
+}
+
+fn deinit(self: *Self, allocator: Allocator) void {
+    self.lexer.destroy(allocator);
+    self.diagnostics.deinit();
+}
+
+pub fn destroy(self: *Self, allocator: Allocator) void {
+    self.deinit(allocator);
+    allocator.destroy(self);
+}
+
+pub fn parseScript(self: *Self, allocator: Allocator) ParseError!AST.ScriptNode {
+    // Script = StatementList
+
+    _ = try self.lexer.nextToken(allocator);
+    const statements = try self.parseStatementList(allocator, false);
+    errdefer statements.unrefWithAllocator(allocator);
+    if (!try self.expect(allocator, .EOF, .DontConsume)) {
+        try self.diagnostics.reportDiagnosticFormatted(
+            .Error,
+            self.lexer.token_start,
+            "Expected end-of-file after last statement, got {s}",
+            .{self.lexer.current_token.toString()},
+        );
     }
-};
+
+    return AST.ScriptNode{ .statements = statements };
+}
+
+fn parseStatementList(self: *Self, allocator: Allocator, allow_nonlocal_return: bool) ParseError!AST.StatementList.Ref {
+    // StatementList = Expression ("." Expression)* "."? | empty
+
+    var statements = std.ArrayList(AST.ExpressionNode).init(allocator);
+    defer {
+        for (statements.items) |*expression| {
+            expression.deinit(allocator);
+        }
+        statements.deinit();
+    }
+
+    var did_parse_nonlocal_return = false;
+    var should_wrap_expression_with_return_node = false;
+
+    if (self.lexer.current_token != .EOF) first_expr_parsing: {
+        {
+            const start_of_expression = self.lexer.token_start;
+            if (self.lexer.current_token == .Cap) parse_nonlocal_return: {
+                if (!allow_nonlocal_return) {
+                    try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Non-local returns are not allowed here");
+                    break :parse_nonlocal_return;
+                }
+
+                should_wrap_expression_with_return_node = true;
+                _ = try self.lexer.nextToken(allocator);
+            }
+
+            var first_expression = (try self.parseExpression(allocator, false)) orelse break :first_expr_parsing;
+            errdefer first_expression.deinit(allocator);
+
+            if (should_wrap_expression_with_return_node) {
+                var return_node = try allocator.create(AST.ReturnNode);
+                return_node.* = .{
+                    .expression = first_expression,
+                    .range = .{ .start = start_of_expression, .end = first_expression.range().end },
+                };
+                first_expression = AST.ExpressionNode{ .Return = return_node };
+                did_parse_nonlocal_return = true;
+                should_wrap_expression_with_return_node = false;
+            }
+
+            try statements.append(first_expression);
+        }
+
+        while (self.lexer.current_token == .Period) {
+            _ = try self.lexer.nextToken(allocator);
+
+            const start_of_expression = self.lexer.token_start;
+            if (self.lexer.current_token == .Cap) parse_nonlocal_return: {
+                if (!allow_nonlocal_return) {
+                    try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Non-local returns are not allowed here");
+                    break :parse_nonlocal_return;
+                } else if (did_parse_nonlocal_return) {
+                    try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Unexpected statement after non-local return");
+                    break :parse_nonlocal_return;
+                }
+
+                should_wrap_expression_with_return_node = true;
+                _ = try self.lexer.nextToken(allocator);
+            }
+
+            if (!self.canParseExpression()) {
+                if (should_wrap_expression_with_return_node)
+                    try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Expected expression after non-local return");
+                break;
+            }
+
+            if (did_parse_nonlocal_return) {
+                try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Unexpected statement after non-local return");
+            }
+
+            // TODO: Recover until next period or EOF
+            var expression = (try self.parseExpression(allocator, false)) orelse continue;
+            errdefer expression.deinit(allocator);
+
+            if (should_wrap_expression_with_return_node) {
+                var return_node = try allocator.create(AST.ReturnNode);
+                return_node.* = .{
+                    .expression = expression,
+                    .range = .{ .start = start_of_expression, .end = expression.range().end },
+                };
+                expression = AST.ExpressionNode{ .Return = return_node };
+                did_parse_nonlocal_return = true;
+                should_wrap_expression_with_return_node = false;
+            }
+
+            try statements.append(expression);
+        }
+    }
+
+    return AST.StatementList.create(allocator, statements.toOwnedSlice());
+}
+
+fn canParseExpression(self: *Self) bool {
+    // binary to self
+    if (self.lexer.current_token.isOperator())
+        return true;
+
+    return switch (self.lexer.current_token) {
+        // zig fmt: off
+        .FirstKeyword, // keyword to self
+        .Identifier,   // unary to self
+        .ParenOpen,    // object/subexpr
+        .BracketOpen,  // block
+        .String,
+        .Integer,
+        .FloatingPoint,
+        => true,
+        // zig fmt: on
+        else => false,
+    };
+}
+
+fn parseExpression(self: *Self, allocator: Allocator, avoid_keyword_after_receiver: bool) ParseError!?AST.ExpressionNode {
+    // Expression = KeywordSend
+    //            | BinarySend
+    //            | Primary UnarySend* BinarySend? KeywordSend?
+
+    _ = avoid_keyword_after_receiver;
+
+    if (self.lexer.current_token == .FirstKeyword)
+        return try self.parseKeywordMessage(allocator, null);
+
+    if (self.lexer.current_token.isOperator())
+        return try self.parseBinaryMessage(allocator, null);
+
+    var primary = (try self.parsePrimary(allocator)) orelse return null;
+    errdefer primary.deinit(allocator);
+
+    return try self.parseExpressionFromPrimary(allocator, primary, avoid_keyword_after_receiver);
+}
+
+fn parseExpressionFromPrimary(self: *Self, allocator: Allocator, primary: AST.ExpressionNode, avoid_keyword_after_receiver: bool) ParseError!?AST.ExpressionNode {
+    var expr = primary;
+
+    // Collect unary messages
+    while (self.lexer.current_token == .Identifier) {
+        var message_node = try allocator.create(AST.MessageNode);
+        errdefer allocator.destroy(message_node);
+
+        // FIXME: The source code is always kept in memory, even after the file
+        //        has been parsed. The script object always owns the AST, and
+        //        shares the same lifetime. Avoid these allocations by simply
+        //        pointing to a slice of source code.
+        const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
+        var identifier_copy = try allocator.dupe(u8, identifier_slice);
+        // NOTE: message_node takes ownership of this identifier so we don't errdefer here.
+        //       In case of error, expr.deinit cleans up the identifier.
+
+        message_node.* = .{
+            .receiver = expr,
+            .message_name = identifier_copy,
+            .arguments = &.{},
+            .range = .{ .start = expr.range().start, .end = self.lexer.token_end },
+        };
+        expr = AST.ExpressionNode{ .Message = message_node };
+
+        _ = try self.lexer.nextToken(allocator);
+    }
+
+    // If possible, parse a binary message.
+    if (self.lexer.current_token.isOperator())
+        return try self.parseBinaryMessage(allocator, expr);
+
+    // Otherwise, try parsing a keyword message.
+    if (self.lexer.current_token == .FirstKeyword and !avoid_keyword_after_receiver)
+        return try self.parseKeywordMessage(allocator, expr);
+
+    return expr;
+}
+
+fn parseBinaryMessage(self: *Self, allocator: Allocator, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
+    // BinarySend = binaryOp+ Expression
+    std.debug.assert(self.lexer.current_token.isOperator());
+
+    const start_of_message = self.lexer.token_start;
+    var binary_message_name = std.BoundedArray(u8, tokens.MaximumIdentifierLength).init(0) catch unreachable;
+
+    // FIXME: Disallow space between operator tokens.
+    while (self.lexer.current_token.isOperator()) {
+        binary_message_name.appendSlice(self.lexer.current_token.toString()) catch {
+            try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Maximum binary operator length exceeded");
+            // FIXME: This will fail if we exceeded the binary operator length with an implicit self!
+            return receiver;
+        };
+
+        _ = try self.lexer.nextToken(allocator);
+    }
+
+    var term = (try self.parseExpression(allocator, true)) orelse return null;
+    errdefer term.deinit(allocator);
+    var binary_message_copy = try allocator.dupe(u8, binary_message_name.constSlice());
+    errdefer allocator.free(binary_message_copy);
+    var arguments = try allocator.alloc(AST.ExpressionNode, 1);
+    errdefer allocator.free(arguments);
+    arguments[0] = term;
+
+    var message_node = try allocator.create(AST.MessageNode);
+    message_node.* = .{
+        .receiver = receiver,
+        .message_name = binary_message_copy,
+        .arguments = arguments,
+        .range = .{ .start = if (receiver) |r| r.range().start else start_of_message, .end = term.range().end },
+    };
+
+    return AST.ExpressionNode{ .Message = message_node };
+}
+
+fn parseKeywordMessage(self: *Self, allocator: Allocator, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
+    // KeywordSend = firstKeyword Expression (restKeyword Expression)*
+    std.debug.assert(self.lexer.current_token == .FirstKeyword);
+
+    const start_of_message = self.lexer.token_start;
+    const first_keyword_slice = std.mem.sliceTo(&self.lexer.current_token.FirstKeyword, 0);
+
+    var message_name = try std.ArrayList(u8).initCapacity(allocator, first_keyword_slice.len);
+    defer message_name.deinit();
+    var arguments = try std.ArrayList(AST.ExpressionNode).initCapacity(allocator, 1);
+    defer {
+        for (arguments.items) |*expression| {
+            expression.deinit(allocator);
+        }
+        arguments.deinit();
+    }
+
+    message_name.appendSliceAssumeCapacity(first_keyword_slice);
+    _ = try self.lexer.nextToken(allocator);
+
+    const first_expression = (try self.parseExpression(allocator, false)) orelse return null;
+    // NOTE: No errdefer as arguments now owns first_expression.
+    arguments.appendAssumeCapacity(first_expression);
+
+    while (self.lexer.current_token == .RestKeyword) {
+        const rest_keyword_slice = std.mem.sliceTo(&self.lexer.current_token.RestKeyword, 0);
+        try message_name.appendSlice(rest_keyword_slice);
+        _ = try self.lexer.nextToken(allocator);
+
+        var expression = (try self.parseExpression(allocator, false)) orelse return null;
+        errdefer expression.deinit(allocator);
+        try arguments.append(expression);
+    }
+
+    const end_of_last_argument = arguments.items[arguments.items.len - 1].range().end;
+
+    var message_node = try allocator.create(AST.MessageNode);
+    errdefer allocator.destroy(message_node);
+
+    message_node.* = .{
+        .receiver = receiver,
+        .message_name = message_name.toOwnedSlice(),
+        .arguments = arguments.toOwnedSlice(),
+        .range = .{ .start = if (receiver) |r| r.range().start else start_of_message, .end = end_of_last_argument },
+    };
+
+    return AST.ExpressionNode{ .Message = message_node };
+}
+
+fn parsePrimary(self: *Self, allocator: Allocator) ParseError!?AST.ExpressionNode {
+    // Primary = Integer | FloatingPoint | Object | Block | identifier | String
+    return switch (self.lexer.current_token) {
+        .Integer => AST.ExpressionNode{ .Number = try self.parseInteger(allocator) },
+        .FloatingPoint => AST.ExpressionNode{ .Number = try self.parseFloatingPoint(allocator) },
+        .ParenOpen => (try self.parseSlotsObjectOrSubexpr(allocator, true, null)) orelse return null,
+        .BracketOpen => AST.ExpressionNode{ .Block = (try self.parseBlock(allocator)) orelse return null },
+        .Identifier => AST.ExpressionNode{ .Identifier = try self.parseIdentifier(allocator) },
+        .String => AST.ExpressionNode{ .String = try self.parseString(allocator) },
+        else => blk: {
+            try self.diagnostics.reportDiagnosticFormatted(
+                .Error,
+                self.lexer.token_start,
+                "Expected primary expression, got {s}",
+                .{self.lexer.current_token.toString()},
+            );
+            break :blk null;
+        },
+    };
+}
+
+fn parseSlotsObjectOrSubexpr(self: *Self, allocator: Allocator, must_not_be_method: bool, did_extract_expr: ?*bool) ParseError!?AST.ExpressionNode {
+    var did_use_slots = false;
+    var object = (try self.parseObject(allocator, &did_use_slots)) orelse return null;
+    errdefer object.destroy(allocator);
+
+    const statement_count = object.statements.value.statements.len;
+    const slot_count = object.slots.len;
+    if (!did_use_slots) {
+        if (statement_count == 0) {
+            // Just an empty slots object.
+            return AST.ExpressionNode{ .Object = object };
+        } else if (statement_count == 1) {
+            // A sub-expression. We need to do some fiddling here to avoid destroying
+            // the expression when we destroy the expression node.
+            const subexpr = object.statements.value.statements[0];
+            allocator.free(object.statements.value.statements);
+            object.statements.value.statements = &.{};
+
+            object.destroy(allocator);
+            if (did_extract_expr) |flag| flag.* = true;
+            return subexpr;
+        } else {
+            if (must_not_be_method)
+                try self.diagnostics.reportDiagnostic(
+                    .Error,
+                    object.range.start,
+                    "Sub-expressions cannot have more than one expression",
+                );
+
+            return AST.ExpressionNode{ .Object = object };
+        }
+    }
+
+    if (slot_count == 0) {
+        if (statement_count == 0) {
+            // Just an empty slots object.
+            return AST.ExpressionNode{ .Object = object };
+        } else if (statement_count == 1) {
+            if (must_not_be_method)
+                try self.diagnostics.reportDiagnostic(
+                    .Error,
+                    object.range.start,
+                    "Sub-expressions must not use slot delimiters",
+                );
+
+            return AST.ExpressionNode{ .Object = object };
+        } else {
+            if (must_not_be_method)
+                try self.diagnostics.reportDiagnostic(
+                    .Error,
+                    object.range.start,
+                    "Slots object cannot contain expressions, use methods",
+                );
+
+            return AST.ExpressionNode{ .Object = object };
+        }
+    } else if (statement_count != 0) {
+        if (must_not_be_method)
+            try self.diagnostics.reportDiagnostic(
+                .Error,
+                object.range.start,
+                "Slots object cannot contain expressions, use methods",
+            );
+
+        return AST.ExpressionNode{ .Object = object };
+    }
+
+    return AST.ExpressionNode{ .Object = object };
+}
+
+fn parseObject(self: *Self, allocator: Allocator, did_use_slots: ?*bool) ParseError!?*AST.ObjectNode {
+    // Object = "(" SlotList<ObjectSlot>? ")"
+    // Method = "(" SlotList<ObjectSlot>? StatementList ")"
+    std.debug.assert(self.lexer.current_token == .ParenOpen);
+
+    const start_of_object = self.lexer.token_start;
+    _ = try self.lexer.nextToken(allocator);
+
+    var slots = if (self.lexer.current_token == .Pipe) blk: {
+        if (did_use_slots) |flag| flag.* = true;
+        break :blk (try self.parseSlotList(.WithoutArguments, allocator)) orelse return null;
+    } else &[_]AST.SlotNode{};
+    defer {
+        for (slots) |*slot| {
+            slot.deinit(allocator);
+        }
+        allocator.free(slots);
+    }
+
+    var statements = blk: {
+        if (self.lexer.current_token != .ParenClose)
+            break :blk try self.parseStatementList(allocator, false);
+        break :blk try AST.StatementList.create(allocator, &.{});
+    };
+    defer statements.unrefWithAllocator(allocator);
+
+    const end_of_object = self.lexer.token_end;
+    if (!try self.expect(allocator, .ParenClose, .Consume)) {
+        return null;
+    }
+
+    var object_node = try allocator.create(AST.ObjectNode);
+    object_node.* = .{
+        .slots = slots,
+        .statements = statements,
+        .range = .{ .start = start_of_object, .end = end_of_object },
+    };
+    // Replace slots with an empty slice so that we don't free the slots after
+    // we exit.
+    slots = &.{};
+    statements.ref();
+
+    return object_node;
+}
+
+fn parseBlock(self: *Self, allocator: Allocator) ParseError!?*AST.BlockNode {
+    // Block = "[" SlotList<BlockSlot>? StatementList "]"
+    std.debug.assert(self.lexer.current_token == .BracketOpen);
+
+    const start_of_block = self.lexer.token_start;
+    _ = try self.lexer.nextToken(allocator);
+
+    var slots = if (self.lexer.current_token == .Pipe)
+        (try self.parseSlotList(.WithArguments, allocator)) orelse return null
+    else
+        &[_]AST.SlotNode{};
+    defer {
+        for (slots) |*slot| {
+            slot.deinit(allocator);
+        }
+        allocator.free(slots);
+    }
+
+    var statements = blk: {
+        if (self.lexer.current_token != .BracketClose)
+            break :blk try self.parseStatementList(allocator, true);
+        break :blk try AST.StatementList.create(allocator, &.{});
+    };
+    defer statements.unrefWithAllocator(allocator);
+
+    const end_of_block = self.lexer.token_end;
+    if (!try self.expect(allocator, .BracketClose, .Consume)) {
+        return null;
+    }
+
+    var block_node = try allocator.create(AST.BlockNode);
+    block_node.* = .{
+        .slots = slots,
+        .statements = statements,
+        .range = .{ .start = start_of_block, .end = end_of_block },
+    };
+    // Replace slots with an empty slice so that we don't free the slots after
+    // we exit.
+    slots = &.{};
+    statements.ref();
+
+    return block_node;
+}
+
+const SlotListType = enum { WithArguments, WithoutArguments };
+fn parseSlotList(self: *Self, comptime slot_list_type: SlotListType, allocator: Allocator) ParseError!?[]AST.SlotNode {
+    // SlotList<SlotType> = "|" "|" | "|" SlotType ("." SlotType)* "."? "|"
+    std.debug.assert(self.lexer.current_token == .Pipe);
+    _ = try self.lexer.nextToken(allocator);
+
+    var slots = std.ArrayList(AST.SlotNode).init(allocator);
+    defer {
+        for (slots.items) |*slot| {
+            slot.deinit(allocator);
+        }
+        slots.deinit();
+    }
+
+    const allow_argument = switch (slot_list_type) {
+        .WithArguments => true,
+        .WithoutArguments => false,
+    };
+
+    if (self.lexer.current_token != .Pipe) first_slot_parsing: {
+        {
+            var first_slot = (try self.parseSlot(allocator, allow_argument)) orelse break :first_slot_parsing;
+            errdefer first_slot.deinit(allocator);
+            try slots.append(first_slot);
+        }
+
+        while (self.lexer.current_token == .Period) {
+            _ = try self.lexer.nextToken(allocator);
+            if (!self.canParseSlot()) break;
+
+            var slot = (try self.parseSlot(allocator, allow_argument)) orelse continue;
+            errdefer slot.deinit(allocator);
+            try slots.append(slot);
+        }
+    }
+
+    if (!try self.expect(allocator, .Pipe, .Consume)) {
+        while (self.lexer.current_token != .Pipe and self.lexer.current_token != .EOF)
+            _ = try self.lexer.nextToken(allocator);
+        if (self.lexer.current_token == .Pipe)
+            _ = try self.lexer.nextToken(allocator);
+    }
+
+    return slots.toOwnedSlice();
+}
+
+fn canParseSlot(self: *Self) bool {
+    if (self.lexer.current_token.isOperator())
+        return true;
+    return switch (self.lexer.current_token) {
+        .FirstKeyword, .Identifier, .Colon => true,
+        else => false,
+    };
+}
+
+fn parseSlot(self: *Self, allocator: Allocator, allow_argument: bool) ParseError!?AST.SlotNode {
+    //   ObjectSlot = identifier "*"? ("=" | "<-") Expression -- slot
+    //              | SlotName "=" Method                     -- method
+    //              | identifier                              -- default init to nil
+    //   BlockSlot = ObjectSlot
+    //             | ":" identifier                           -- argument
+
+    const start_of_slot = self.lexer.token_start;
+
+    var is_argument = false;
+    var is_mutable = false;
+    var is_parent = false;
+
+    if (self.lexer.current_token == .Colon) {
+        if (!allow_argument) {
+            try self.diagnostics.reportDiagnostic(
+                .Error,
+                self.lexer.token_start,
+                "Argument slots are not allowed in this slot list",
+            );
+            return null;
+        }
+
+        is_argument = true;
+        _ = try self.lexer.nextToken(allocator);
+    }
+
+    var did_parse_successfully = false;
+
+    var must_be_method = false;
+    var arguments = std.ArrayList([]const u8).init(allocator);
+    defer {
+        for (arguments.items) |arg| {
+            allocator.free(arg);
+        }
+        arguments.deinit();
+    }
+
+    var slot_name = (try self.parseSlotName(allocator, &arguments, &must_be_method)) orelse return null;
+    defer if (!did_parse_successfully) allocator.free(slot_name);
+
+    if (must_be_method) {
+        if (!try self.expect(allocator, .Equals, .Consume)) return null;
+    } else {
+        if (self.lexer.current_token == .Asterisk) {
+            is_parent = true;
+            _ = try self.lexer.nextToken(allocator);
+        }
+
+        if (self.lexer.current_token == .Arrow) {
+            is_mutable = true;
+        } else if (self.lexer.current_token == .Period or self.lexer.current_token == .Pipe) {
+            // This slot has no value. Just exit.
+            did_parse_successfully = true;
+            return AST.SlotNode{
+                .is_mutable = true,
+                .is_parent = is_parent,
+                .is_argument = is_argument,
+                .name = slot_name,
+                .arguments = arguments.toOwnedSlice(),
+                .value = null,
+                .range = .{ .start = start_of_slot, .end = self.lexer.token_start },
+            };
+        } else if (self.lexer.current_token != .Equals) {
+            try self.diagnostics.reportDiagnosticFormatted(
+                .Error,
+                self.lexer.token_start,
+                "Expected arrow or equals after slot name, got {s}",
+                .{self.lexer.current_token.toString()},
+            );
+            return null;
+        }
+
+        _ = try self.lexer.nextToken(allocator);
+    }
+
+    var value = blk: {
+        if (must_be_method) {
+            // NOTE: Just for fun, turn this into:
+            //           break :blk AST.ExpressionNode{ ...
+            //       and watch the Zig compiler crash and burn.
+            const expression_node = AST.ExpressionNode{
+                .Object = (try self.parseObject(allocator, null)) orelse return null,
+            };
+            break :blk expression_node;
+        }
+
+        if (self.lexer.current_token == .ParenOpen) {
+            // It's entirely possible for the user to do this:
+            //     value = (1 + 2) * 3.
+            // Or this:
+            //     value = (| foo = ... |) foo.
+            // We don't want to disallow these, so we look at the object and see
+            // whether it is a slots object or sub-expr, and if it is we look
+            // ahead to the next token to see whether it would be a valid message
+            // token. If it is, we turn this into a message instead (through the
+            // use of parseExpressionFromPrimary).
+
+            var did_extract_expr = false;
+            var expr = (try self.parseSlotsObjectOrSubexpr(allocator, false, &did_extract_expr)) orelse return null;
+            errdefer expr.deinit(allocator);
+            if (expr == .Object and expr.Object.statements.value.statements.len > 0) {
+                // This is a method, we cannot put expressions after it.
+                break :blk expr;
+            }
+
+            if (self.lexer.current_token == .Period or self.lexer.current_token == .Pipe) {
+                // This is a method, but it looks like a sub-expression. If it was extracted
+                // into an expression, then re-pack it, and then return it from this block.
+                if (did_extract_expr) {
+                    var statement_slice = try allocator.alloc(AST.ExpressionNode, 1);
+                    errdefer allocator.free(statement_slice);
+                    statement_slice[0] = expr;
+
+                    var statement_list = try AST.StatementList.create(allocator, statement_slice);
+                    errdefer statement_list.unrefWithAllocator(allocator);
+
+                    var object_node = try allocator.create(AST.ObjectNode);
+                    object_node.* = .{
+                        .slots = &.{},
+                        .statements = statement_list,
+                        .range = expr.range(),
+                    };
+                    expr = AST.ExpressionNode{ .Object = object_node };
+                }
+
+                break :blk expr;
+            }
+
+            break :blk (try self.parseExpressionFromPrimary(allocator, expr, false)) orelse return null;
+        }
+
+        break :blk (try self.parseExpression(allocator, false)) orelse return null;
+    };
+
+    did_parse_successfully = true;
+    return AST.SlotNode{
+        .is_mutable = is_mutable,
+        .is_parent = is_parent,
+        .is_argument = is_argument,
+        .name = slot_name,
+        .arguments = arguments.toOwnedSlice(),
+        .value = value,
+        .range = .{ .start = start_of_slot, .end = value.range().end },
+    };
+}
+
+fn parseSlotName(self: *Self, allocator: Allocator, arguments: *std.ArrayList([]const u8), must_be_method: *bool) ParseError!?[]const u8 {
+    if (self.lexer.current_token == .Identifier) {
+        // Identifier means this is a unary message, no need to do anymore work.
+        must_be_method.* = false;
+
+        const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
+        var identifier_copy = try allocator.dupe(u8, identifier_slice);
+        errdefer allocator.free(identifier_copy);
+
+        _ = try self.lexer.nextToken(allocator);
+        return identifier_copy;
+    }
+
+    if (self.lexer.current_token == .FirstKeyword) {
+        must_be_method.* = true;
+
+        const first_keyword_slice = std.mem.sliceTo(&self.lexer.current_token.FirstKeyword, 0);
+        var slot_name = try std.ArrayList(u8).initCapacity(allocator, first_keyword_slice.len);
+        defer slot_name.deinit();
+        slot_name.appendSliceAssumeCapacity(first_keyword_slice);
+
+        _ = try self.lexer.nextToken(allocator);
+
+        if (!try self.expect(allocator, .Identifier, .DontConsume))
+            return null;
+
+        {
+            const first_identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
+            var first_identifier_copy = try allocator.dupe(u8, first_identifier_slice);
+            errdefer allocator.free(first_identifier_copy);
+            try arguments.append(first_identifier_copy);
+        }
+
+        _ = try self.lexer.nextToken(allocator);
+
+        while (self.lexer.current_token == .RestKeyword) {
+            const keyword_slice = std.mem.sliceTo(&self.lexer.current_token.RestKeyword, 0);
+            try slot_name.appendSlice(keyword_slice);
+            _ = try self.lexer.nextToken(allocator);
+
+            if (!try self.expect(allocator, .Identifier, .DontConsume))
+                return null;
+
+            {
+                const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
+                var identifier_copy = try allocator.dupe(u8, identifier_slice);
+                errdefer allocator.free(identifier_copy);
+                try arguments.append(identifier_copy);
+            }
+
+            _ = try self.lexer.nextToken(allocator);
+        }
+
+        return slot_name.toOwnedSlice();
+    }
+
+    if (!self.lexer.current_token.isOperator()) {
+        try self.diagnostics.reportDiagnosticFormatted(
+            .Error,
+            self.lexer.token_start,
+            "Expected slot name, got {s}",
+            .{self.lexer.current_token.toString()},
+        );
+    }
+
+    var binary_message_name = std.BoundedArray(u8, tokens.MaximumIdentifierLength).init(0) catch unreachable;
+
+    // FIXME: Disallow space between operator tokens.
+    while (self.lexer.current_token.isOperator()) {
+        binary_message_name.appendSlice(self.lexer.current_token.toString()) catch {
+            try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Maximum binary operator length exceeded");
+            return null;
+        };
+
+        _ = try self.lexer.nextToken(allocator);
+    }
+
+    if (!try self.expect(allocator, .Identifier, .DontConsume))
+        return null;
+
+    {
+        const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
+        var identifier_copy = try allocator.dupe(u8, identifier_slice);
+        errdefer allocator.free(identifier_copy);
+        try arguments.append(identifier_copy);
+    }
+    _ = try self.lexer.nextToken(allocator);
+
+    return try allocator.dupe(u8, binary_message_name.constSlice());
+}
+
+fn parseString(self: *Self, allocator: Allocator) ParseError!AST.StringNode {
+    std.debug.assert(self.lexer.current_token == .String);
+
+    var string_copy = try allocator.dupe(u8, self.lexer.current_token.String);
+    errdefer allocator.free(string_copy);
+
+    const node = AST.StringNode{
+        .value = string_copy,
+        .range = .{ .start = self.lexer.token_start, .end = self.lexer.token_end },
+    };
+    _ = try self.lexer.nextToken(allocator);
+    return node;
+}
+
+fn parseIdentifier(self: *Self, allocator: Allocator) ParseError!AST.IdentifierNode {
+    std.debug.assert(self.lexer.current_token == .Identifier);
+
+    const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
+    var identifier_copy = try allocator.dupe(u8, identifier_slice);
+    errdefer allocator.free(identifier_copy);
+
+    const node = AST.IdentifierNode{
+        .value = identifier_copy,
+        .range = .{ .start = self.lexer.token_start, .end = self.lexer.token_end },
+    };
+    _ = try self.lexer.nextToken(allocator);
+    return node;
+}
+
+fn parseInteger(self: *Self, allocator: Allocator) ParseError!AST.NumberNode {
+    std.debug.assert(self.lexer.current_token == .Integer);
+
+    const node = AST.NumberNode{
+        .value = .{ .Integer = self.lexer.current_token.Integer },
+        .range = .{ .start = self.lexer.token_start, .end = self.lexer.token_end },
+    };
+    _ = try self.lexer.nextToken(allocator);
+    return node;
+}
+
+fn parseFloatingPoint(self: *Self, allocator: Allocator) ParseError!AST.NumberNode {
+    std.debug.assert(self.lexer.current_token == .FloatingPoint);
+
+    const node = AST.NumberNode{
+        .value = .{ .FloatingPoint = self.lexer.current_token.FloatingPoint },
+        .range = .{ .start = self.lexer.token_start, .end = self.lexer.token_end },
+    };
+    _ = try self.lexer.nextToken(allocator);
+    return node;
+}
 
 fn errorSetOf(comptime Fn: anytype) type {
     return @typeInfo(@typeInfo(@TypeOf(Fn)).Fn.return_type.?).ErrorUnion.error_set;
 }
 
-// TODO: When the Zig compiler stops entering an infinite loop because of error
-//       sets in recursive functions, remove this.
-const ParserFunctionErrorSet = (errorSetOf(Lexer.nextToken));
-
-// TODO: When Zig's RLS actually starts working properly, make this a static
-//       function.
-pub fn initInPlaceFromFilePath(self: *Self, file_path: []const u8, allocator: Allocator) !void {
-    if (self.initialized)
-        @panic("Attempting to initialize already-initialized parser");
-
-    self.lexer = Lexer{};
-    try self.lexer.initInPlaceFromFilePath(file_path, allocator);
-    try self.initCommon(allocator);
-}
-
-pub fn initInPlaceFromString(self: *Self, contents: []const u8, allocator: Allocator) !void {
-    if (self.initialized)
-        @panic("Attempting to initialize already-initialized parser");
-
-    self.lexer = Lexer{};
-    try self.lexer.initInPlaceFromString(contents, allocator);
-    try self.initCommon(allocator);
-}
-
-fn initCommon(self: *Self, allocator: Allocator) !void {
-    self.diagnostics = try Diagnostics.init(allocator);
-
-    self.allocator = allocator;
-    self.initialized = true;
-}
-
-pub fn deinit(self: *Self) void {
-    if (!self.initialized)
-        @panic("Attempting to deinitialize uninitialized parser");
-
-    self.lexer.deinit();
-    self.diagnostics.deinit();
-}
-
-pub fn parse(self: *Self) !AST.ScriptNode {
-    if (!self.initialized)
-        @panic("Attempting to call Parser.parse on uninitialized parser");
-
-    _ = try self.lexer.nextToken();
-
-    var statements = std.ArrayList(AST.StatementNode).init(self.allocator);
-    defer {
-        for (statements.items) |*statement| {
-            statement.deinit(self.allocator);
-        }
-        statements.deinit();
-    }
-
-    while (self.lexer.current_token != .EOF) {
-        if (try self.parseStatement(.EOF)) |*statement| {
-            errdefer statement.deinit(self.allocator);
-            try statements.append(statement.*);
-        }
-    }
-
-    return AST.ScriptNode{ .statements = statements.toOwnedSlice() };
-}
-
 const ExpectTokenAction = enum { Consume, DontConsume };
-
-fn expectToken(self: *Self, token_type: std.meta.Tag(tokens.Token), action: ExpectTokenAction) !bool {
+fn expect(self: *Self, allocator: Allocator, token_type: std.meta.Tag(tokens.Token), action: ExpectTokenAction) ParseError!bool {
     if (self.lexer.current_token != token_type) {
         try self.diagnostics.reportDiagnosticFormatted(
             .Error,
@@ -108,954 +869,9 @@ fn expectToken(self: *Self, token_type: std.meta.Tag(tokens.Token), action: Expe
     }
 
     switch (action) {
-        .Consume => _ = try self.lexer.nextToken(),
+        .Consume => _ = try self.lexer.nextToken(allocator),
         .DontConsume => {},
     }
 
     return true;
 }
-
-fn parseStatement(self: *Self, alternative_terminator: std.meta.Tag(tokens.Token)) ParserFunctionErrorSet!?AST.StatementNode {
-    const start = self.lexer.token_start;
-
-    if (try self.parseExpression()) |*expression| {
-        if (self.lexer.current_token == .Period) {
-            _ = try self.lexer.nextToken();
-        } else if (self.lexer.current_token != alternative_terminator) {
-            try self.diagnostics.reportDiagnosticFormatted(
-                .Error,
-                self.lexer.token_start,
-                "Expected period or '{s}' after expression, got '{s}'",
-                .{ tokens.tokenTypeToString(alternative_terminator), self.lexer.current_token.toString() },
-            );
-
-            // Attempt to recover by consuming up to the next statement or end of scope
-            while (self.lexer.current_token != .Period and self.lexer.current_token != alternative_terminator and self.lexer.current_token != .EOF) {
-                _ = try self.lexer.nextToken();
-            }
-
-            if (self.lexer.current_token == .Period) {
-                _ = try self.lexer.nextToken();
-            }
-
-            expression.deinit(self.allocator);
-            return null;
-        }
-
-        return AST.StatementNode{ .expression = expression.*, .range = .{ .start = start, .end = self.lexer.token_start } };
-    } else {
-        // Attempt to recover by consuming up to the next statement or end of scope
-        while (self.lexer.current_token != .Period and self.lexer.current_token != alternative_terminator and self.lexer.current_token != .EOF) {
-            _ = try self.lexer.nextToken();
-        }
-
-        if (self.lexer.current_token == .Period) {
-            _ = try self.lexer.nextToken();
-        }
-
-        return null;
-    }
-}
-
-fn parseExpression(self: *Self) ParserFunctionErrorSet!?AST.ExpressionNode {
-    if (try self.parsePrimary()) |*primary| {
-        errdefer primary.deinit(self.allocator);
-        var receiver = primary.*;
-
-        if (primary.* == .Identifier and self.lexer.current_token == .Colon) {
-            return try self.parseKeywordMessageToSelf(primary.Identifier);
-        } else if (self.lexer.current_token == .Identifier) {
-            if (try self.parseMessageToReceiver(primary.*)) |message_expr| {
-                receiver = message_expr;
-            } else {
-                return null;
-            }
-        }
-
-        if (self.lexer.current_token.isOperator()) {
-            if (try self.parseBinaryMessage(receiver)) |message_expr| {
-                receiver = message_expr;
-            } else {
-                return null;
-            }
-        }
-
-        return receiver;
-    } else {
-        return null;
-    }
-}
-
-fn parsePrimary(self: *Self) ParserFunctionErrorSet!?AST.ExpressionNode {
-    switch (self.lexer.current_token) {
-        .ParenOpen => return try self.parseSlotsObjectOrSubExpression(),
-        .BracketOpen => if (try self.parseBlock()) |block| return AST.ExpressionNode{ .Block = block },
-        .Identifier => if (try self.parseIdentifier()) |identifier| return AST.ExpressionNode{ .Identifier = identifier },
-        .Integer, .FloatingPoint => if (try self.parseNumber()) |number| return AST.ExpressionNode{ .Number = number },
-        .String => if (try self.parseString()) |string| return AST.ExpressionNode{ .String = string },
-        else => {
-            // TODO: Recovery
-            try self.diagnostics.reportDiagnosticFormatted(
-                .Error,
-                self.lexer.token_start,
-                "Got unknown token '{s}' while parsing primary expression",
-                .{self.lexer.current_token.toString()},
-            );
-        },
-    }
-
-    return null;
-}
-
-fn parseSlotsObjectOrSubExpression(self: *Self) ParserFunctionErrorSet!?AST.ExpressionNode {
-    const start_of_object = self.lexer.token_start;
-
-    if (try self.parseObject()) |object| {
-        errdefer object.destroy(self.allocator);
-
-        if (object.slots.len > 0) {
-            if (object.statements.value.statements.len == 0) {
-                return AST.ExpressionNode{ .Object = object };
-            } else {
-                // TODO: Recovery
-                try self.diagnostics.reportDiagnostic(.Error, start_of_object, "Slot list cannot be present in a sub-expression");
-
-                object.destroy(self.allocator);
-                return null;
-            }
-        } else {
-            if (object.statements.value.statements.len == 0) {
-                // Just an empty object.
-                return AST.ExpressionNode{ .Object = object };
-            } else if (object.statements.value.statements.len == 1) {
-                const statement = object.statements.value.statements[0];
-
-                // This is done so that the slice is freed but the expression isn't.
-                // The optional should not fail because we're just reducing the size.
-                object.statements.value.statements = self.allocator.resize(object.statements.value.statements, 0).?;
-                object.destroy(self.allocator);
-
-                return statement.expression;
-            } else {
-                // TODO: Recovery
-                try self.diagnostics.reportDiagnostic(.Error, start_of_object, "Only one expression must be present in a sub-expression");
-
-                object.destroy(self.allocator);
-                return null;
-            }
-        }
-    }
-
-    return null;
-}
-
-fn parseObject(self: *Self) ParserFunctionErrorSet!?*AST.ObjectNode {
-    const start = self.lexer.token_start;
-
-    if (!try self.expectToken(.ParenOpen, .Consume))
-        return null;
-
-    var slots = std.ArrayList(AST.SlotNode).init(self.allocator);
-    defer {
-        for (slots.items) |*slot| {
-            slot.deinit(self.allocator);
-        }
-        slots.deinit();
-    }
-
-    var statements = std.ArrayList(AST.StatementNode).init(self.allocator);
-    defer {
-        for (statements.items) |*statement| {
-            statement.deinit(self.allocator);
-        }
-        statements.deinit();
-    }
-
-    if (self.lexer.current_token == .Pipe) {
-        _ = try self.lexer.nextToken();
-
-        while (self.lexer.current_token != .Pipe) {
-            if (try self.parseSlot(.Object)) |*slot| {
-                errdefer slot.deinit(self.allocator);
-                try slots.append(slot.*);
-
-                if (self.lexer.current_token == .Period) {
-                    _ = try self.lexer.nextToken();
-                } else if (self.lexer.current_token != .Pipe) {
-                    try self.diagnostics.reportDiagnosticFormatted(
-                        .Error,
-                        self.lexer.token_start,
-                        "Expected '.' or '|' after slot, got '{s}'",
-                        .{self.lexer.current_token.toString()},
-                    );
-
-                    // Attempt to recover by eating up to either the pipe or period
-                    while (self.lexer.current_token != .Period and self.lexer.current_token != .Pipe) {
-                        _ = try self.lexer.nextToken();
-                    }
-
-                    if (self.lexer.current_token == .Period) {
-                        _ = try self.lexer.nextToken();
-                    }
-                }
-            } else {
-                // Attempt to recover by eating up to either the pipe or period
-                while (self.lexer.current_token != .Period and self.lexer.current_token != .Pipe) {
-                    _ = try self.lexer.nextToken();
-                }
-
-                if (self.lexer.current_token == .Period) {
-                    _ = try self.lexer.nextToken();
-                }
-            }
-        }
-
-        _ = try self.lexer.nextToken();
-    }
-
-    while (self.lexer.current_token != .ParenClose) {
-        // NOTE: parseStatement will have handled the "consuming until end of
-        //       statement" part here, so we don't need to do it ourselves.
-        if (try self.parseStatement(.ParenClose)) |*statement| {
-            errdefer statement.deinit(self.allocator);
-            try statements.append(statement.*);
-        }
-    }
-
-    _ = try self.lexer.nextToken();
-
-    const object_node = try self.allocator.create(AST.ObjectNode);
-    object_node.slots = slots.toOwnedSlice();
-    object_node.statements = try AST.Statements.create(self.allocator, statements.toOwnedSlice());
-    object_node.range = .{ .start = start, .end = self.lexer.token_start };
-
-    return object_node;
-}
-
-fn parseBlock(self: *Self) ParserFunctionErrorSet!?*AST.BlockNode {
-    const start = self.lexer.token_start;
-
-    if (!try self.expectToken(.BracketOpen, .Consume))
-        return null;
-
-    var slots = std.ArrayList(AST.SlotNode).init(self.allocator);
-    defer {
-        for (slots.items) |*slot| {
-            slot.deinit(self.allocator);
-        }
-        slots.deinit();
-    }
-
-    var statements = std.ArrayList(AST.StatementNode).init(self.allocator);
-    defer {
-        for (statements.items) |*statement| {
-            statement.deinit(self.allocator);
-        }
-        statements.deinit();
-    }
-
-    if (self.lexer.current_token == .Pipe) {
-        _ = try self.lexer.nextToken();
-
-        while (self.lexer.current_token != .Pipe) {
-            if (try self.parseSlot(.Block)) |*slot| {
-                errdefer slot.deinit(self.allocator);
-                try slots.append(slot.*);
-
-                if (self.lexer.current_token == .Period) {
-                    _ = try self.lexer.nextToken();
-                } else if (self.lexer.current_token != .Pipe) {
-                    try self.diagnostics.reportDiagnosticFormatted(
-                        .Error,
-                        self.lexer.token_start,
-                        "Expected '.' or '|' after slot, got '{s}'",
-                        .{self.lexer.current_token.toString()},
-                    );
-
-                    // Attempt to recover by eating up to either the pipe or period
-                    while (self.lexer.current_token != .Period and self.lexer.current_token != .Pipe) {
-                        _ = try self.lexer.nextToken();
-                    }
-
-                    if (self.lexer.current_token == .Period) {
-                        _ = try self.lexer.nextToken();
-                    }
-                }
-            } else {
-                // Attempt to recover by eating up to either the pipe or period
-                while (self.lexer.current_token != .Period and self.lexer.current_token != .Pipe) {
-                    _ = try self.lexer.nextToken();
-                }
-            }
-        }
-
-        _ = try self.lexer.nextToken();
-    }
-
-    var did_use_return = false;
-    var return_use_location: Location = .{};
-    while (self.lexer.current_token != .BracketClose) {
-        if (did_use_return) {
-            try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Unexpected expression after return expression in block");
-            try self.diagnostics.reportDiagnostic(.Note, return_use_location, "Return expression used here");
-
-            // Try to recover by eating up to bracket
-            while (self.lexer.current_token != .BracketClose) {
-                _ = try self.lexer.nextToken();
-            }
-
-            break;
-        }
-
-        if (self.lexer.current_token == .Cap) {
-            did_use_return = true;
-            return_use_location = self.lexer.token_start;
-
-            _ = try self.lexer.nextToken();
-        }
-
-        // NOTE: parseStatement will have handled the "consuming until end of
-        //       statement" part here, so we don't need to do it ourselves.
-        if (try self.parseStatement(.BracketClose)) |*statement| {
-            errdefer statement.deinit(self.allocator);
-
-            if (did_use_return) {
-                const return_node = try self.allocator.create(AST.ReturnNode);
-                return_node.expression = statement.expression;
-                return_node.range = .{ .start = start, .end = self.lexer.token_start };
-                errdefer return_node.destroy(self.allocator);
-
-                try statements.append(AST.StatementNode{ .expression = AST.ExpressionNode{ .Return = return_node }, .range = return_node.range });
-            } else {
-                try statements.append(statement.*);
-            }
-        }
-    }
-
-    _ = try self.lexer.nextToken();
-
-    const block_node = try self.allocator.create(AST.BlockNode);
-    block_node.slots = slots.toOwnedSlice();
-    block_node.statements = try AST.Statements.create(self.allocator, statements.toOwnedSlice());
-    block_node.range = .{ .start = start, .end = self.lexer.token_start };
-
-    return block_node;
-}
-
-const SlotParsingMode = enum { Object, Block };
-fn parseSlot(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionErrorSet!?AST.SlotNode {
-    const start = self.lexer.token_start;
-
-    var is_mutable = true;
-    var is_parent = false;
-    var is_argument = false;
-
-    if (self.lexer.current_token == .Colon) {
-        if (parsing_mode == .Block) {
-            is_argument = true;
-            _ = try self.lexer.nextToken();
-        } else {
-            try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Object slots may not be arguments");
-            return null;
-        }
-    }
-
-    if (try self.parseSlotName(parsing_mode)) |*slot_name| {
-        errdefer slot_name.deinit(self.allocator);
-
-        if (self.lexer.current_token == .Asterisk) {
-            if (parsing_mode == .Object) {
-                is_parent = true;
-                _ = try self.lexer.nextToken();
-            } else {
-                try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Block slots may not be parents");
-
-                slot_name.deinit(self.allocator);
-                return null;
-            }
-        }
-
-        var value = value_parsing: {
-            if (slot_name.arguments.len > 0) {
-                // If we get here then we *MUST* be in Object slot parsing mode,
-                // because only Objects can have slots with keywords.
-                std.debug.assert(parsing_mode == .Object);
-
-                if (!try self.expectToken(.Equals, .Consume)) {
-                    slot_name.deinit(self.allocator);
-                    return null;
-                }
-                is_mutable = false;
-
-                if (self.lexer.current_token != .ParenOpen) {
-                    try self.diagnostics.reportDiagnosticFormatted(
-                        .Error,
-                        self.lexer.token_start,
-                        "Expected object after slot with keywords, got '{s}'",
-                        .{self.lexer.current_token.toString()},
-                    );
-
-                    slot_name.deinit(self.allocator);
-                    return null;
-                }
-
-                if (try self.parseObject()) |object| {
-                    break :value_parsing AST.ExpressionNode{ .Object = object };
-                } else {
-                    slot_name.deinit(self.allocator);
-                    return null;
-                }
-            } else {
-                if (is_argument) {
-                    // If this is an argument slot, we don't allow the assignment of
-                    // any sort of value.
-                    if (!(self.lexer.current_token == .Pipe or self.lexer.current_token == .Period)) {
-                        try self.diagnostics.reportDiagnosticFormatted(
-                            .Error,
-                            self.lexer.token_start,
-                            "Expected '|' or '.' after argument slot, got '{s}'",
-                            .{self.lexer.current_token.toString()},
-                        );
-
-                        slot_name.deinit(self.allocator);
-                        return null;
-                    }
-                } else {
-                    if (self.lexer.current_token == .Arrow or self.lexer.current_token == .Equals) {
-                        is_mutable = self.lexer.current_token == .Arrow;
-                        _ = try self.lexer.nextToken();
-
-                        // NOTE: We need to override ParenOpen here because
-                        //       parseExpression only parses sub-expressions or
-                        //       slots objects.
-                        switch (self.lexer.current_token) {
-                            .ParenOpen => if (try self.parseObject()) |object| break :value_parsing AST.ExpressionNode{ .Object = object },
-                            else => if (try self.parseExpression()) |expression| break :value_parsing expression,
-                        }
-
-                        // If we got here, then parsing either of them failed.
-                        slot_name.deinit(self.allocator);
-                        return null;
-                    } else if (!(self.lexer.current_token == .Period or self.lexer.current_token == .Pipe)) {
-                        try self.diagnostics.reportDiagnosticFormatted(
-                            .Error,
-                            self.lexer.token_start,
-                            "Expected '.', '|', '<-' or '=' after slot name, got '{s}'",
-                            .{self.lexer.current_token.toString()},
-                        );
-
-                        slot_name.deinit(self.allocator);
-                        return null;
-                    }
-                }
-
-                // TODO: Intern these
-                const nil_identifier = try self.allocator.dupe(u8, "nil");
-                break :value_parsing AST.ExpressionNode{
-                    .Identifier = AST.IdentifierNode{
-                        .value = nil_identifier,
-                        .range = .{ .start = start, .end = self.lexer.token_start },
-                    },
-                };
-            }
-        };
-
-        return AST.SlotNode{
-            .is_mutable = is_mutable,
-            .is_parent = is_parent,
-            .is_argument = is_argument,
-            .name = slot_name.name,
-            .arguments = slot_name.arguments,
-            .value = value,
-            .range = .{ .start = start, .end = self.lexer.token_start },
-        };
-    }
-
-    return null;
-}
-
-fn parseSlotName(self: *Self, parsing_mode: SlotParsingMode) ParserFunctionErrorSet!?SlotName {
-    var name = std.ArrayList(u8).init(self.allocator);
-    defer name.deinit();
-
-    var arguments = std.ArrayList([]u8).init(self.allocator);
-    defer {
-        for (arguments.items) |argument| {
-            self.allocator.free(argument);
-        }
-        arguments.deinit();
-    }
-
-    if (self.lexer.current_token == .Identifier) {
-        var is_parsing_keyword_message = false;
-        while (self.lexer.current_token == .Identifier) {
-            const keyword_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
-
-            // Keyword messages have their casing as: foo: param Bar: param Baz: param
-            if (is_parsing_keyword_message and !std.ascii.isUpper(keyword_slice[0])) {
-                try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Keyword argument must have uppercase prefix");
-                return null;
-            }
-
-            try name.appendSlice(keyword_slice);
-
-            if ((try self.lexer.nextToken()).* == .Colon) {
-                if (parsing_mode == .Block) {
-                    try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Blocks cannot have keyword slots");
-                    return null;
-                } else {
-                    is_parsing_keyword_message = true;
-                }
-            } else if (is_parsing_keyword_message) {
-                // If we're parsing a keyword message and there's no colon after a keyword,
-                // that's an error.
-                try self.diagnostics.reportDiagnosticFormatted(
-                    .Error,
-                    self.lexer.token_start,
-                    "Expected ':' after slot keyword, got '{s}'",
-                    .{self.lexer.current_token.toString()},
-                );
-                return null;
-            } else {
-                // If we weren't parsing a keyword message, then this is just a unary message.
-                break;
-            }
-
-            try name.append(':');
-
-            if ((try self.lexer.nextToken()).* != .Identifier) {
-                try self.diagnostics.reportDiagnosticFormatted(
-                    .Error,
-                    self.lexer.token_start,
-                    "Expected parameter name after slot keyword, got '{s}'",
-                    .{self.lexer.current_token.toString()},
-                );
-                return null;
-            }
-
-            const argument_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
-            const argument_copy = try self.allocator.dupe(u8, argument_slice);
-
-            {
-                errdefer self.allocator.free(argument_copy);
-                try arguments.append(argument_copy);
-            }
-
-            _ = try self.lexer.nextToken();
-        }
-    } else if (self.lexer.current_token.isOperator()) {
-        if (parsing_mode != .Object) {
-            try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Binary slots are only allowed on objects");
-            return null;
-        }
-
-        var tokens_consumed: usize = 0;
-        while (self.lexer.current_token.isOperator()) {
-            if (tokens_consumed > 0 and self.lexer.consumed_whitespace > 0) {
-                try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Unexpected whitespace between binary message tokens");
-                return null;
-            }
-
-            try name.appendSlice(self.lexer.current_token.toString());
-            _ = try self.lexer.nextToken();
-            tokens_consumed += 1;
-        }
-
-        if (!try self.expectToken(.Identifier, .DontConsume))
-            return null;
-
-        const argument_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
-        const argument_copy = try self.allocator.dupe(u8, argument_slice);
-
-        {
-            errdefer self.allocator.free(argument_copy);
-            try arguments.append(argument_copy);
-        }
-
-        _ = try self.lexer.nextToken();
-    } else {
-        try self.diagnostics.reportDiagnosticFormatted(
-            .Error,
-            self.lexer.token_start,
-            "Expected operator character or identifier for slot name, got '{s}'",
-            .{self.lexer.current_token.toString()},
-        );
-        return null;
-    }
-
-    return SlotName{ .name = name.toOwnedSlice(), .arguments = arguments.toOwnedSlice() };
-}
-
-fn parseKeywordMessageToSelf(self: *Self, identifier: AST.IdentifierNode) ParserFunctionErrorSet!?AST.ExpressionNode {
-    // Arguments aren't mutable in Zig.
-    var identifier_mut = identifier;
-
-    if (!try self.expectToken(.Colon, .DontConsume)) {
-        identifier_mut.deinit(self.allocator);
-        return null;
-    }
-
-    // TODO: Intern these
-    const self_identifier = try self.allocator.dupe(u8, "self");
-    // NOTE: We transfer the ownership to parseMessageCommon at call time, so it
-    //       will clean up the receiver and identifier on failure.
-
-    const receiver = AST.ExpressionNode{ .Identifier = AST.IdentifierNode{ .value = self_identifier, .range = identifier.range } };
-    return try self.parseMessageCommon(receiver, identifier);
-}
-
-fn parseMessageToReceiver(self: *Self, receiver: AST.ExpressionNode) ParserFunctionErrorSet!?AST.ExpressionNode {
-    // Arguments aren't mutable in Zig.
-    var receiver_mut = receiver;
-
-    if (!try self.expectToken(.Identifier, .DontConsume)) {
-        receiver_mut.deinit(self.allocator);
-        return null;
-    }
-
-    const identifier_start = self.lexer.token_start;
-    const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
-
-    // Determine whether this identifier can be a message. Normally
-    // parseMessageCommon would do this but we get rid of the identifier below
-    // by doing a nextToken, so we won't be able to recover the parser state at
-    // that point.
-    if (std.ascii.isUpper(identifier_slice[0])) {
-        // Nope, can't use it.
-        return receiver;
-    }
-
-    const identifier_copy = try self.allocator.dupe(u8, identifier_slice);
-    // NOTE: We transfer the ownership to parseMessageCommon at call time, so it
-    //       will clean up the receiver and identifier on failure.
-
-    {
-        errdefer self.allocator.free(identifier_copy);
-        _ = try self.lexer.nextToken();
-    }
-
-    const identifier = AST.IdentifierNode{ .value = identifier_copy, .range = .{ .start = identifier_start, .end = self.lexer.token_start } };
-    return try self.parseMessageCommon(receiver, identifier);
-}
-
-const MessageParsingState = enum { Unary, Keyword };
-fn parseMessageCommon(
-    self: *Self,
-    receiver: AST.ExpressionNode,
-    first_identifier: AST.IdentifierNode,
-) ParserFunctionErrorSet!?AST.ExpressionNode {
-    const start = self.lexer.token_start;
-    // At this part of message parsing, we're going to be at one of these two
-    // points:
-    // 1) It was a keyword message. We are at a Colon token, and will start
-    //    parsing a keyword message from the get-go.
-    // 2) It was a unary message, possibly followed up by more unary messages,
-    //    maybe ending in a keyword message. We are at an Identifier token, and
-    //    will reduce it to a new expression.
-
-    // Arguments aren't mutable in Zig.
-    var first_identifier_mut = first_identifier;
-
-    var parsing_state = MessageParsingState.Unary;
-
-    var current_receiver = receiver;
-    errdefer current_receiver.deinit(self.allocator);
-
-    var current_message_name = std.ArrayList(u8).init(self.allocator);
-    defer current_message_name.deinit();
-
-    var parameters = std.ArrayList(AST.ExpressionNode).init(self.allocator);
-    defer {
-        for (parameters.items) |*parameter| {
-            parameter.deinit(self.allocator);
-        }
-        parameters.deinit();
-    }
-
-    // Used when passing an identifier string from unary to keyword parsing state.
-    var unary_to_keyword_identifier: []const u8 = undefined;
-    // Used to tell whether the Keyword state should use unary-to-keyword
-    // passover or the first identifier as the initial keyword, because we can
-    // have two ways of entering the Keyword state.
-    var should_use_passover_as_first_identifier = false;
-
-    // If the next token is not a Colon, then we want to immediately reduce
-    // the first identifier into the receiver; this handles the case of
-    // chained unary messages.
-    if (self.lexer.current_token != .Colon) {
-        errdefer first_identifier_mut.deinit(self.allocator);
-
-        var message_node = try self.allocator.create(AST.MessageNode);
-        message_node.receiver = current_receiver;
-        // NOTE: We now take ownership of the first identifier's string
-        message_node.message_name = first_identifier.value;
-        message_node.arguments = try self.allocator.alloc(AST.ExpressionNode, 0);
-        message_node.range = .{ .start = start, .end = self.lexer.token_start };
-
-        current_receiver = AST.ExpressionNode{ .Message = message_node };
-
-        should_use_passover_as_first_identifier = true;
-    } else {
-        // If it *is* a colon, we want to switch to Keyword mode immediately.
-        parsing_state = .Keyword;
-    }
-
-    state_machine: while (true) {
-        switch (parsing_state) {
-            .Unary => {
-                if (self.lexer.current_token == .Identifier) {
-                    const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
-                    if (std.ascii.isUpper(identifier_slice[0])) {
-                        // We are parsing a unary message and the message name
-                        // starts with an uppercase?! No, this is part of an
-                        // outer expression, probably a keyword message this
-                        // unary message expression is an argument to. Give up
-                        // parsing.
-                        break :state_machine;
-                    }
-
-                    const identifier_copy = try self.allocator.dupe(u8, identifier_slice);
-                    errdefer self.allocator.free(identifier_copy);
-
-                    unary_to_keyword_identifier = identifier_copy;
-                    // Look ahead once to see whether we should be collapsing
-                    // this into a new message or we should be letting keyword
-                    // state handle this from now on.
-                    if ((try self.lexer.nextToken()).* == .Colon) {
-                        // Yep, it's a keyword. Switch over.
-                        parsing_state = .Keyword;
-                        continue :state_machine;
-                    }
-
-                    // No, it's not. Collapse this identifier into an unary
-                    // message and let the state machine handle the rest.
-                    var message_node = try self.allocator.create(AST.MessageNode);
-                    message_node.receiver = current_receiver;
-                    message_node.message_name = identifier_copy;
-                    message_node.arguments = try self.allocator.alloc(AST.ExpressionNode, 0);
-                    message_node.range = .{ .start = start, .end = self.lexer.token_start };
-                    current_receiver = AST.ExpressionNode{ .Message = message_node };
-                } else {
-                    // We let the statement parser throw any errors related
-                    // to unexpected tokens at the end of an expression.
-                    break :state_machine;
-                }
-            },
-            .Keyword => {
-                if (parameters.items.len == 0) {
-                    // We have not parsed anything keyword-related yet, so let's
-                    // figure out what the first keyword is now.
-                    if (should_use_passover_as_first_identifier) {
-                        // We were parsing unary messages before we got here,
-                        // so use the passover value.
-                        defer self.allocator.free(unary_to_keyword_identifier);
-
-                        // Sanity check
-                        if (std.ascii.isUpper(unary_to_keyword_identifier[0]))
-                            @panic("Got an uppercase keyword as first keyword argument from unary state?!");
-
-                        if (!try self.expectToken(.Colon, .Consume)) {
-                            current_receiver.deinit(self.allocator);
-                            return null;
-                        }
-
-                        try current_message_name.appendSlice(unary_to_keyword_identifier);
-                    } else {
-                        // Unary never triggered so we should be using the first
-                        // identifier.
-                        defer first_identifier_mut.deinit(self.allocator);
-
-                        // The same sanity check can't be repeated here because
-                        // first_identifier is given by the expression parser
-                        // who has no idea about keyword rules.
-                        if (std.ascii.isUpper(first_identifier.value[0])) {
-                            break :state_machine;
-                        }
-
-                        if (!try self.expectToken(.Colon, .Consume)) {
-                            current_receiver.deinit(self.allocator);
-                            return null;
-                        }
-
-                        try current_message_name.appendSlice(first_identifier.value);
-                    }
-                    try current_message_name.append(':');
-
-                    if (try self.parseExpression()) |*expression| {
-                        errdefer expression.deinit(self.allocator);
-                        try parameters.append(expression.*);
-                    } else {
-                        current_receiver.deinit(self.allocator);
-                        return null;
-                    }
-                }
-
-                // Okay, NOW we can resume regular parsing proper.
-
-                if (self.lexer.current_token == .Identifier) {
-                    const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
-
-                    // We are at the start of a new keyword. Verify that it is
-                    // part of this message.
-                    if (!std.ascii.isUpper(identifier_slice[0])) {
-                        break :state_machine;
-                    }
-
-                    try current_message_name.appendSlice(identifier_slice);
-                    _ = try self.lexer.nextToken();
-
-                    if (!try self.expectToken(.Colon, .Consume)) {
-                        current_receiver.deinit(self.allocator);
-                        return null;
-                    }
-
-                    try current_message_name.append(':');
-
-                    if (try self.parseExpression()) |*expression| {
-                        errdefer expression.deinit(self.allocator);
-                        try parameters.append(expression.*);
-                    } else {
-                        current_receiver.deinit(self.allocator);
-                        return null;
-                    }
-                } else {
-                    break :state_machine;
-                }
-            },
-        }
-    }
-
-    // If we're in keyword mode, let's compile the collected slot name and
-    // variables into a message expression.
-    switch (parsing_state) {
-        .Unary => return current_receiver,
-        .Keyword => {
-            var message_node = try self.allocator.create(AST.MessageNode);
-            message_node.receiver = current_receiver;
-            // NOTE: We now take ownership of the first identifier's string
-            message_node.message_name = current_message_name.toOwnedSlice();
-            message_node.arguments = parameters.toOwnedSlice();
-            message_node.range = .{ .start = start, .end = self.lexer.token_start };
-
-            return AST.ExpressionNode{ .Message = message_node };
-        },
-    }
-}
-
-fn parseBinaryMessage(self: *Self, receiver: AST.ExpressionNode) ParserFunctionErrorSet!?AST.ExpressionNode {
-    const start = self.lexer.token_start;
-    // Arguments aren't mutable in Zig.
-    var receiver_mut = receiver;
-    errdefer receiver_mut.deinit(self.allocator);
-
-    var message_name = std.ArrayList(u8).init(self.allocator);
-    defer message_name.deinit();
-
-    if (!self.lexer.current_token.isOperator()) {
-        try self.diagnostics.reportDiagnosticFormatted(
-            .Error,
-            self.lexer.token_start,
-            "Expected an operator token for binary message, got '{s}'",
-            .{self.lexer.current_token.toString()},
-        );
-
-        receiver_mut.deinit(self.allocator);
-        return null;
-    }
-
-    var tokens_consumed: usize = 0;
-    while (self.lexer.current_token.isOperator()) {
-        if (tokens_consumed > 0 and self.lexer.consumed_whitespace > 0) {
-            try self.diagnostics.reportDiagnostic(.Error, self.lexer.token_start, "Unexpected whitespace between binary message tokens");
-            return null;
-        }
-
-        try message_name.appendSlice(self.lexer.current_token.toString());
-        _ = try self.lexer.nextToken();
-        tokens_consumed += 1;
-    }
-
-    if (try self.parseExpression()) |*expression| {
-        errdefer expression.deinit(self.allocator);
-        // TODO: Disallow mixing different binary messages without parenthesis,
-        //       as it looks ambiguous. Self doesn't define any precedence for
-        //       operators, so they would always be processed right-to-left.
-        //
-        //       Not having any precedence doesn't really sound that good either,
-        //       though. Could we do better here? Maybe objects that are the same
-        //       "type" (i.e. a binary message resolves to identical method
-        //       activations on both objects) can have a type precedence within?
-        //       Though that wouldn't work for custom types. I wouldn't like
-        //       it to be world-dependent either, that would easily break across
-        //       worlds. Need to put more thought here.
-
-        const message_node = try self.allocator.create(AST.MessageNode);
-        message_node.message_name = message_name.toOwnedSlice();
-        message_node.arguments = try self.allocator.alloc(AST.ExpressionNode, 1);
-        message_node.arguments[0] = expression.*;
-        message_node.receiver = receiver;
-        message_node.range = .{ .start = start, .end = self.lexer.token_start };
-
-        return AST.ExpressionNode{ .Message = message_node };
-    } else {
-        receiver_mut.deinit(self.allocator);
-        return null;
-    }
-}
-
-fn parseIdentifier(self: *Self) ParserFunctionErrorSet!?AST.IdentifierNode {
-    const start = self.lexer.token_start;
-    const end = self.lexer.token_end;
-
-    if (!try self.expectToken(.Identifier, .DontConsume))
-        return null;
-
-    const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
-    const identifier_copy = try self.allocator.dupe(u8, identifier_slice);
-    errdefer self.allocator.free(identifier_copy);
-
-    _ = try self.lexer.nextToken();
-    return AST.IdentifierNode{ .value = identifier_copy, .range = .{ .start = start, .end = end } };
-}
-
-fn parseNumber(self: *Self) ParserFunctionErrorSet!?AST.NumberNode {
-    const start = self.lexer.token_start;
-    const end = self.lexer.token_end;
-
-    const value = switch (self.lexer.current_token) {
-        .Integer => AST.NumberNode{ .value = .{ .Integer = self.lexer.current_token.Integer }, .range = .{ .start = start, .end = end } },
-        .FloatingPoint => AST.NumberNode{ .value = .{ .FloatingPoint = self.lexer.current_token.FloatingPoint }, .range = .{ .start = start, .end = end } },
-        else => {
-            try self.diagnostics.reportDiagnosticFormatted(
-                .Error,
-                self.lexer.token_start,
-                "Expected number value, got '{s}'",
-                .{self.lexer.current_token.toString()},
-            );
-            return null;
-        },
-    };
-
-    _ = try self.lexer.nextToken();
-    return value;
-}
-
-fn parseString(self: *Self) ParserFunctionErrorSet!?AST.StringNode {
-    const start = self.lexer.token_start;
-    const end = self.lexer.token_end;
-
-    if (!try self.expectToken(.String, .DontConsume))
-        return null;
-
-    const string_copy = try self.allocator.dupe(u8, self.lexer.current_token.String);
-    errdefer self.allocator.free(string_copy);
-    const value = AST.StringNode{ .value = string_copy, .range = .{ .start = start, .end = end } };
-
-    _ = try self.lexer.nextToken();
-    return value;
-}
-
-initialized: bool = false,
-allocator: Allocator = undefined,
-lexer: Lexer = undefined,
-diagnostics: Diagnostics = undefined,

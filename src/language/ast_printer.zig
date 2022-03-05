@@ -87,19 +87,10 @@ pub fn dumpScript(self: *Self, script: AST.ScriptNode) void {
     self.print(CYAN ++ "ScriptNode\n" ++ CLEAR, .{});
 
     self.indent();
-    for (script.statements) |statement, i| {
-        self.setStem(if (i == script.statements.len - 1) .Last else .NotLast);
-        self.dumpStatement(statement);
+    for (script.statements.value.statements) |expression, i| {
+        self.setStem(if (i == script.statements.value.statements.len - 1) .Last else .NotLast);
+        self.dumpExpression(expression);
     }
-    self.dedent();
-}
-
-pub fn dumpStatement(self: *Self, statement: AST.StatementNode) void {
-    self.print(CYAN ++ "StatementNode\n" ++ CLEAR, .{});
-
-    self.indent();
-    self.setStem(.Last);
-    self.dumpExpression(statement.expression);
     self.dedent();
 }
 
@@ -137,9 +128,9 @@ pub fn dumpObject(self: *Self, object: AST.ObjectNode) void {
     self.setStem(.Last);
     self.print("statements:\n", .{});
     self.indent();
-    for (object.statements.value.statements) |statement, i| {
+    for (object.statements.value.statements) |expression, i| {
         self.setStem(if (i == object.statements.value.statements.len - 1) .Last else .NotLast);
-        self.dumpStatement(statement);
+        self.dumpExpression(expression);
     }
     self.dedent();
 
@@ -170,7 +161,11 @@ pub fn dumpSlot(self: *Self, slot: AST.SlotNode) void {
     self.print("value:\n", .{});
     self.indent();
     self.setStem(.Last);
-    self.dumpExpression(slot.value);
+    if (slot.value) |value| {
+        self.dumpExpression(value);
+    } else {
+        self.print(GRAY ++ "<implicit nil>\n" ++ CLEAR, .{});
+    }
     self.dedent();
 
     self.dedent();
@@ -192,9 +187,9 @@ pub fn dumpBlock(self: *Self, block: AST.BlockNode) void {
     self.setStem(.Last);
     self.print("statements:\n", .{});
     self.indent();
-    for (block.statements.value.statements) |statement, i| {
+    for (block.statements.value.statements) |expression, i| {
         self.setStem(if (i == block.statements.value.statements.len - 1) .Last else .NotLast);
-        self.dumpStatement(statement);
+        self.dumpExpression(expression);
     }
     self.dedent();
 
@@ -223,7 +218,11 @@ pub fn dumpMessage(self: *Self, message: AST.MessageNode) void {
     self.print("receiver:\n", .{});
     self.indent();
     self.setStem(.Last);
-    self.dumpExpression(message.receiver);
+    if (message.receiver) |expr| {
+        self.dumpExpression(expr);
+    } else {
+        self.print(GREEN ++ "<implicit self>\n" ++ CLEAR, .{});
+    }
     self.dedent();
 
     self.setStem(if (message.arguments.len == 0) .Last else .NotLast);

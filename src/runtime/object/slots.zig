@@ -465,7 +465,7 @@ pub const Method = packed struct {
         return self.getMap().getDefinitionScript();
     }
 
-    pub fn getStatementsSlice(self: *Method) []AST.StatementNode {
+    pub fn getStatementsSlice(self: *Method) []AST.ExpressionNode {
         return self.getMap().getStatementsSlice();
     }
 
@@ -548,7 +548,7 @@ pub const Block = packed struct {
         return self.getMap().getDefinitionScript();
     }
 
-    pub fn getStatementsSlice(self: *Block) []AST.StatementNode {
+    pub fn getStatementsSlice(self: *Block) []AST.ExpressionNode {
         return self.getMap().getStatementsSlice();
     }
 

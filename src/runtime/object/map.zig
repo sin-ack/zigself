@@ -282,7 +282,7 @@ const SlotsAndStatementsMap = packed struct {
         map_map: Value,
         argument_slot_count: u8,
         regular_slot_count: u32,
-        statements: AST.Statements.Ref,
+        statements: AST.StatementList.Ref,
         script: Script.Ref,
     ) void {
         self.slots_map.init(regular_slot_count + argument_slot_count, map_map);
@@ -306,11 +306,11 @@ const SlotsAndStatementsMap = packed struct {
         return Script.Ref{ .value = @intToPtr(*Script, self.script_ref.asUnsignedInteger()) };
     }
 
-    pub fn getStatements(self: *SlotsAndStatementsMap) AST.Statements.Ref {
-        return AST.Statements.Ref{ .value = @intToPtr(*AST.Statements, self.statements_ref.asUnsignedInteger()) };
+    pub fn getStatements(self: *SlotsAndStatementsMap) AST.StatementList.Ref {
+        return AST.StatementList.Ref{ .value = @intToPtr(*AST.StatementList, self.statements_ref.asUnsignedInteger()) };
     }
 
-    pub fn getStatementsSlice(self: *SlotsAndStatementsMap) []AST.StatementNode {
+    pub fn getStatementsSlice(self: *SlotsAndStatementsMap) []AST.ExpressionNode {
         return self.getStatements().value.statements;
     }
 
@@ -363,7 +363,7 @@ const MethodMap = packed struct {
         heap: *Heap,
         argument_slot_count: u8,
         regular_slot_count: u32,
-        statements: AST.Statements.Ref,
+        statements: AST.StatementList.Ref,
         method_name: ByteArrayTheFirst,
         script: Script.Ref,
     ) !*MethodMap {
@@ -383,7 +383,7 @@ const MethodMap = packed struct {
         map_map: Value,
         argument_slot_count: u8,
         regular_slot_count: u32,
-        statements: AST.Statements.Ref,
+        statements: AST.StatementList.Ref,
         method_name: ByteArrayTheFirst,
         script: Script.Ref,
     ) void {
@@ -403,7 +403,7 @@ const MethodMap = packed struct {
         return self.base_map.getDefinitionScript();
     }
 
-    pub fn getStatementsSlice(self: *MethodMap) []AST.StatementNode {
+    pub fn getStatementsSlice(self: *MethodMap) []AST.ExpressionNode {
         return self.base_map.getStatementsSlice();
     }
 
@@ -461,7 +461,7 @@ const BlockMap = packed struct {
         heap: *Heap,
         argument_slot_count: u8,
         regular_slot_count: u32,
-        statements: AST.Statements.Ref,
+        statements: AST.StatementList.Ref,
         parent_activation: *Activation,
         nonlocal_return_target_activation: *Activation,
         script: Script.Ref,
@@ -482,7 +482,7 @@ const BlockMap = packed struct {
         map_map: Value,
         argument_slot_count: u8,
         regular_slot_count: u32,
-        statements: AST.Statements.Ref,
+        statements: AST.StatementList.Ref,
         parent_activation: *Activation,
         nonlocal_return_target_activation: *Activation,
         script: Script.Ref,
@@ -504,7 +504,7 @@ const BlockMap = packed struct {
         return self.base_map.getDefinitionScript();
     }
 
-    pub fn getStatementsSlice(self: *BlockMap) []AST.StatementNode {
+    pub fn getStatementsSlice(self: *BlockMap) []AST.ExpressionNode {
         return self.base_map.getStatementsSlice();
     }
 

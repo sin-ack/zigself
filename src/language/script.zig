@@ -21,7 +21,7 @@ file_path: []const u8,
 // Not owned by this member. Same as file_path for file scripts and the owner script for
 // string scripts.
 running_path: []const u8,
-parser: Parser,
+parser: *Parser,
 
 pub fn createFromFilePath(allocator: Allocator, file_path: []const u8) !Ref {
     const self = try allocator.create(Self);
@@ -47,8 +47,8 @@ fn initFromFilePath(self: *Self, allocator: Allocator, file_path: []const u8) !v
     self.file_path = file_path_copy;
     self.running_path = file_path_copy;
 
-    self.parser = .{};
-    try self.parser.initInPlaceFromFilePath(file_path, allocator);
+    self.parser = try Parser.createFromFile(allocator, file_path);
+    errdefer self.parser.destroy(allocator);
     try self.initCommon(allocator);
 }
 
@@ -59,8 +59,7 @@ fn initFromString(self: *Self, allocator: Allocator, running_path: []const u8, c
     self.file_path = file_path_copy;
     self.running_path = running_path;
 
-    self.parser = .{};
-    try self.parser.initInPlaceFromString(contents, allocator);
+    self.parser = try Parser.createFromString(allocator, contents);
     try self.initCommon(allocator);
 }
 
@@ -71,7 +70,7 @@ fn initCommon(self: *Self, allocator: Allocator) !void {
 
 fn deinit(self: *Self) void {
     self.allocator.free(self.file_path);
-    self.parser.deinit();
+    self.parser.destroy(self.allocator);
     if (self.ast_root) |*ast_root| {
         ast_root.deinit(self.allocator);
     }
@@ -80,7 +79,7 @@ fn deinit(self: *Self) void {
 /// Parse the script and expose it in `self.ast_root`. Return whether the script
 /// was parsed without any error diagnostics being generated.
 pub fn parseScript(self: *Self) !bool {
-    self.ast_root = try self.parser.parse();
+    self.ast_root = try self.parser.parseScript(self.allocator);
 
     for (self.diagnostics().diagnostics.items) |diagnostic| {
         if (diagnostic.level == .Error) {
