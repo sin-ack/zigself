@@ -202,6 +202,11 @@ pub const Slots = packed struct {
                 // Nope, just update our assignable slots and map.
                 std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values.items);
                 self.header.map_pointer = new_map.asValue();
+                // NOTE: It is possible for the object we are adding slots to to
+                //       be in an older generation. In this case, the map we
+                //       just created will be in a newer generation, and we will
+                //       need to add it to the remembered set
+                try heap.rememberObjectReference(self.asValue(), self.header.map_pointer);
                 return self;
             }
         } else {
