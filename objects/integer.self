@@ -7,8 +7,8 @@ SPDX-License-Identifier: GPL-3.0-only
 std traits integer _AddSlots: (|
     parent* = std traits clonable.
 
-    succ = (self + 1).
-    prec = (self - 1).
+    succ = (+1).
+    prec = (-1).
 
     negate = (0 - self).
 
@@ -20,9 +20,9 @@ std traits integer _AddSlots: (|
     < n  = (_IntLT: n).
     > n  = (_IntGT: n).
     = n  = (_IntEq: n).
-    >= n = ((self > n) or: [ self = n ]).
-    <= n = ((self < n) or: [ self = n ]).
-    != n = ((self = n) not).
+    >= n = ((> n) || [ self = n ]).
+    <= n = ((< n) || [ self = n ]).
+    != n = ((= n) not).
 
     max: n = ((self < n) ifTrue: [ n ] False: [ self ]).
 
