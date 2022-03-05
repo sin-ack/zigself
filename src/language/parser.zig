@@ -233,11 +233,11 @@ fn parseExpressionFromPrimary(self: *Self, allocator: Allocator, primary: AST.Ex
 
     // If possible, parse a binary message.
     if (self.lexer.current_token.isOperator())
-        return try self.parseBinaryMessage(allocator, expr);
+        expr = (try self.parseBinaryMessage(allocator, expr)) orelse return null;
 
     // Otherwise, try parsing a keyword message.
     if (self.lexer.current_token == .FirstKeyword and !avoid_keyword_after_receiver)
-        return try self.parseKeywordMessage(allocator, expr);
+        expr = (try self.parseKeywordMessage(allocator, expr)) orelse return null;
 
     return expr;
 }
