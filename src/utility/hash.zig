@@ -5,8 +5,8 @@
 const std = @import("std");
 
 // https://cp-algorithms.com/string/string-hashing.html
-// 26 lowercase + 26 uppercase + 10 digit + underscore + 20 operators + colon
-// = 84 characters.
+// 26 lowercase + 26 uppercase + 10 digit + underscore + 21 operators + colon
+// = 85 characters.
 // We use the closest prime higher than it, 89 as the p value.
 // We use the prime 2979709441 for the m value, since that's what I found as
 // a random prime. :^)
@@ -93,6 +93,8 @@ const character_translation_map = blk: {
     map['~'] = i;
     i += 1;
     map[':'] = i;
+    i += 1;
+    map['|'] = i;
 
     break :blk map;
 };
