@@ -399,6 +399,11 @@ fn lexNumber(self: *Self) !?tokens.Token {
         try self.stream.putBackByte(last_byte);
     }
 
+    if (parser_state == .MaybeRepresentation) {
+        // The file ended with 0 as its last character, which is an integer.
+        parser_state = .Decimal;
+    }
+
     return switch (parser_state) {
         .Decimal, .Binary, .Hexadecimal => tokens.Token{ .Integer = integer },
         .Fraction => tokens.Token{ .FloatingPoint = floating_point },
