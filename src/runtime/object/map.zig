@@ -158,6 +158,55 @@ pub const Map = packed struct {
     const asArrayMap = generateAsMap(Map, Array, "Array");
 };
 
+/// Return a mixin struct which can be added to slots-like maps with pub
+/// usingnamespace.
+fn SlotsLikeMapBase(comptime MapT: type) type {
+    return struct {
+        fn getSlotMemory(self: *MapT) []u8 {
+            const total_object_size = getSizeInMemory(self);
+            const map_memory = @ptrCast([*]u8, self);
+            return map_memory[@sizeOf(MapT)..total_object_size];
+        }
+
+        pub fn getSlots(self: *MapT) []Slot {
+            return std.mem.bytesAsSlice(Slot, getSlotMemory(self));
+        }
+
+        pub fn asObjectAddress(self: *MapT) [*]u64 {
+            return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+        }
+
+        pub fn asValue(self: *MapT) Value {
+            return Value.fromObjectAddress(asObjectAddress(self));
+        }
+
+        /// Return the amount of assignable slots that this slot map
+        /// contains.
+        pub fn getAssignableSlotCount(self: *MapT) u8 {
+            // 255 assignable slots ought to be enough for everybody.
+            return @intCast(u8, asSlotsMap(self).properties >> 24);
+        }
+
+        pub fn setAssignableSlotCount(self: *MapT, count: u8) void {
+            const slots_map = asSlotsMap(self);
+            slots_map.properties = (slots_map.properties & @as(u32, 0x00FFFFFF)) | (@as(u32, count) << 24);
+        }
+
+        pub fn getSizeInMemory(self: *MapT) usize {
+            return requiredSizeForAllocation(asSlotsMap(self).slot_count);
+        }
+
+        /// Return the size required for the whole map with the given slot count.
+        pub fn requiredSizeForAllocation(slot_count: u32) usize {
+            return @sizeOf(MapT) + slot_count * @sizeOf(Slot);
+        }
+
+        fn asSlotsMap(self: *MapT) *SlotsMap {
+            return @ptrCast(*SlotsMap, self);
+        }
+    };
+}
+
 // NOTE: properties comes *before* the slot count in the struct
 //       definition, but comes *after* the slot count in the actual bit
 //       definitions.
@@ -172,6 +221,8 @@ const SlotsMap = packed struct {
     /// field.
     slot_count: u32,
 
+    pub usingnamespace SlotsLikeMapBase(SlotsMap);
+
     /// Create a new slots map. Takes the amount of slots this object will have.
     ///
     /// IMPORTANT: All slots *must* be initialized right after creation like this:
@@ -182,7 +233,7 @@ const SlotsMap = packed struct {
     /// slots_map.getSlots()[1].initMutable(...);
     /// ```
     pub fn create(heap: *Heap, slot_count: u32) !*SlotsMap {
-        const size = requiredSizeForAllocation(slot_count);
+        const size = SlotsMap.requiredSizeForAllocation(slot_count);
         const map_map = try getMapMap(heap);
 
         var memory_area = try heap.allocateInObjectSegment(size);
@@ -196,55 +247,6 @@ const SlotsMap = packed struct {
         self.map.init(.Slots, map_map);
         self.properties = 0;
         self.slot_count = slot_count;
-    }
-
-    fn getSlotsSlice(self: *SlotsMap) []u8 {
-        const total_object_size = @sizeOf(SlotsMap) + self.slot_count * @sizeOf(Slot);
-        const map_memory = @ptrCast([*]u8, self);
-        return map_memory[@sizeOf(SlotsMap)..total_object_size];
-    }
-
-    pub fn getSlots(self: *SlotsMap) []Slot {
-        return std.mem.bytesAsSlice(Slot, self.getSlotsSlice());
-    }
-
-    pub fn getSizeInMemory(self: *SlotsMap) usize {
-        return requiredSizeForAllocation(self.slot_count);
-    }
-
-    pub fn asValue(self: *SlotsMap) Value {
-        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
-    }
-
-    /// Return the amount of assignable slots that this slot map
-    /// contains.
-    pub fn getAssignableSlotCount(self: *SlotsMap) u8 {
-        // 255 assignable slots ought to be enough for everybody.
-        return @intCast(u8, self.properties >> 24);
-    }
-
-    pub fn setAssignableSlotCount(self: *SlotsMap, count: u8) void {
-        self.properties = (self.properties & @as(u32, 0x00FFFFFF)) | (@as(u32, count) << 24);
-    }
-
-    pub fn getSlotByHash(self: *SlotsMap, hash_value: u32) ?*Slot {
-        for (self.getSlots()) |*slot| {
-            if (slot.hash == hash_value) {
-                return slot;
-            }
-        }
-
-        return null;
-    }
-
-    pub fn getSlotByName(self: *SlotsMap, string: []const u8) ?*Slot {
-        const hash_value = hash.stringHash(string);
-        return self.getSlotByHash(hash_value);
-    }
-
-    /// Return the size required for the whole map with the given slot count.
-    pub fn requiredSizeForAllocation(slot_count: u32) usize {
-        return @sizeOf(SlotsMap) + slot_count * @sizeOf(Slot);
     }
 };
 
@@ -273,10 +275,8 @@ const SlotsAndStatementsMap = packed struct {
         self.script_ref = Value.fromUnsignedInteger(@ptrToInt(script.value));
     }
 
-    fn setArgumentSlotCount(self: *SlotsAndStatementsMap, count: u8) void {
-        self.slots_map.properties = (self.slots_map.properties & @as(u32, 0xFF00FFFF)) | (@as(u32, count) << 16);
-    }
-
+    /// Finalizes this object. All maps that have a SlotsAndStatementsMap member
+    /// must call this function in their finalize.
     pub fn finalize(self: *SlotsAndStatementsMap, allocator: Allocator) void {
         self.getStatements().unrefWithAllocator(allocator);
         self.getDefinitionScript().unref();
@@ -284,10 +284,6 @@ const SlotsAndStatementsMap = packed struct {
 
     pub fn getDefinitionScript(self: *SlotsAndStatementsMap) Script.Ref {
         return Script.Ref{ .value = @intToPtr(*Script, self.script_ref.asUnsignedInteger()) };
-    }
-
-    pub fn getStatements(self: *SlotsAndStatementsMap) AST.StatementList.Ref {
-        return AST.StatementList.Ref{ .value = @intToPtr(*AST.StatementList, self.statements_ref.asUnsignedInteger()) };
     }
 
     pub fn getStatementsSlice(self: *SlotsAndStatementsMap) []AST.ExpressionNode {
@@ -298,32 +294,12 @@ const SlotsAndStatementsMap = packed struct {
         return @intCast(u8, (self.slots_map.properties >> 16) & @as(u64, 0xFF));
     }
 
-    fn getSlotsSlice(self: *SlotsAndStatementsMap, comptime MapSize: usize) []u8 {
-        const total_object_size = MapSize + self.slots_map.slot_count * @sizeOf(Slot);
-
-        const map_memory = @ptrCast([*]u8, self);
-        return map_memory[MapSize..total_object_size];
+    fn setArgumentSlotCount(self: *SlotsAndStatementsMap, count: u8) void {
+        self.slots_map.properties = (self.slots_map.properties & @as(u32, 0xFF00FFFF)) | (@as(u32, count) << 16);
     }
 
-    pub fn getSlots(self: *SlotsAndStatementsMap, comptime MapSize: usize) []Slot {
-        return std.mem.bytesAsSlice(Slot, self.getSlotsSlice(MapSize));
-    }
-
-    pub fn getArgumentSlots(self: *SlotsAndStatementsMap, comptime MapSize: usize) []Slot {
-        return self.getSlots(MapSize)[0..self.getArgumentSlotCount()];
-    }
-
-    /// Return slots that don't belong to any arguments.
-    pub fn getNonArgumentSlots(self: *SlotsAndStatementsMap, comptime MapSize: usize) []Slot {
-        return self.getSlots(MapSize)[self.getArgumentSlotCount()..];
-    }
-
-    pub fn getAssignableSlotCount(self: *SlotsAndStatementsMap) u8 {
-        return self.slots_map.getAssignableSlotCount();
-    }
-
-    pub fn setAssignableSlotCount(self: *SlotsAndStatementsMap, count: u8) void {
-        self.slots_map.setAssignableSlotCount(count);
+    fn getStatements(self: *SlotsAndStatementsMap) AST.StatementList.Ref {
+        return AST.StatementList.Ref{ .value = @intToPtr(*AST.StatementList, self.statements_ref.asUnsignedInteger()) };
     }
 };
 
@@ -336,6 +312,8 @@ const MethodMap = packed struct {
     base_map: SlotsAndStatementsMap,
     /// What the method is called.
     method_name: Value,
+
+    pub usingnamespace SlotsLikeMapBase(MethodMap);
 
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
@@ -375,10 +353,6 @@ const MethodMap = packed struct {
         self.base_map.finalize(allocator);
     }
 
-    pub fn asValue(self: *MethodMap) Value {
-        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
-    }
-
     pub fn getDefinitionScript(self: *MethodMap) Script.Ref {
         return self.base_map.getDefinitionScript();
     }
@@ -389,35 +363,6 @@ const MethodMap = packed struct {
 
     pub fn getArgumentSlotCount(self: *MethodMap) u8 {
         return self.base_map.getArgumentSlotCount();
-    }
-
-    pub fn getArgumentSlots(self: *MethodMap) []Slot {
-        return self.base_map.getArgumentSlots(@sizeOf(MethodMap));
-    }
-
-    pub fn getSlots(self: *MethodMap) []Slot {
-        return self.base_map.getSlots(@sizeOf(MethodMap));
-    }
-
-    pub fn getNonArgumentSlots(self: *MethodMap) []Slot {
-        return self.base_map.getNonArgumentSlots(@sizeOf(MethodMap));
-    }
-
-    pub fn getSizeInMemory(self: *MethodMap) usize {
-        return requiredSizeForAllocation(self.base_map.slots_map.slot_count);
-    }
-
-    pub fn getAssignableSlotCount(self: *MethodMap) u8 {
-        return self.base_map.getAssignableSlotCount();
-    }
-
-    pub fn setAssignableSlotCount(self: *MethodMap, count: u8) void {
-        self.base_map.setAssignableSlotCount(count);
-    }
-
-    /// Return the size required for the whole map with the given slot count.
-    pub fn requiredSizeForAllocation(slot_count: u32) usize {
-        return @sizeOf(MethodMap) + slot_count * @sizeOf(Slot);
     }
 };
 
@@ -434,6 +379,8 @@ const BlockMap = packed struct {
     /// block. If a non-local return happens inside this block, then it will
     /// target this activation.
     nonlocal_return_target_activation: Activation.ActivationRef,
+
+    pub usingnamespace SlotsLikeMapBase(BlockMap);
 
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
@@ -476,10 +423,6 @@ const BlockMap = packed struct {
         self.base_map.finalize(allocator);
     }
 
-    pub fn asValue(self: *BlockMap) Value {
-        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
-    }
-
     pub fn getDefinitionScript(self: *BlockMap) Script.Ref {
         return self.base_map.getDefinitionScript();
     }
@@ -490,35 +433,6 @@ const BlockMap = packed struct {
 
     pub fn getArgumentSlotCount(self: *BlockMap) u8 {
         return self.base_map.getArgumentSlotCount();
-    }
-
-    pub fn getArgumentSlots(self: *BlockMap) []Slot {
-        return self.base_map.getArgumentSlots(@sizeOf(BlockMap));
-    }
-
-    pub fn getSlots(self: *BlockMap) []Slot {
-        return self.base_map.getSlots(@sizeOf(BlockMap));
-    }
-
-    pub fn getNonArgumentSlots(self: *BlockMap) []Slot {
-        return self.base_map.getNonArgumentSlots(@sizeOf(BlockMap));
-    }
-
-    pub fn getSizeInMemory(self: *BlockMap) usize {
-        return requiredSizeForAllocation(self.base_map.slots_map.slot_count);
-    }
-
-    pub fn getAssignableSlotCount(self: *BlockMap) u8 {
-        return self.base_map.getAssignableSlotCount();
-    }
-
-    pub fn setAssignableSlotCount(self: *BlockMap, count: u8) void {
-        self.base_map.setAssignableSlotCount(count);
-    }
-
-    /// Return the size required for the whole map with the given slot count.
-    pub fn requiredSizeForAllocation(slot_count: u32) usize {
-        return @sizeOf(BlockMap) + slot_count * @sizeOf(Slot);
     }
 };
 
