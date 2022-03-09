@@ -158,17 +158,17 @@ fn slotsLookup(
     // if it's not assignable, then we return null. This is important because
     // it prevents assigning to constant slots. Perhaps a primitive can help you
     // assign to a constant slot? It will cause a map copy though.
-    var assignable_slots = object.getAssignableSlots();
+
     // Direct lookup
     for (object.getSlots()) |slot| {
-        if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing slot \"{s}\" (hash {x}) vs. our hash {x}\n", .{ slot.name.asByteArray().getValues(), slot.hash, selector_hash });
-        if (slot.hash == selector_hash) {
+        if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing slot \"{s}\" (hash {x}) vs. our hash {x}\n", .{ slot.name.asByteArray().getValues(), slot.getHash(), selector_hash });
+        if (slot.getHash() == selector_hash) {
             if (intent == .Assign) {
-                if (slot.isMutable()) {
+                if (slot.isAssignable()) {
                     return AssignLookupResult{
                         .Result = .{
                             .object = Object.fromAddress(object.asObjectAddress()),
-                            .value_ptr = &assignable_slots[slot.value.asUnsignedInteger()],
+                            .value_ptr = object.getAssignableSlotValue(slot),
                         },
                     };
                 } else {
@@ -176,8 +176,8 @@ fn slotsLookup(
                     return null;
                 }
             } else {
-                if (slot.isMutable()) {
-                    return Completion.initNormal(assignable_slots[slot.value.asUnsignedInteger()]);
+                if (slot.isAssignable()) {
+                    return Completion.initNormal(object.getAssignableSlotValue(slot).*);
                 } else {
                     return Completion.initNormal(slot.value);
                 }

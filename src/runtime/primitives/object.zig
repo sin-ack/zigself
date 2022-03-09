@@ -36,7 +36,7 @@ pub fn AddSlots(context: PrimitiveContext) !Completion {
     receiver_object = context.receiver.getValue().asObject().asSlotsObject();
     argument_object = context.arguments[0].getValue().asObject().asSlotsObject();
 
-    const new_object = try receiver_object.addSlotsFrom(argument_object, context.vm.heap, context.vm.allocator);
+    const new_object = try receiver_object.addSlotsFrom(argument_object, context.vm.heap);
     return Completion.initNormal(new_object.asValue());
 }
 

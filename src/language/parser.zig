@@ -333,7 +333,7 @@ fn parsePrimary(self: *Self, allocator: Allocator) ParseError!?AST.ExpressionNod
     return switch (self.lexer.current_token) {
         .Integer => AST.ExpressionNode{ .Number = try self.parseInteger(allocator) },
         .FloatingPoint => AST.ExpressionNode{ .Number = try self.parseFloatingPoint(allocator) },
-        .ParenOpen => (try self.parseSlotsObjectOrSubexpr(allocator, true, null)) orelse return null,
+        .ParenOpen => (try self.parseSlotsObjectOrSubexpr(allocator, true, null, null)) orelse return null,
         .BracketOpen => AST.ExpressionNode{ .Block = (try self.parseBlock(allocator)) orelse return null },
         .Identifier => AST.ExpressionNode{ .Identifier = try self.parseIdentifier(allocator) },
         .String => AST.ExpressionNode{ .String = try self.parseString(allocator) },
@@ -349,9 +349,9 @@ fn parsePrimary(self: *Self, allocator: Allocator) ParseError!?AST.ExpressionNod
     };
 }
 
-fn parseSlotsObjectOrSubexpr(self: *Self, allocator: Allocator, must_not_be_method: bool, did_extract_expr: ?*bool) ParseError!?AST.ExpressionNode {
+fn parseSlotsObjectOrSubexpr(self: *Self, allocator: Allocator, must_not_be_method: bool, did_extract_expr: ?*bool, arguments: ?[]const AST.SlotNode) ParseError!?AST.ExpressionNode {
     var did_use_slots = false;
-    var object = (try self.parseObject(allocator, &did_use_slots)) orelse return null;
+    var object = (try self.parseObject(allocator, &did_use_slots, arguments)) orelse return null;
     errdefer object.destroy(allocator);
 
     const statement_count = object.statements.value.statements.len;
@@ -419,7 +419,7 @@ fn parseSlotsObjectOrSubexpr(self: *Self, allocator: Allocator, must_not_be_meth
     return AST.ExpressionNode{ .Object = object };
 }
 
-fn parseObject(self: *Self, allocator: Allocator, did_use_slots: ?*bool) ParseError!?*AST.ObjectNode {
+fn parseObject(self: *Self, allocator: Allocator, did_use_slots: ?*bool, argument_slots: ?[]const AST.SlotNode) ParseError!?*AST.ObjectNode {
     // Object = "(" SlotList<ObjectSlot>? ")"
     // Method = "(" SlotList<ObjectSlot>? StatementList ")"
     std.debug.assert(self.lexer.current_token == .ParenOpen);
@@ -427,15 +427,27 @@ fn parseObject(self: *Self, allocator: Allocator, did_use_slots: ?*bool) ParseEr
     const start_of_object = self.lexer.token_start;
     _ = try self.lexer.nextToken(allocator);
 
-    var slots = if (self.lexer.current_token == .Pipe) blk: {
-        if (did_use_slots) |flag| flag.* = true;
-        break :blk (try self.parseSlotList(.WithoutArguments, allocator)) orelse return null;
-    } else &[_]AST.SlotNode{};
+    var slots = std.ArrayList(AST.SlotNode).init(allocator);
     defer {
-        for (slots) |*slot| {
+        for (slots.items) |*slot| {
             slot.deinit(allocator);
         }
-        allocator.free(slots);
+        slots.deinit();
+    }
+
+    if (argument_slots) |slot_list| {
+        try slots.appendSlice(slot_list);
+    }
+
+    if (self.lexer.current_token == .Pipe) {
+        if (did_use_slots) |flag| flag.* = true;
+        const slot_list = (try self.parseSlotList(.WithoutArguments, allocator)) orelse return null;
+        defer allocator.free(slot_list);
+        errdefer for (slot_list) |*slot| {
+            slot.deinit(allocator);
+        };
+
+        try slots.appendSlice(slot_list);
     }
 
     var statements = blk: {
@@ -450,16 +462,13 @@ fn parseObject(self: *Self, allocator: Allocator, did_use_slots: ?*bool) ParseEr
         return null;
     }
 
+    statements.ref();
     var object_node = try allocator.create(AST.ObjectNode);
     object_node.* = .{
-        .slots = slots,
+        .slots = slots.toOwnedSlice(),
         .statements = statements,
         .range = .{ .start = start_of_object, .end = end_of_object },
     };
-    // Replace slots with an empty slice so that we don't free the slots after
-    // we exit.
-    slots = &.{};
-    statements.ref();
 
     return object_node;
 }
@@ -591,17 +600,17 @@ fn parseSlot(self: *Self, allocator: Allocator, allow_argument: bool) ParseError
     }
 
     var did_parse_successfully = false;
-
     var must_be_method = false;
-    var arguments = std.ArrayList([]const u8).init(allocator);
-    defer {
-        for (arguments.items) |arg| {
-            allocator.free(arg);
-        }
-        arguments.deinit();
-    }
+    var arguments = std.ArrayList(AST.SlotNode).init(allocator);
+    defer arguments.deinit();
 
-    var slot_name = (try self.parseSlotName(allocator, &arguments, &must_be_method)) orelse return null;
+    var slot_name = blk: {
+        errdefer for (arguments.items) |*slot| {
+            slot.deinit(allocator);
+        };
+
+        break :blk (try self.parseSlotName(allocator, &arguments, &must_be_method)) orelse return null;
+    };
     defer if (!did_parse_successfully) allocator.free(slot_name);
 
     if (must_be_method) {
@@ -622,7 +631,6 @@ fn parseSlot(self: *Self, allocator: Allocator, allow_argument: bool) ParseError
                 .is_parent = is_parent,
                 .is_argument = is_argument,
                 .name = slot_name,
-                .arguments = arguments.toOwnedSlice(),
                 .value = null,
                 .range = .{ .start = start_of_slot, .end = self.lexer.token_start },
             };
@@ -645,7 +653,7 @@ fn parseSlot(self: *Self, allocator: Allocator, allow_argument: bool) ParseError
             //           break :blk AST.ExpressionNode{ ...
             //       and watch the Zig compiler crash and burn.
             const expression_node = AST.ExpressionNode{
-                .Object = (try self.parseObject(allocator, null)) orelse return null,
+                .Object = (try self.parseObject(allocator, null, arguments.items)) orelse return null,
             };
             break :blk expression_node;
         }
@@ -662,7 +670,7 @@ fn parseSlot(self: *Self, allocator: Allocator, allow_argument: bool) ParseError
             // use of parseExpressionFromPrimary).
 
             var did_extract_expr = false;
-            var expr = (try self.parseSlotsObjectOrSubexpr(allocator, false, &did_extract_expr)) orelse return null;
+            var expr = (try self.parseSlotsObjectOrSubexpr(allocator, false, &did_extract_expr, arguments.items)) orelse return null;
             errdefer expr.deinit(allocator);
             if (expr == .Object and expr.Object.statements.value.statements.len > 0) {
                 // This is a method, we cannot put expressions after it.
@@ -704,13 +712,32 @@ fn parseSlot(self: *Self, allocator: Allocator, allow_argument: bool) ParseError
         .is_parent = is_parent,
         .is_argument = is_argument,
         .name = slot_name,
-        .arguments = arguments.toOwnedSlice(),
         .value = value,
         .range = .{ .start = start_of_slot, .end = value.range().end },
     };
 }
 
-fn parseSlotName(self: *Self, allocator: Allocator, arguments: *std.ArrayList([]const u8), must_be_method: *bool) ParseError!?[]const u8 {
+/// Creates an argument slot node from the current identifier.
+fn createSlotNodeFromArgument(self: *Self, allocator: Allocator) ParseError!AST.SlotNode {
+    std.debug.assert(self.lexer.current_token == .Identifier);
+
+    const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
+    var identifier_copy = try allocator.dupe(u8, identifier_slice);
+    errdefer allocator.free(identifier_copy);
+
+    const slot_node = AST.SlotNode{
+        .is_mutable = true,
+        .is_parent = false,
+        .is_argument = true,
+        .name = identifier_copy,
+        .value = null,
+        .range = .{ .start = self.lexer.token_start, .end = self.lexer.token_end },
+    };
+    _ = try self.lexer.nextToken(allocator);
+    return slot_node;
+}
+
+fn parseSlotName(self: *Self, allocator: Allocator, arguments: *std.ArrayList(AST.SlotNode), must_be_method: *bool) ParseError!?[]const u8 {
     if (self.lexer.current_token == .Identifier) {
         // Identifier means this is a unary message, no need to do anymore work.
         must_be_method.* = false;
@@ -736,14 +763,7 @@ fn parseSlotName(self: *Self, allocator: Allocator, arguments: *std.ArrayList([]
         if (!try self.expect(allocator, .Identifier, .DontConsume))
             return null;
 
-        {
-            const first_identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
-            var first_identifier_copy = try allocator.dupe(u8, first_identifier_slice);
-            errdefer allocator.free(first_identifier_copy);
-            try arguments.append(first_identifier_copy);
-        }
-
-        _ = try self.lexer.nextToken(allocator);
+        try arguments.append(try self.createSlotNodeFromArgument(allocator));
 
         while (self.lexer.current_token == .RestKeyword) {
             const keyword_slice = std.mem.sliceTo(&self.lexer.current_token.RestKeyword, 0);
@@ -753,14 +773,7 @@ fn parseSlotName(self: *Self, allocator: Allocator, arguments: *std.ArrayList([]
             if (!try self.expect(allocator, .Identifier, .DontConsume))
                 return null;
 
-            {
-                const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
-                var identifier_copy = try allocator.dupe(u8, identifier_slice);
-                errdefer allocator.free(identifier_copy);
-                try arguments.append(identifier_copy);
-            }
-
-            _ = try self.lexer.nextToken(allocator);
+            try arguments.append(try self.createSlotNodeFromArgument(allocator));
         }
 
         return slot_name.toOwnedSlice();
@@ -776,6 +789,7 @@ fn parseSlotName(self: *Self, allocator: Allocator, arguments: *std.ArrayList([]
         return null;
     }
 
+    must_be_method.* = true;
     var binary_message_name = std.BoundedArray(u8, tokens.MaximumIdentifierLength).init(0) catch unreachable;
 
     // FIXME: Disallow space between operator tokens.
@@ -791,14 +805,7 @@ fn parseSlotName(self: *Self, allocator: Allocator, arguments: *std.ArrayList([]
     if (!try self.expect(allocator, .Identifier, .DontConsume))
         return null;
 
-    {
-        const identifier_slice = std.mem.sliceTo(&self.lexer.current_token.Identifier, 0);
-        var identifier_copy = try allocator.dupe(u8, identifier_slice);
-        errdefer allocator.free(identifier_copy);
-        try arguments.append(identifier_copy);
-    }
-    _ = try self.lexer.nextToken(allocator);
-
+    try arguments.append(try self.createSlotNodeFromArgument(allocator));
     return try allocator.dupe(u8, binary_message_name.constSlice());
 }
 

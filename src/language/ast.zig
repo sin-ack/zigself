@@ -111,19 +111,12 @@ pub const SlotNode = struct {
     is_argument: bool,
 
     name: []const u8,
-    // NOTE: The arguments will be injected into the object during evaluation.
-    arguments: [][]const u8,
     value: ?ExpressionNode,
 
     range: Range,
 
     pub fn deinit(self: *SlotNode, allocator: Allocator) void {
         allocator.free(self.name);
-
-        for (self.arguments) |argument| {
-            allocator.free(argument);
-        }
-        allocator.free(self.arguments);
 
         if (self.value) |*value|
             value.deinit(allocator);

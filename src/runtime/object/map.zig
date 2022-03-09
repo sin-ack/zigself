@@ -16,6 +16,7 @@ const Script = @import("../../language/script.zig");
 // Zig's shadowing rules are annoying.
 const ByteArrayTheFirst = @import("../byte_array.zig");
 const Activation = @import("../activation.zig");
+const MapBuilder = @import("./map_builder.zig").MapBuilder;
 
 var static_map_map: ?Value = null;
 
@@ -139,23 +140,23 @@ pub const Map = packed struct {
         };
     }
 
-    const isSlotsMap = generateIsMap(Map, .Slots);
-    const isMethodMap = generateIsMap(Map, .Method);
-    const isBlockMap = generateIsMap(Map, .Block);
-    const isByteArrayMap = generateIsMap(Map, .ByteArray);
-    const isArrayMap = generateIsMap(Map, .Array);
+    pub const isSlotsMap = generateIsMap(Map, .Slots);
+    pub const isMethodMap = generateIsMap(Map, .Method);
+    pub const isBlockMap = generateIsMap(Map, .Block);
+    pub const isByteArrayMap = generateIsMap(Map, .ByteArray);
+    pub const isArrayMap = generateIsMap(Map, .Array);
 
-    const mustBeSlotsMap = generateMustBeMap(Map, "Slots", "a slots map");
-    const mustBeMethodMap = generateMustBeMap(Map, "Method", "a method map");
-    const mustBeBlockMap = generateMustBeMap(Map, "Block", "a block map");
-    const mustBeByteArrayMap = generateMustBeMap(Map, "ByteArray", "a byte array map");
-    const mustBeArrayMap = generateMustBeMap(Map, "Array", "an array map");
+    pub const mustBeSlotsMap = generateMustBeMap(Map, "Slots", "a slots map");
+    pub const mustBeMethodMap = generateMustBeMap(Map, "Method", "a method map");
+    pub const mustBeBlockMap = generateMustBeMap(Map, "Block", "a block map");
+    pub const mustBeByteArrayMap = generateMustBeMap(Map, "ByteArray", "a byte array map");
+    pub const mustBeArrayMap = generateMustBeMap(Map, "Array", "an array map");
 
-    const asSlotsMap = generateAsMap(Map, Slots, "Slots");
-    const asMethodMap = generateAsMap(Map, Method, "Method");
-    const asBlockMap = generateAsMap(Map, Block, "Block");
-    const asByteArrayMap = generateAsMap(Map, ByteArray, "ByteArray");
-    const asArrayMap = generateAsMap(Map, Array, "Array");
+    pub const asSlotsMap = generateAsMap(Map, Slots, "Slots");
+    pub const asMethodMap = generateAsMap(Map, Method, "Method");
+    pub const asBlockMap = generateAsMap(Map, Block, "Block");
+    pub const asByteArrayMap = generateAsMap(Map, ByteArray, "ByteArray");
+    pub const asArrayMap = generateAsMap(Map, Array, "Array");
 };
 
 /// Return a mixin struct which can be added to slots-like maps with pub
@@ -204,6 +205,10 @@ fn SlotsLikeMapBase(comptime MapT: type) type {
         fn asSlotsMap(self: *MapT) *SlotsMap {
             return @ptrCast(*SlotsMap, self);
         }
+
+        pub fn getMapBuilder(self: *MapT, heap: *Heap) !MapBuilder(MapT, MapT.ObjectType) {
+            return try MapBuilder(MapT, MapT.ObjectType).init(heap, self);
+        }
     };
 }
 
@@ -222,16 +227,11 @@ const SlotsMap = packed struct {
     slot_count: u32,
 
     pub usingnamespace SlotsLikeMapBase(SlotsMap);
+    pub const ObjectType = Object.Slots;
 
     /// Create a new slots map. Takes the amount of slots this object will have.
     ///
-    /// IMPORTANT: All slots *must* be initialized right after creation like this:
-    ///
-    /// ```
-    /// var slots_map = Object.Map.Slots.create(heap, 2);
-    /// slots_map.getSlots()[0].initConstant(...);
-    /// slots_map.getSlots()[1].initMutable(...);
-    /// ```
+    /// IMPORTANT: All slots *must* be initialized right after creation.
     pub fn create(heap: *Heap, slot_count: u32) !*SlotsMap {
         const size = SlotsMap.requiredSizeForAllocation(slot_count);
         const map_map = try getMapMap(heap);
@@ -263,11 +263,13 @@ const SlotsAndStatementsMap = packed struct {
         comptime map_type: MapType,
         map_map: Value,
         argument_slot_count: u8,
-        regular_slot_count: u32,
+        total_slot_count: u32,
         statements: AST.StatementList.Ref,
         script: Script.Ref,
     ) void {
-        self.slots_map.init(regular_slot_count + argument_slot_count, map_map);
+        std.debug.assert(argument_slot_count <= total_slot_count);
+
+        self.slots_map.init(total_slot_count, map_map);
         self.slots_map.map.init(map_type, map_map);
         self.setArgumentSlotCount(argument_slot_count);
 
@@ -314,23 +316,24 @@ const MethodMap = packed struct {
     method_name: Value,
 
     pub usingnamespace SlotsLikeMapBase(MethodMap);
+    pub const ObjectType = Object.Method;
 
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
         heap: *Heap,
         argument_slot_count: u8,
-        regular_slot_count: u32,
+        total_slot_count: u32,
         statements: AST.StatementList.Ref,
         method_name: ByteArrayTheFirst,
         script: Script.Ref,
     ) !*MethodMap {
-        const size = requiredSizeForAllocation(regular_slot_count + argument_slot_count);
+        const size = MethodMap.requiredSizeForAllocation(total_slot_count);
         const map_map = try getMapMap(heap);
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*MethodMap, memory_area);
-        self.init(map_map, argument_slot_count, regular_slot_count, statements, method_name, script);
+        self.init(map_map, argument_slot_count, total_slot_count, statements, method_name, script);
 
         try heap.markAddressAsNeedingFinalization(memory_area);
         return self;
@@ -340,12 +343,12 @@ const MethodMap = packed struct {
         self: *MethodMap,
         map_map: Value,
         argument_slot_count: u8,
-        regular_slot_count: u32,
+        total_slot_count: u32,
         statements: AST.StatementList.Ref,
         method_name: ByteArrayTheFirst,
         script: Script.Ref,
     ) void {
-        self.base_map.init(.Method, map_map, argument_slot_count, regular_slot_count, statements, script);
+        self.base_map.init(.Method, map_map, argument_slot_count, total_slot_count, statements, script);
         self.method_name = method_name.asValue();
     }
 
@@ -381,24 +384,25 @@ const BlockMap = packed struct {
     nonlocal_return_target_activation: Activation.ActivationRef,
 
     pub usingnamespace SlotsLikeMapBase(BlockMap);
+    pub const ObjectType = Object.Block;
 
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
         heap: *Heap,
         argument_slot_count: u8,
-        regular_slot_count: u32,
+        total_slot_count: u32,
         statements: AST.StatementList.Ref,
         parent_activation: *Activation,
         nonlocal_return_target_activation: *Activation,
         script: Script.Ref,
     ) !*BlockMap {
-        const size = requiredSizeForAllocation(regular_slot_count + argument_slot_count);
+        const size = BlockMap.requiredSizeForAllocation(total_slot_count);
         const map_map = try getMapMap(heap);
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*BlockMap, memory_area);
-        self.init(map_map, argument_slot_count, regular_slot_count, statements, parent_activation, nonlocal_return_target_activation, script);
+        self.init(map_map, argument_slot_count, total_slot_count, statements, parent_activation, nonlocal_return_target_activation, script);
 
         try heap.markAddressAsNeedingFinalization(memory_area);
         return self;
@@ -408,13 +412,13 @@ const BlockMap = packed struct {
         self: *BlockMap,
         map_map: Value,
         argument_slot_count: u8,
-        regular_slot_count: u32,
+        total_slot_count: u32,
         statements: AST.StatementList.Ref,
         parent_activation: *Activation,
         nonlocal_return_target_activation: *Activation,
         script: Script.Ref,
     ) void {
-        self.base_map.init(.Block, map_map, argument_slot_count, regular_slot_count, statements, script);
+        self.base_map.init(.Block, map_map, argument_slot_count, total_slot_count, statements, script);
         self.parent_activation = parent_activation.takeRef();
         self.nonlocal_return_target_activation = nonlocal_return_target_activation.takeRef();
     }

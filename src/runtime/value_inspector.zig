@@ -87,29 +87,24 @@ fn inspectObject(
             const slots = object.asSlotsObject();
 
             std.debug.print("(|{s}", .{separator});
-            try inspectSlots(display_type, "getSlots", vm, slots, indent + 2, separator, &my_link);
+            try inspectSlots(display_type, vm, slots, indent + 2, separator, &my_link);
             printWithIndent(display_type, indent, "|)", .{});
         },
         .Activation => {
             const activation = object.asSlotsObject();
 
             std.debug.print("<activation object> (|{s}", .{separator});
-            try inspectSlots(display_type, "getSlots", vm, activation, indent + 2, separator, &my_link);
+            try inspectSlots(display_type, vm, activation, indent + 2, separator, &my_link);
             printWithIndent(display_type, indent, "|)", .{});
         },
         .Method => {
             const method = object.asMethodObject();
 
-            std.debug.print("<method object \"{s}\" [", .{method.getMap().method_name.asByteArray().getValues()});
-            for (method.getMap().getArgumentSlots()) |slot, i| {
-                if (i > 0) std.debug.print(", ", .{});
-                std.debug.print("\"{s}\"", .{slot.name.asByteArray().getValues()});
-            }
-            std.debug.print("]> ", .{});
+            std.debug.print("<method object \"{s}\"> ", .{method.getMap().method_name.asObject().asByteArrayObject().getValues()});
 
-            if (method.getMap().getNonArgumentSlots().len > 0) {
+            if (method.getMap().getSlots().len > 0) {
                 std.debug.print("(|{s}", .{separator});
-                try inspectSlots(display_type, "getNonArgumentSlots", vm, method, indent + 2, separator, &my_link);
+                try inspectSlots(display_type, vm, method, indent + 2, separator, &my_link);
                 printWithIndent(display_type, indent, "|)", .{});
             } else {
                 std.debug.print("()", .{});
@@ -118,16 +113,11 @@ fn inspectObject(
         .Block => {
             const block = object.asBlockObject();
 
-            std.debug.print("<block object [", .{});
-            for (block.getMap().getArgumentSlots()) |slot, i| {
-                if (i > 0) std.debug.print(", ", .{});
-                std.debug.print("\"{s}\"", .{slot.name.asByteArray().getValues()});
-            }
-            std.debug.print("]> ", .{});
+            std.debug.print("<block object> ", .{});
 
-            if (block.getMap().getNonArgumentSlots().len > 0) {
+            if (block.getMap().getSlots().len > 0) {
                 std.debug.print("(|{s}", .{separator});
-                try inspectSlots(display_type, "getNonArgumentSlots", vm, block, indent + 2, separator, &my_link);
+                try inspectSlots(display_type, vm, block, indent + 2, separator, &my_link);
                 printWithIndent(display_type, indent, "|)", .{});
             } else {
                 std.debug.print("()", .{});
@@ -169,7 +159,6 @@ fn inspectObject(
 
 fn inspectSlots(
     comptime display_type: InspectDisplayType,
-    comptime slot_getter: []const u8,
     vm: *VirtualMachine,
     object: anytype,
     indent: usize,
@@ -177,18 +166,18 @@ fn inspectSlots(
     visited_object_link: *const VisitedObjectLink,
 ) !void {
     const map = object.getMap();
-    const slots: []Slot = @call(.{}, @field(map, slot_getter), .{});
+    const slots = map.getSlots();
 
     for (slots) |slot| {
         const parent_marker: []const u8 = if (slot.isParent()) "*" else "";
-        const mutability_marker: []const u8 = if (slot.isMutable()) "<-" else "=";
-        printWithIndent(display_type, indent, "{s}{s} {s} ", .{ slot.name.asByteArray().getValues(), parent_marker, mutability_marker });
+        const assignability_marker: []const u8 = if (slot.isAssignable()) "<-" else "=";
+        printWithIndent(display_type, indent, "{s}{s} {s} ", .{ slot.name.asByteArray().getValues(), parent_marker, assignability_marker });
 
         if (slot.isParent()) {
             // FIXME: Figure out creator slots, and give the path to this object
             std.debug.print("<parent object>", .{});
         } else {
-            if (slot.isMutable()) {
+            if (slot.isAssignable()) {
                 try inspectValueInternal(display_type, vm, object.getAssignableSlots()[slot.value.asUnsignedInteger()], indent, visited_object_link);
             } else {
                 try inspectValueInternal(display_type, vm, slot.value, indent, visited_object_link);

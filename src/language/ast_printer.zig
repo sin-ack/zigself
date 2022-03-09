@@ -149,13 +149,6 @@ pub fn dumpSlot(self: *Self, slot: AST.SlotNode) void {
 
     self.setStem(.NotLast);
     self.print("name: " ++ GREEN ++ "\"{s}\"\n" ++ CLEAR, .{slot.name});
-    self.setStem(.NotLast);
-    self.print("arguments: " ++ GREEN, .{});
-    for (slot.arguments) |argument, i| {
-        if (i != 0) std.debug.print(", ", .{});
-        std.debug.print("\"{s}\"", .{argument});
-    }
-    std.debug.print("\n" ++ CLEAR, .{});
 
     self.setStem(.Last);
     self.print("value:\n", .{});

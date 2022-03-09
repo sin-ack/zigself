@@ -77,7 +77,7 @@ pub fn executeBlockMessage(
     const tracked_message_name = try context.vm.getOrCreateBlockMessageName(@intCast(u8, arguments.len));
     const block_activation = blk: {
         // Ensure that we won't cause a GC by activating the block.
-        try context.vm.heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(block_object.getAssignableSlotCount()));
+        try context.vm.heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(block_object.getArgumentSlotCount(), block_object.getAssignableSlotCount()));
 
         // Refresh the pointer in case a GC happened
         block_object = block_value.getValue().asObject().asBlockObject();
@@ -190,7 +190,7 @@ pub fn executeMethodMessage(
 
     var method_object = tracked_method_object.getValue().asObject().asMethodObject();
     // Ensure that we won't cause a GC by activating the method.
-    try context.vm.heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(method_object.getAssignableSlotCount()));
+    try context.vm.heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(method_object.getArgumentSlotCount(), method_object.getAssignableSlotCount()));
 
     // Refresh the pointer in case a GC happened
     method_object = tracked_method_object.getValue().asObject().asMethodObject();

@@ -172,38 +172,125 @@ pub fn executeExpression(context: *InterpreterContext, expression: AST.Expressio
     };
 }
 
-/// Creates a new method object. All refs are forwarded. `arguments` and
-/// `object_node`'s statements are copied.
-fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AST.ObjectNode, arguments: [][]const u8) InterpreterError!Completion {
-    // FIXME: Get a better source range for the method itself
+/// Creates a new slot and adds it to the given map builder.
+pub fn executeSlot(context: *InterpreterContext, map_builder: anytype, slot_node: AST.SlotNode) InterpreterError!?Completion {
+    {
+        const map_builder_type = @typeInfo(@TypeOf(map_builder)).Pointer.child;
+        if (!@hasDecl(map_builder_type, "is_map_builder"))
+            @compileError("executeSlot must be called with a map builder");
+    }
+
+    const completion = blk: {
+        if (slot_node.value) |value| {
+            if (value == .Object) {
+                var has_argument = false;
+                for (value.Object.slots) |slot| {
+                    if (slot.is_argument) {
+                        has_argument = true;
+                        break;
+                    }
+                }
+
+                if (value.Object.statements.value.statements.len > 0 or has_argument)
+                    break :blk try executeMethod(context, slot_node.name, value.Object.*);
+            }
+
+            break :blk try executeExpression(context, value);
+        }
+
+        break :blk Completion.initNormal(context.vm.nil());
+    };
+    if (!completion.isNormal()) {
+        return completion;
+    }
+
+    // In case the slot name allocation causes a GC.
+    const tracked_value = try context.vm.heap.track(completion.data.Normal);
+    defer tracked_value.untrack(context.vm.heap);
+
+    const slot_name = try ByteArray.createFromString(context.vm.heap, slot_node.name);
+    const slot = blk: {
+        if (slot_node.is_argument) {
+            break :blk Slot.initArgument(slot_name);
+        } else if (slot_node.is_mutable) {
+            break :blk Slot.initAssignable(slot_name, if (slot_node.is_parent) .Parent else .NotParent, tracked_value.getValue());
+        } else {
+            break :blk Slot.initConstant(slot_name, if (slot_node.is_parent) .Parent else .NotParent, tracked_value.getValue());
+        }
+    };
+
+    try map_builder.addSlot(slot);
+    return null;
+}
+
+/// Takes a map type, creates a map builder from it, and executes all the given
+/// slots. Returns an object created from this map builder.
+pub fn createSlotsObjectFromMap(context: *InterpreterContext, map: anytype, slots: []AST.SlotNode) InterpreterError!Completion {
+    // Make sure that we are really being called with a pointer to a map type.
+    blk: {
+        const map_type = @typeInfo(@TypeOf(map)).Pointer.child;
+        inline for (comptime std.meta.declarations(Object.Map)) |decl| {
+            if (@field(Object.Map, decl.name) == map_type)
+                break :blk;
+        }
+
+        @compileError("executeSlotList must be called with a map");
+    }
+
+    var map_builder = try map.getMapBuilder(context.vm.heap);
+    defer map_builder.deinit();
+
+    for (slots) |slot_node| {
+        if (try executeSlot(context, &map_builder, slot_node)) |completion|
+            return completion;
+    }
+
+    const object = try map_builder.createObject();
+    return Completion.initNormal(object.asValue());
+}
+
+pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) InterpreterError!Completion {
+    // Verify that we are executing a slots object and not a method; methods
+    // are created through executeMethod.
+    if (object_node.statements.value.statements.len > 0) {
+        @panic("!!! Attempted to execute a non-slots object! Methods must be created via executeMethod.");
+    }
+
     var source_range = SourceRange.init(context.script, object_node.range);
     defer source_range.deinit();
 
-    if (arguments.len > MaximumArguments)
-        return Completion.initRuntimeError(context.vm, source_range, "Maximum argument limit exceeded for method", .{});
-
+    // Verify that the assignable slots in this object are within limits
     var assignable_slot_count: usize = 0;
     for (object_node.slots) |slot| {
         if (slot.is_mutable) assignable_slot_count += 1;
     }
-    if (arguments.len + object_node.slots.len > MaximumAssignableSlots)
+    if (assignable_slot_count > MaximumAssignableSlots)
+        return Completion.initRuntimeError(context.vm, source_range, "Maximum assignable slot limit exceeded for slots object", .{});
+
+    var slots_map = try Object.Map.Slots.create(context.vm.heap, @intCast(u32, object_node.slots.len));
+    return try createSlotsObjectFromMap(context, slots_map, object_node.slots);
+}
+
+fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AST.ObjectNode) InterpreterError!Completion {
+    // FIXME: Get a better source range for the method itself
+    var source_range = SourceRange.init(context.script, object_node.range);
+    defer source_range.deinit();
+
+    var assignable_slot_count: usize = 0;
+    var argument_slot_count: usize = 0;
+    for (object_node.slots) |slot| {
+        if (slot.is_argument) argument_slot_count += 1;
+        if (slot.is_mutable) assignable_slot_count += 1;
+    }
+
+    if (argument_slot_count > MaximumArguments)
+        return Completion.initRuntimeError(context.vm, source_range, "Maximum argument limit exceeded for method", .{});
+    if (assignable_slot_count > MaximumAssignableSlots)
         return Completion.initRuntimeError(context.vm, source_range, "Maximum assignable slot limit exceeded for method", .{});
 
-    var assignable_slot_values = std.BoundedArray(Heap.Tracked, MaximumAssignableSlots).init(0) catch unreachable;
-    defer {
-        for (assignable_slot_values.slice()) |value| {
-            value.untrack(context.vm.heap);
-        }
-    }
-
-    // This will prevent garbage collections until the execution of slots at
-    // least.
+    // This will prevent garbage collections until the map is created.
     var required_memory: usize = ByteArray.requiredSizeForAllocation(name.len);
-    required_memory += Object.Map.Method.requiredSizeForAllocation(@intCast(u32, object_node.slots.len + arguments.len));
-    for (arguments) |argument| {
-        required_memory += ByteArray.requiredSizeForAllocation(argument.len);
-    }
-
+    required_memory += Object.Map.Method.requiredSizeForAllocation(@intCast(u32, object_node.slots.len));
     try context.vm.heap.ensureSpaceInEden(required_memory);
 
     context.script.ref();
@@ -218,7 +305,7 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
         const method_name_in_heap = try ByteArray.createFromString(context.vm.heap, name);
         break :blk try Object.Map.Method.create(
             context.vm.heap,
-            @intCast(u8, arguments.len),
+            @intCast(u8, argument_slot_count),
             @intCast(u32, object_node.slots.len),
             object_node.statements,
             method_name_in_heap,
@@ -226,162 +313,24 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
         );
     };
 
-    var slot_init_offset: usize = 0;
-
-    const argument_slots = method_map.getArgumentSlots();
-    for (arguments) |argument| {
-        const argument_in_heap = try ByteArray.createFromString(context.vm.heap, argument);
-        argument_slots[slot_init_offset].initMutable(Object.Map.Method, method_map, argument_in_heap, .NotParent);
-        // FIXME: Avoid this unnecessary tracking of the nil value for arguments.
-        assignable_slot_values.appendAssumeCapacity(try context.vm.heap.track(context.vm.nil()));
-
-        slot_init_offset += 1;
-    }
-
-    const tracked_method_map = try context.vm.heap.track(method_map.asValue());
-    defer tracked_method_map.untrack(context.vm.heap);
-
-    for (object_node.slots) |slot_node| {
-        const slot_completion = try executeSlot(context, slot_node, Object.Map.Method, tracked_method_map.getValue().asObject().asMap().asMethodMap(), slot_init_offset);
-        if (slot_completion) |completion| {
-            if (completion.isNormal())
-                assignable_slot_values.appendAssumeCapacity(try context.vm.heap.track(completion.data.Normal))
-            else
-                return completion;
-        }
-
-        slot_init_offset += 1;
-    }
-
-    // Ensure that creating the method object won't cause a garbage collection
-    // before the assignable slot values are copied in.
-    try context.vm.heap.ensureSpaceInEden(Object.Method.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len)));
-
-    var current_assignable_slot_values = std.BoundedArray(Value, MaximumAssignableSlots).init(assignable_slot_values.len) catch unreachable;
-    for (assignable_slot_values.constSlice()) |value, i| {
-        current_assignable_slot_values.set(i, value.getValue());
-    }
-
-    const method_object = try Object.Method.create(
-        context.vm.heap,
-        tracked_method_map.getValue().asObject().asMap().asMethodMap(),
-        current_assignable_slot_values.constSlice(),
-    );
-    return Completion.initNormal(method_object.asValue());
-}
-
-/// Creates a new slot. All refs are forwarded.
-pub fn executeSlot(context: *InterpreterContext, slot_node: AST.SlotNode, comptime MapType: type, map: *MapType, slot_index: usize) InterpreterError!?Completion {
-    const completion = blk: {
-        if (slot_node.value) |value| {
-            if (value == .Object and (value.Object.statements.value.statements.len > 0 or slot_node.arguments.len > 0)) {
-                break :blk try executeMethod(context, slot_node.name, value.Object.*, slot_node.arguments);
-            } else {
-                break :blk try executeExpression(context, value);
-            }
-        }
-
-        break :blk Completion.initNormal(context.vm.nil());
-    };
-    if (!completion.isNormal()) {
-        return completion;
-    }
-
-    const tracked_value = try context.vm.heap.track(completion.data.Normal);
-    defer tracked_value.untrack(context.vm.heap);
-
-    const slot_name = try ByteArray.createFromString(context.vm.heap, slot_node.name);
-    if (slot_node.is_mutable) {
-        map.getSlots()[slot_index].initMutable(MapType, map, slot_name, if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent);
-        return Completion.initNormal(tracked_value.getValue());
-    } else {
-        map.getSlots()[slot_index].initConstant(slot_name, if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent, tracked_value.getValue());
-        return null;
-    }
-}
-
-pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) InterpreterError!Completion {
-    // Verify that we are executing a slots object and not a method; methods
-    // are created through executeSlot.
-    if (object_node.statements.value.statements.len > 0) {
-        @panic("!!! Attempted to execute a non-slots object! Methods must be created via executeSlot.");
-    }
-
-    var source_range = SourceRange.init(context.script, object_node.range);
-    defer source_range.deinit();
-
-    // Verify that the assignable slots in this object are within limits
-    var assignable_slot_count: usize = 0;
-    for (object_node.slots) |slot| {
-        if (slot.is_mutable) assignable_slot_count += 1;
-    }
-    if (assignable_slot_count > MaximumAssignableSlots)
-        return Completion.initRuntimeError(context.vm, source_range, "Maximum assignable slot limit exceeded for slots object", .{});
-
-    var assignable_slot_values = std.BoundedArray(Heap.Tracked, MaximumAssignableSlots).init(0) catch unreachable;
-    defer {
-        for (assignable_slot_values.slice()) |value| {
-            value.untrack(context.vm.heap);
-        }
-    }
-
-    var slots_map = try Object.Map.Slots.create(context.vm.heap, @intCast(u32, object_node.slots.len));
-    const tracked_slots_map = try context.vm.heap.track(slots_map.asValue());
-    defer tracked_slots_map.untrack(context.vm.heap);
-
-    for (object_node.slots) |slot_node, i| {
-        var slot_completion = try executeSlot(context, slot_node, Object.Map.Slots, tracked_slots_map.getValue().asObject().asMap().asSlotsMap(), i);
-        if (slot_completion) |completion| {
-            if (completion.isNormal()) {
-                assignable_slot_values.appendAssumeCapacity(try context.vm.heap.track(completion.data.Normal));
-            } else {
-                return completion;
-            }
-        }
-    }
-
-    // Ensure that creating the slots object won't cause a garbage collection
-    // before the assignable slot values are copied in.
-    try context.vm.heap.ensureSpaceInEden(Object.Slots.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len)));
-
-    var current_assignable_slot_values = std.BoundedArray(Value, MaximumAssignableSlots).init(assignable_slot_values.len) catch unreachable;
-    for (assignable_slot_values.constSlice()) |value, i| {
-        current_assignable_slot_values.set(i, value.getValue());
-    }
-
-    const slots_object = try Object.Slots.create(
-        context.vm.heap,
-        tracked_slots_map.getValue().asObject().asMap().asSlotsMap(),
-        current_assignable_slot_values.constSlice(),
-    );
-    return Completion.initNormal(slots_object.asValue());
+    return try createSlotsObjectFromMap(context, method_map, object_node.slots);
 }
 
 pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) InterpreterError!Completion {
-    var argument_slot_count: usize = 0;
-    var assignable_slot_count: usize = 0;
-    for (block.slots) |slot_node| {
-        if (slot_node.is_argument) {
-            argument_slot_count += 1;
-        } else if (slot_node.is_mutable) {
-            assignable_slot_count += 1;
-        }
-    }
-
     var source_range = SourceRange.init(context.script, block.range);
     defer source_range.deinit();
 
+    var argument_slot_count: usize = 0;
+    var assignable_slot_count: usize = 0;
+    for (block.slots) |slot_node| {
+        if (slot_node.is_argument) argument_slot_count += 1;
+        if (slot_node.is_mutable) assignable_slot_count += 1;
+    }
+
     if (argument_slot_count > MaximumArguments)
         return Completion.initRuntimeError(context.vm, source_range, "Maximum argument limit exceeded for block", .{});
-    if (argument_slot_count + assignable_slot_count > MaximumAssignableSlots)
+    if (assignable_slot_count > MaximumAssignableSlots)
         return Completion.initRuntimeError(context.vm, source_range, "Maximum assignable slot limit exceeded for block", .{});
-
-    var assignable_slot_values = std.BoundedArray(Heap.Tracked, MaximumAssignableSlots).init(0) catch unreachable;
-    defer {
-        for (assignable_slot_values.slice()) |value| {
-            value.untrack(context.vm.heap);
-        }
-    }
 
     // The latest activation is where the block was created, so it will always
     // be the parent activation (i.e., where we look for parent blocks' and the
@@ -397,12 +346,6 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
     std.debug.assert(nonlocal_return_target_activation.nonlocal_return_target_activation == null);
 
     var required_memory: usize = Object.Map.Block.requiredSizeForAllocation(@intCast(u32, block.slots.len));
-    for (block.slots) |slot_node| {
-        if (slot_node.is_argument) {
-            required_memory += ByteArray.requiredSizeForAllocation(slot_node.name.len);
-        }
-    }
-
     try context.vm.heap.ensureSpaceInEden(required_memory);
 
     context.script.ref();
@@ -417,7 +360,7 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
         break :blk try Object.Map.Block.create(
             context.vm.heap,
             @intCast(u8, argument_slot_count),
-            @intCast(u32, block.slots.len) - @intCast(u8, argument_slot_count),
+            @intCast(u32, block.slots.len),
             block.statements,
             parent_activation,
             nonlocal_return_target_activation,
@@ -425,63 +368,7 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
         );
     };
 
-    var slot_init_offset: usize = 0;
-
-    // Add all the argument slots
-    var argument_slots = block_map.getArgumentSlots();
-    for (block.slots) |slot_node| {
-        if (slot_node.is_argument) {
-            const slot_name = try ByteArray.createFromString(context.vm.heap, slot_node.name);
-
-            argument_slots[slot_init_offset].initMutable(
-                Object.Map.Block,
-                block_map,
-                slot_name,
-                if (slot_node.is_parent) Slot.ParentFlag.Parent else Slot.ParentFlag.NotParent,
-            );
-            // FIXME: Avoid tracking all these nil values for arguments.
-            assignable_slot_values.appendAssumeCapacity(try context.vm.heap.track(context.vm.nil()));
-
-            slot_init_offset += 1;
-        }
-    }
-
-    const tracked_block_map = try context.vm.heap.track(block_map.asValue());
-    defer tracked_block_map.untrack(context.vm.heap);
-
-    // Add all the non-argument slots
-    for (block.slots) |slot_node| {
-        if (!slot_node.is_argument) {
-            var slot_completion = try executeSlot(
-                context,
-                slot_node,
-                Object.Map.Block,
-                tracked_block_map.getValue().asObject().asMap().asBlockMap(),
-                slot_init_offset,
-            );
-            if (slot_completion) |completion| {
-                if (completion.isNormal()) {
-                    assignable_slot_values.appendAssumeCapacity(try context.vm.heap.track(completion.data.Normal));
-                } else {
-                    return completion;
-                }
-            }
-
-            slot_init_offset += 1;
-        }
-    }
-
-    // Ensure that creating the block object won't cause a garbage collection
-    // before the assignable slot values are copied in.
-    try context.vm.heap.ensureSpaceInEden(Object.Block.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len)));
-
-    var current_assignable_slot_values = std.BoundedArray(Value, MaximumAssignableSlots).init(assignable_slot_values.len) catch unreachable;
-    for (assignable_slot_values.constSlice()) |value, i| {
-        current_assignable_slot_values.set(i, value.getValue());
-    }
-
-    const block_object = try Object.Block.create(context.vm.heap, tracked_block_map.getValue().asObject().asMap().asBlockMap(), current_assignable_slot_values.constSlice());
-    return Completion.initNormal(block_object.asValue());
+    return try createSlotsObjectFromMap(context, block_map, block.slots);
 }
 
 pub fn executeReturn(context: *InterpreterContext, return_node: AST.ReturnNode) InterpreterError!Completion {
