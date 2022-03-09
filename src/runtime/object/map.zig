@@ -52,6 +52,43 @@ pub const MapType = enum(u64) {
     Array = 0b100 << MapTypeShift,
 };
 
+/// Generates a method for use as an isXMap function.
+fn generateIsMap(comptime MapT: type, comptime map_type: MapType) fn (*MapT) bool {
+    return struct {
+        pub fn func(self: *MapT) bool {
+            return self.getMapType() == map_type;
+        }
+    }.func;
+}
+
+/// Generates a method for use as a mustBeXMap function.
+fn generateMustBeMap(comptime MapT: type, comptime map_type_name: [*:0]const u8, comptime human_map_type: [*:0]const u8) fn (*MapT) void {
+    const is_map_func_name = "is" ++ map_type_name ++ "Map";
+
+    return struct {
+        pub fn func(self: *MapT) void {
+            if (!@call(.{}, @field(self, is_map_func_name), .{})) {
+                std.debug.panic("Expected the object at {*} to be " ++ human_map_type, .{self});
+            }
+        }
+    }.func;
+}
+
+/// Generates a method for use as an asXMap function.
+fn generateAsMap(comptime MapT: type, comptime SubMapT: type, comptime map_type_name: [*:0]const u8) fn (*MapT) *SubMapT {
+    const must_be_map_func_name = "mustBe" ++ map_type_name ++ "Map";
+
+    return struct {
+        pub fn func(self: *MapT) *SubMapT {
+            if (builtin.mode == .Debug) {
+                @call(.{}, @field(self, must_be_map_func_name), .{});
+            }
+
+            return @ptrCast(*SubMapT, self);
+        }
+    }.func;
+}
+
 pub const Map = packed struct {
     header: Object.Header,
 
@@ -64,14 +101,6 @@ pub const Map = packed struct {
     fn init(self: *Map, map_type: MapType, map_map: Value) void {
         self.header.init(.Map, map_map);
         self.setMapType(map_type);
-    }
-
-    pub fn finalize(self: *Map, allocator: Allocator) void {
-        switch (self.getMapType()) {
-            .Slots, .Array, .ByteArray => unreachable,
-            .Method => self.asMethodMap().finalize(allocator),
-            .Block => self.asBlockMap().finalize(allocator),
-        }
     }
 
     pub fn getMapType(self: *Map) MapType {
@@ -88,79 +117,16 @@ pub const Map = packed struct {
         self.header.object_information = (self.header.object_information & ~MapTypeMask) | @enumToInt(map_type);
     }
 
-    pub fn isSlotsMap(self: *Map) bool {
-        return self.getMapType() == .Slots;
+    pub fn asValue(self: *Map) Value {
+        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
     }
 
-    fn mustBeSlotsMap(self: *Map) void {
-        if (!self.isSlotsMap()) {
-            std.debug.panic("Expected the object at {*} to be a slots map", .{self});
+    pub fn finalize(self: *Map, allocator: Allocator) void {
+        switch (self.getMapType()) {
+            .Slots, .Array, .ByteArray => unreachable,
+            .Method => self.asMethodMap().finalize(allocator),
+            .Block => self.asBlockMap().finalize(allocator),
         }
-    }
-
-    pub fn asSlotsMap(self: *Map) *Slots {
-        if (builtin.mode == .Debug) self.mustBeSlotsMap();
-        return @ptrCast(*Slots, self);
-    }
-
-    pub fn isMethodMap(self: *Map) bool {
-        return self.getMapType() == .Method;
-    }
-
-    fn mustBeMethodMap(self: *Map) void {
-        if (!self.isMethodMap()) {
-            std.debug.panic("Expected the object at {*} to be a method map", .{self});
-        }
-    }
-
-    pub fn asMethodMap(self: *Map) *Method {
-        if (builtin.mode == .Debug) self.mustBeMethodMap();
-        return @ptrCast(*Method, self);
-    }
-
-    pub fn isBlockMap(self: *Map) bool {
-        return self.getMapType() == .Block;
-    }
-
-    fn mustBeBlockMap(self: *Map) void {
-        if (!self.isBlockMap()) {
-            std.debug.panic("Expected the object at {*} to be a block map", .{self});
-        }
-    }
-
-    pub fn asBlockMap(self: *Map) *Block {
-        if (builtin.mode == .Debug) self.mustBeBlockMap();
-        return @ptrCast(*Block, self);
-    }
-
-    pub fn isByteArrayMap(self: *Map) bool {
-        return self.getMapType() == .ByteArray;
-    }
-
-    fn mustBeByteArrayMap(self: *Map) void {
-        if (!self.isByteArrayMap()) {
-            std.debug.panic("Expected the object at {*} to be a byte array map", .{self});
-        }
-    }
-
-    pub fn asByteArrayMap(self: *Map) *ByteArray {
-        if (builtin.mode == .Debug) self.mustBeByteArrayMap();
-        return @ptrCast(*ByteArray, self);
-    }
-
-    pub fn isArrayMap(self: *Map) bool {
-        return self.getMapType() == .Array;
-    }
-
-    fn mustBeArrayMap(self: *Map) void {
-        if (!self.isArrayMap()) {
-            std.debug.panic("Expected the object at {*} to be an array map", .{self});
-        }
-    }
-
-    pub fn asArrayMap(self: *Map) *Array {
-        if (builtin.mode == .Debug) self.mustBeArrayMap();
-        return @ptrCast(*Array, self);
     }
 
     pub fn getSizeInMemory(self: *Map) usize {
@@ -173,9 +139,23 @@ pub const Map = packed struct {
         };
     }
 
-    pub fn asValue(self: *Map) Value {
-        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
-    }
+    const isSlotsMap = generateIsMap(Map, .Slots);
+    const isMethodMap = generateIsMap(Map, .Method);
+    const isBlockMap = generateIsMap(Map, .Block);
+    const isByteArrayMap = generateIsMap(Map, .ByteArray);
+    const isArrayMap = generateIsMap(Map, .Array);
+
+    const mustBeSlotsMap = generateMustBeMap(Map, "Slots", "a slots map");
+    const mustBeMethodMap = generateMustBeMap(Map, "Method", "a method map");
+    const mustBeBlockMap = generateMustBeMap(Map, "Block", "a block map");
+    const mustBeByteArrayMap = generateMustBeMap(Map, "ByteArray", "a byte array map");
+    const mustBeArrayMap = generateMustBeMap(Map, "Array", "an array map");
+
+    const asSlotsMap = generateAsMap(Map, Slots, "Slots");
+    const asMethodMap = generateAsMap(Map, Method, "Method");
+    const asBlockMap = generateAsMap(Map, Block, "Block");
+    const asByteArrayMap = generateAsMap(Map, ByteArray, "ByteArray");
+    const asArrayMap = generateAsMap(Map, Array, "Array");
 };
 
 // NOTE: properties comes *before* the slot count in the struct
