@@ -188,7 +188,7 @@ pub const Slots = packed struct {
         // Let's allocate a new map with the target slot count.
         const current_map = self.getMap();
         const source_map = source_object.getMap();
-        var new_map = try Object.Map.Slots.create(heap, @intCast(u32, constant_slot_count_after_merge));
+        var new_map = try Object.Map.Slots.create(heap, @intCast(u32, constant_slot_count_after_merge + assignable_slot_count_after_merge));
 
         var map_builder = try new_map.getMapBuilder(heap);
         defer map_builder.deinit();
