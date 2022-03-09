@@ -44,9 +44,8 @@ pub const InterpreterContext = struct {
 
 pub const InterpreterError = Allocator.Error;
 
-/// Executes a script node. `lobby` is ref'd for the function lifetime. The last
-/// expression result is returned, or if no statements were available, null is
-/// returned.
+/// Executes a script node. The last statement result is returned. If no
+/// statements were available or there was an error, null is returned.
 ///
 /// Refs `script`.
 pub fn executeScript(vm: *VirtualMachine, script: Script.Ref) InterpreterError!?Value {
@@ -160,7 +159,6 @@ pub fn executeSubScript(parent_context: *InterpreterContext, script: Script.Ref)
     return null;
 }
 
-/// Executes an expression. All refs are forwarded.
 pub fn executeExpression(context: *InterpreterContext, expression: AST.ExpressionNode) InterpreterError!Completion {
     return switch (expression) {
         .Object => |object| try executeObject(context, object.*),
@@ -302,7 +300,6 @@ pub fn executeSlot(context: *InterpreterContext, slot_node: AST.SlotNode, compti
     }
 }
 
-/// Creates a new slots object. All refs are forwarded.
 pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) InterpreterError!Completion {
     // Verify that we are executing a slots object and not a method; methods
     // are created through executeSlot.
@@ -517,7 +514,6 @@ pub fn executeReturn(context: *InterpreterContext, return_node: AST.ReturnNode) 
     }
 }
 
-/// Executes an identifier expression.
 pub fn executeIdentifier(context: *InterpreterContext, identifier: AST.IdentifierNode) InterpreterError!Completion {
     var source_range = SourceRange.init(context.script, identifier.range);
     defer source_range.deinit();
@@ -580,8 +576,6 @@ pub fn executeIdentifier(context: *InterpreterContext, identifier: AST.Identifie
     }
 }
 
-/// Executes a string literal expression. `lobby` gains a ref during the
-/// lifetime of the function.
 pub fn executeString(context: *InterpreterContext, string: AST.StringNode) InterpreterError!Completion {
     try context.vm.heap.ensureSpaceInEden(
         ByteArray.requiredSizeForAllocation(string.value.len) +
@@ -594,8 +588,6 @@ pub fn executeString(context: *InterpreterContext, string: AST.StringNode) Inter
     return Completion.initNormal((try Object.ByteArray.create(context.vm.heap, byte_array_map)).asValue());
 }
 
-/// Executes a number literal expression. `lobby` gains a ref during the
-/// lifetime of the function.
 pub fn executeNumber(context: *InterpreterContext, number: AST.NumberNode) InterpreterError!Completion {
     _ = context;
 
