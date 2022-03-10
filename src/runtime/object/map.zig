@@ -122,6 +122,13 @@ pub const Map = packed struct {
         return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
     }
 
+    pub fn shouldFinalize(self: *Map) bool {
+        return switch (self.getMapType()) {
+            .Slots, .Array, .ByteArray => false,
+            .Method, .Block => true,
+        };
+    }
+
     pub fn finalize(self: *Map, allocator: Allocator) void {
         switch (self.getMapType()) {
             .Slots, .Array, .ByteArray => unreachable,

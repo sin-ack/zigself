@@ -231,7 +231,7 @@ pub const Slots = packed struct {
             // We do need to create a new object, and then update all the heap
             // references to it.
             const new_object = try map_builder.createObject();
-            heap.updateAllReferencesTo(self.asValue(), new_object.asValue());
+            try heap.updateAllReferencesTo(self.asValue(), new_object.asValue());
             return new_object;
         }
 

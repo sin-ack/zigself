@@ -76,6 +76,14 @@ pub fn getSizeInMemory(self: Self) usize {
     };
 }
 
+pub fn shouldFinalize(self: Self) bool {
+    return switch (self.header.getObjectType()) {
+        .ForwardingReference, .Slots, .Activation, .Method, .Block, .Array, .ByteArray => false,
+        .Managed => true,
+        .Map => self.asMap().shouldFinalize(),
+    };
+}
+
 pub fn finalize(self: Self, allocator: Allocator) void {
     switch (self.header.getObjectType()) {
         .ForwardingReference, .Slots, .Activation, .Method, .Block, .Array, .ByteArray => unreachable,

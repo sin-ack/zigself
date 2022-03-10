@@ -201,11 +201,18 @@ pub fn ensureSpaceInEden(self: *Self, required_memory: usize) !void {
 
 /// Go through the whole heap, updating references to the given value with the
 /// new value.
-pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) void {
-    _ = self;
-    _ = old_value;
-    _ = new_value;
-    std.debug.panic("TODO", .{});
+pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) !void {
+    // If the activation stack exists then go through it and update all
+    // references.
+    if (self.activation_stack) |activation_stack| {
+        for (activation_stack.getStack()) |*activation| {
+            if (activation.activation_object.data == old_value.data) {
+                activation.activation_object = new_value;
+            }
+        }
+    }
+
+    try self.eden.updateAllReferencesTo(self.allocator, old_value.asObjectAddress(), new_value.asObjectAddress());
 }
 
 /// Figure out which spaces the referrer and target object are in, and add an
@@ -858,6 +865,42 @@ const Space = struct {
         }
 
         return false;
+    }
+
+    pub fn updateAllReferencesToImpl(self: *Space, allocator: Allocator, old_address: [*]u64, new_address: [*]u64) !void {
+        const new_address_value = Value.fromObjectAddress(new_address);
+        const old_address_as_reference = Value.fromObjectAddress(old_address).data;
+        const new_address_as_reference = new_address_value.data;
+
+        const object_space_size_in_words = @divExact(@ptrToInt(self.object_cursor) - @ptrToInt(self.memory.ptr), @sizeOf(u64));
+        const object_memory = self.memory[0..object_space_size_in_words];
+
+        for (object_memory) |*word| {
+            if (word.* == old_address_as_reference)
+                word.* = new_address_as_reference;
+        }
+
+        // Go through tracked set, and replace the address contained in any
+        // handle with the new address.
+        for (self.tracked_set.keys()) |handle| {
+            if (handle.* == old_address)
+                handle.* = new_address;
+        }
+
+        // If the new object is in the current space and should be finalized,
+        // then put it in the finalization set.
+        if (self.objectSegmentContains(new_address) and new_address_value.asObject().shouldFinalize())
+            try self.finalization_set.put(allocator, new_address, .{});
+    }
+
+    /// Update all references to the given object in the current space and
+    /// its tenure target.
+    pub fn updateAllReferencesTo(self: *Space, allocator: Allocator, old_address: [*]u64, new_address: [*]u64) Allocator.Error!void {
+        try self.updateAllReferencesToImpl(allocator, old_address, new_address);
+
+        if (self.tenure_target) |tenure_target| {
+            try tenure_target.updateAllReferencesTo(allocator, old_address, new_address);
+        }
     }
 };
 
