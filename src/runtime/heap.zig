@@ -836,10 +836,6 @@ const Space = struct {
             return true;
         }
 
-        if (self.scavenge_target) |scavenge_target| {
-            if (try scavenge_target.startTracking(allocator, handle)) return true;
-        }
-
         if (self.tenure_target) |tenure_target| {
             if (try tenure_target.startTracking(allocator, handle)) return true;
         }
@@ -855,10 +851,6 @@ const Space = struct {
         if (self.objectSegmentContains(address) or self.byteVectorSegmentContains(address)) {
             self.removeFromTrackedSet(handle) catch unreachable;
             return true;
-        }
-
-        if (self.scavenge_target) |scavenge_target| {
-            if (scavenge_target.stopTracking(handle)) return true;
         }
 
         if (self.tenure_target) |tenure_target| {
