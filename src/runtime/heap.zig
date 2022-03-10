@@ -309,13 +309,10 @@ const Space = struct {
     /// The raw memory contents of the space. The space capacity can be learned
     /// with `memory.len`.
     memory: []u64,
-    /// Points to the first free address in this space's object segment (which
-    /// grows upwards in memory).
-    object_cursor: [*]u64,
-    /// Points to the first used address in this space's bytevector segment
-    /// (which grows downwards in memory). May point to the byte after `memory`,
-    /// in which case the bytevector segment is empty.
-    byte_array_cursor: [*]u64,
+    /// A slice of the current object segment in this space.
+    object_segment: []u64,
+    /// A slice of the current byte array segment in this space.
+    byte_array_segment: []u64,
     /// The set of objects which reference an object in this space. When a
     /// constant or assignable slot from a previous space references this space,
     /// it is added to this set; when it starts referencing another space, it is
@@ -364,11 +361,17 @@ const Space = struct {
 
     pub fn init(heap: *Self, allocator: Allocator, comptime name: [*:0]const u8, size: usize) !Space {
         var memory = try allocator.alloc(u64, size / @sizeOf(u64));
+
+        // REVIEW: When Zig fixes its zero-length arrays to not create a slice
+        //         with an undefined address, get rid of this and just use
+        //         memory[0..0].
+        var runtime_zero: usize = 0;
+
         return Space{
             .heap = if (GC_TRACK_SOURCE_DEBUG) heap else .{},
             .memory = memory,
-            .object_cursor = memory.ptr,
-            .byte_array_cursor = memory.ptr + memory.len,
+            .object_segment = memory[0..runtime_zero],
+            .byte_array_segment = (memory.ptr + memory.len)[0..runtime_zero],
             .remembered_set = .{},
             .finalization_set = .{},
             .tracked_set = .{},
@@ -392,14 +395,8 @@ const Space = struct {
 
     /// Return the amount of free memory in this space in bytes.
     pub fn freeMemory(self: *Space) usize {
-        const memory_word_count = self.memory.len;
-        const start_of_memory = self.memory.ptr;
-        const end_of_memory = start_of_memory + memory_word_count;
-
-        const object_size = @ptrToInt(self.object_cursor) - @ptrToInt(start_of_memory);
-        const byte_array_size = @ptrToInt(end_of_memory) - @ptrToInt(self.byte_array_cursor);
-
-        return memory_word_count * @sizeOf(u64) - object_size - byte_array_size;
+        const available_words = self.memory.len - self.object_segment.len - self.byte_array_segment.len;
+        return available_words * @sizeOf(u64);
     }
 
     /// Copy the given address as a new object in the target space. Creates a
@@ -456,7 +453,7 @@ const Space = struct {
     fn copyAddress(self: *Space, allocator: Allocator, address: [*]u64, target_space: *Space, comptime require_copy: bool) !?[*]u64 {
         if (self.objectSegmentContains(address)) {
             return self.copyObjectTo(allocator, address, target_space);
-        } else if (self.byteVectorSegmentContains(address)) {
+        } else if (self.byteArraySegmentContains(address)) {
             return copyByteVectorTo(allocator, address, target_space);
         } else if (require_copy) {
             std.debug.panic("!!! copyAddress called with an address that's not allocated in this space!", .{});
@@ -493,9 +490,9 @@ const Space = struct {
         // If we got here, then we have enough free memory on the target space
         // to perform our operations.
 
-        // These are saved in order to race against them in the final phase
-        // of the scavenge.
-        var object_scan_cursor = target_space.object_cursor;
+        // This is saved to race against the target space's object segment
+        // length after everything else has been copied in.
+        var target_object_segment_index = target_space.object_segment.len;
 
         // Go through the whole activation stack, copying activation objects
         // that are within this space
@@ -559,12 +556,10 @@ const Space = struct {
             if (GC_DEBUG) std.debug.print("Space.cheneyCommon: Scanning newer generation {s}\n", .{link.space.name});
 
             const newer_generation_space = link.space;
-            const object_segment_size_in_words = (@ptrToInt(newer_generation_space.object_cursor) - @ptrToInt(newer_generation_space.memory.ptr)) / @sizeOf(u64);
-            const object_segment_of_space = newer_generation_space.memory.ptr[0..object_segment_size_in_words];
 
             // Update all the addresses in the newer space with the new
             // locations in the target space
-            for (object_segment_of_space) |*word| {
+            for (newer_generation_space.object_segment) |*word| {
                 const value = Value{ .data = word.* };
                 if (value.isObjectReference()) {
                     const address = value.asObjectAddress();
@@ -577,26 +572,30 @@ const Space = struct {
             newer_generation_link_it = link.previous;
         }
 
-        if (GC_DEBUG) std.debug.print("Space.cheneyCommon: Trying to catch up from {*} to {*}\n", .{ object_scan_cursor, target_space.object_cursor });
+        if (GC_DEBUG) std.debug.print(
+            "Space.cheneyCommon: Trying to catch up from object segment offset {} to {}\n",
+            .{ target_object_segment_index, target_space.object_segment.len },
+        );
 
         // Try to catch up to the target space's object and byte vector cursors,
-        // copying any other objects/byte vectors that still exist in this space
-        while (@ptrToInt(object_scan_cursor) < @ptrToInt(target_space.object_cursor)) : (object_scan_cursor += 1) {
-            const word = object_scan_cursor[0];
-            const value = Value{ .data = word };
+        // copying any other objects/byte vectors that still exist in this
+        // space.
+        while (target_object_segment_index < target_space.object_segment.len) : (target_object_segment_index += 1) {
+            const word_ptr = &target_space.object_segment[target_object_segment_index];
+            const value = Value{ .data = word_ptr.* };
 
             if (value.isObjectReference()) {
                 const address = value.asObjectAddress();
 
                 if (self.objectSegmentContains(address)) {
-                    object_scan_cursor[0] = Value.fromObjectAddress(try self.copyObjectTo(allocator, address, target_space)).data;
-                } else if (self.byteVectorSegmentContains(address)) {
-                    object_scan_cursor[0] = Value.fromObjectAddress(copyByteVectorTo(allocator, address, target_space)).data;
+                    word_ptr.* = Value.fromObjectAddress(try self.copyObjectTo(allocator, address, target_space)).data;
+                } else if (self.byteArraySegmentContains(address)) {
+                    word_ptr.* = Value.fromObjectAddress(copyByteVectorTo(allocator, address, target_space)).data;
                 }
             }
         }
 
-        std.debug.assert(object_scan_cursor == target_space.object_cursor);
+        std.debug.assert(target_object_segment_index == target_space.object_segment.len);
 
         // Notify any object who didn't make it out of this space and wanted to
         // be notified about being finalized.
@@ -649,10 +648,15 @@ const Space = struct {
             newer_generation_link_it = link.previous;
         }
 
-        // Reset this space's pointers, tracked set, remembered set and
+        // REVIEW: When Zig fixes its zero-length arrays to not create a slice
+        //         with an undefined address, get rid of this and just use
+        //         memory[0..0].
+        var runtime_zero: usize = 0;
+
+        // Reset this space's segments, tracked set, remembered set and
         // finalization set, as it is now effectively empty.
-        self.object_cursor = self.memory.ptr;
-        self.byte_array_cursor = self.memory.ptr + self.memory.len;
+        self.object_segment = self.memory[0..runtime_zero];
+        self.byte_array_segment = (self.memory.ptr + self.memory.len)[0..runtime_zero];
         self.remembered_set.clearRetainingCapacity();
         self.finalization_set.clearRetainingCapacity();
         self.tracked_set.clearRetainingCapacity();
@@ -735,29 +739,38 @@ const Space = struct {
 
     fn swapMemoryWith(self: *Space, target_space: *Space) void {
         std.mem.swap([]u64, &self.memory, &target_space.memory);
-        std.mem.swap([*]u64, &self.object_cursor, &target_space.object_cursor);
-        std.mem.swap([*]u64, &self.byte_array_cursor, &target_space.byte_array_cursor);
+        std.mem.swap([]u64, &self.object_segment, &target_space.object_segment);
+        std.mem.swap([]u64, &self.byte_array_segment, &target_space.byte_array_segment);
         std.mem.swap(RememberedSet, &self.remembered_set, &target_space.remembered_set);
         std.mem.swap(FinalizationSet, &self.finalization_set, &target_space.finalization_set);
         std.mem.swap(TrackedSet, &self.tracked_set, &target_space.tracked_set);
     }
 
     fn objectSegmentContains(self: *Space, address: [*]u64) bool {
-        return @ptrToInt(address) >= @ptrToInt(self.memory.ptr) and @ptrToInt(address) < @ptrToInt(self.object_cursor);
+        const start_of_object_segment = @ptrToInt(self.object_segment.ptr);
+        const end_of_object_segment = @ptrToInt(self.object_segment.ptr + self.object_segment.len);
+        const address_value = @ptrToInt(address);
+
+        return address_value >= start_of_object_segment and address_value < end_of_object_segment;
     }
 
-    fn byteVectorSegmentContains(self: *Space, address: [*]u64) bool {
-        return @ptrToInt(address) >= @ptrToInt(self.byte_array_cursor) and @ptrToInt(address) < @ptrToInt(self.memory.ptr + self.memory.len);
+    fn byteArraySegmentContains(self: *Space, address: [*]u64) bool {
+        const start_of_byte_array_segment = @ptrToInt(self.byte_array_segment.ptr);
+        const end_of_byte_array_segment = @ptrToInt(self.byte_array_segment.ptr + self.byte_array_segment.len);
+        const address_value = @ptrToInt(address);
+
+        return address_value >= start_of_byte_array_segment and address_value < end_of_byte_array_segment;
     }
 
     /// Allocates the requested amount in bytes in the object segment of this
     /// space, garbage collecting if there is not enough space.
     pub fn allocateInObjectSegment(self: *Space, allocator: Allocator, activation_stack: *const ActivationStack, size: usize) ![*]u64 {
-        std.debug.assert(size % 8 == 0);
         if (self.freeMemory() < size) try self.collectGarbage(allocator, size, activation_stack);
 
-        const start_of_object = self.object_cursor;
-        self.object_cursor += size / @sizeOf(u64);
+        const size_in_words = @divExact(size, @sizeOf(u64));
+        const current_object_segment_offset = self.object_segment.len;
+        self.object_segment.len += size_in_words;
+        const start_of_object = @ptrCast([*]u64, &self.object_segment[current_object_segment_offset]);
 
         if (builtin.mode == .Debug)
             std.mem.set(u8, @ptrCast([*]align(@alignOf(u64)) u8, start_of_object)[0..size], UninitializedHeapScrubByte);
@@ -768,15 +781,16 @@ const Space = struct {
     /// Allocates the requested amount in bytes in the byte vector segment of
     /// this space, garbage collecting if there is not enough space.
     pub fn allocateInByteVectorSegment(self: *Space, allocator: Allocator, activation_stack: *const ActivationStack, size: usize) ![*]u64 {
-        std.debug.assert(size % 8 == 0);
         if (self.freeMemory() < size) try self.collectGarbage(allocator, size, activation_stack);
 
-        self.byte_array_cursor -= size / @sizeOf(u64);
+        const size_in_words = @divExact(size, @sizeOf(u64));
+        self.byte_array_segment.ptr -= size_in_words;
+        self.byte_array_segment.len += size_in_words;
 
         if (builtin.mode == .Debug)
-            std.mem.set(u8, @ptrCast([*]align(@alignOf(u64)) u8, self.byte_array_cursor)[0..size], UninitializedHeapScrubByte);
+            std.mem.set(u8, @ptrCast([*]align(@alignOf(u64)) u8, self.byte_array_segment.ptr)[0..size], UninitializedHeapScrubByte);
 
-        return self.byte_array_cursor;
+        return self.byte_array_segment.ptr;
     }
 
     /// Adds the given address to the finalization set of this space.
@@ -838,7 +852,7 @@ const Space = struct {
     pub fn startTracking(self: *Space, allocator: Allocator, handle: *[*]u64) Allocator.Error!bool {
         const address = handle.*;
 
-        if (self.objectSegmentContains(address) or self.byteVectorSegmentContains(address)) {
+        if (self.objectSegmentContains(address) or self.byteArraySegmentContains(address)) {
             try self.addToTrackedSet(allocator, handle);
             return true;
         }
@@ -855,7 +869,7 @@ const Space = struct {
     pub fn stopTracking(self: *Space, handle: *[*]u64) bool {
         const address = handle.*;
 
-        if (self.objectSegmentContains(address) or self.byteVectorSegmentContains(address)) {
+        if (self.objectSegmentContains(address) or self.byteArraySegmentContains(address)) {
             self.removeFromTrackedSet(handle) catch unreachable;
             return true;
         }
@@ -872,10 +886,7 @@ const Space = struct {
         const old_address_as_reference = Value.fromObjectAddress(old_address).data;
         const new_address_as_reference = new_address_value.data;
 
-        const object_space_size_in_words = @divExact(@ptrToInt(self.object_cursor) - @ptrToInt(self.memory.ptr), @sizeOf(u64));
-        const object_memory = self.memory[0..object_space_size_in_words];
-
-        for (object_memory) |*word| {
+        for (self.object_segment) |*word| {
             if (word.* == old_address_as_reference)
                 word.* = new_address_as_reference;
         }
@@ -961,7 +972,7 @@ test "fill up the eden with objects and attempt to allocate one more" {
     try std.testing.expectEqual(eden_free_memory - 16, heap.eden.freeMemory());
     // Expect the from space to be empty, as there were no object refs this
     // entire time
-    try std.testing.expectEqual(heap.from_space.memory.ptr, heap.from_space.object_cursor);
+    try std.testing.expectEqual(heap.from_space.memory.ptr, heap.from_space.object_segment.ptr);
 }
 
 test "link an object to another and perform scavenge" {
