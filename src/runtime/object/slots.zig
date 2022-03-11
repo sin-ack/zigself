@@ -21,20 +21,20 @@ const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
 /// Information about added/changed slots when an object is merged into another.
 const MergeInfo = struct {
-    added_constant_slots: usize,
-    added_assignable_slots: usize,
-    changed_constant_slots: usize,
-    changed_assignable_slots: usize,
-    constant_to_assignable_slots: usize,
-    assignable_to_constant_slots: usize,
+    previous_slots: usize,
+    previous_assignable_slot_values: usize,
+    slots: usize,
+    assignable_slot_values: usize,
+    has_updated_slots: bool,
 
     pub fn hasChanges(self: MergeInfo) bool {
-        return self.added_constant_slots != 0 or
-            self.added_assignable_slots != 0 or
-            self.changed_constant_slots != 0 or
-            self.changed_assignable_slots != 0 or
-            self.constant_to_assignable_slots != 0 or
-            self.assignable_to_constant_slots != 0;
+        return self.has_updated_slots or
+            self.previous_slots != self.slots or
+            self.previous_assignable_slot_values != self.assignable_slot_values;
+    }
+
+    pub fn assignableSlotCountChanged(self: MergeInfo) bool {
+        return self.previous_assignable_slot_values != self.assignable_slot_values;
     }
 };
 
@@ -150,24 +150,12 @@ pub const Slots = packed struct {
     pub fn addSlotsFrom(self: *Slots, source_object: *Slots, heap: *Heap) !*Slots {
         const merge_info = self.calculateMergeOf(source_object);
 
-        const target_constant_slot_count = self.getMap().slot_count - self.getMap().getAssignableSlotCount();
-        const constant_slot_count_after_merge =
-            target_constant_slot_count - merge_info.constant_to_assignable_slots +
-            merge_info.assignable_to_constant_slots +
-            merge_info.added_constant_slots;
-
-        const target_assignable_slot_count = self.getMap().getAssignableSlotCount();
-        const assignable_slot_count_after_merge = target_assignable_slot_count - merge_info.assignable_to_constant_slots +
-            merge_info.constant_to_assignable_slots +
-            merge_info.added_assignable_slots;
-        const assignable_slot_count_diff = @intCast(isize, assignable_slot_count_after_merge) - @intCast(isize, target_assignable_slot_count);
-
         // If there is anything that could change any of the slots, then we need
         // to create a new copy of the map.
         const map_needs_change = merge_info.hasChanges();
         // We only create a new object if the assignable slot count changes;
         // otherwise we just overwrite the current object with the new slots.
-        const object_needs_change = assignable_slot_count_diff != 0;
+        const object_needs_change = merge_info.assignableSlotCountChanged();
 
         if (!map_needs_change) {
             // If the map doesn't need to change at all then there is nothing
@@ -178,7 +166,7 @@ pub const Slots = packed struct {
         // Let's allocate a new map with the target slot count.
         const current_map = self.getMap();
         const source_map = source_object.getMap();
-        var new_map = try Object.Map.Slots.create(heap, @intCast(u32, constant_slot_count_after_merge + assignable_slot_count_after_merge));
+        var new_map = try Object.Map.Slots.create(heap, @intCast(u32, merge_info.slots));
 
         var map_builder = try new_map.getMapBuilder(heap);
         defer map_builder.deinit();
@@ -239,31 +227,18 @@ pub const Slots = packed struct {
     pub fn requiredSizeForMerging(target_object: *Slots, source_object: *Slots) usize {
         const merge_info = target_object.calculateMergeOf(source_object);
 
-        // FIXME: Avoid duplicating these with addSlotsFrom
-        const target_constant_slot_count = target_object.getMap().slot_count - target_object.getMap().getAssignableSlotCount();
-        const constant_slot_count_after_merge =
-            target_constant_slot_count - merge_info.constant_to_assignable_slots +
-            merge_info.assignable_to_constant_slots +
-            merge_info.added_constant_slots;
-
-        const target_assignable_slot_count = target_object.getMap().getAssignableSlotCount();
-        const assignable_slot_count_after_merge = target_assignable_slot_count - merge_info.assignable_to_constant_slots +
-            merge_info.constant_to_assignable_slots +
-            merge_info.added_assignable_slots;
-        const assignable_slot_count_diff = @intCast(isize, assignable_slot_count_after_merge) - @intCast(isize, target_assignable_slot_count);
-
         // If there is anything that could change any of the slots, then we need
         // to create a new copy of the map.
         const map_needs_change = merge_info.hasChanges();
         // We only create a new object if the assignable slot count changes;
         // otherwise we just overwrite the current object with the new slots.
-        const object_needs_change = assignable_slot_count_diff != 0;
+        const object_needs_change = merge_info.assignableSlotCountChanged();
 
         var required_size: usize = 0;
         if (map_needs_change)
-            required_size += Map.Slots.requiredSizeForAllocation(@intCast(u32, constant_slot_count_after_merge));
+            required_size += Map.Slots.requiredSizeForAllocation(@intCast(u32, merge_info.slots));
         if (object_needs_change)
-            required_size += Slots.requiredSizeForAllocation(@intCast(u8, assignable_slot_count_after_merge));
+            required_size += Slots.requiredSizeForAllocation(@intCast(u8, merge_info.assignable_slot_values));
 
         return required_size;
     }
@@ -274,66 +249,51 @@ pub const Slots = packed struct {
     ///
     /// Returns a MergeInfo.
     fn calculateMergeOf(target_object: *Slots, source_object: *Slots) MergeInfo {
-        var added_constant_slots: usize = 0;
-        var added_assignable_slots: usize = 0;
-        var changed_constant_slots: usize = 0;
-        var changed_assignable_slots: usize = 0;
-        var constant_to_assignable_slots: usize = 0;
-        var assignable_to_constant_slots: usize = 0;
+        var slots: usize = 0;
+        var assignable_slot_values: usize = 0;
+        var has_updated_slots = false;
 
-        for (source_object.getSlots()) |source_slot| {
+        // Go through all the target object slots and add the slot counts. If
+        // a slot with the same name exists on the source object then use its
+        // counts instead.
+        next_target_slot: for (target_object.getSlots()) |target_slot| {
+            for (source_object.getSlots()) |source_slot| {
+                if (source_slot.getHash() == target_slot.getHash()) {
+                    slots += source_slot.requiredSlotSpace();
+                    assignable_slot_values += source_slot.requiredAssignableSlotValueSpace();
+                    has_updated_slots = true;
+
+                    continue :next_target_slot;
+                }
+            }
+
+            slots += target_slot.requiredSlotSpace();
+            assignable_slot_values += target_slot.requiredAssignableSlotValueSpace();
+        }
+
+        // Go through all the source object slots and add the ones we haven't
+        // seen before to the count.
+        next_source_slot: for (source_object.getSlots()) |source_slot| {
             // Argument objects are a method & block object thing. We don't want
             // any of that here.
             std.debug.assert(!source_slot.isArgument());
 
-            var did_find_matching_slot = false;
             for (target_object.getSlots()) |target_slot| {
-                if (source_slot.getHash() == target_slot.getHash()) {
-                    if (source_slot.isAssignable() and !target_slot.isAssignable()) {
-                        constant_to_assignable_slots += 1;
-                    } else if (!source_slot.isAssignable() and target_slot.isAssignable()) {
-                        assignable_to_constant_slots += 1;
-                    } else {
-                        const parent_flag_matches = source_slot.isParent() != target_slot.isParent();
-                        const source_value = if (source_slot.isAssignable())
-                            source_object.getAssignableSlots()[source_slot.value.asUnsignedInteger()]
-                        else
-                            source_slot.value;
-                        const target_value = if (target_slot.isAssignable())
-                            target_object.getAssignableSlots()[target_slot.value.asUnsignedInteger()]
-                        else
-                            target_slot.value;
-
-                        if (!parent_flag_matches or source_value.data != target_value.data) {
-                            if (source_slot.isAssignable()) {
-                                changed_assignable_slots += 1;
-                            } else {
-                                changed_constant_slots += 1;
-                            }
-                        }
-                    }
-
-                    did_find_matching_slot = true;
-                    break;
-                }
+                if (source_slot.getHash() == target_slot.getHash())
+                    continue :next_source_slot;
             }
 
-            if (!did_find_matching_slot) {
-                if (source_slot.isAssignable()) {
-                    added_assignable_slots += 1;
-                } else {
-                    added_constant_slots += 1;
-                }
-            }
+            slots += source_slot.requiredSlotSpace();
+            assignable_slot_values += source_slot.requiredAssignableSlotValueSpace();
+            has_updated_slots = true;
         }
 
         return MergeInfo{
-            .added_constant_slots = added_constant_slots,
-            .added_assignable_slots = added_assignable_slots,
-            .changed_constant_slots = changed_constant_slots,
-            .changed_assignable_slots = changed_assignable_slots,
-            .constant_to_assignable_slots = constant_to_assignable_slots,
-            .assignable_to_constant_slots = assignable_to_constant_slots,
+            .previous_slots = target_object.getSlots().len,
+            .previous_assignable_slot_values = target_object.getMap().getAssignableSlotCount(),
+            .slots = slots,
+            .assignable_slot_values = assignable_slot_values,
+            .has_updated_slots = has_updated_slots,
         };
     }
 };

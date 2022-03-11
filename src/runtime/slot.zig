@@ -230,9 +230,20 @@ pub const Slot = packed struct {
         return initConstant(name, if (self.isParent()) .Parent else .NotParent, self.value);
     }
 
-    /// Return how many slot spaces this slot needs for its contents.
-    pub fn requiredSlotSpace(self: Slot) u32 {
+    /// Return how many slot spaces this slot needs on the map for its contents.
+    pub fn requiredSlotSpace(self: Slot) usize {
         _ = self;
+        return 1;
+    }
+
+    /// Return how many assignable slot value spaces this slot needs on the
+    /// object for its contents.
+    pub fn requiredAssignableSlotValueSpace(self: Slot) usize {
+        if (!self.isAssignable())
+            return 0;
+        // This is dealt with during activation.
+        if (self.isArgument())
+            return 0;
         return 1;
     }
 };
