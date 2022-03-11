@@ -100,7 +100,7 @@ fn inspectObject(
         .Method => {
             const method = object.asMethodObject();
 
-            std.debug.print("<method object \"{s}\"> ", .{method.getMap().method_name.asObject().asByteArrayObject().getValues()});
+            std.debug.print("<method object \"{s}\"> ", .{method.getMap().method_name.asByteArray().getValues()});
 
             if (method.getMap().getSlots().len > 0) {
                 std.debug.print("(|{s}", .{separator});
@@ -177,8 +177,10 @@ fn inspectSlots(
             // FIXME: Figure out creator slots, and give the path to this object
             std.debug.print("<parent object>", .{});
         } else {
-            if (slot.isAssignable()) {
-                try inspectValueInternal(display_type, vm, object.getAssignableSlots()[slot.value.asUnsignedInteger()], indent, visited_object_link);
+            if (slot.isArgument()) {
+                std.debug.print("<argument>", .{});
+            } else if (slot.isAssignable()) {
+                try inspectValueInternal(display_type, vm, object.getAssignableSlotValue(slot).*, indent, visited_object_link);
             } else {
                 try inspectValueInternal(display_type, vm, slot.value, indent, visited_object_link);
             }
