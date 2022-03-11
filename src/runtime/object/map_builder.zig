@@ -9,6 +9,8 @@ const interpreter = @import("../interpreter.zig");
 const Slot = @import("../slot.zig").Slot;
 const Value = @import("../value.zig").Value;
 
+pub const AssignableSlotValues = std.BoundedArray(Heap.Tracked, interpreter.MaximumAssignableSlots);
+
 /// This struct allows one to build out a map's slots and eventually construct
 /// an object using it. It holds the assignable slot values and assigns an index
 /// to them. It additionally tracks argument slot offsets.
@@ -30,7 +32,6 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
         argument_slot_index: usize = 0,
 
         const Self = @This();
-        const AssignableSlotValues = std.BoundedArray(Heap.Tracked, interpreter.MaximumAssignableSlots);
 
         // Marker for typechecking.
         pub const is_map_builder = true;
@@ -54,22 +55,14 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
 
         pub fn addSlot(self: *Self, slot: Slot) !void {
             const map = @ptrCast(*MapType, self.map.getValue().asObjectAddress());
-            const slot_ptr = &map.getSlots()[self.slot_index];
-            slot_ptr.* = slot;
-            self.slot_index += 1;
-
-            if (slot.isArgument()) {
-                std.debug.assert(self.argument_slot_index < interpreter.MaximumArguments);
-
-                _ = slot_ptr.assignIndex(@intCast(u8, self.argument_slot_index));
-                self.argument_slot_index += 1;
-            } else if (slot.isAssignable()) {
-                std.debug.assert(self.assignable_slot_index + self.argument_slot_index < interpreter.MaximumAssignableSlots);
-
-                const value = slot_ptr.assignIndex(@intCast(u8, self.assignable_slot_index));
-                self.assignable_slot_values.appendAssumeCapacity(try self.heap.track(value));
-                self.assignable_slot_index += 1;
-            }
+            try slot.writeContentsTo(
+                self.heap,
+                map.getSlots(),
+                &self.assignable_slot_values,
+                &self.slot_index,
+                &self.assignable_slot_index,
+                &self.argument_slot_index,
+            );
 
             // NOTE: Method and block maps do not count the argument slot count
             //       towards their assignable slot counts, because the argument

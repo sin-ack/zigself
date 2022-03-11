@@ -11,6 +11,8 @@ const hash = @import("../utility/hash.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
 const ByteArray = @import("./byte_array.zig");
+const map_builder = @import("./object/map_builder.zig");
+const interpreter = @import("./interpreter.zig");
 
 /// The properties of a slot. This is shared by both ProtoSlot and Slot.
 const SlotProperties = packed struct {
@@ -245,5 +247,37 @@ pub const Slot = packed struct {
         if (self.isArgument())
             return 0;
         return 1;
+    }
+
+    /// Write the contents of this slot to the given slot map. Also write the
+    /// assignable slot values of this slot to the given assignable slot values
+    /// list. slot_index, assignable_slot_index and argument_slot_index are
+    /// both in and out parameters, and are incremented by the amount of slots
+    /// written.
+    pub fn writeContentsTo(
+        self: Slot,
+        heap: *Heap,
+        slots: []Slot,
+        assignable_slot_values: *map_builder.AssignableSlotValues,
+        slot_index: *usize,
+        assignable_slot_index: *usize,
+        argument_slot_index: *usize,
+    ) !void {
+        const slot_ptr = &slots[slot_index.*];
+        slot_ptr.* = self;
+        slot_index.* += 1;
+
+        if (self.isArgument()) {
+            std.debug.assert(argument_slot_index.* < interpreter.MaximumArguments);
+
+            _ = slot_ptr.assignIndex(@intCast(u8, argument_slot_index.*));
+            argument_slot_index.* += 1;
+        } else if (self.isAssignable()) {
+            std.debug.assert(assignable_slot_index.* + argument_slot_index.* < interpreter.MaximumAssignableSlots);
+
+            const value = slot_ptr.assignIndex(@intCast(u8, assignable_slot_index.*));
+            assignable_slot_values.appendAssumeCapacity(try heap.track(value));
+            assignable_slot_index.* += 1;
+        }
     }
 };
