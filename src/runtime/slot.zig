@@ -157,8 +157,8 @@ pub const Slot = packed struct {
         }
 
         if (self.isAssignable()) {
-            const slot_value = holder.getAssignableSlots()[self.value.asUnsignedInteger()];
-            return initAssignable(name, if (self.isParent()) .Parent else .NotParent, slot_value);
+            const slot_value = holder.getAssignableSlotValue(self);
+            return initAssignable(name, if (self.isParent()) .Parent else .NotParent, slot_value.*);
         }
 
         return initConstant(name, if (self.isParent()) .Parent else .NotParent, self.value);
