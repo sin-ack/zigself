@@ -109,6 +109,11 @@ pub const SlotNode = struct {
     is_mutable: bool,
     is_parent: bool,
     is_argument: bool,
+    is_inherited: bool,
+
+    /// The ID of this slot in definition order.
+    /// Inherited slots are always hoisted to the top.
+    order: usize,
 
     name: []const u8,
     value: ?ExpressionNode,
