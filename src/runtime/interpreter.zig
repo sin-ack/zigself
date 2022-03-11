@@ -12,6 +12,7 @@ const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
 const Script = @import("../language/script.zig");
 const ByteArray = @import("./byte_array.zig");
+const ProtoSlot = @import("./slot.zig").ProtoSlot;
 const Activation = @import("./activation.zig");
 const Completion = @import("./completion.zig");
 const SourceRange = @import("../language/source_range.zig");
@@ -234,7 +235,7 @@ pub fn createSlotsObjectFromMap(context: *InterpreterContext, map: anytype, slot
                 break :blk;
         }
 
-        @compileError("executeSlotList must be called with a map");
+        @compileError("createSlotsObjectFromMap must be called with a map");
     }
 
     var map_builder = try map.getMapBuilder(context.vm.heap);
@@ -247,6 +248,27 @@ pub fn createSlotsObjectFromMap(context: *InterpreterContext, map: anytype, slot
 
     const object = try map_builder.createObject();
     return Completion.initNormal(object.asValue());
+}
+
+/// Return how many slots the map will need to allocate.
+fn getSlotCountForMap(slots: []AST.SlotNode) u32 {
+    var slot_count: u32 = 0;
+
+    for (slots) |slot_node| {
+        const proto_slot = blk: {
+            if (slot_node.is_argument) {
+                break :blk ProtoSlot.initArgument(slot_node.name);
+            } else if (slot_node.is_mutable) {
+                break :blk ProtoSlot.initAssignable(slot_node.name, if (slot_node.is_parent) .Parent else .NotParent);
+            } else {
+                break :blk ProtoSlot.initConstant(slot_node.name, if (slot_node.is_parent) .Parent else .NotParent);
+            }
+        };
+
+        slot_count += proto_slot.requiredSlotSpace();
+    }
+
+    return slot_count;
 }
 
 pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) InterpreterError!Completion {
@@ -267,7 +289,8 @@ pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) 
     if (assignable_slot_count > MaximumAssignableSlots)
         return Completion.initRuntimeError(context.vm, source_range, "Maximum assignable slot limit exceeded for slots object", .{});
 
-    var slots_map = try Object.Map.Slots.create(context.vm.heap, @intCast(u32, object_node.slots.len));
+    const slot_count = getSlotCountForMap(object_node.slots);
+    var slots_map = try Object.Map.Slots.create(context.vm.heap, slot_count);
     return try createSlotsObjectFromMap(context, slots_map, object_node.slots);
 }
 
@@ -303,10 +326,11 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
         errdefer object_node.statements.unrefWithAllocator(context.vm.allocator);
 
         const method_name_in_heap = try ByteArray.createFromString(context.vm.heap, name);
+        const slot_count = getSlotCountForMap(object_node.slots);
         break :blk try Object.Map.Method.create(
             context.vm.heap,
             @intCast(u8, argument_slot_count),
-            @intCast(u32, object_node.slots.len),
+            slot_count,
             object_node.statements,
             method_name_in_heap,
             context.script,
@@ -357,10 +381,11 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
         errdefer context.script.unref();
         errdefer block.statements.unrefWithAllocator(context.vm.allocator);
 
+        const slot_count = getSlotCountForMap(block.slots);
         break :blk try Object.Map.Block.create(
             context.vm.heap,
             @intCast(u8, argument_slot_count),
-            @intCast(u32, block.slots.len),
+            slot_count,
             block.statements,
             parent_activation,
             nonlocal_return_target_activation,
