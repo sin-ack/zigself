@@ -147,8 +147,8 @@ pub const Slots = packed struct {
     /// move of this object if the number of assignable slots changes. A pointer
     /// to the new location of the slots object is returned in this case.
     /// Otherwise, the original location is returned as a pointer.
-    pub fn addSlotsFrom(self: *Slots, source_object: *Slots, heap: *Heap) !*Slots {
-        const merge_info = self.calculateMergeOf(source_object);
+    pub fn addSlotsFrom(self: *Slots, source_object: *Slots, allocator: Allocator, heap: *Heap) !*Slots {
+        const merge_info = try self.calculateMergeOf(source_object, allocator);
 
         // If there is anything that could change any of the slots, then we need
         // to create a new copy of the map.
@@ -176,12 +176,18 @@ pub const Slots = packed struct {
         // with the same name should override ours.
         next_target_slot: for (current_map.getSlots()) |target_slot| {
             for (source_map.getSlots()) |source_slot| {
+                if (source_slot.isInheritedChild())
+                    continue;
+
                 if (source_slot.getHash() == target_slot.getHash()) {
                     const source_slot_copy = source_slot.copy(source_object);
                     try map_builder.addSlot(source_slot_copy);
                     continue :next_target_slot;
                 }
             }
+
+            if (target_slot.isInheritedChild())
+                continue;
 
             const target_slot_copy = target_slot.copy(self);
             try map_builder.addSlot(target_slot_copy);
@@ -195,6 +201,9 @@ pub const Slots = packed struct {
                     continue :next_source_slot;
                 }
             }
+
+            if (source_slot.isInheritedChild())
+                continue;
 
             const source_slot_copy = source_slot.copy(source_object);
             try map_builder.addSlot(source_slot_copy);
@@ -224,8 +233,8 @@ pub const Slots = packed struct {
 
     /// Return the amount of bytes that must be available on the heap in order
     /// to merge `source_object` into `target_object`.
-    pub fn requiredSizeForMerging(target_object: *Slots, source_object: *Slots) usize {
-        const merge_info = target_object.calculateMergeOf(source_object);
+    pub fn requiredSizeForMerging(target_object: *Slots, source_object: *Slots, allocator: Allocator) !usize {
+        const merge_info = try target_object.calculateMergeOf(source_object, allocator);
 
         // If there is anything that could change any of the slots, then we need
         // to create a new copy of the map.
@@ -248,27 +257,49 @@ pub const Slots = packed struct {
     /// slots would change from a constant to assignable slot and vice versa.
     ///
     /// Returns a MergeInfo.
-    fn calculateMergeOf(target_object: *Slots, source_object: *Slots) MergeInfo {
+    fn calculateMergeOf(target_object: *Slots, source_object: *Slots, allocator: Allocator) !MergeInfo {
         var slots: usize = 0;
+        // usize despite requiredAssignableSlotValueSpace returning isize, as
+        // this should never go negative (that'd be a bug).
         var assignable_slot_values: usize = 0;
         var has_updated_slots = false;
+
+        // Unfortunately we need to allocate an ArrayList here, because we do
+        // not know ahead of time which slots from the source object and the
+        // target object will end up in our merged object ahead of time. We use
+        // this to look at the previous slots to see when slots need to be
+        // overwritten.
+        //
+        // This incurs a small performance cost but hopefully shouldn't hurt
+        // too much as merging slots into existing objects should not be a
+        // frequent occurrence.
+        var merged_slots = std.ArrayList(Slot).init(allocator);
+        defer merged_slots.deinit();
 
         // Go through all the target object slots and add the slot counts. If
         // a slot with the same name exists on the source object then use its
         // counts instead.
         next_target_slot: for (target_object.getSlots()) |target_slot| {
             for (source_object.getSlots()) |source_slot| {
+                if (source_slot.isInheritedChild())
+                    continue;
+
                 if (source_slot.getHash() == target_slot.getHash()) {
-                    slots += source_slot.requiredSlotSpace();
-                    assignable_slot_values += source_slot.requiredAssignableSlotValueSpace();
+                    slots += source_slot.requiredSlotSpace(merged_slots.items);
+                    assignable_slot_values = @intCast(usize, @intCast(isize, assignable_slot_values) + source_slot.requiredAssignableSlotValueSpace(merged_slots.items));
+                    try merged_slots.append(source_slot);
                     has_updated_slots = true;
 
                     continue :next_target_slot;
                 }
             }
 
-            slots += target_slot.requiredSlotSpace();
-            assignable_slot_values += target_slot.requiredAssignableSlotValueSpace();
+            if (target_slot.isInheritedChild())
+                continue;
+
+            slots += target_slot.requiredSlotSpace(merged_slots.items);
+            assignable_slot_values = @intCast(usize, @intCast(isize, assignable_slot_values) + target_slot.requiredAssignableSlotValueSpace(merged_slots.items));
+            try merged_slots.append(target_slot);
         }
 
         // Go through all the source object slots and add the ones we haven't
@@ -283,9 +314,13 @@ pub const Slots = packed struct {
                     continue :next_source_slot;
             }
 
-            slots += source_slot.requiredSlotSpace();
-            assignable_slot_values += source_slot.requiredAssignableSlotValueSpace();
+            if (source_slot.isInheritedChild())
+                continue;
+
+            slots += source_slot.requiredSlotSpace(merged_slots.items);
+            assignable_slot_values = @intCast(usize, @intCast(isize, assignable_slot_values) + source_slot.requiredAssignableSlotValueSpace(merged_slots.items));
             has_updated_slots = true;
+            try merged_slots.append(source_slot);
         }
 
         return MergeInfo{

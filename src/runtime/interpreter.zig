@@ -26,6 +26,7 @@ const message_interpreter = @import("./interpreter/message.zig");
 pub const MaximumStackDepth = 2048;
 pub const MaximumArguments = 128; // Reasonable limit
 pub const MaximumAssignableSlots = 255;
+pub const MaximumInheritedSlotsInObject = 2;
 
 pub const InterpreterContext = struct {
     /// The virtual machine that the interpreter is currently executing on.
@@ -173,15 +174,30 @@ pub fn executeExpression(context: *InterpreterContext, expression: AST.Expressio
     };
 }
 
+const InheritedSlotValues = std.BoundedArray(Heap.Tracked, MaximumInheritedSlotsInObject);
+
 /// Creates a new slot and adds it to the given map builder.
-pub fn executeSlot(context: *InterpreterContext, map_builder: anytype, slot_node: AST.SlotNode) InterpreterError!?Completion {
+pub fn executeSlot(
+    context: *InterpreterContext,
+    map_builder: anytype,
+    slot_node: AST.SlotNode,
+    inherited_slot_values: ?*InheritedSlotValues,
+) InterpreterError!?Completion {
     {
         const map_builder_type = @typeInfo(@TypeOf(map_builder)).Pointer.child;
         if (!@hasDecl(map_builder_type, "is_map_builder"))
             @compileError("executeSlot must be called with a map builder");
     }
 
+    var inherited_slot_value_offset: usize = 0;
+
     const completion = blk: {
+        if (slot_node.is_inherited) {
+            var inherited_slot_value = inherited_slot_values.?.constSlice()[inherited_slot_value_offset].getValue();
+            inherited_slot_value_offset += 1;
+            break :blk Completion.initNormal(inherited_slot_value);
+        }
+
         if (slot_node.value) |value| {
             if (value == .Object) {
                 var has_argument = false;
@@ -211,7 +227,9 @@ pub fn executeSlot(context: *InterpreterContext, map_builder: anytype, slot_node
 
     const slot_name = try ByteArray.createFromString(context.vm.heap, slot_node.name);
     const slot = blk: {
-        if (slot_node.is_argument) {
+        if (slot_node.is_inherited) {
+            break :blk Slot.initInherited(slot_name, tracked_value.getValue());
+        } else if (slot_node.is_argument) {
             break :blk Slot.initArgument(slot_name);
         } else if (slot_node.is_mutable) {
             break :blk Slot.initAssignable(slot_name, if (slot_node.is_parent) .Parent else .NotParent, tracked_value.getValue());
@@ -226,7 +244,12 @@ pub fn executeSlot(context: *InterpreterContext, map_builder: anytype, slot_node
 
 /// Takes a map type, creates a map builder from it, and executes all the given
 /// slots. Returns an object created from this map builder.
-pub fn createSlotsObjectFromMap(context: *InterpreterContext, map: anytype, slots: []AST.SlotNode) InterpreterError!Completion {
+pub fn createSlotsObjectFromMap(
+    context: *InterpreterContext,
+    map: anytype,
+    slots: []AST.SlotNode,
+    inherited_slot_values: ?*InheritedSlotValues,
+) InterpreterError!Completion {
     // Make sure that we are really being called with a pointer to a map type.
     blk: {
         const map_type = @typeInfo(@TypeOf(map)).Pointer.child;
@@ -242,7 +265,7 @@ pub fn createSlotsObjectFromMap(context: *InterpreterContext, map: anytype, slot
     defer map_builder.deinit();
 
     for (slots) |slot_node| {
-        if (try executeSlot(context, &map_builder, slot_node)) |completion|
+        if (try executeSlot(context, &map_builder, slot_node, inherited_slot_values)) |completion|
             return completion;
     }
 
@@ -251,12 +274,28 @@ pub fn createSlotsObjectFromMap(context: *InterpreterContext, map: anytype, slot
 }
 
 /// Return how many slots the map will need to allocate.
-fn getSlotCountForMap(slots: []AST.SlotNode) u32 {
-    var slot_count: u32 = 0;
+fn getSlotCountForMap(
+    context: *InterpreterContext,
+    slots: []AST.SlotNode,
+    inherited_slot_values: ?*InheritedSlotValues,
+    out_slot_count: *u32,
+) !?Completion {
+    out_slot_count.* = 0;
 
-    for (slots) |slot_node| {
+    for (slots) |slot_node, i| {
         const proto_slot = blk: {
-            if (slot_node.is_argument) {
+            if (slot_node.is_inherited) {
+                const inherited_value_completion = try executeExpression(context, slot_node.value.?);
+                if (!inherited_value_completion.isNormal()) {
+                    return inherited_value_completion;
+                }
+
+                const inherited_value = inherited_value_completion.data.Normal;
+                std.debug.assert(inherited_value.isObjectReference() and inherited_value.asObject().isSlotsObject());
+
+                inherited_slot_values.?.appendAssumeCapacity(try context.vm.heap.track(inherited_value));
+                break :blk ProtoSlot.initInherited(slot_node.name, inherited_value);
+            } else if (slot_node.is_argument) {
                 break :blk ProtoSlot.initArgument(slot_node.name);
             } else if (slot_node.is_mutable) {
                 break :blk ProtoSlot.initAssignable(slot_node.name, if (slot_node.is_parent) .Parent else .NotParent);
@@ -265,10 +304,15 @@ fn getSlotCountForMap(slots: []AST.SlotNode) u32 {
             }
         };
 
-        slot_count += proto_slot.requiredSlotSpace();
+        const inherited_slot_values_slice = if (inherited_slot_values) |values|
+            values.constSlice()
+        else
+            &[_]Heap.Tracked{};
+
+        out_slot_count.* += proto_slot.requiredSlotSpace(slots[0..i], inherited_slot_values_slice);
     }
 
-    return slot_count;
+    return null;
 }
 
 pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) InterpreterError!Completion {
@@ -283,15 +327,27 @@ pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) 
 
     // Verify that the assignable slots in this object are within limits
     var assignable_slot_count: usize = 0;
+    var inherited_slot_count: usize = 0;
     for (object_node.slots) |slot| {
+        if (slot.is_inherited) inherited_slot_count += 1;
         if (slot.is_mutable) assignable_slot_count += 1;
     }
     if (assignable_slot_count > MaximumAssignableSlots)
         return Completion.initRuntimeError(context.vm, source_range, "Maximum assignable slot limit exceeded for slots object", .{});
+    if (inherited_slot_count > MaximumInheritedSlotsInObject)
+        return Completion.initRuntimeError(context.vm, source_range, "Maximum inherited slot limit exceeded for slots object", .{});
 
-    const slot_count = getSlotCountForMap(object_node.slots);
+    var inherited_slot_values = InheritedSlotValues.init(0) catch unreachable;
+    defer for (inherited_slot_values.constSlice()) |value| {
+        value.untrack(context.vm.heap);
+    };
+
+    var slot_count: u32 = undefined;
+    if (try getSlotCountForMap(context, object_node.slots, &inherited_slot_values, &slot_count)) |completion|
+        return completion;
+
     var slots_map = try Object.Map.Slots.create(context.vm.heap, slot_count);
-    return try createSlotsObjectFromMap(context, slots_map, object_node.slots);
+    return try createSlotsObjectFromMap(context, slots_map, object_node.slots, &inherited_slot_values);
 }
 
 fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AST.ObjectNode) InterpreterError!Completion {
@@ -326,7 +382,10 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
         errdefer object_node.statements.unrefWithAllocator(context.vm.allocator);
 
         const method_name_in_heap = try ByteArray.createFromString(context.vm.heap, name);
-        const slot_count = getSlotCountForMap(object_node.slots);
+        var slot_count: u32 = undefined;
+        if (try getSlotCountForMap(context, object_node.slots, null, &slot_count)) |completion|
+            return completion;
+
         break :blk try Object.Map.Method.create(
             context.vm.heap,
             @intCast(u8, argument_slot_count),
@@ -337,7 +396,7 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
         );
     };
 
-    return try createSlotsObjectFromMap(context, method_map, object_node.slots);
+    return try createSlotsObjectFromMap(context, method_map, object_node.slots, null);
 }
 
 pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) InterpreterError!Completion {
@@ -381,7 +440,10 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
         errdefer context.script.unref();
         errdefer block.statements.unrefWithAllocator(context.vm.allocator);
 
-        const slot_count = getSlotCountForMap(block.slots);
+        var slot_count: u32 = undefined;
+        if (try getSlotCountForMap(context, block.slots, null, &slot_count)) |completion|
+            return completion;
+
         break :blk try Object.Map.Block.create(
             context.vm.heap,
             @intCast(u8, argument_slot_count),
@@ -393,7 +455,7 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
         );
     };
 
-    return try createSlotsObjectFromMap(context, block_map, block.slots);
+    return try createSlotsObjectFromMap(context, block_map, block.slots, null);
 }
 
 pub fn executeReturn(context: *InterpreterContext, return_node: AST.ReturnNode) InterpreterError!Completion {

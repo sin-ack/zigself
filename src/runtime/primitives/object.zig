@@ -30,13 +30,15 @@ pub fn AddSlots(context: PrimitiveContext) !Completion {
     var argument_object = argument.asObject().asSlotsObject();
 
     // Avoid any further GCs by reserving the space beforehand
-    try context.vm.heap.ensureSpaceInEden(Object.Slots.requiredSizeForMerging(receiver_object, argument_object));
+    try context.vm.heap.ensureSpaceInEden(
+        try Object.Slots.requiredSizeForMerging(receiver_object, argument_object, context.vm.allocator),
+    );
 
     // Refresh the pointers in case that caused a GC
     receiver_object = context.receiver.getValue().asObject().asSlotsObject();
     argument_object = context.arguments[0].getValue().asObject().asSlotsObject();
 
-    const new_object = try receiver_object.addSlotsFrom(argument_object, context.vm.heap);
+    const new_object = try receiver_object.addSlotsFrom(argument_object, context.vm.allocator, context.vm.heap);
     return Completion.initNormal(new_object.asValue());
 }
 
