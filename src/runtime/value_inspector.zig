@@ -170,14 +170,17 @@ fn inspectSlots(
 
     for (slots) |slot| {
         const parent_marker: []const u8 = if (slot.isParent()) "*" else "";
+        const inheritance_marker: []const u8 = if (slot.isInherited()) "<" else "";
         const assignability_marker: []const u8 = if (slot.isAssignable()) "<-" else "=";
-        printWithIndent(display_type, indent, "{s}{s} {s} ", .{ slot.name.asByteArray().getValues(), parent_marker, assignability_marker });
+        printWithIndent(display_type, indent, "{s}{s}{s} {s} ", .{ slot.name.asByteArray().getValues(), parent_marker, inheritance_marker, assignability_marker });
 
         if (slot.isParent()) {
             // FIXME: Figure out creator slots, and give the path to this object
             std.debug.print("<parent object>", .{});
         } else {
-            if (slot.isArgument()) {
+            if (slot.isInherited()) {
+                std.debug.print("<inherited object>", .{});
+            } else if (slot.isArgument()) {
                 std.debug.print("<argument>", .{});
             } else if (slot.isAssignable()) {
                 try inspectValueInternal(display_type, vm, object.getAssignableSlotValue(slot).*, indent, visited_object_link);
