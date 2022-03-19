@@ -15,6 +15,7 @@ const Script = @import("../../language/script.zig");
 const Object = @import("../object.zig");
 const MapType = @import("./map.zig").MapType;
 const Location = @import("../../language/location.zig");
+const MapBuilder = @import("./map_builder.zig").MapBuilder;
 const SourceRange = @import("../../language/source_range.zig");
 const RuntimeActivation = @import("../activation.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
@@ -140,6 +141,76 @@ pub const Slots = packed struct {
 
     // --- Adding slots ---
 
+    /// Calls the given function with each slot in merge order.
+    fn forSlotsInMergeOrder(
+        target_object: *Slots,
+        source_object: *Slots,
+        context: anytype,
+        comptime callback: fn (context: @TypeOf(context), object: *Slots, slot: Slot) Allocator.Error!void,
+    ) !void {
+        // We go through all of the target object's slots first, seeing if there
+        // is any slot that should override ours. Any slot in the source object
+        // with the same name should override ours.
+        next_target_slot: for (target_object.getSlots()) |target_slot| {
+            for (source_object.getSlots()) |source_slot| {
+                if (source_slot.isInheritedChild())
+                    continue;
+
+                if (source_slot.getHash() == target_slot.getHash()) {
+                    try callback(context, source_object, source_slot);
+                    continue :next_target_slot;
+                }
+            }
+
+            if (target_slot.isInheritedChild())
+                continue;
+
+            try callback(context, target_object, target_slot);
+        }
+
+        // We then go through all of the source object's slots, adding slots
+        // that we haven't seen before to the map builder.
+        next_source_slot: for (source_object.getSlots()) |source_slot| {
+            for (target_object.getSlots()) |target_slot| {
+                if (source_slot.getHash() == target_slot.getHash()) {
+                    continue :next_source_slot;
+                }
+            }
+
+            if (source_slot.isInheritedChild())
+                continue;
+
+            try callback(context, source_object, source_slot);
+        }
+    }
+
+    /// Like forSlotsInMergeOrder but first calls with only inherited slots,
+    /// and then calls with no inherited slots.
+    fn forSlotsInMergeOrderWithInheritedFirst(
+        target_object: *Slots,
+        source_object: *Slots,
+        context: anytype,
+        comptime callback: fn (context: @TypeOf(context), object: *Slots, slot: Slot) Allocator.Error!void,
+    ) !void {
+        const ContextT = @TypeOf(context);
+
+        try forSlotsInMergeOrder(target_object, source_object, context, struct {
+            fn outerCallback(ctx: ContextT, object: *Slots, slot: Slot) !void {
+                if (!slot.isInherited())
+                    return;
+                try callback(ctx, object, slot);
+            }
+        }.outerCallback);
+
+        try forSlotsInMergeOrder(target_object, source_object, context, struct {
+            fn outerCallback(ctx: ContextT, object: *Slots, slot: Slot) !void {
+                if (slot.isInherited())
+                    return;
+                try callback(ctx, object, slot);
+            }
+        }.outerCallback);
+    }
+
     /// Returns a slice of `Value`s for the assignable slots that are after the
     /// given object offset. Should not be called from the outside, it's only
     /// intended for Slots and its "subclasses".
@@ -164,50 +235,19 @@ pub const Slots = packed struct {
         }
 
         // Let's allocate a new map with the target slot count.
-        const current_map = self.getMap();
-        const source_map = source_object.getMap();
         var new_map = try Object.Map.Slots.create(heap, @intCast(u32, merge_info.slots));
 
         var map_builder = try new_map.getMapBuilder(heap);
         defer map_builder.deinit();
 
-        // We go through all of the current map's slots first, seeing if there
-        // is any slot that should override ours. Any slot in the source object
-        // with the same name should override ours.
-        next_target_slot: for (current_map.getSlots()) |target_slot| {
-            for (source_map.getSlots()) |source_slot| {
-                if (source_slot.isInheritedChild())
-                    continue;
+        const CallbackContext = struct { map_builder: *MapBuilder(Map.Slots, Slots) };
 
-                if (source_slot.getHash() == target_slot.getHash()) {
-                    const source_slot_copy = source_slot.copy(source_object);
-                    try map_builder.addSlot(source_slot_copy);
-                    continue :next_target_slot;
-                }
+        try forSlotsInMergeOrderWithInheritedFirst(self, source_object, CallbackContext{ .map_builder = &map_builder }, struct {
+            fn callback(context: CallbackContext, object: *Slots, slot: Slot) !void {
+                const slot_copy = slot.copy(object);
+                try context.map_builder.addSlot(slot_copy);
             }
-
-            if (target_slot.isInheritedChild())
-                continue;
-
-            const target_slot_copy = target_slot.copy(self);
-            try map_builder.addSlot(target_slot_copy);
-        }
-
-        // We then go through all of the source map's slots, adding slots that
-        // we haven't seen before to the map builder.
-        next_source_slot: for (source_map.getSlots()) |source_slot| {
-            for (current_map.getSlots()) |target_slot| {
-                if (source_slot.getHash() == target_slot.getHash()) {
-                    continue :next_source_slot;
-                }
-            }
-
-            if (source_slot.isInheritedChild())
-                continue;
-
-            const source_slot_copy = source_slot.copy(source_object);
-            try map_builder.addSlot(source_slot_copy);
-        }
+        }.callback);
 
         // At this point, we have a map builder which has initialized our new
         // map with all the constant slots.
@@ -276,52 +316,31 @@ pub const Slots = packed struct {
         var merged_slots = std.ArrayList(Slot).init(allocator);
         defer merged_slots.deinit();
 
-        // Go through all the target object slots and add the slot counts. If
-        // a slot with the same name exists on the source object then use its
-        // counts instead.
-        next_target_slot: for (target_object.getSlots()) |target_slot| {
-            for (source_object.getSlots()) |source_slot| {
-                if (source_slot.isInheritedChild())
-                    continue;
+        const CallbackContext = struct {
+            merged_slots: *std.ArrayList(Slot),
+            slots: *usize,
+            assignable_slot_values: *usize,
+            has_updated_slots: *bool,
+            source_object: *Slots,
+        };
 
-                if (source_slot.getHash() == target_slot.getHash()) {
-                    slots += source_slot.requiredSlotSpace(merged_slots.items);
-                    assignable_slot_values = @intCast(usize, @intCast(isize, assignable_slot_values) + source_slot.requiredAssignableSlotValueSpace(merged_slots.items));
-                    try merged_slots.append(source_slot);
-                    has_updated_slots = true;
+        try forSlotsInMergeOrderWithInheritedFirst(target_object, source_object, CallbackContext{
+            .merged_slots = &merged_slots,
+            .slots = &slots,
+            .assignable_slot_values = &assignable_slot_values,
+            .has_updated_slots = &has_updated_slots,
+            .source_object = source_object,
+        }, struct {
+            fn callback(context: CallbackContext, object: *Slots, slot: Slot) !void {
+                context.slots.* += slot.requiredSlotSpace(context.merged_slots.items);
+                context.assignable_slot_values.* = @intCast(usize, @intCast(isize, context.assignable_slot_values.*) +
+                    slot.requiredAssignableSlotValueSpace(context.merged_slots.items));
+                try context.merged_slots.append(slot);
 
-                    continue :next_target_slot;
-                }
+                if (object == context.source_object)
+                    context.has_updated_slots.* = true;
             }
-
-            if (target_slot.isInheritedChild())
-                continue;
-
-            slots += target_slot.requiredSlotSpace(merged_slots.items);
-            assignable_slot_values = @intCast(usize, @intCast(isize, assignable_slot_values) + target_slot.requiredAssignableSlotValueSpace(merged_slots.items));
-            try merged_slots.append(target_slot);
-        }
-
-        // Go through all the source object slots and add the ones we haven't
-        // seen before to the count.
-        next_source_slot: for (source_object.getSlots()) |source_slot| {
-            // Argument objects are a method & block object thing. We don't want
-            // any of that here.
-            std.debug.assert(!source_slot.isArgument());
-
-            for (target_object.getSlots()) |target_slot| {
-                if (source_slot.getHash() == target_slot.getHash())
-                    continue :next_source_slot;
-            }
-
-            if (source_slot.isInheritedChild())
-                continue;
-
-            slots += source_slot.requiredSlotSpace(merged_slots.items);
-            assignable_slot_values = @intCast(usize, @intCast(isize, assignable_slot_values) + source_slot.requiredAssignableSlotValueSpace(merged_slots.items));
-            has_updated_slots = true;
-            try merged_slots.append(source_slot);
-        }
+        }.callback);
 
         return MergeInfo{
             .previous_slots = target_object.getSlots().len,
