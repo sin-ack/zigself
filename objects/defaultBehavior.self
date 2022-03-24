@@ -23,6 +23,13 @@ _AddSlots: (|
         value: a With: b With: c With: d = (value: a With: b With: c).
         value: a With: b With: c With: d With: e = (value: a With: b With: c With: d).
 
+        "Wrapping values with [] all the time may get annoying, so this helper
+         allows you to pass an expression to any message expecting a no-argument
+         block directly.
+
+         NOTE: The expression will evaluate eagerly when this is used."
+        value = (self).
+
         "Clone an object shallowly."
         clone = (_Clone).
 
