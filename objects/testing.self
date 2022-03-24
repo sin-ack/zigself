@@ -19,6 +19,13 @@ std _AddSlots: (|
                 ].
             ).
 
+            "Expects the expected value to NOT be identical to the actual value."
+            expect: actual ToNotBeIdenticalTo: expected = (
+                (expected == actual) ifTrue: [
+                    _Error: 'Expected non-identical values'
+                ].
+            ).
+
             "Expects the expected value to be equal to the actual value."
             expect: actual ToBe: expected = (
                 (expected = actual) ifFalse: [
