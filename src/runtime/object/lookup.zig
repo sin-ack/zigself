@@ -190,8 +190,13 @@ fn slotsLookup(
     // Parent lookup
     for (object.getSlots()) |slot| {
         if (slot.isParent()) {
-            if (slot.value.isObjectReference()) {
-                if (try lookupInternal(slot.value.asObject(), intent, context, selector_hash, &currently_visited, source_range)) |result| {
+            const slot_value = if (slot.isAssignable())
+                object.getAssignableSlotValue(slot).*
+            else
+                slot.value;
+
+            if (slot_value.isObjectReference()) {
+                if (try lookupInternal(slot_value.asObject(), intent, context, selector_hash, &currently_visited, source_range)) |result| {
                     return result;
                 }
             } else {
