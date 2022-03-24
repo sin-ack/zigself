@@ -24,7 +24,6 @@ pub const TokenRepresentation = struct {
     pub const Ampersand = "&";
     pub const Asterisk = "*";
     pub const Comma = ",";
-    pub const Semicolon = ";";
     pub const Slash = "/";
     pub const Backslash = "\\";
     pub const LessThan = "<";
@@ -45,6 +44,9 @@ pub const TokenRepresentation = struct {
 
     /// Used for non-local returns.
     pub const Cap = "^";
+
+    /// Used for sending another message to the expression on the left.
+    pub const Semicolon = ";";
 
     /// Statement terminator, or floating point number.
     pub const Period = ".";
@@ -72,7 +74,6 @@ pub const OperatorTokens = [_]std.meta.Tag(Token){
     .Ampersand,
     .Asterisk,
     .Comma,
-    .Semicolon,
     .Slash,
     .Backslash,
     .LessThan,
@@ -97,7 +98,6 @@ pub const Token = union(enum) {
     Ampersand: void,
     Asterisk: void,
     Comma: void,
-    Semicolon: void,
     Slash: void,
     Backslash: void,
     LessThan: void,
@@ -112,6 +112,7 @@ pub const Token = union(enum) {
     DoubleCap: void,
     Colon: void,
     Cap: void,
+    Semicolon: void,
     Period: void,
     Pipe: void,
     ParenOpen: void,

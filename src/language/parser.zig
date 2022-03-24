@@ -98,7 +98,7 @@ fn parseStatementList(self: *Self, allocator: Allocator, allow_nonlocal_return: 
                 _ = try self.lexer.nextToken(allocator);
             }
 
-            var first_expression = (try self.parseExpression(allocator, false)) orelse break :first_expr_parsing;
+            var first_expression = (try self.parseExpression(allocator, .Any)) orelse break :first_expr_parsing;
             errdefer first_expression.deinit(allocator);
 
             if (should_wrap_expression_with_return_node) {
@@ -143,7 +143,7 @@ fn parseStatementList(self: *Self, allocator: Allocator, allow_nonlocal_return: 
             }
 
             // TODO: Recover until next period or EOF
-            var expression = (try self.parseExpression(allocator, false)) orelse continue;
+            var expression = (try self.parseExpression(allocator, .Any)) orelse continue;
             errdefer expression.deinit(allocator);
 
             if (should_wrap_expression_with_return_node) {
@@ -184,12 +184,11 @@ fn canParseExpression(self: *Self) bool {
     };
 }
 
-fn parseExpression(self: *Self, allocator: Allocator, avoid_keyword_after_receiver: bool) ParseError!?AST.ExpressionNode {
+const MessagePrecedence = enum { Binary, Keyword, Any };
+fn parseExpression(self: *Self, allocator: Allocator, precedence: MessagePrecedence) ParseError!?AST.ExpressionNode {
     // Expression = KeywordSend
     //            | BinarySend
     //            | Primary UnarySend* BinarySend? KeywordSend?
-
-    _ = avoid_keyword_after_receiver;
 
     if (self.lexer.current_token == .FirstKeyword)
         return try self.parseKeywordMessage(allocator, null);
@@ -200,14 +199,37 @@ fn parseExpression(self: *Self, allocator: Allocator, avoid_keyword_after_receiv
     var primary = (try self.parsePrimary(allocator)) orelse return null;
     errdefer primary.deinit(allocator);
 
-    return try self.parseExpressionFromPrimary(allocator, primary, avoid_keyword_after_receiver);
+    return try self.parseExpressionFromPrimary(allocator, primary, precedence, false);
 }
 
-fn parseExpressionFromPrimary(self: *Self, allocator: Allocator, primary: AST.ExpressionNode, avoid_keyword_after_receiver: bool) ParseError!?AST.ExpressionNode {
+// If require_message is true then the primary must receive at least one message.
+fn parseExpressionFromPrimary(
+    self: *Self,
+    allocator: Allocator,
+    primary: AST.ExpressionNode,
+    precedence: MessagePrecedence,
+    require_message: bool,
+) ParseError!?AST.ExpressionNode {
     var expr = primary;
+    var did_send_message = false;
+
+    const emitDiagnosticIfNeeded = struct {
+        fn f(s: *Self, require: bool, did_send: bool) ParseError!void {
+            if (!did_send and require) {
+                try s.diagnostics.reportDiagnosticFormatted(
+                    .Error,
+                    s.lexer.token_start,
+                    "Expected unary, binary or keyword message, got {s}",
+                    .{s.lexer.current_token.toString()},
+                );
+            }
+        }
+    }.f;
 
     // Collect unary messages
     while (self.lexer.current_token == .Identifier) {
+        did_send_message = true;
+
         var message_node = try allocator.create(AST.MessageNode);
         errdefer allocator.destroy(message_node);
 
@@ -232,12 +254,34 @@ fn parseExpressionFromPrimary(self: *Self, allocator: Allocator, primary: AST.Ex
     }
 
     // If possible, parse a binary message.
-    if (self.lexer.current_token.isOperator())
+    if (self.lexer.current_token.isOperator()) {
+        did_send_message = true;
         expr = (try self.parseBinaryMessage(allocator, expr)) orelse return null;
+    }
+
+    if (precedence == .Binary) {
+        try emitDiagnosticIfNeeded(self, require_message, did_send_message);
+        return expr;
+    }
 
     // Otherwise, try parsing a keyword message.
-    if (self.lexer.current_token == .FirstKeyword and !avoid_keyword_after_receiver)
+    if (self.lexer.current_token == .FirstKeyword) {
+        did_send_message = true;
         expr = (try self.parseKeywordMessage(allocator, expr)) orelse return null;
+    }
+
+    if (precedence == .Keyword) {
+        try emitDiagnosticIfNeeded(self, require_message, did_send_message);
+        return expr;
+    }
+
+    // If the current token is a semicolon then we want to send more messages to it,
+    // so try parsing an expression after it with the current expression as the
+    // "primary".
+    if (self.lexer.current_token == .Semicolon) {
+        _ = try self.lexer.nextToken(allocator);
+        expr = (try self.parseExpressionFromPrimary(allocator, expr, .Any, true)) orelse return null;
+    }
 
     return expr;
 }
@@ -260,7 +304,7 @@ fn parseBinaryMessage(self: *Self, allocator: Allocator, receiver: ?AST.Expressi
         _ = try self.lexer.nextToken(allocator);
     }
 
-    var term = (try self.parseExpression(allocator, true)) orelse return null;
+    var term = (try self.parseExpression(allocator, .Binary)) orelse return null;
     errdefer term.deinit(allocator);
     var binary_message_copy = try allocator.dupe(u8, binary_message_name.constSlice());
     errdefer allocator.free(binary_message_copy);
@@ -299,7 +343,7 @@ fn parseKeywordMessage(self: *Self, allocator: Allocator, receiver: ?AST.Express
     message_name.appendSliceAssumeCapacity(first_keyword_slice);
     _ = try self.lexer.nextToken(allocator);
 
-    const first_expression = (try self.parseExpression(allocator, false)) orelse return null;
+    const first_expression = (try self.parseExpression(allocator, .Keyword)) orelse return null;
     // NOTE: No errdefer as arguments now owns first_expression.
     arguments.appendAssumeCapacity(first_expression);
 
@@ -308,7 +352,7 @@ fn parseKeywordMessage(self: *Self, allocator: Allocator, receiver: ?AST.Express
         try message_name.appendSlice(rest_keyword_slice);
         _ = try self.lexer.nextToken(allocator);
 
-        var expression = (try self.parseExpression(allocator, false)) orelse return null;
+        var expression = (try self.parseExpression(allocator, .Keyword)) orelse return null;
         errdefer expression.deinit(allocator);
         try arguments.append(expression);
     }
@@ -742,12 +786,12 @@ fn parseSlot(self: *Self, allocator: Allocator, order: usize, allow_argument: bo
                     break :blk expr;
                 }
 
-                break :blk (try self.parseExpressionFromPrimary(allocator, expr, false)) orelse return null;
+                break :blk (try self.parseExpressionFromPrimary(allocator, expr, .Any, false)) orelse return null;
             }
 
-            break :blk (try self.parseExpression(allocator, false)) orelse return null;
+            break :blk (try self.parseExpression(allocator, .Any)) orelse return null;
         },
-        .Forbidden => (try self.parseExpression(allocator, false)) orelse return null,
+        .Forbidden => (try self.parseExpression(allocator, .Any)) orelse return null,
     };
 
     did_parse_successfully = true;
