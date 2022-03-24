@@ -357,7 +357,7 @@ pub fn executeAssignmentMessage(
         // David will remember that.
         try context.vm.heap.rememberObjectReference(object_that_has_the_assignable_slot.asValue(), argument);
 
-        return Completion.initNormal(context.vm.nil());
+        return Completion.initNormal(receiver);
     } else {
         return null;
     }
