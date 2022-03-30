@@ -190,13 +190,14 @@ fn parseExpression(self: *Self, allocator: Allocator, precedence: MessagePrecede
     //            | BinarySend
     //            | Primary UnarySend* BinarySend? KeywordSend?
 
+    var primary: AST.ExpressionNode = undefined;
+
     if (self.lexer.current_token == .FirstKeyword)
-        return try self.parseKeywordMessage(allocator, null);
-
-    if (self.lexer.current_token.isOperator())
-        return try self.parseBinaryMessage(allocator, null);
-
-    var primary = (try self.parsePrimary(allocator)) orelse return null;
+        primary = (try self.parseKeywordMessage(allocator, null)) orelse return null
+    else if (self.lexer.current_token.isOperator())
+        primary = (try self.parseBinaryMessage(allocator, null)) orelse return null
+    else
+        primary = (try self.parsePrimary(allocator)) orelse return null;
     errdefer primary.deinit(allocator);
 
     return try self.parseExpressionFromPrimary(allocator, primary, precedence, false);
