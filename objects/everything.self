@@ -7,22 +7,21 @@ SPDX-License-Identifier: GPL-3.0-only
 "Required by default slots"
 _AddSlots: (| nil = _Nil |).
 
+"Basic Self operations and objects."
 'globals.self' _RunScript.
 'basicTraits.self' _RunScript.
-
-"Nil objects are singletons."
-nil _AddSlots: (| parent* = std traits singleton |).
-
 'defaultBehavior.self' _RunScript.
 'booleans.self' _RunScript.
-'string.self' _RunScript.
 'integer.self' _RunScript.
 'block.self' _RunScript.
-'array.self' _RunScript.
 
+'array.self' _RunScript.
+'string.self' _RunScript.
 'list.self' _RunScript.
+
+"A basic testing framework."
 'testing.self' _RunScript.
 
+"Interacting with the OS."
 'os.self' _RunScript.
-
 'file.self' _RunScript.

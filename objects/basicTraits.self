@@ -17,3 +17,6 @@ std traits _AddSlots: (|
         copy = (self).
     |).
 |).
+
+"Nil objects are singletons."
+nil _AddSlots: (| parent* = std traits singleton |).
