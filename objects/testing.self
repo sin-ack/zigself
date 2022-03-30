@@ -50,6 +50,15 @@ std _AddSlots: (|
                 ].
             ).
 
+            "Expects the actual value to be greater than the given value."
+            expect: actual ToBeGreaterThan: value = (
+                (actual > value) ifFalse: [
+                    'Value: ' print. value _Inspect. '' printLine.
+                    'Actual: ' print. actual _Inspect. '' printLine.
+                    _Error: 'Expected actual value to be greater than given value'
+                ].
+            ).
+
             "Passes a block that takes a single argument to blk, and expects it
              to not be called."
             expectToNotFail: blk = (
