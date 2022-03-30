@@ -31,7 +31,7 @@ std traits integer _AddSlots: (|
     gib = (mib * 1024).
 
     to: upper Do: block = (| i |
-        (self < upper) ifFalse: [ ^ nil ].
+        self < upper ifFalse: [ ^ nil ].
 
         i: self.
         [ i < upper ] whileTrue: [
@@ -42,13 +42,16 @@ std traits integer _AddSlots: (|
 
     "FIXME: This is a naive implementation. Allocate the byte array in one go
             by counting the digits."
-    asString = (| output. value |
+    asString = (| output. value. negative |
+        value = 0 ifTrue: [ ^ '0' ].
+
         output: ''.
         value: self.
+        negative: false.
 
-        (value < 0) ifTrue: [
+        value < 0 ifTrue: [
             value: value negate.
-            output: '-'.
+            negative: true.
         ].
 
         [ value > 0 ] whileTrue: [| char <- ' '. digit |
@@ -58,6 +61,7 @@ std traits integer _AddSlots: (|
             value: value / 10.
         ].
 
-        output reverse
+        output: output reverse.
+        negative ifTrue: [ '-', output ] False: output.
     ).
 |).
