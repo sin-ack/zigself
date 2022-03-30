@@ -24,6 +24,16 @@ std traits integer _AddSlots: (|
     <= n = ((< n) || [ self = n ]).
     != n = ((= n) not).
 
+    ** n = (| i |
+        n = 0 ifTrue: [ ^ 1 ].
+        n < 0 ifTrue: [ _Error: 'TODO: Implement negative power' ].
+
+        i: self.
+        0 to: n prec Do: [ i: i * self ].
+
+        i
+    ).
+
     max: n = ((self < n) ifTrue: [ n ] False: [ self ]).
 
     kib = (self * 1024).
