@@ -45,5 +45,9 @@ _AddSlots: (|
             value = ( _Error: 'Error raised' ).
             value: err = ( _Error: 'Error raised (FIXME: Print the error)' ).
         |).
+
+        "When sent, raises an error which tells the user that this slot needs
+         to be implemented."
+        childMustImplement = (_Error: 'This slot is not implemented').
     |).
 |)
