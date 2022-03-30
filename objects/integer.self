@@ -34,17 +34,33 @@ std traits integer _AddSlots: (|
         i
     ).
 
-    max: n = ((self < n) ifTrue: [ n ] False: [ self ]).
+    bitLength = (| absolute. power. output |
+        absolute: abs.
+        power: 1.
+        output: 0.
+
+        [power <= self] whileTrue: [
+            output: output succ.
+            power: power * 2.
+        ].
+
+        output
+    ).
+
+    abs = (< 0 ifTrue: negate False: self).
+
+    max: n = (< n ifTrue: [ n ] False: [ self ]).
 
     kib = (self * 1024).
     mib = (kib * 1024).
     gib = (mib * 1024).
 
-    to: upper Do: block = (| i |
-        self < upper ifFalse: [ ^ nil ].
+    to: upper Do: block = (through: upper prec Do: block).
+    through: upper Do: block = (| i |
+        <= upper ifFalse: [ ^ nil ].
 
         i: self.
-        [ i < upper ] whileTrue: [
+        [ i <= upper ] whileTrue: [
             block value: i.
             i: i succ.
         ].
@@ -53,7 +69,7 @@ std traits integer _AddSlots: (|
     "FIXME: This is a naive implementation. Allocate the byte array in one go
             by counting the digits."
     asString = (| output. value. negative |
-        value = 0 ifTrue: [ ^ '0' ].
+        = 0 ifTrue: [ ^ '0' ].
 
         output: ''.
         value: self.

@@ -15,7 +15,11 @@ _AddSlots: (| nil = _Nil |).
 'integer.self' _RunScript.
 'block.self' _RunScript.
 
+"The collection traits family and its users."
+'collection.self' _RunScript.
+
 'array.self' _RunScript.
+'vector.self' _RunScript.
 'string.self' _RunScript.
 'list.self' _RunScript.
 

@@ -15,6 +15,8 @@ _AddSlots: (|
                 integer = 0 parent.
                 string = '' parent.
             |).
+
+            mixins = ().
         |).
     |).
 |).
