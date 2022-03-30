@@ -10,6 +10,12 @@ std _AddSlots: (|
         test = (|
             parent* = std traits singleton.
 
+            expectToBeTrue: expr = (
+                expr ifFalse: [
+                    _Error: 'Expected expression to be true'.
+                ].
+            ).
+
             "Expects the expected value to be identical to the actual value."
             expect: actual ToBeIdenticalTo: expected = (
                 (expected == actual) ifFalse: [
