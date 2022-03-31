@@ -24,10 +24,10 @@ std traits _AddSlots: (|
 
         readAll = (readAllIfFail: raiseError).
         readAllIfFail: failBlock = (| chunks |
-            chunks: std list copyRemoveAll.
+            chunks: std vector copyRemoveAll.
 
             [ atEOF ] whileFalse: [
-                chunks append: readIfFail: failBlock.
+                chunks add: readIfFail: failBlock.
             ].
 
             '' join: chunks.
