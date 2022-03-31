@@ -82,7 +82,7 @@ std traits integer _AddSlots: (|
 
         [ value > 0 ] whileTrue: [| char <- ' '. digit |
             digit: value % 10.
-            char at: 0 PutByte: 48 + digit.
+            char at: 0 Put: 48 + digit.
             output: output, char.
             value: value / 10.
         ].

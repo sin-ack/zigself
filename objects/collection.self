@@ -82,5 +82,27 @@ std traits _AddSlots: (|
             "Return the size of the collection."
             size = (childMustImplement).
         |).
+
+        isEmpty = (size = 0).
+
+        "Compare each item between this collection and other, and return whether
+         they are equal."
+        = other = (
+            "FIXME: Return false when the other side doesn't support at:IfAbsent:
+                    (i.e. is not a collection)."
+            each: [| :value. :key. otherValue |
+                otherValue: other at: key IfAbsent: [ ^ false ].
+                otherValue = v ifFalse: [ ^ false ].
+            ].
+            true
+        ).
+
+        "Call the block on each item of this collection, calling presentBlock with
+         the index at which the block returns true. Call absentBlock with no
+         arguments if the block never returned true."
+        findFirst: block IfPresent: presentBlock IfAbsent: absentBlock = (
+            each: [| :item. :i | (block value: item With: i) ifTrue: [ ^ presentBlock value: i ] ].
+            absentBlock value.
+        ).
     |).
 |).
