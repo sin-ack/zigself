@@ -18,7 +18,7 @@ std traits _AddSlots: (|
         ).
         copyRemoveAll = (
             clone
-            ; items: std vector copy
+            ; items: std array copy
             ; size: 0.
         ).
 
