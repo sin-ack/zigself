@@ -41,6 +41,11 @@ float_traits: Heap.Tracked,
 string_traits: Heap.Tracked,
 integer_traits: Heap.Tracked,
 
+// Settings
+
+/// Whether the interpreter should be silent when an error happens.
+silent_errors: bool = false,
+
 const Self = @This();
 
 /// Creates the virtual machine, including the heap and the global objects.

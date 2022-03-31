@@ -94,8 +94,10 @@ pub fn executeScript(vm: *VirtualMachine, script: Script.Ref) InterpreterError!?
                 last_expression_result = try vm.heap.track(value);
             },
             .RuntimeError => |err| {
-                std.debug.print("Received error at top level: {s}\n", .{err.message});
-                runtime_error.printTraceFromActivationStack(activation_stack.getStack(), err.source_range);
+                if (!vm.silent_errors) {
+                    std.debug.print("Received error at top level: {s}\n", .{err.message});
+                    runtime_error.printTraceFromActivationStack(activation_stack.getStack(), err.source_range);
+                }
                 return null;
             },
             else => unreachable,

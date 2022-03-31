@@ -120,6 +120,8 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
         //       print each test name.
         progress.refresh();
 
+        vm.silent_errors = the_test.expects_error;
+
         const path_to_test = try std.fs.path.resolve(allocator, &[_][]const u8{ harness_dirname, the_test.path });
         defer allocator.free(path_to_test);
 
