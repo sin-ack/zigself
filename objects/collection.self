@@ -31,6 +31,10 @@ std mixins _AddSlots: (|
         firstKey = 0.
         lastKey = (size prec).
 
+        at: index IfAbsent: blk = (
+            (index >= firstKey) && [index <= lastKey] ifFalse: blk.
+            at: index
+        ).
         each: blk = (
             firstKey through: lastKey Do: [| :i | blk value: (at: i) With: i ].
         ).
