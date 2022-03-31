@@ -6,11 +6,11 @@ SPDX-License-Identifier: GPL-3.0-only
 
 std traits _AddSlots: (|
     vector = (|
-        parent* = std traits collection.
         mutable* = std mixins mutableCollection.
         indexable* = std mixins indexableCollection.
         removable* = std mixins removableCollection.
         implicitKeyInsertable* = std mixins implicitKeyInsertableCollection.
+        parent* = std traits collection.
 
         copy = (
             clone
