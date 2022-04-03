@@ -30,24 +30,36 @@ std traits _AddSlots: (|
 
         & value = (value appendToCollector: self).
         appendToCollector: c = (
-            previous == nil ifFalse: [ ^ previous appendToCollector: c; add: value ].
+            nil == previous ifFalse: [ ^ previous appendToCollector: c; add: value ].
             c add: value.
         ).
 
         collectInto: collection = (
-            previous == nil ifFalse: [ previous collectInto: collection ].
+            nil == previous ifFalse: [ previous collectInto: collection ].
             collection add: value.
         ).
 
         "Common conversions"
         asVector = (collectInto: std vector copy).
+
+        size = (| current |
+            nil == cachedSize ifFalse: [ ^ cachedSize ].
+
+            cachedSize: 1.
+            current: previous.
+            [nil == current] whileFalse: [
+                cachedSize: cachedSize succ.
+                current: current previous.
+            ].
+            cachedSize
+        )
     |).
 |).
 
 std _AddSlots: (|
     collector = (|
         parent* = std traits collector.
-        previous. value.
+        previous. value. cachedSize.
     |).
 |).
 
