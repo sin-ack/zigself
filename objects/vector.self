@@ -54,6 +54,15 @@ std traits _AddSlots: (|
 
         shrinkToFit = (private resizeTo: size. self).
 
+        asString = (| s |
+            s: '['.
+            each: [| :v. :i |
+                i > 0 ifTrue: [ s: s, ', ' ].
+                s: s, v asString.
+            ].
+            s, ']'.
+        ).
+
         private = (|
             prototype = (|
                 receiver* <- nil.
