@@ -23,6 +23,9 @@ _AddSlots: (| nil = _Nil |).
 'string.self' _RunScript.
 'list.self' _RunScript.
 
+"Collector for easy collecting."
+'collector.self' _RunScript.
+
 "A basic testing framework."
 'testing.self' _RunScript.
 
