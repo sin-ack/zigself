@@ -28,6 +28,12 @@ std traits _AddSlots: (|
         copyFirst: value = (clone; previous: nil; value: value).
         add: value = (clone; previous: self; value: value).
 
+        = other = (
+            "FIXME: Return false if other doesn't have value or previous messages."
+            value = other value ifFalse: [ ^ false ].
+            previous = other previous
+        ).
+
         & value = (value appendToCollector: self).
         appendToCollector: c = (
             nil == previous ifFalse: [ ^ previous appendToCollector: c; add: value ].
@@ -52,7 +58,7 @@ std traits _AddSlots: (|
                 current: current previous.
             ].
             cachedSize
-        )
+        ).
     |).
 |).
 
