@@ -9,7 +9,7 @@ const Activation = @import("./activation.zig");
 const SourceRange = @import("../language/source_range.zig");
 
 fn writeTraceForFrame(message_name: []const u8, source_range: SourceRange) void {
-    std.debug.print("  at {s} ({})\n", .{ message_name, source_range.format() });
+    std.debug.print("  at {s} ({})\n", .{ message_name, source_range });
 
     const range = source_range.range;
     const source_line = source_range.getStartLine() catch unreachable;

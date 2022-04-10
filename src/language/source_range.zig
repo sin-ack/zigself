@@ -30,14 +30,10 @@ pub fn copy(self: Self) Self {
 }
 
 pub fn getStartLine(self: Self) ![]const u8 {
-    return self.script.value.parser.lexer.getLineForLocation(self.range.start);
+    return self.script.value.parser.buffer[self.range.start.line_start..self.range.start.line_end];
 }
 
-pub fn format(self: Self) std.fmt.Formatter(formatSourceRange) {
-    return .{ .data = self };
-}
-
-fn formatSourceRange(
+pub fn format(
     source_range: Self,
     comptime fmt: []const u8,
     options: std.fmt.FormatOptions,
@@ -45,5 +41,5 @@ fn formatSourceRange(
 ) !void {
     try std.fmt.formatText(source_range.script.value.file_path, "s", options, writer);
     try writer.writeByte(':');
-    try source_range.range.format().format(fmt, options, writer);
+    try source_range.range.format(fmt, options, writer);
 }

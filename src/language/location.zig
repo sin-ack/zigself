@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -6,35 +6,15 @@ const std = @import("std");
 
 const Self = @This();
 
-pub fn advanceColumn(self: *Self) void {
-    self.column += 1;
-    self.offset += 1;
-}
+line: usize,
+column: usize,
+/// The offset at which the current line starts in the corresponding source file.
+line_start: usize,
+/// The offset at which the current line ends in the corresponding source file.
+/// Points to the newline.
+line_end: usize,
 
-pub fn advanceNColumns(self: *Self, n: usize) void {
-    self.column += n;
-    self.offset += n;
-}
-
-pub fn advanceLine(self: *Self) void {
-    self.line += 1;
-    self.column = 1;
-    self.offset += 1;
-}
-
-pub fn advanceForCharacter(self: *Self, c: u8) void {
-    if (c == '\n' or c == '\r') {
-        self.advanceLine();
-    } else {
-        self.advanceColumn();
-    }
-}
-
-pub fn format(self: Self) std.fmt.Formatter(formatLocation) {
-    return .{ .data = self };
-}
-
-fn formatLocation(
+pub fn format(
     location: Self,
     comptime fmt: []const u8,
     options: std.fmt.FormatOptions,
@@ -46,7 +26,3 @@ fn formatLocation(
     try writer.writeByte(':');
     try std.fmt.formatInt(location.column, 10, .lower, options, writer);
 }
-
-line: usize = 1,
-column: usize = 1,
-offset: usize = 0,

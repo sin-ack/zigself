@@ -70,7 +70,7 @@ fn initCommon(self: *Self, allocator: Allocator) !void {
 
 fn deinit(self: *Self) void {
     self.allocator.free(self.file_path);
-    self.parser.destroy(self.allocator);
+    self.parser.destroy();
     if (self.ast_root) |*ast_root| {
         ast_root.deinit(self.allocator);
     }
@@ -79,7 +79,7 @@ fn deinit(self: *Self) void {
 /// Parse the script and expose it in `self.ast_root`. Return whether the script
 /// was parsed without any error diagnostics being generated.
 pub fn parseScript(self: *Self) !bool {
-    self.ast_root = try self.parser.parseScript(self.allocator);
+    self.ast_root = try self.parser.parseScript();
 
     for (self.diagnostics().diagnostics.items) |diagnostic| {
         if (diagnostic.level == .Error) {
@@ -96,9 +96,9 @@ pub fn diagnostics(self: Self) Diagnostics {
 
 pub fn reportDiagnostics(self: Self, writer: anytype) !void {
     for (self.diagnostics().diagnostics.items) |diagnostic| {
-        const line = try self.parser.lexer.getLineForLocation(diagnostic.location);
+        const line = self.parser.buffer[diagnostic.location.line_start..diagnostic.location.line_end];
 
-        try writer.print("{s}:{}: {s}: {s}\n", .{ self.file_path, diagnostic.location.format(), @tagName(diagnostic.level), diagnostic.message });
+        try writer.print("{s}:{}: {s}: {s}\n", .{ self.file_path, diagnostic.location, @tagName(diagnostic.level), diagnostic.message });
         try writer.print("{s}\n", .{line});
         try writer.writeByteNTimes(' ', diagnostic.location.column - 1);
         try writer.writeAll("^\n");

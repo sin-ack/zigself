@@ -150,7 +150,7 @@ pub const BlockNode = struct {
 };
 
 pub const IdentifierNode = struct {
-    value: []u8,
+    value: []const u8,
 
     range: Range,
 
