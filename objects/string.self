@@ -23,6 +23,8 @@ std traits string _AddSlots: (|
     = v = (_ByteArrayEq: v).
     , s = (_ByteArrayConcatenate: s).
 
+    asString = (self).
+
     filler = ' '.
     "FIXME: Byte array objects should copy their values when cloned."
     copy = (copySize: size).
