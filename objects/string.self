@@ -69,37 +69,42 @@ std traits string _AddSlots: (|
         newString
     ).
 
-    "FIXME: Convert this to return a collector!"
-    splitOn: substring = (| indicesList. substrings. head. index |
-        indicesList: std list copyRemoveAll.
+    "Split the current string with the given delimiter, and put the results in the
+     given implicitKeyInsertable collection. If a collection is not given, a std
+     vector copy is used by default."
+    splitBy: substring = (splitBy: substring CollectingInto: std vector copyRemoveAll).
+    splitBy: substring CollectingInto: collection = (| indices. index. previous |
+        indices: std vector copyRemoveAll.
         index: 0.
+
+        "Empty substring means we want to split this string into its characters.
+         That will include the first (empty) character, so let's skip it."
+        substring isEmpty ifTrue: [ index: index succ ].
 
         [ index < size ] whileTrue: [
             findSubstring: substring
                 FromIndex: index
                 IfPresent: [| :substringIndex |
-                    indicesList append: substringIndex.
+                    indices add: substringIndex.
                     index: substringIndex succ.
                 ]
-                IfAbsent: [ index: size ].
+                 IfAbsent: [ index: size ].
         ].
 
-        indicesList append: size.
-        substrings: std array copySize: indicesList size.
+        indices add: size.
 
         "The first substring must be appended outside because we do not want to add the substring length."
-        substrings at: 0 Put: (copyFrom: 0 Until: (indicesList at: 0)).
+        collection add: (copyFrom: 0 Until: (indices at: 0)).
 
-        "Find and append all the substrings."
-        index: 1.
-        head: indicesList nodes.
-        indicesList nodes do: [| :node |
-            (node next == head) ifTrue: [ ^ substrings ].
-            substrings at: index Put: (copyFrom: (node value + substring size) Until: (node next value)).
-            index: index succ.
+        "Find and append all the rest of the substrings."
+        previous: indices at: 0.
+        1 to: indices size Do: [| :i. current |
+            current: indices at: i.
+            collection add: (copyFrom: (previous + substring size) Until: current).
+            previous: current.
         ].
 
-        substrings
+        collection
     ).
 
     "Find the given substring, starting from the given index. Call presentBlock
