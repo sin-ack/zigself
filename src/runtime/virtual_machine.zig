@@ -23,23 +23,23 @@ block_message_names: std.AutoArrayHashMapUnmanaged(u8, Heap.Tracked),
 // References to global objects
 
 /// The root of the current Self world.
-lobby_object: Heap.Tracked,
+lobby_object: Heap.Tracked = undefined,
 
 /// The global nil object used to represent the default assignable slot value.
 /// Can also be used in place of "nothing".
-global_nil: Heap.Tracked,
+global_nil: Heap.Tracked = undefined,
 /// The global truth value.
-global_true: Heap.Tracked,
+global_true: Heap.Tracked = undefined,
 /// The global falsity value.
-global_false: Heap.Tracked,
+global_false: Heap.Tracked = undefined,
 
 // Primitive object traits
 
-array_traits: Heap.Tracked,
-block_traits: Heap.Tracked,
-float_traits: Heap.Tracked,
-string_traits: Heap.Tracked,
-integer_traits: Heap.Tracked,
+array_traits: Heap.Tracked = undefined,
+block_traits: Heap.Tracked = undefined,
+float_traits: Heap.Tracked = undefined,
+string_traits: Heap.Tracked = undefined,
+integer_traits: Heap.Tracked = undefined,
 
 // Settings
 
@@ -56,9 +56,11 @@ pub fn create(allocator: Allocator) !*Self {
     var self = try allocator.create(Self);
     errdefer allocator.destroy(self);
 
-    self.allocator = allocator;
-    self.heap = heap;
-    self.block_message_names = .{};
+    self.* = .{
+        .allocator = allocator,
+        .heap = heap,
+        .block_message_names = .{},
+    };
 
     const empty_map = try Object.Map.Slots.create(heap, 0);
 
