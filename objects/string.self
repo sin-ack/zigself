@@ -109,7 +109,7 @@ std traits string _AddSlots: (|
         FromIndex: index
         IfPresent: presentBlock
          IfAbsent: absentBlock = (
-        index to: size - substring size Do: [| :i |
+        index through: size - substring size Do: [| :i |
             substring findFirst: [| :c. :j | c != (at: i + j) ]
                       IfPresent: []
                        IfAbsent: [ ^ presentBlock value: i ].
