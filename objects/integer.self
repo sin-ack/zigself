@@ -25,6 +25,8 @@ std traits integer _AddSlots: (|
     != n = ((= n) not).
     << n = (_IntShl: n).
     >> n = (_IntShr: n).
+    ^^ n = (_IntXor: n).
+    && n = (_IntAnd: n).
 
     ** n = (| i |
         n = 0 ifTrue: [ ^ 1 ].

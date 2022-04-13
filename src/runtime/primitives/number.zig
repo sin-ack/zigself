@@ -126,6 +126,28 @@ pub fn IntShr(context: PrimitiveContext) !Completion {
     }.op);
 }
 
+/// Perform a bitwise XOR on the receiver with the argument. The returned value
+/// is an integer.
+pub fn IntXor(context: PrimitiveContext) !Completion {
+    return integerOpCommon("IntXor", context, struct {
+        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
+            _ = ctx;
+            return Completion.initNormal(Value.fromInteger(receiver ^ term));
+        }
+    }.op);
+}
+
+/// Perform a bitwise AND on the receiver with the argument. The returned value
+/// is an integer.
+pub fn IntAnd(context: PrimitiveContext) !Completion {
+    return integerOpCommon("IntAnd", context, struct {
+        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
+            _ = ctx;
+            return Completion.initNormal(Value.fromInteger(receiver & term));
+        }
+    }.op);
+}
+
 /// Return whether the receiver is less than its argument. The return value is
 /// either "true" or "false".
 pub fn IntLT(context: PrimitiveContext) !Completion {
