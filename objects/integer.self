@@ -94,4 +94,7 @@ std traits integer _AddSlots: (|
         output: output reverse.
         negative ifTrue: [ '-', output ] False: output.
     ).
+
+    "Return the 32-bit 'hash' of this integer."
+    hash = (&& 0xFFFFFFFF).
 |).
