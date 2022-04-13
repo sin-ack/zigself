@@ -11,9 +11,9 @@ _AddSlots: (|
         "These are convenience helpers. They allow for blocks that take less
          arguments than the caller expects to be called properly:
 
-         list do: [| :item | item printLine ].
+         list each: [| :item | item printLine ].
 
-         Here, `do:` on `list` would expect the block it is passed to receive
+         Here, `each:` on `list` would expect the block it is passed to receive
          `value:With:` so it can pass the item and its index. However, since
          the block only accepts `value:`, that would fail. These methods allow
          `value:With:` to delegate to `value:` which makes for nicer behavior."
