@@ -199,10 +199,18 @@ pub fn executeMethodMessage(
     for (arguments) |argument| argument_values.appendAssumeCapacity(argument.getValue());
 
     const method_activation = blk: {
+        // NOTE: The receiver of a method activation must never be an activation
+        //       object, as that would allow us to access the slots of upper
+        //       scopes.
+        var receiver_of_method = receiver.getValue();
+        if (receiver_of_method.isObjectReference() and receiver_of_method.asObject().isActivationObject()) {
+            receiver_of_method = receiver_of_method.asObject().asActivationObject().findActivationReceiver();
+        }
+
         const new_activation = context.activation_stack.getNewActivationSlot();
         try method_object.activateMethod(
             context.vm.heap,
-            receiver.getValue(),
+            receiver_of_method,
             argument_values.constSlice(),
             source_range,
             new_activation,
