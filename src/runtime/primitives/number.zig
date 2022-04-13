@@ -77,7 +77,8 @@ pub fn IntMul(context: PrimitiveContext) !Completion {
 pub fn IntDiv(context: PrimitiveContext) !Completion {
     return integerOpCommon("IntDiv", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
-            _ = ctx;
+            if (term == 0)
+                return Completion.initRuntimeError(ctx.vm, ctx.source_range, "Division by zero", .{});
             return Completion.initNormal(Value.fromInteger(@divFloor(receiver, term)));
         }
     }.op);
@@ -88,7 +89,8 @@ pub fn IntDiv(context: PrimitiveContext) !Completion {
 pub fn IntMod(context: PrimitiveContext) !Completion {
     return integerOpCommon("IntMod", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
-            _ = ctx;
+            if (term == 0)
+                return Completion.initRuntimeError(ctx.vm, ctx.source_range, "Modulo by zero", .{});
             return Completion.initNormal(Value.fromInteger(@mod(receiver, term)));
         }
     }.op);
