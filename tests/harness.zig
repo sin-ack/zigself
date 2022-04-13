@@ -42,9 +42,6 @@ const Test = struct {
 
 /// Expects an iterable directory.
 fn collectTests(allocator: Allocator, directory: std.fs.Dir) !std.ArrayList(Test) {
-    var walker = try directory.walk(allocator);
-    defer walker.deinit();
-
     var tests = std.ArrayList(Test).init(allocator);
     errdefer {
         for (tests.items) |*the_test| {
@@ -53,16 +50,46 @@ fn collectTests(allocator: Allocator, directory: std.fs.Dir) !std.ArrayList(Test
         tests.deinit();
     }
 
-    next_file: while (try walker.next()) |entry| {
-        if (entry.kind != .File)
-            continue :next_file;
-        if (!std.mem.endsWith(u8, entry.basename, ".self"))
-            continue :next_file;
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
 
-        var the_test = try Test.init(allocator, entry.basename, entry.path);
-        errdefer the_test.deinit(allocator);
+    // Skip the filename
+    _ = args.skip();
 
-        try tests.append(the_test);
+    var first_arg = args.next();
+    if (first_arg) |first_path| {
+        // We were passed at least one path, let's use them as tests to run.
+        const first_basename = std.fs.path.basename(first_path);
+        var first_test = try Test.init(allocator, first_basename, first_path);
+
+        {
+            errdefer first_test.deinit(allocator);
+            try tests.append(first_test);
+        }
+
+        while (args.next()) |path| {
+            const basename = std.fs.path.basename(path);
+            var the_test = try Test.init(allocator, basename, path);
+            errdefer the_test.deinit(allocator);
+
+            try tests.append(the_test);
+        }
+    } else {
+        // No args were passed, let's walk the given directory.
+        var walker = try directory.walk(allocator);
+        defer walker.deinit();
+
+        next_file: while (try walker.next()) |entry| {
+            if (entry.kind != .File)
+                continue :next_file;
+            if (!std.mem.endsWith(u8, entry.basename, ".self"))
+                continue :next_file;
+
+            var the_test = try Test.init(allocator, entry.basename, entry.path);
+            errdefer the_test.deinit(allocator);
+
+            try tests.append(the_test);
+        }
     }
 
     return tests;
