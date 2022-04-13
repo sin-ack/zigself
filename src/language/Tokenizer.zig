@@ -270,6 +270,10 @@ pub fn next(self: *Self) Token {
                 else => {},
             },
             .StringLiteral => switch (c) {
+                0 => {
+                    token.tag = .Invalid;
+                    break;
+                },
                 '\'' => {
                     self.offset += 1;
                     break;
