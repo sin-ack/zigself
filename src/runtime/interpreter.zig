@@ -42,6 +42,13 @@ pub const InterpreterContext = struct {
     /// The script file that is currently executing, used to resolve the
     /// relative paths of other script files.
     script: Script.Ref,
+    /// The method execution (not activation!) depth of the interpreter. Every
+    /// time the interpreter enters `executeMethod`, this is incremented by one,
+    /// and when exited it is decremented by one. When `executeObject` or
+    /// `executeBlock` is entered this value is reset during the duration of the
+    /// method and restored afterwards. This is used to track and mark inline
+    /// method creations during method execution.
+    method_execution_depth: usize,
 };
 
 pub const InterpreterError = Allocator.Error;
@@ -77,6 +84,7 @@ pub fn executeScript(vm: *VirtualMachine, script: Script.Ref) InterpreterError!?
         .self_object = try vm.heap.track(vm.lobby()),
         .activation_stack = &activation_stack,
         .script = script,
+        .method_execution_depth = 0,
     };
     var last_expression_result: ?Heap.Tracked = try vm.heap.track(vm.nil());
     for (script.value.ast_root.?.statements.value.statements) |expression| {
@@ -127,6 +135,7 @@ pub fn executeSubScript(parent_context: *InterpreterContext, script: Script.Ref)
         .self_object = try parent_context.vm.heap.track(parent_context.vm.lobby()),
         .activation_stack = parent_context.activation_stack,
         .script = script,
+        .method_execution_depth = 0,
     };
     var last_expression_result: ?Heap.Tracked = null;
     for (script.value.ast_root.?.statements.value.statements) |expression| {
@@ -327,6 +336,9 @@ pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) 
     var source_range = SourceRange.init(context.script, object_node.range);
     defer source_range.deinit();
 
+    const old_method_execution_depth = context.method_execution_depth;
+    context.method_execution_depth = 0;
+
     // Verify that the assignable slots in this object are within limits
     var assignable_slot_count: usize = 0;
     var inherited_slot_count: usize = 0;
@@ -349,13 +361,18 @@ pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) 
         return completion;
 
     var slots_map = try Object.Map.Slots.create(context.vm.heap, slot_count);
-    return try createSlotsObjectFromMap(context, slots_map, object_node.slots, &inherited_slot_values);
+    const slots_object = try createSlotsObjectFromMap(context, slots_map, object_node.slots, &inherited_slot_values);
+
+    context.method_execution_depth = old_method_execution_depth;
+    return slots_object;
 }
 
 fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AST.ObjectNode) InterpreterError!Completion {
     // FIXME: Get a better source range for the method itself
     var source_range = SourceRange.init(context.script, object_node.range);
     defer source_range.deinit();
+
+    context.method_execution_depth += 1;
 
     var assignable_slot_count: usize = 0;
     var argument_slot_count: usize = 0;
@@ -388,22 +405,30 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
         if (try getSlotCountForMap(context, object_node.slots, null, &slot_count)) |completion|
             return completion;
 
+        const is_inline_method = context.method_execution_depth > 1;
         break :blk try Object.Map.Method.create(
             context.vm.heap,
             @intCast(u8, argument_slot_count),
             slot_count,
             object_node.statements,
+            is_inline_method,
             method_name_in_heap,
             context.script,
         );
     };
 
-    return try createSlotsObjectFromMap(context, method_map, object_node.slots, null);
+    const method_object = try createSlotsObjectFromMap(context, method_map, object_node.slots, null);
+
+    context.method_execution_depth -= 1;
+    return method_object;
 }
 
 pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) InterpreterError!Completion {
     var source_range = SourceRange.init(context.script, block.range);
     defer source_range.deinit();
+
+    const old_method_execution_depth = context.method_execution_depth;
+    context.method_execution_depth = 0;
 
     var argument_slot_count: usize = 0;
     var assignable_slot_count: usize = 0;
@@ -457,7 +482,10 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
         );
     };
 
-    return try createSlotsObjectFromMap(context, block_map, block.slots, null);
+    const block_object = try createSlotsObjectFromMap(context, block_map, block.slots, null);
+
+    context.method_execution_depth = old_method_execution_depth;
+    return block_object;
 }
 
 pub fn executeReturn(context: *InterpreterContext, return_node: AST.ReturnNode) InterpreterError!Completion {

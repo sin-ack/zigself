@@ -400,6 +400,10 @@ pub const Method = packed struct {
         return self.getMap().getStatementsSlice();
     }
 
+    pub fn expectsActivationObjectAsReceiver(self: *Method) bool {
+        return self.getMap().expectsActivationObjectAsReceiver();
+    }
+
     // --- Slot counts ---
 
     pub fn getArgumentSlotCount(self: *Method) u8 {

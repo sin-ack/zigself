@@ -332,6 +332,7 @@ const MethodMap = packed struct {
         argument_slot_count: u8,
         total_slot_count: u32,
         statements: AST.StatementList.Ref,
+        is_inline_method: bool,
         method_name: ByteArrayTheFirst,
         script: Script.Ref,
     ) !*MethodMap {
@@ -340,7 +341,7 @@ const MethodMap = packed struct {
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*MethodMap, memory_area);
-        self.init(map_map, argument_slot_count, total_slot_count, statements, method_name, script);
+        self.init(map_map, argument_slot_count, total_slot_count, statements, is_inline_method, method_name, script);
 
         try heap.markAddressAsNeedingFinalization(memory_area);
         return self;
@@ -352,11 +353,33 @@ const MethodMap = packed struct {
         argument_slot_count: u8,
         total_slot_count: u32,
         statements: AST.StatementList.Ref,
+        is_inline_method: bool,
         method_name: ByteArrayTheFirst,
         script: Script.Ref,
     ) void {
         self.base_map.init(.Method, map_map, argument_slot_count, total_slot_count, statements, script);
         self.method_name = method_name.asValue();
+        self.setInlineMethod(is_inline_method);
+    }
+
+    const InlineShift = MapTypeShift + MapTypeBits;
+    const InlineBit: u64 = 1 << InlineShift;
+
+    fn setInlineMethod(self: *MethodMap, is_inline_method: bool) void {
+        var object_info = self.base_map.slots_map.map.header.object_information;
+        if (is_inline_method)
+            object_info |= InlineBit
+        else
+            object_info &= ~InlineBit;
+        self.base_map.slots_map.map.header.object_information = object_info;
+    }
+
+    fn isInlineMethod(self: *MethodMap) bool {
+        return self.base_map.slots_map.map.header.object_information & InlineBit != 0;
+    }
+
+    pub fn expectsActivationObjectAsReceiver(self: *MethodMap) bool {
+        return self.isInlineMethod();
     }
 
     pub fn finalize(self: *MethodMap, allocator: Allocator) void {

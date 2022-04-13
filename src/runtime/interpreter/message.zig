@@ -200,10 +200,13 @@ pub fn executeMethodMessage(
 
     const method_activation = blk: {
         // NOTE: The receiver of a method activation must never be an activation
-        //       object, as that would allow us to access the slots of upper
-        //       scopes.
+        //       object (unless it explicitly wants that), as that would allow
+        //       us to access the slots of upper scopes.
         var receiver_of_method = receiver.getValue();
-        if (receiver_of_method.isObjectReference() and receiver_of_method.asObject().isActivationObject()) {
+        if (!method_object.expectsActivationObjectAsReceiver() and
+            receiver_of_method.isObjectReference() and
+            receiver_of_method.asObject().isActivationObject())
+        {
             receiver_of_method = receiver_of_method.asObject().asActivationObject().findActivationReceiver();
         }
 
