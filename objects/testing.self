@@ -16,6 +16,12 @@ std _AddSlots: (|
                 ].
             ).
 
+            expectToBeFalse: expr = (
+                expr ifTrue: [
+                    _Error: 'Expected expression to be false'.
+                ].
+            ).
+
             "Expects the expected value to be identical to the actual value."
             expect: actual ToBeIdenticalTo: expected = (
                 (expected == actual) ifFalse: [
