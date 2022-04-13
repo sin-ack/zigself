@@ -140,6 +140,26 @@ std traits string _AddSlots: (|
 
         targetBuffer
     ).
+
+    "Return the 32-bit hash of this string."
+    hash = (|
+        hashMask = 0xFFFFFFFF.
+        result
+    |
+        "A port of SerenityOS' string hash:"
+        "https://github.com/SerenityOS/serenity/blob/daaa8a57f0d7e638c434b08b22a5f2bc107480a6/AK/StringHash.h#L13"
+        result: 0.
+        each: [| :byte |
+            result: result + byte.
+            result: result + (result << 10).
+            result: result ^^ (result >> 6).
+        ].
+
+        result: result + (result << 3).
+        result: result ^^ (result << 11).
+        result: result + (result << 15).
+        result && hashMask
+    ).
 |).
 
 std traits string _AddSlots: (|
