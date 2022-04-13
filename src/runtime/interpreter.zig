@@ -78,7 +78,7 @@ pub fn executeScript(vm: *VirtualMachine, script: Script.Ref) InterpreterError!?
         .activation_stack = &activation_stack,
         .script = script,
     };
-    var last_expression_result: ?Heap.Tracked = null;
+    var last_expression_result: ?Heap.Tracked = try vm.heap.track(vm.nil());
     for (script.value.ast_root.?.statements.value.statements) |expression| {
         std.debug.assert(activation_stack.depth == 0);
 
