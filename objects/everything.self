@@ -22,6 +22,7 @@ _AddSlots: (| nil = _Nil |).
 'vector.self' _RunScript.
 'string.self' _RunScript.
 'list.self' _RunScript.
+'hashTable.self' _RunScript.
 
 "Collector for easy collecting."
 'collector.self' _RunScript.
