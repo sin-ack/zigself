@@ -28,23 +28,23 @@ std traits _AddSlots: (|
             items at: key
         ).
         at: key Put: item = (
-            [| p* = private |
-                (isWithinBounds: key) ifFalse: [ _Error: 'key out of bounds' ].
-                at: key PutWithoutBoundsCheck: item.
+            [| p = private |
+                (p isWithinBounds: key) ifFalse: [ _Error: 'key out of bounds' ].
+                p at: key PutWithoutBoundsCheck: item.
             ] value.
             self
         ).
         remove: index IfAbsent: blk = (
-            [| p* = private |
-                (isWithinBounds: index) ifFalse: blk.
-                removeIndex: index.
+            [| p = private |
+                (p isWithinBounds: index) ifFalse: blk.
+                p removeIndex: index.
             ] value.
             self
         ).
         add: item = (
-            [| p* = private |
-                ensureSpaceForOneMore.
-                at: size PutWithoutBoundsCheck: item.
+            [| p = private |
+                p ensureSpaceForOneMore.
+                p at: size PutWithoutBoundsCheck: item.
                 size: size succ.
             ] value.
             self
