@@ -85,6 +85,8 @@ std traits _AddSlots: (|
 
         isEmpty = (size = 0).
 
+        at: key = (at: key IfAbsent: [ _Error: 'key was not found in the collection' ]).
+
         "Compare each item between this collection and other, and return whether
          they are equal."
         = other = (
