@@ -33,6 +33,8 @@ SPDX-License-Identifier: GPL-3.0-only
             && b = (b value).
             "Short circuits its argument."
             || b = (self).
+
+            asString = 'true'.
         |).
 
         false parent _AddSlots: (|
@@ -44,6 +46,8 @@ SPDX-License-Identifier: GPL-3.0-only
             "Short circuits its argument."
             && b = (self).
             || b = (b value).
+
+            asString = 'false'.
         |).
     ).
 |) addBooleanCapabilities.
