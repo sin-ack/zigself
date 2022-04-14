@@ -47,6 +47,7 @@ std traits _AddSlots: (|
 
         "Common conversions"
         asVector = (collectInto: std vector copy).
+        asSet = (collectInto: std hashSet copy).
 
         size = (| current |
             nil == cachedSize ifFalse: [ ^ cachedSize ].
