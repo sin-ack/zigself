@@ -212,7 +212,7 @@ pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) !v
         }
     }
 
-    try self.eden.updateAllReferencesTo(self.allocator, old_value.asObjectAddress(), new_value.asObjectAddress());
+    try self.eden.updateAllReferencesTo(self.allocator, old_value.asObjectAddress(), new_value.asObjectAddress(), null);
 }
 
 /// Figure out which spaces the referrer and target object are in, and add an
@@ -881,7 +881,13 @@ const Space = struct {
         return false;
     }
 
-    pub fn updateAllReferencesToImpl(self: *Space, allocator: Allocator, old_address: [*]u64, new_address: [*]u64) !void {
+    pub fn updateAllReferencesToImpl(
+        self: *Space,
+        allocator: Allocator,
+        old_address: [*]u64,
+        new_address: [*]u64,
+        new_address_space: ?*Space,
+    ) !void {
         const new_address_value = Value.fromObjectAddress(new_address);
         const old_address_as_reference = Value.fromObjectAddress(old_address).data;
         const new_address_as_reference = new_address_value.data;
@@ -891,11 +897,32 @@ const Space = struct {
                 word.* = new_address_as_reference;
         }
 
+        var tracked_handles_to_remove = TrackedSet{};
+        defer tracked_handles_to_remove.deinit(allocator);
+
         // Go through tracked set, and replace the address contained in any
         // handle with the new address.
         for (self.tracked_set.keys()) |handle| {
-            if (handle.* == old_address)
+            if (handle.* == old_address) {
+                // If the new address' space is not this space, then we need to
+                // remove this address from our tracked set and add it to the
+                // other space's tracked set, so that it can be properly
+                // untracked.
+                //
+                // Otherwise, since this space already contains both the
+                // old and new address, we'll always be correctly untracking,
+                // so we can simply update the address.
+                if (new_address_space) |new_space| {
+                    try tracked_handles_to_remove.put(allocator, handle, .{});
+                    try new_space.addToTrackedSet(allocator, handle);
+                }
+
                 handle.* = new_address;
+            }
+        }
+
+        for (tracked_handles_to_remove.keys()) |handle| {
+            self.removeFromTrackedSet(handle) catch unreachable;
         }
 
         // If the new object is in the current space and should be finalized,
@@ -906,11 +933,18 @@ const Space = struct {
 
     /// Update all references to the given object in the current space and
     /// its tenure target.
-    pub fn updateAllReferencesTo(self: *Space, allocator: Allocator, old_address: [*]u64, new_address: [*]u64) Allocator.Error!void {
-        try self.updateAllReferencesToImpl(allocator, old_address, new_address);
+    pub fn updateAllReferencesTo(
+        self: *Space,
+        allocator: Allocator,
+        old_address: [*]u64,
+        new_address: [*]u64,
+        new_address_space: ?*Space,
+    ) Allocator.Error!void {
+        try self.updateAllReferencesToImpl(allocator, old_address, new_address, new_address_space);
 
         if (self.tenure_target) |tenure_target| {
-            try tenure_target.updateAllReferencesTo(allocator, old_address, new_address);
+            const space_contains_new_address = self.objectSegmentContains(new_address) or self.byteArraySegmentContains(new_address);
+            try tenure_target.updateAllReferencesTo(allocator, old_address, new_address, if (space_contains_new_address) self else new_address_space);
         }
     }
 };
