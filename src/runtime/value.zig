@@ -17,8 +17,9 @@ const debug = @import("../debug.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
-const LookupIntent = object_lookup.LookupIntent;
 const LookupError = object_lookup.LookupError;
+const LookupResult = object_lookup.LookupResult;
+const SelectorHash = object_lookup.SelectorHash;
 const parent_hash = hash.stringHash("parent");
 
 pub const Value = packed struct {
@@ -114,48 +115,42 @@ pub const Value = packed struct {
 
     pub fn lookup(
         self: Value,
-        comptime intent: LookupIntent,
         context: *InterpreterContext,
         selector: []const u8,
         source_range: SourceRange,
-    ) object_lookup.lookupReturnType(intent) {
-        const selector_hash = hash.stringHash(selector);
-        if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up \"{s}\" (hash: {x}) on {}\n", .{ selector, selector_hash, self });
+    ) LookupError!LookupResult {
+        const selector_hash = SelectorHash.init(selector);
+        if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up \"{s}\" (hash: {x}) on {}\n", .{ selector, selector_hash.regular, self });
 
-        return try self.lookupByHash(intent, context, selector_hash, source_range);
+        return try self.lookupByHash(context, selector_hash, source_range);
     }
 
     pub fn lookupByHash(
         self: Value,
-        comptime intent: LookupIntent,
         context: *InterpreterContext,
-        selector_hash: u32,
+        selector_hash: SelectorHash,
         source_range: SourceRange,
-    ) object_lookup.lookupReturnType(intent) {
+    ) LookupError!LookupResult {
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
-            .ObjectReference => self.asObject().lookupByHash(intent, context, selector_hash, source_range),
+            .ObjectReference => self.asObject().lookupByHash(context, selector_hash, source_range),
 
             .Integer => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits integer\n", .{});
                 const integer_traits = context.vm.integer_traits.getValue();
-                if (intent == .Read) {
-                    if (selector_hash == parent_hash)
-                        return @as(?Completion, Completion.initNormal(integer_traits));
-                }
+                if (selector_hash.regular == parent_hash)
+                    return LookupResult{ .Regular = integer_traits };
 
-                return try integer_traits.lookupByHash(intent, context, selector_hash, source_range);
+                return try integer_traits.lookupByHash(context, selector_hash, source_range);
             },
             .FloatingPoint => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits float\n", .{});
 
                 const float_traits = context.vm.float_traits.getValue();
-                if (intent == .Read) {
-                    if (selector_hash == parent_hash)
-                        return @as(?Completion, Completion.initNormal(float_traits));
-                }
+                if (selector_hash.regular == parent_hash)
+                    return LookupResult{ .Regular = float_traits };
 
-                return try float_traits.lookupByHash(intent, context, selector_hash, source_range);
+                return try float_traits.lookupByHash(context, selector_hash, source_range);
             },
         };
     }

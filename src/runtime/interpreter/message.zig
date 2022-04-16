@@ -337,43 +337,6 @@ pub fn executePrimitiveMessage(
     }
 }
 
-/// The original value in `slot` is unref'd.
-pub fn executeAssignmentMessage(
-    context: *InterpreterContext,
-    tracked_receiver: Heap.Tracked,
-    message_name: []const u8,
-    tracked_argument: Heap.Tracked,
-    source_range: SourceRange,
-) root_interpreter.InterpreterError!?Completion {
-    const receiver = tracked_receiver.getValue();
-    var argument = tracked_argument.getValue();
-    // NOTE: This is required, for instance, when we are assigning `self` to
-    //       a slot (happens more often than you might think!). We need to strip
-    //       the activation object to get to the actual value inside.
-    if (argument.isObjectReference() and argument.asObject().isActivationObject()) {
-        argument = argument.asObject().asActivationObject().findActivationReceiver();
-    }
-
-    const message_name_without_colon = message_name[0 .. message_name.len - 1];
-    if (try receiver.lookup(.Assign, context, message_name_without_colon, source_range)) |assign_lookup_result| {
-        if (assign_lookup_result == .Completion) {
-            return assign_lookup_result.Completion;
-        }
-
-        const result = assign_lookup_result.Result;
-        const object_that_has_the_assignable_slot = result.object;
-        const value_ptr = result.value_ptr;
-        value_ptr.* = argument;
-
-        // David will remember that.
-        try context.vm.heap.rememberObjectReference(object_that_has_the_assignable_slot.asValue(), argument);
-
-        return Completion.initNormal(receiver);
-    } else {
-        return null;
-    }
-}
-
 /// Executes a message. All refs are forwarded.
 pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) root_interpreter.InterpreterError!Completion {
     var source_range = SourceRange.init(context.script, message.range);
@@ -413,13 +376,6 @@ pub fn sendMessage(
     arguments: []const Heap.Tracked,
     source_range: SourceRange,
 ) root_interpreter.InterpreterError!Completion {
-    // Check for assignable slots
-    if (name[name.len - 1] == ':' and arguments.len == 1) {
-        if (try executeAssignmentMessage(context, tracked_receiver, name, arguments[0], source_range)) |completion| {
-            return completion;
-        }
-    }
-
     // Primitive check
     if (name[0] == '_') {
         return executePrimitiveMessage(context, tracked_receiver, name, arguments, source_range);
@@ -446,21 +402,35 @@ pub fn sendMessage(
         }
     }
 
-    if (try tracked_receiver.getValue().lookup(.Read, context, name, source_range)) |lookup_completion| {
-        if (!lookup_completion.isNormal()) {
-            return lookup_completion;
-        }
+    return switch (try tracked_receiver.getValue().lookup(context, name, source_range)) {
+        .Regular => |lookup_result| {
+            if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
+                var tracked_lookup_result = try context.vm.heap.track(lookup_result);
+                defer tracked_lookup_result.untrack(context.vm.heap);
 
-        const lookup_result = lookup_completion.data.Normal;
-        if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
-            var tracked_lookup_result = try context.vm.heap.track(lookup_result);
-            defer tracked_lookup_result.untrack(context.vm.heap);
+                return executeMethodMessage(context, tracked_receiver, tracked_lookup_result, arguments, source_range);
+            } else {
+                return Completion.initNormal(lookup_result);
+            }
+        },
+        .Assignment => |assignment_context| {
+            var argument = arguments[0].getValue();
+            // NOTE: This is required, for instance, when we are assigning `self` to
+            //       a slot (happens more often than you might think!). We need to strip
+            //       the activation object to get to the actual value inside.
+            if (argument.isObjectReference() and argument.asObject().isActivationObject()) {
+                argument = argument.asObject().asActivationObject().findActivationReceiver();
+            }
 
-            return executeMethodMessage(context, tracked_receiver, tracked_lookup_result, arguments, source_range);
-        } else {
-            return Completion.initNormal(lookup_result);
-        }
-    } else {
-        return Completion.initRuntimeError(context.vm, source_range, "Unknown selector \"{s}\"", .{name});
-    }
+            const object_that_has_the_assignable_slot = assignment_context.object;
+            const value_ptr = assignment_context.value_ptr;
+            value_ptr.* = argument;
+
+            // David will remember that.
+            try context.vm.heap.rememberObjectReference(object_that_has_the_assignable_slot.asValue(), argument);
+
+            return Completion.initNormal(tracked_receiver.getValue());
+        },
+        .Nothing => Completion.initRuntimeError(context.vm, source_range, "Unknown selector \"{s}\"", .{name}),
+    };
 }
