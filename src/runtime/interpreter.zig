@@ -522,62 +522,7 @@ pub fn executeIdentifier(context: *InterpreterContext, identifier: AST.Identifie
     var source_range = SourceRange.init(context.script, identifier.range);
     defer source_range.deinit();
 
-    if (identifier.value[0] == '_') {
-        var receiver = context.self_object.getValue();
-
-        if (receiver.isObjectReference() and receiver.asObject().isActivationObject()) {
-            receiver = receiver.asObject().asActivationObject().findActivationReceiver();
-        }
-
-        var tracked_receiver = try context.vm.heap.track(receiver);
-        defer tracked_receiver.untrack(context.vm.heap);
-
-        return message_interpreter.executePrimitiveMessage(context, tracked_receiver, identifier.value, &.{}, source_range);
-    }
-
-    // Check for block activation. Note that this isn't the same as calling a
-    // method on traits block, this is actually executing the block itself via
-    // the virtual method.
-    {
-        var receiver = context.self_object.getValue();
-        if (receiver.isObjectReference() and receiver.asObject().isActivationObject()) {
-            receiver = receiver.asObject().asActivationObject().findActivationReceiver();
-        }
-
-        if (receiver.isObjectReference() and
-            receiver.asObject().isBlockObject() and
-            receiver.asObject().asBlockObject().isCorrectMessageForBlockExecution(identifier.value))
-        {
-            var tracked_receiver = try context.vm.heap.track(receiver);
-            defer tracked_receiver.untrack(context.vm.heap);
-
-            return message_interpreter.executeBlockMessage(context, tracked_receiver, &.{}, source_range);
-        }
-    }
-
-    if (try context.self_object.getValue().lookup(.Read, context, identifier.value, source_range)) |lookup_completion| {
-        if (!lookup_completion.isNormal()) {
-            return lookup_completion;
-        }
-
-        const lookup_result = lookup_completion.data.Normal;
-        if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
-            var tracked_lookup_result = try context.vm.heap.track(lookup_result);
-            defer tracked_lookup_result.untrack(context.vm.heap);
-
-            return message_interpreter.executeMethodMessage(
-                context,
-                context.self_object,
-                tracked_lookup_result,
-                &.{},
-                source_range,
-            );
-        } else {
-            return Completion.initNormal(lookup_result);
-        }
-    } else {
-        return Completion.initRuntimeError(context.vm, source_range, "Failed looking up \"{s}\"", .{identifier.value});
-    }
+    return try message_interpreter.sendMessage(context, context.self_object, identifier.value, &.{}, source_range);
 }
 
 pub fn executeString(context: *InterpreterContext, string: AST.StringNode) InterpreterError!Completion {
