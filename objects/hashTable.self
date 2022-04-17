@@ -145,7 +145,7 @@ std traits _AddSlots: (|
                     slot: slotForItem: item.
 
                     slot deleted ifTrue: [ deletedSlots: deletedSlots prec ].
-                    size: size succ.
+                    slot used ifFalse: [ size: size succ ].
 
                     slot set: item.
                 ).
