@@ -1266,7 +1266,7 @@ fn offsetToLocation(self: Self, offset: usize) Location {
         const line_offset = self.line_offsets.items[line];
         if (offset < line_offset) {
             line_start = self.line_offsets.items[line - 1];
-            line_end = line_offset;
+            line_end = line_offset - 1; // Get rid of newline
             did_find_line = true;
             break;
         }
