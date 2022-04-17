@@ -76,6 +76,21 @@ std traits _AddSlots: (|
             slot used
         ).
 
+        "Perspective intended for wrapper objects' use."
+        wrapperUtility = (|
+            prototype = (|
+                receiver* <- nil.
+
+                "Intended to be used with objects like std hashMap which store an
+                auxiliary object internally. This method sends the 'copy' message to
+                each slot's contents and replaces the slot content with it. The
+                object's hash must not change during this operation."
+                replaceEachValueWithCopy = (
+                    slots each: [| :slot | slot used ifTrue: [ slot value: slot value copy ] ].
+                ).
+            |).
+        | prototype clone; receiver: self).
+
         private = (|
             prototype = (|
                 receiver* <- nil.
