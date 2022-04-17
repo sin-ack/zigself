@@ -28,6 +28,8 @@ std traits _AddSlots: (|
 
         "Trait & mixin requirements"
         at: key IfAbsent: absentBlock = (| slot |
+            isEmpty ifTrue: [ ^ absentBlock value ].
+
             slot: private slotForItem: key.
             slot used ifFalse: [ ^ absentBlock value ].
             slot value
