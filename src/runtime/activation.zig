@@ -130,6 +130,9 @@ pub const ActivationRef = packed struct {
 activation_id: u64,
 heap: *Heap,
 activation_object: Value,
+/// The index of the statement that is currently being executed. This is an
+/// offset into the statement slice of the activation object.
+statement_index: usize = 0,
 creation_context: ActivationCreationContext,
 /// Will be used as the target activation that a non-local return needs to rise
 /// to. Must be non-null when a non-local return is encountered, and when

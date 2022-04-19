@@ -77,9 +77,8 @@ pub fn initRestart() Self {
 pub fn deinit(self: *Self, vm: *VirtualMachine) void {
     switch (self.data) {
         .Normal, .Restart => {},
-        .NonlocalReturn => {
-            // NOTE: We explicitly DON'T untrack the heap value here, as that will be borrowed by
-            //       executeMethodMessage when the value has arrived to its intended destination.
+        .NonlocalReturn => |nonlocal_return| {
+            nonlocal_return.value.untrack(vm.heap);
         },
         .RuntimeError => |*err| {
             vm.allocator.free(err.message);

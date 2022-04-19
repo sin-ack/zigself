@@ -56,6 +56,101 @@ fn getMessageArguments(
     return null;
 }
 
+const ActivationExecutionResult = enum { Success, NonlocalReturn, Error };
+/// Execute the activation at the top of the activation stack from its statement
+/// offset. If the activation has completed normally or the execution resulted
+/// in a non-local return, pops the activation off the activation stack and
+/// returns the result of the last expression.
+pub fn executeCurrentActivation(context: *InterpreterContext) root_interpreter.InterpreterError!Completion {
+    var activation = context.activation_stack.getCurrent().?;
+
+    var execution_result = ActivationExecutionResult.Success;
+    defer {
+        switch (execution_result) {
+            .Success, .NonlocalReturn => {
+                const popped_activation = context.activation_stack.popActivation();
+                // NOTE: This isn't perfect but should be a good enough heuristic that something is
+                //       seriously wrong if it fails.
+                std.debug.assert(popped_activation == activation);
+                popped_activation.deinit();
+            },
+            .Error => {},
+        }
+    }
+
+    // FIXME: Move these pointers to each individual activation, and use getters
+    //        on the InterpreterContext.
+    const previous_script = context.script;
+    const previous_self_object = context.self_object;
+
+    const activation_object = activation.activation_object.asObject().asActivationObject();
+    const tracked_activation_object = try context.vm.heap.track(activation.activation_object);
+    const script = activation_object.getDefinitionScript();
+
+    context.script = script;
+    context.self_object = tracked_activation_object;
+
+    defer {
+        tracked_activation_object.untrack(context.vm.heap);
+
+        // Restore the context on successful execution.
+        switch (execution_result) {
+            .Success => {
+                context.script = previous_script;
+                context.self_object = previous_self_object;
+            },
+            else => {},
+        }
+    }
+
+    var last_expression_result: ?Value = null;
+    const statements_slice = activation_object.getStatementsSlice();
+    while (activation.statement_index < statements_slice.len) {
+        const expression = statements_slice[activation.statement_index];
+        var completion = try root_interpreter.executeExpression(context, expression);
+        switch (completion.data) {
+            .Normal => |value| {
+                last_expression_result = value;
+                activation.statement_index += 1;
+            },
+            .NonlocalReturn => |nonlocal_return| {
+                if (nonlocal_return.target_activation.get(context)) |target_activation| {
+                    if (target_activation == activation) {
+                        // The target was us! Turn this into a regular completion
+                        // and return with it.
+                        last_expression_result = nonlocal_return.value.getValue();
+                        completion.deinit(context.vm);
+                        break;
+                    }
+                }
+
+                // The target of the non-local return wasn't us. Allow the error
+                // to keep bubbling up.
+                execution_result = .NonlocalReturn;
+                return completion;
+            },
+            .RuntimeError => return completion,
+            .Restart => {
+                activation.statement_index = 0;
+                last_expression_result = null;
+                continue;
+            },
+        }
+    }
+
+    if (last_expression_result) |last_result| {
+        // Do not return the activation object from the block when returning "self".
+        var result = last_result;
+        if (result.isObjectReference() and result.asObject().isActivationObject()) {
+            result = result.asObject().asActivationObject().findActivationReceiver();
+        }
+
+        return Completion.initNormal(result);
+    } else {
+        return Completion.initNormal(context.vm.nil());
+    }
+}
+
 pub fn executeBlockMessage(
     context: *InterpreterContext,
     block_value: Heap.Tracked,
@@ -75,106 +170,26 @@ pub fn executeBlockMessage(
     }
 
     const tracked_message_name = try context.vm.getOrCreateBlockMessageName(@intCast(u8, arguments.len));
-    const block_activation = blk: {
-        // Ensure that we won't cause a GC by activating the block.
-        try context.vm.heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(block_object.getArgumentSlotCount(), block_object.getAssignableSlotCount()));
+    // Ensure that we won't cause a GC by activating the block.
+    try context.vm.heap.ensureSpaceInEden(Object.Activation.requiredSizeForAllocation(block_object.getArgumentSlotCount(), block_object.getAssignableSlotCount()));
 
-        // Refresh the pointer in case a GC happened
-        block_object = block_value.getValue().asObject().asBlockObject();
+    // Refresh the pointer in case a GC happened
+    block_object = block_value.getValue().asObject().asBlockObject();
 
-        var argument_values = std.BoundedArray(Value, MaximumArguments).init(0) catch unreachable;
-        for (arguments) |argument| argument_values.appendAssumeCapacity(argument.getValue());
+    var argument_values = std.BoundedArray(Value, MaximumArguments).init(0) catch unreachable;
+    for (arguments) |argument| argument_values.appendAssumeCapacity(argument.getValue());
 
-        const new_activation = context.activation_stack.getNewActivationSlot();
-        try block_object.activateBlock(
-            context,
-            block_object.getMap().parent_activation.get(context).?.activation_object,
-            argument_values.constSlice(),
-            tracked_message_name,
-            source_range,
-            new_activation,
-        );
-        break :blk new_activation;
-    };
+    const new_activation = context.activation_stack.getNewActivationSlot();
+    try block_object.activateBlock(
+        context,
+        block_object.getMap().parent_activation.get(context).?.activation_object,
+        argument_values.constSlice(),
+        tracked_message_name,
+        source_range,
+        new_activation,
+    );
 
-    // NOTE: We shouldn't pop from the activation stack if we didn't execute
-    //       normally and didn't non-local return.
-    var did_execute_normally = false;
-    var did_nonlocal_return = false;
-    defer {
-        if (did_execute_normally or did_nonlocal_return) {
-            const popped_activation = context.activation_stack.popActivation();
-            // NOTE: This isn't perfect but should be a good enough heuristic that something is
-            //       seriously wrong if it fails.
-            std.debug.assert(popped_activation == block_activation);
-            popped_activation.deinit();
-        }
-    }
-
-    const previous_script = context.script;
-    const previous_self_object = context.self_object;
-
-    const block_script = block_object.getDefinitionScript();
-    const block_activation_object = block_activation.activation_object;
-    const tracked_block_activation_object = try context.vm.heap.track(block_activation_object);
-
-    context.script = block_script;
-    context.self_object = tracked_block_activation_object;
-
-    defer {
-        tracked_block_activation_object.untrack(context.vm.heap);
-
-        // NOTE: We don't care about this if an error is bubbling up.
-        if (did_execute_normally) {
-            context.script = previous_script;
-            context.self_object = previous_self_object;
-        }
-    }
-
-    var last_expression_result: ?Heap.Tracked = null;
-    var statement_index: usize = 0;
-    const statements_slice = block_object.getStatementsSlice();
-    while (statement_index < statements_slice.len) {
-        const expression = statements_slice[statement_index];
-
-        if (last_expression_result) |last_result| {
-            last_result.untrack(context.vm.heap);
-        }
-
-        const completion = try root_interpreter.executeExpression(context, expression);
-        switch (completion.data) {
-            .Normal => |value| {
-                last_expression_result = try context.vm.heap.track(value);
-                statement_index += 1;
-            },
-            .NonlocalReturn => {
-                did_nonlocal_return = true;
-                return completion;
-            },
-            .RuntimeError => return completion,
-            .Restart => {
-                statement_index = 0;
-                last_expression_result = null;
-                continue;
-            },
-        }
-    }
-
-    did_execute_normally = true;
-
-    if (last_expression_result) |last_result| {
-        defer last_result.untrack(context.vm.heap);
-
-        // Do not return the activation object from the block when returning "self".
-        var result = last_result.getValue();
-        if (result.isObjectReference() and result.asObject().isActivationObject()) {
-            result = result.asObject().asActivationObject().findActivationReceiver();
-        }
-
-        return Completion.initNormal(result);
-    } else {
-        return Completion.initNormal(context.vm.nil());
-    }
+    return try executeCurrentActivation(context);
 }
 
 pub fn executeMethodMessage(
@@ -198,117 +213,27 @@ pub fn executeMethodMessage(
     var argument_values = std.BoundedArray(Value, MaximumArguments).init(0) catch unreachable;
     for (arguments) |argument| argument_values.appendAssumeCapacity(argument.getValue());
 
-    const method_activation = blk: {
-        // NOTE: The receiver of a method activation must never be an activation
-        //       object (unless it explicitly wants that), as that would allow
-        //       us to access the slots of upper scopes.
-        var receiver_of_method = receiver.getValue();
-        if (!method_object.expectsActivationObjectAsReceiver() and
-            receiver_of_method.isObjectReference() and
-            receiver_of_method.asObject().isActivationObject())
-        {
-            receiver_of_method = receiver_of_method.asObject().asActivationObject().findActivationReceiver();
-        }
-
-        const new_activation = context.activation_stack.getNewActivationSlot();
-        try method_object.activateMethod(
-            context.vm.heap,
-            receiver_of_method,
-            argument_values.constSlice(),
-            source_range,
-            new_activation,
-        );
-        break :blk new_activation;
-    };
-
-    // NOTE: We shouldn't pop from the activation stack if we didn't execute
-    //       normally and didn't non-local return.
-    var did_execute_normally = false;
-    var did_nonlocal_return = false;
-    defer {
-        if (did_execute_normally or did_nonlocal_return) {
-            const popped_activation = context.activation_stack.popActivation();
-            // NOTE: Same deal as in executeBlockMessage.
-            std.debug.assert(popped_activation == method_activation);
-            popped_activation.deinit();
-        }
+    // NOTE: The receiver of a method activation must never be an activation
+    //       object (unless it explicitly wants that), as that would allow
+    //       us to access the slots of upper scopes.
+    var receiver_of_method = receiver.getValue();
+    if (!method_object.expectsActivationObjectAsReceiver() and
+        receiver_of_method.isObjectReference() and
+        receiver_of_method.asObject().isActivationObject())
+    {
+        receiver_of_method = receiver_of_method.asObject().asActivationObject().findActivationReceiver();
     }
 
-    const previous_script = context.script;
-    const previous_self_object = context.self_object;
+    const new_activation = context.activation_stack.getNewActivationSlot();
+    try method_object.activateMethod(
+        context.vm.heap,
+        receiver_of_method,
+        argument_values.constSlice(),
+        source_range,
+        new_activation,
+    );
 
-    const method_script = method_object.getDefinitionScript();
-    const method_activation_object = method_activation.activation_object;
-    const tracked_method_activation_object = try context.vm.heap.track(method_activation_object);
-    context.script = method_script;
-    context.self_object = tracked_method_activation_object;
-
-    // NOTE: We don't care about this if an error is bubbling up.
-    defer {
-        tracked_method_activation_object.untrack(context.vm.heap);
-
-        if (did_execute_normally) {
-            context.script = previous_script;
-            context.self_object = previous_self_object;
-        }
-    }
-
-    var last_expression_result: ?Heap.Tracked = null;
-    var statement_index: usize = 0;
-    const statements_slice = method_object.getStatementsSlice();
-    while (statement_index < statements_slice.len) {
-        const expression = statements_slice[statement_index];
-
-        if (last_expression_result) |last_result| {
-            last_result.untrack(context.vm.heap);
-        }
-
-        var completion = try root_interpreter.executeExpression(context, expression);
-        switch (completion.data) {
-            .Normal => |value| {
-                last_expression_result = try context.vm.heap.track(value);
-                statement_index += 1;
-            },
-            .NonlocalReturn => |nonlocal_return| {
-                if (nonlocal_return.target_activation.get(context)) |target_activation| {
-                    if (target_activation == method_activation) {
-                        // The target was us! Turn this into a regular completion
-                        // and return with it.
-                        last_expression_result = nonlocal_return.value;
-                        completion.deinit(context.vm);
-                        break;
-                    }
-                }
-
-                // The target of the non-local return wasn't us. Allow the error
-                // to keep bubbling up.
-                did_nonlocal_return = true;
-                return completion;
-            },
-            .RuntimeError => return completion,
-            .Restart => {
-                statement_index = 0;
-                last_expression_result = null;
-                continue;
-            },
-        }
-    }
-
-    did_execute_normally = true;
-
-    if (last_expression_result) |last_result| {
-        defer last_result.untrack(context.vm.heap);
-
-        // Do not return the activation object from the method when returning "self".
-        var result = last_result.getValue();
-        if (result.isObjectReference() and result.asObject().isActivationObject()) {
-            result = result.asObject().asActivationObject().findActivationReceiver();
-        }
-
-        return Completion.initNormal(result);
-    } else {
-        return Completion.initNormal(context.vm.nil());
-    }
+    return try executeCurrentActivation(context);
 }
 
 /// Refs `receiver`.

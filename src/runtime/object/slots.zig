@@ -392,14 +392,6 @@ pub const Method = packed struct {
 
     // --- Map forwarding ---
 
-    pub fn getDefinitionScript(self: *Method) Script.Ref {
-        return self.getMap().getDefinitionScript();
-    }
-
-    pub fn getStatementsSlice(self: *Method) []AST.ExpressionNode {
-        return self.getMap().getStatementsSlice();
-    }
-
     pub fn expectsActivationObjectAsReceiver(self: *Method) bool {
         return self.getMap().expectsActivationObjectAsReceiver();
     }
@@ -478,16 +470,6 @@ pub const Block = packed struct {
 
     pub fn getSlots(self: *Slots) []Slot {
         return self.getMap().getSlots();
-    }
-
-    // --- Map forwarding ---
-
-    pub fn getDefinitionScript(self: *Block) Script.Ref {
-        return self.getMap().getDefinitionScript();
-    }
-
-    pub fn getStatementsSlice(self: *Block) []AST.ExpressionNode {
-        return self.getMap().getStatementsSlice();
     }
 
     // --- Slot counts ---
@@ -650,6 +632,16 @@ pub const Activation = packed struct {
 
     pub fn getArgumentSlotCount(self: *Activation) u8 {
         return self.dispatch("getArgumentSlotCount");
+    }
+
+    // --- Map forwarding ---
+
+    pub fn getDefinitionScript(self: *Activation) Script.Ref {
+        return self.dispatch("getDefinitionScript");
+    }
+
+    pub fn getStatementsSlice(self: *Activation) []AST.ExpressionNode {
+        return self.dispatch("getStatementsSlice");
     }
 
     // --- Slots and slot values ---
