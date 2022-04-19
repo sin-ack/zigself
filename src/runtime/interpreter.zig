@@ -86,20 +86,16 @@ pub fn executeScript(vm: *VirtualMachine, script: Script.Ref) InterpreterError!?
         .script = script,
         .method_execution_depth = 0,
     };
-    var last_expression_result: ?Heap.Tracked = try vm.heap.track(vm.nil());
+    var last_expression_result: ?Value = vm.nil();
     for (script.value.ast_root.?.statements.value.statements) |expression| {
         std.debug.assert(activation_stack.depth == 0);
-
-        if (last_expression_result) |result| {
-            result.untrack(vm.heap);
-        }
 
         var completion = try executeExpression(&context, expression);
         defer completion.deinit(vm);
 
         switch (completion.data) {
             .Normal => |value| {
-                last_expression_result = try vm.heap.track(value);
+                last_expression_result = value;
             },
             .RuntimeError => |err| {
                 if (!vm.silent_errors) {
@@ -113,12 +109,7 @@ pub fn executeScript(vm: *VirtualMachine, script: Script.Ref) InterpreterError!?
     }
 
     did_execute_normally = true;
-    if (last_expression_result) |result| {
-        defer result.untrack(vm.heap);
-        return result.getValue();
-    }
-
-    return null;
+    return last_expression_result orelse null;
 }
 
 /// Execute a script object as a child script of the root script. The parent
@@ -137,12 +128,8 @@ pub fn executeSubScript(parent_context: *InterpreterContext, script: Script.Ref)
         .script = script,
         .method_execution_depth = 0,
     };
-    var last_expression_result: ?Heap.Tracked = null;
+    var last_expression_result: ?Value = null;
     for (script.value.ast_root.?.statements.value.statements) |expression| {
-        if (last_expression_result) |result| {
-            result.untrack(parent_context.vm.heap);
-        }
-
         var did_complete_statement_successfully = false;
         var completion = try executeExpression(&child_context, expression);
         defer {
@@ -153,7 +140,7 @@ pub fn executeSubScript(parent_context: *InterpreterContext, script: Script.Ref)
 
         switch (completion.data) {
             .Normal => |value| {
-                last_expression_result = try parent_context.vm.heap.track(value);
+                last_expression_result = value;
                 did_complete_statement_successfully = true;
             },
             .RuntimeError => {
@@ -164,12 +151,7 @@ pub fn executeSubScript(parent_context: *InterpreterContext, script: Script.Ref)
         }
     }
 
-    if (last_expression_result) |result| {
-        defer result.untrack(parent_context.vm.heap);
-        return Completion.initNormal(result.getValue());
-    }
-
-    return null;
+    return if (last_expression_result) |result| Completion.initNormal(result) else null;
 }
 
 pub fn executeExpression(context: *InterpreterContext, expression: AST.ExpressionNode) InterpreterError!Completion {
