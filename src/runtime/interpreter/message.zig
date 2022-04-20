@@ -62,7 +62,7 @@ const ActivationExecutionResult = enum { Success, NonlocalReturn, Error };
 /// in a non-local return, pops the activation off the activation stack and
 /// returns the result of the last expression.
 pub fn executeCurrentActivation(context: *InterpreterContext) root_interpreter.InterpreterError!Completion {
-    var activation = context.activation_stack.getCurrent().?;
+    var activation = context.activation_stack.getCurrent();
 
     var execution_result = ActivationExecutionResult.Success;
     defer {

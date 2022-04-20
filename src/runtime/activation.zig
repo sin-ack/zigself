@@ -49,8 +49,8 @@ pub const ActivationStack = struct {
         return self.stack[0..self.depth];
     }
 
-    pub fn getCurrent(self: ActivationStack) ?*Self {
-        if (self.depth == 0) return null;
+    pub fn getCurrent(self: ActivationStack) *Self {
+        std.debug.assert(self.depth > 0);
         return &self.stack[self.depth - 1];
     }
 
@@ -60,7 +60,7 @@ pub const ActivationStack = struct {
             std.debug.assert(self.isActivationWithin(activation));
         }
 
-        const current_activation = self.getCurrent().?;
+        const current_activation = self.getCurrent();
         std.debug.assert(@ptrToInt(current_activation) >= @ptrToInt(activation));
 
         const distance = @divExact(@ptrToInt(current_activation) - @ptrToInt(activation), @sizeOf(Self));

@@ -45,11 +45,11 @@ pub const InterpreterContext = struct {
     method_execution_depth: usize,
 
     pub fn script(self: *InterpreterContext) Script.Ref {
-        return self.activation_stack.getCurrent().?.script();
+        return self.activation_stack.getCurrent().script();
     }
 
     pub fn selfObject(self: *InterpreterContext) Value {
-        return self.activation_stack.getCurrent().?.selfObject();
+        return self.activation_stack.getCurrent().selfObject();
     }
 };
 

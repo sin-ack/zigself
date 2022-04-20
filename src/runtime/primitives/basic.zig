@@ -116,7 +116,7 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !Completion {
         return message_interpreter.sendMessage(context.interpreter_context, context.arguments[0], "value", &.{}, context.source_range);
     }
 
-    const current_activation = context.interpreter_context.activation_stack.getCurrent().?;
+    const current_activation = context.interpreter_context.activation_stack.getCurrent();
 
     if (try interpreter.executeSubScript(context.interpreter_context, script)) |*script_completion| {
         switch (script_completion.data) {
