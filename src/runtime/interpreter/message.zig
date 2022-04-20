@@ -129,7 +129,10 @@ pub fn executeCurrentActivation(context: *InterpreterContext) root_interpreter.I
                 execution_result = .NonlocalReturn;
                 return completion;
             },
-            .RuntimeError => return completion,
+            .RuntimeError => {
+                execution_result = .Error;
+                return completion;
+            },
             .Restart => {
                 activation.statement_index = 0;
                 last_expression_result = null;
