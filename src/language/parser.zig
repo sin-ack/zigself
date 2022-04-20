@@ -122,7 +122,7 @@ pub fn parseScript(self: *Self) ParseError!AST.ScriptNode {
         );
     }
 
-    return AST.ScriptNode{ .statements = statements };
+    return AST.ScriptNode{ .statements = statements, .range = .{ .start = self.offsetToLocation(0), .end = self.offsetToLocation(self.buffer.len) } };
 }
 
 fn parseStatementList(self: *Self, allow_nonlocal_return: bool) ParseError!AST.StatementList.Ref {

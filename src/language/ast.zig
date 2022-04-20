@@ -45,6 +45,7 @@ pub const StatementList = struct {
 /// A node which describes a single script.
 pub const ScriptNode = struct {
     statements: StatementList.Ref,
+    range: Range,
 
     pub fn deinit(self: *ScriptNode, allocator: Allocator) void {
         self.statements.unrefWithAllocator(allocator);
