@@ -8,9 +8,7 @@
 
     main = (
         1 to: 20 + 1 Do: [| :i |
-            'Fibonacci(' print. i _StringPrint. ') is: ' print.
-            (fib: i) _StringPrint.
-            '' printLine.
+            'Fibonacci(', i asString, ') is: ', (fib: i) asString; printLine.
         ].
     ).
 |) main.
