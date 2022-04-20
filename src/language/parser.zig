@@ -1276,6 +1276,8 @@ fn offsetToLocation(self: Self, offset: usize) Location {
         // We are on the very last line.
         line_start = self.line_offsets.items[line - 1];
         line_end = self.buffer.len;
+        if (line_end > 0 and self.buffer[line_end - 1] == '\n')
+            line_end -= 1;
     }
 
     return Location{
