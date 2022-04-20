@@ -15,8 +15,10 @@ const Script = @import("../../language/script.zig");
 const Object = @import("../object.zig");
 const MapType = @import("./map.zig").MapType;
 const Location = @import("../../language/location.zig");
+const ByteArray = @import("../byte_array.zig");
 const MapBuilder = @import("./map_builder.zig").MapBuilder;
 const SourceRange = @import("../../language/source_range.zig");
+const VirtualMachine = @import("../virtual_machine.zig");
 const RuntimeActivation = @import("../activation.zig");
 const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
 
@@ -388,6 +390,30 @@ pub const Method = packed struct {
 
     pub fn getSlots(self: *Slots) []Slot {
         return self.getMap().getSlots();
+    }
+
+    // --- Top level context creation ---
+
+    const toplevel_context_string = "<top level>";
+    pub fn createTopLevelContextForScript(vm: *VirtualMachine, script: Script.Ref) !*Method {
+        const script_statements = script.value.ast_root.?.statements;
+
+        try vm.heap.ensureSpaceInEden(
+            ByteArray.requiredSizeForAllocation(toplevel_context_string.len) +
+                Map.Method.requiredSizeForAllocation(0) +
+                Method.requiredSizeForAllocation(0),
+        );
+
+        script.ref();
+        script_statements.ref();
+        const toplevel_context_method_map = blk: {
+            errdefer script.unref();
+            errdefer script_statements.unrefWithAllocator(vm.allocator);
+
+            const toplevel_context_name = try ByteArray.createFromString(vm.heap, toplevel_context_string);
+            break :blk try Map.Method.create(vm.heap, 0, 0, script_statements, false, toplevel_context_name, script);
+        };
+        return try create(vm.heap, toplevel_context_method_map, &.{});
     }
 
     // --- Map forwarding ---

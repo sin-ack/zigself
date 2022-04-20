@@ -31,17 +31,11 @@ pub const MaximumInheritedSlotsInObject = 2;
 pub const InterpreterContext = struct {
     /// The virtual machine that the interpreter is currently executing on.
     vm: *VirtualMachine,
-    /// The object that is the current context. The identifier "self" will
-    /// resolve to this object.
-    self_object: Heap.Tracked,
     /// The method/block activation stack. This is used with blocks in order to
     /// verify that the block is executed within its enclosing method and for
     /// stack traces. When the activation completes, the activation object is
     /// popped; when a new activation occurs, it is pushed.
     activation_stack: *ActivationStack,
-    /// The script file that is currently executing, used to resolve the
-    /// relative paths of other script files.
-    script: Script.Ref,
     /// The method execution (not activation!) depth of the interpreter. Every
     /// time the interpreter enters `executeMethod`, this is incremented by one,
     /// and when exited it is decremented by one. When `executeObject` or
@@ -49,6 +43,14 @@ pub const InterpreterContext = struct {
     /// method and restored afterwards. This is used to track and mark inline
     /// method creations during method execution.
     method_execution_depth: usize,
+
+    pub fn script(self: *InterpreterContext) Script.Ref {
+        return self.activation_stack.getCurrent().?.script();
+    }
+
+    pub fn selfObject(self: *InterpreterContext) Value {
+        return self.activation_stack.getCurrent().?.selfObject();
+    }
 };
 
 pub const InterpreterError = Allocator.Error;
@@ -58,12 +60,12 @@ pub const InterpreterError = Allocator.Error;
 ///
 /// Refs `script`.
 pub fn executeScript(vm: *VirtualMachine, script: Script.Ref) InterpreterError!?Value {
-    script.ref();
-    defer script.unref();
+    const ast_root = script.value.ast_root.?;
+    var source_range = SourceRange.init(script, ast_root.range);
+    defer source_range.deinit();
 
     // Did this script execute normally?
     var did_execute_normally = false;
-
     var activation_stack = try ActivationStack.init(vm.allocator, MaximumStackDepth);
     defer {
         if (!did_execute_normally) {
@@ -81,35 +83,31 @@ pub fn executeScript(vm: *VirtualMachine, script: Script.Ref) InterpreterError!?
 
     var context = InterpreterContext{
         .vm = vm,
-        .self_object = try vm.heap.track(vm.lobby()),
         .activation_stack = &activation_stack,
-        .script = script,
         .method_execution_depth = 0,
     };
-    var last_expression_result: ?Value = vm.nil();
-    for (script.value.ast_root.?.statements.value.statements) |expression| {
-        std.debug.assert(activation_stack.depth == 0);
 
-        var completion = try executeExpression(&context, expression);
-        defer completion.deinit(vm);
+    const toplevel_context_method = try Object.Method.createTopLevelContextForScript(vm, script);
+    const tracked_toplevel_context_method = try vm.heap.track(toplevel_context_method.asValue());
+    defer tracked_toplevel_context_method.untrack(vm.heap);
 
-        switch (completion.data) {
-            .Normal => |value| {
-                last_expression_result = value;
-            },
-            .RuntimeError => |err| {
-                if (!vm.silent_errors) {
-                    std.debug.print("Received error at top level: {s}\n", .{err.message});
-                    runtime_error.printTraceFromActivationStack(activation_stack.getStack(), err.source_range);
-                }
-                return null;
-            },
-            else => unreachable,
-        }
+    var completion = try message_interpreter.executeMethodMessage(&context, vm.lobby_object, tracked_toplevel_context_method, &.{}, source_range);
+    defer completion.deinit(vm);
+
+    switch (completion.data) {
+        .Normal => |value| {
+            did_execute_normally = true;
+            return value;
+        },
+        .RuntimeError => |err| {
+            if (!vm.silent_errors) {
+                std.debug.print("Received error at top level: {s}\n", .{err.message});
+                runtime_error.printTraceFromActivationStack(activation_stack.getStack(), err.source_range);
+            }
+            return null;
+        },
+        else => unreachable,
     }
-
-    did_execute_normally = true;
-    return last_expression_result orelse null;
 }
 
 /// Execute a script object as a child script of the root script. The parent
@@ -118,40 +116,25 @@ pub fn executeScript(vm: *VirtualMachine, script: Script.Ref) InterpreterError!?
 ///
 /// Refs `script`.
 pub fn executeSubScript(parent_context: *InterpreterContext, script: Script.Ref) InterpreterError!?Completion {
-    script.ref();
-    defer script.unref();
+    const ast_root = script.value.ast_root.?;
+    var source_range = SourceRange.init(script, ast_root.range);
+    defer source_range.deinit();
 
     var child_context = InterpreterContext{
         .vm = parent_context.vm,
-        .self_object = try parent_context.vm.heap.track(parent_context.vm.lobby()),
         .activation_stack = parent_context.activation_stack,
-        .script = script,
         .method_execution_depth = 0,
     };
-    var last_expression_result: ?Value = null;
-    for (script.value.ast_root.?.statements.value.statements) |expression| {
-        var did_complete_statement_successfully = false;
-        var completion = try executeExpression(&child_context, expression);
-        defer {
-            if (did_complete_statement_successfully) {
-                completion.deinit(parent_context.vm);
-            }
-        }
 
-        switch (completion.data) {
-            .Normal => |value| {
-                last_expression_result = value;
-                did_complete_statement_successfully = true;
-            },
-            .RuntimeError => {
-                // Allow the error to keep bubbling up.
-                return completion;
-            },
-            else => unreachable,
-        }
+    const toplevel_context_method = try Object.Method.createTopLevelContextForScript(parent_context.vm, script);
+    const tracked_toplevel_context_method = try parent_context.vm.heap.track(toplevel_context_method.asValue());
+    defer tracked_toplevel_context_method.untrack(parent_context.vm.heap);
+
+    var completion = try message_interpreter.executeMethodMessage(&child_context, parent_context.vm.lobby_object, tracked_toplevel_context_method, &.{}, source_range);
+    switch (completion.data) {
+        .Normal, .RuntimeError => return completion,
+        else => unreachable,
     }
-
-    return if (last_expression_result) |result| Completion.initNormal(result) else null;
 }
 
 pub fn executeExpression(context: *InterpreterContext, expression: AST.ExpressionNode) InterpreterError!Completion {
@@ -315,7 +298,7 @@ pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) 
         @panic("!!! Attempted to execute a non-slots object! Methods must be created via executeMethod.");
     }
 
-    var source_range = SourceRange.init(context.script, object_node.range);
+    var source_range = SourceRange.init(context.script(), object_node.range);
     defer source_range.deinit();
 
     const old_method_execution_depth = context.method_execution_depth;
@@ -351,7 +334,7 @@ pub fn executeObject(context: *InterpreterContext, object_node: AST.ObjectNode) 
 
 fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AST.ObjectNode) InterpreterError!Completion {
     // FIXME: Get a better source range for the method itself
-    var source_range = SourceRange.init(context.script, object_node.range);
+    var source_range = SourceRange.init(context.script(), object_node.range);
     defer source_range.deinit();
 
     context.method_execution_depth += 1;
@@ -373,13 +356,13 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
     required_memory += Object.Map.Method.requiredSizeForAllocation(@intCast(u32, object_node.slots.len));
     try context.vm.heap.ensureSpaceInEden(required_memory);
 
-    context.script.ref();
+    context.script().ref();
     object_node.statements.ref();
     // NOTE: Once we create the method map successfully, the ref we just created
     // above is owned by the method_map, and we shouldn't try to unref in case
     // of an error.
     var method_map = blk: {
-        errdefer context.script.unref();
+        errdefer context.script().unref();
         errdefer object_node.statements.unrefWithAllocator(context.vm.allocator);
 
         const method_name_in_heap = try ByteArray.createFromString(context.vm.heap, name);
@@ -395,7 +378,7 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
             object_node.statements,
             is_inline_method,
             method_name_in_heap,
-            context.script,
+            context.script(),
         );
     };
 
@@ -406,7 +389,7 @@ fn executeMethod(context: *InterpreterContext, name: []const u8, object_node: AS
 }
 
 pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) InterpreterError!Completion {
-    var source_range = SourceRange.init(context.script, block.range);
+    var source_range = SourceRange.init(context.script(), block.range);
     defer source_range.deinit();
 
     const old_method_execution_depth = context.method_execution_depth;
@@ -440,13 +423,13 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
     var required_memory: usize = Object.Map.Block.requiredSizeForAllocation(@intCast(u32, block.slots.len));
     try context.vm.heap.ensureSpaceInEden(required_memory);
 
-    context.script.ref();
+    context.script().ref();
     block.statements.ref();
     // NOTE: Once we create the block map successfully, the ref we just created
     // above is owned by the block_map, and we shouldn't try to unref in case
     // of an error.
     var block_map = blk: {
-        errdefer context.script.unref();
+        errdefer context.script().unref();
         errdefer block.statements.unrefWithAllocator(context.vm.allocator);
 
         var slot_count: u32 = undefined;
@@ -460,7 +443,7 @@ pub fn executeBlock(context: *InterpreterContext, block: AST.BlockNode) Interpre
             block.statements,
             parent_activation,
             nonlocal_return_target_activation,
-            context.script,
+            context.script(),
         );
     };
 
@@ -501,10 +484,13 @@ pub fn executeReturn(context: *InterpreterContext, return_node: AST.ReturnNode) 
 }
 
 pub fn executeIdentifier(context: *InterpreterContext, identifier: AST.IdentifierNode) InterpreterError!Completion {
-    var source_range = SourceRange.init(context.script, identifier.range);
+    var source_range = SourceRange.init(context.script(), identifier.range);
     defer source_range.deinit();
 
-    return try message_interpreter.sendMessage(context, context.self_object, identifier.value, &.{}, source_range);
+    const tracked_self_object = try context.vm.heap.track(context.selfObject());
+    defer tracked_self_object.untrack(context.vm.heap);
+
+    return try message_interpreter.sendMessage(context, tracked_self_object, identifier.value, &.{}, source_range);
 }
 
 pub fn executeString(context: *InterpreterContext, string: AST.StringNode) InterpreterError!Completion {

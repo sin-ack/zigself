@@ -53,8 +53,6 @@ pub fn printTraceFromActivationStackUntil(stack: []Activation, first_source_rang
 
         source_range = context.source_range;
     }
-
-    writeTraceForFrame("<top level>", source_range);
 }
 
 /// Using the given activation object stack, print a stack trace to stderr.

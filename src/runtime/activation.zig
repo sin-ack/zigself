@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 
 const Heap = @import("./heap.zig");
 const Value = @import("./value.zig").Value;
+const Script = @import("../language/script.zig");
 const SourceRange = @import("../language/source_range.zig");
 
 const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
@@ -130,9 +131,6 @@ pub const ActivationRef = packed struct {
 activation_id: u64,
 heap: *Heap,
 activation_object: Value,
-/// The index of the statement that is currently being executed. This is an
-/// offset into the statement slice of the activation object.
-statement_index: usize = 0,
 creation_context: ActivationCreationContext,
 /// Will be used as the target activation that a non-local return needs to rise
 /// to. Must be non-null when a non-local return is encountered, and when
@@ -145,6 +143,12 @@ nonlocal_return_target_activation: ?*Self = null,
 /// previous activation objects in methods (that would make the language
 /// dynamically scoped :^).
 parent_activation: ?*Self = null,
+
+// --- Activation execution state ---
+
+/// The index of the statement that is currently being executed. This is an
+/// offset into the statement slice of the activation object.
+statement_index: usize = 0,
 
 pub fn initInPlace(
     self: *Self,
@@ -178,4 +182,15 @@ pub fn deinit(self: *Self) void {
 
 pub fn takeRef(self: *Self) ActivationRef {
     return ActivationRef.init(self);
+}
+
+/// Return the result of the `self` message for the current context.
+pub fn selfObject(self: *Self) Value {
+    return self.activation_object;
+}
+
+/// Return the script that this activation's method or block is defined in. In
+/// order to keep a reference the caller should ref the script.
+pub fn script(self: *Self) Script.Ref {
+    return self.creation_context.source_range.script;
 }

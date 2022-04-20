@@ -78,33 +78,10 @@ pub fn executeCurrentActivation(context: *InterpreterContext) root_interpreter.I
         }
     }
 
-    // FIXME: Move these pointers to each individual activation, and use getters
-    //        on the InterpreterContext.
-    const previous_script = context.script;
-    const previous_self_object = context.self_object;
-
     const activation_object = activation.activation_object.asObject().asActivationObject();
-    const tracked_activation_object = try context.vm.heap.track(activation.activation_object);
-    const script = activation_object.getDefinitionScript();
-
-    context.script = script;
-    context.self_object = tracked_activation_object;
-
-    defer {
-        tracked_activation_object.untrack(context.vm.heap);
-
-        // Restore the context on successful execution.
-        switch (execution_result) {
-            .Success => {
-                context.script = previous_script;
-                context.self_object = previous_self_object;
-            },
-            else => {},
-        }
-    }
+    const statements_slice = activation_object.getStatementsSlice();
 
     var last_expression_result: ?Value = null;
-    const statements_slice = activation_object.getStatementsSlice();
     while (activation.statement_index < statements_slice.len) {
         const expression = statements_slice[activation.statement_index];
         var completion = try root_interpreter.executeExpression(context, expression);
@@ -267,7 +244,7 @@ pub fn executePrimitiveMessage(
 
 /// Executes a message. All refs are forwarded.
 pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) root_interpreter.InterpreterError!Completion {
-    var source_range = SourceRange.init(context.script, message.range);
+    var source_range = SourceRange.init(context.script(), message.range);
     defer source_range.deinit();
 
     const receiver = if (message.receiver) |expr| blk: {
@@ -275,7 +252,7 @@ pub fn executeMessage(context: *InterpreterContext, message: AST.MessageNode) ro
         if (!receiver_completion.isNormal())
             return receiver_completion;
         break :blk receiver_completion.data.Normal;
-    } else context.self_object.getValue();
+    } else context.selfObject();
 
     var tracked_receiver = try context.vm.heap.track(receiver);
     defer tracked_receiver.untrack(context.vm.heap);

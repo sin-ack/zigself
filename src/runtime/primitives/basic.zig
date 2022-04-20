@@ -44,7 +44,7 @@ pub fn RunScript(context: PrimitiveContext) !Completion {
     // FIXME: Find a way to handle errors here. These hacks are nasty.
 
     const requested_script_path = receiver_byte_array.getValues();
-    const running_script_path = context.interpreter_context.script.value.running_path;
+    const running_script_path = context.interpreter_context.script().value.running_path;
 
     const paths_to_join = &[_][]const u8{
         std.fs.path.dirname(running_script_path) orelse ".",
@@ -95,7 +95,7 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !Completion {
     }
 
     const receiver_byte_array = receiver.asObject().asByteArrayObject();
-    const running_script_path = context.interpreter_context.script.value.running_path;
+    const running_script_path = context.interpreter_context.script().value.running_path;
 
     var script = try Script.createFromString(context.vm.allocator, running_script_path, receiver_byte_array.getValues());
     defer script.unref();
