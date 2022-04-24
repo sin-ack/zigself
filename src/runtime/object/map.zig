@@ -12,11 +12,14 @@ const Slot = @import("../slot.zig").Slot;
 const hash = @import("../../utility/hash.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
-const Script = @import("../../language/script.zig");
-// Zig's shadowing rules are annoying.
-const ByteArrayTheFirst = @import("../byte_array.zig");
 const Activation = @import("../activation.zig");
 const MapBuilder = @import("./map_builder.zig").MapBuilder;
+const PointerValue = @import("../value.zig").PointerValue;
+const BytecodeBlock = @import("../bytecode/Block.zig");
+const RefCountedValue = @import("../value.zig").RefCountedValue;
+// Zig's shadowing rules are annoying.
+const ByteArrayTheFirst = @import("../byte_array.zig");
+const BytecodeExecutable = @import("../bytecode/Executable.zig");
 
 var static_map_map: ?Value = null;
 
@@ -258,21 +261,22 @@ const SlotsMap = packed struct {
 };
 
 /// Common code and fields shared between methods and blocks.
-const SlotsAndStatementsMap = packed struct {
+const SlotsAndBytecodeMap = packed struct {
     slots_map: SlotsMap,
-    /// The address of the ref-counted statement slice.
-    statements_ref: Value,
-    /// Which script this method or block is defined in.
-    script_ref: Value,
+    /// The address of the bytecode block. Owned by definition_executable_ref.
+    block: PointerValue(BytecodeBlock),
+    /// The executable which this map was created from.
+    definition_executable_ref: RefCountedValue(BytecodeExecutable),
 
+    /// Refs `script`.
     fn init(
-        self: *SlotsAndStatementsMap,
+        self: *SlotsAndBytecodeMap,
         comptime map_type: MapType,
         map_map: Value,
         argument_slot_count: u8,
         total_slot_count: u32,
-        statements: AST.StatementList.Ref,
-        script: Script.Ref,
+        block: *BytecodeBlock,
+        executable: BytecodeExecutable.Ref,
     ) void {
         std.debug.assert(argument_slot_count <= total_slot_count);
 
@@ -280,35 +284,23 @@ const SlotsAndStatementsMap = packed struct {
         self.slots_map.map.init(map_type, map_map);
         self.setArgumentSlotCount(argument_slot_count);
 
-        self.statements_ref = Value.fromUnsignedInteger(@ptrToInt(statements.value));
-        self.script_ref = Value.fromUnsignedInteger(@ptrToInt(script.value));
+        self.block = PointerValue(BytecodeBlock).init(block);
+        self.definition_executable_ref = RefCountedValue(BytecodeExecutable).init(executable);
     }
 
-    /// Finalizes this object. All maps that have a SlotsAndStatementsMap member
+    /// Finalizes this object. All maps that have a SlotsAndBytecodeMap member
     /// must call this function in their finalize.
-    pub fn finalize(self: *SlotsAndStatementsMap, allocator: Allocator) void {
-        self.getStatements().unrefWithAllocator(allocator);
-        self.getDefinitionScript().unref();
+    pub fn finalize(self: *SlotsAndBytecodeMap, allocator: Allocator) void {
+        _ = allocator;
+        self.definition_executable_ref.deinit();
     }
 
-    pub fn getDefinitionScript(self: *SlotsAndStatementsMap) Script.Ref {
-        return Script.Ref{ .value = @intToPtr(*Script, self.script_ref.asUnsignedInteger()) };
-    }
-
-    pub fn getStatementsSlice(self: *SlotsAndStatementsMap) []AST.ExpressionNode {
-        return self.getStatements().value.statements;
-    }
-
-    pub fn getArgumentSlotCount(self: *SlotsAndStatementsMap) u8 {
+    pub fn getArgumentSlotCount(self: *SlotsAndBytecodeMap) u8 {
         return @intCast(u8, (self.slots_map.properties >> 16) & @as(u64, 0xFF));
     }
 
-    fn setArgumentSlotCount(self: *SlotsAndStatementsMap, count: u8) void {
+    fn setArgumentSlotCount(self: *SlotsAndBytecodeMap, count: u8) void {
         self.slots_map.properties = (self.slots_map.properties & @as(u32, 0xFF00FFFF)) | (@as(u32, count) << 16);
-    }
-
-    fn getStatements(self: *SlotsAndStatementsMap) AST.StatementList.Ref {
-        return AST.StatementList.Ref{ .value = @intToPtr(*AST.StatementList, self.statements_ref.asUnsignedInteger()) };
     }
 };
 
@@ -318,7 +310,7 @@ const SlotsAndStatementsMap = packed struct {
 /// be executed. Finally, some debug info is stored which is then displayed in
 /// stack traces.
 const MethodMap = packed struct {
-    base_map: SlotsAndStatementsMap,
+    base_map: SlotsAndBytecodeMap,
     /// What the method is called.
     method_name: Value,
 
@@ -331,17 +323,17 @@ const MethodMap = packed struct {
         heap: *Heap,
         argument_slot_count: u8,
         total_slot_count: u32,
-        statements: AST.StatementList.Ref,
         is_inline_method: bool,
         method_name: ByteArrayTheFirst,
-        script: Script.Ref,
+        block: *BytecodeBlock,
+        executable: BytecodeExecutable.Ref,
     ) !*MethodMap {
         const size = MethodMap.requiredSizeForAllocation(total_slot_count);
         const map_map = try getMapMap(heap);
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*MethodMap, memory_area);
-        self.init(map_map, argument_slot_count, total_slot_count, statements, is_inline_method, method_name, script);
+        self.init(map_map, argument_slot_count, total_slot_count, is_inline_method, method_name, block, executable);
 
         try heap.markAddressAsNeedingFinalization(memory_area);
         return self;
@@ -352,12 +344,12 @@ const MethodMap = packed struct {
         map_map: Value,
         argument_slot_count: u8,
         total_slot_count: u32,
-        statements: AST.StatementList.Ref,
         is_inline_method: bool,
         method_name: ByteArrayTheFirst,
-        script: Script.Ref,
+        block: *BytecodeBlock,
+        executable: BytecodeExecutable.Ref,
     ) void {
-        self.base_map.init(.Method, map_map, argument_slot_count, total_slot_count, statements, script);
+        self.base_map.init(.Method, map_map, argument_slot_count, total_slot_count, block, executable);
         self.method_name = method_name.asValue();
         self.setInlineMethod(is_inline_method);
     }
@@ -386,14 +378,6 @@ const MethodMap = packed struct {
         self.base_map.finalize(allocator);
     }
 
-    pub fn getDefinitionScript(self: *MethodMap) Script.Ref {
-        return self.base_map.getDefinitionScript();
-    }
-
-    pub fn getStatementsSlice(self: *MethodMap) []AST.ExpressionNode {
-        return self.base_map.getStatementsSlice();
-    }
-
     pub fn getArgumentSlotCount(self: *MethodMap) u8 {
         return self.base_map.getArgumentSlotCount();
     }
@@ -404,7 +388,7 @@ const MethodMap = packed struct {
 /// executed while the method in which it is created is still on the activation
 /// stack.
 const BlockMap = packed struct {
-    base_map: SlotsAndStatementsMap,
+    base_map: SlotsAndBytecodeMap,
     /// A weak reference to the parent activation of this block. The block must
     /// not be activated if this activation has left the stack.
     parent_activation: Activation.ActivationRef,
@@ -422,17 +406,17 @@ const BlockMap = packed struct {
         heap: *Heap,
         argument_slot_count: u8,
         total_slot_count: u32,
-        statements: AST.StatementList.Ref,
         parent_activation: *Activation,
         nonlocal_return_target_activation: *Activation,
-        script: Script.Ref,
+        block: *BytecodeBlock,
+        executable: BytecodeExecutable.Ref,
     ) !*BlockMap {
         const size = BlockMap.requiredSizeForAllocation(total_slot_count);
         const map_map = try getMapMap(heap);
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*BlockMap, memory_area);
-        self.init(map_map, argument_slot_count, total_slot_count, statements, parent_activation, nonlocal_return_target_activation, script);
+        self.init(map_map, argument_slot_count, total_slot_count, parent_activation, nonlocal_return_target_activation, block, executable);
 
         try heap.markAddressAsNeedingFinalization(memory_area);
         return self;
@@ -443,26 +427,18 @@ const BlockMap = packed struct {
         map_map: Value,
         argument_slot_count: u8,
         total_slot_count: u32,
-        statements: AST.StatementList.Ref,
         parent_activation: *Activation,
         nonlocal_return_target_activation: *Activation,
-        script: Script.Ref,
+        block: *BytecodeBlock,
+        executable: BytecodeExecutable.Ref,
     ) void {
-        self.base_map.init(.Block, map_map, argument_slot_count, total_slot_count, statements, script);
+        self.base_map.init(.Block, map_map, argument_slot_count, total_slot_count, block, executable);
         self.parent_activation = parent_activation.takeRef();
         self.nonlocal_return_target_activation = nonlocal_return_target_activation.takeRef();
     }
 
     pub fn finalize(self: *BlockMap, allocator: Allocator) void {
         self.base_map.finalize(allocator);
-    }
-
-    pub fn getDefinitionScript(self: *BlockMap) Script.Ref {
-        return self.base_map.getDefinitionScript();
-    }
-
-    pub fn getStatementsSlice(self: *BlockMap) []AST.ExpressionNode {
-        return self.base_map.getStatementsSlice();
     }
 
     pub fn getArgumentSlotCount(self: *BlockMap) u8 {

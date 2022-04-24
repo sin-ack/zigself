@@ -8,7 +8,6 @@ const Allocator = std.mem.Allocator;
 const zigself = @import("zigself");
 const Heap = zigself.Heap;
 const Script = zigself.Script;
-const interpreter = zigself.interpreter;
 const VirtualMachine = zigself.VirtualMachine;
 
 const Test = struct {
@@ -116,7 +115,7 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
     const vm = try VirtualMachine.create(allocator);
     defer vm.destroy();
 
-    if ((try interpreter.executeScript(vm, stdlib_script)) == null) {
+    if ((try vm.executeEntrypointScript(stdlib_script)) == null) {
         std.debug.panic("!!! Standard library script failed to execute!", .{});
     }
 
@@ -162,7 +161,14 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
             continue :next_test;
         }
 
-        const result = interpreter.executeScript(vm, script) catch |err| {
+        const result = vm.executeEntrypointScript(script) catch |err| {
+            // Codegen failures are things that we test for, so expected-error
+            // tests should be assumed "passing".
+            if (err == error.CodegenFailure and the_test.expects_error) {
+                try passed_tests.append(the_test.basename);
+                continue :next_test;
+            }
+
             const test_name_without_extension = the_test.basename[0 .. the_test.basename.len - 5];
             std.debug.print("Caught error when executing test {s}: {}\n", .{ test_name_without_extension, err });
             if (@errorReturnTrace()) |trace| {

@@ -4,8 +4,8 @@
 
 const std = @import("std");
 
-const Value = @import("./value.zig").Value;
 const Heap = @import("./heap.zig");
+const Value = @import("./value.zig").Value;
 
 const Self = @This();
 

@@ -9,20 +9,19 @@ const Value = @import("../value.zig").Value;
 const Completion = @import("../completion.zig");
 
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
-const InterpreterError = @import("../interpreter.zig").InterpreterError;
 
 // FIXME: Add overflow checks here
 
 fn integerOpCommon(
     comptime primitive_name: [*:0]const u8,
     context: PrimitiveContext,
-    operation: fn (context: PrimitiveContext, receiver: i64, term: i64) InterpreterError!Completion,
+    operation: fn (context: PrimitiveContext, receiver: i64, term: i64) Allocator.Error!Completion,
 ) !Completion {
     const receiver = context.receiver.getValue();
-    const term = context.arguments[0].getValue();
+    const term = context.arguments[0];
 
     if (!receiver.isInteger()) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected integer as _" ++ primitive_name ++ ": receiver",
@@ -31,7 +30,7 @@ fn integerOpCommon(
     }
 
     if (!term.isInteger()) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected integer as _" ++ primitive_name ++ ": argument",
@@ -43,8 +42,8 @@ fn integerOpCommon(
 }
 
 /// Add two integer numbers. The returned value is an integer.
-pub fn IntAdd(context: PrimitiveContext) !Completion {
-    return integerOpCommon("IntAdd", context, struct {
+pub fn IntAdd(context: PrimitiveContext) !?Completion {
+    return try integerOpCommon("IntAdd", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
             _ = ctx;
             return Completion.initNormal(Value.fromInteger(receiver + term));
@@ -53,8 +52,8 @@ pub fn IntAdd(context: PrimitiveContext) !Completion {
 }
 
 /// Subtract the argument from the receiver. The returned value is an integer.
-pub fn IntSub(context: PrimitiveContext) !Completion {
-    return integerOpCommon("IntSub", context, struct {
+pub fn IntSub(context: PrimitiveContext) !?Completion {
+    return try integerOpCommon("IntSub", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
             _ = ctx;
             return Completion.initNormal(Value.fromInteger(receiver - term));
@@ -63,8 +62,8 @@ pub fn IntSub(context: PrimitiveContext) !Completion {
 }
 
 /// Multiply the argument with the receiver. The returned value is an integer.
-pub fn IntMul(context: PrimitiveContext) !Completion {
-    return integerOpCommon("IntMul", context, struct {
+pub fn IntMul(context: PrimitiveContext) !?Completion {
+    return try integerOpCommon("IntMul", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
             _ = ctx;
             return Completion.initNormal(Value.fromInteger(receiver * term));
@@ -74,8 +73,8 @@ pub fn IntMul(context: PrimitiveContext) !Completion {
 
 /// Perform integer division on the receiver with the argument. Fraction is
 /// discarded. The returned value is an integer.
-pub fn IntDiv(context: PrimitiveContext) !Completion {
-    return integerOpCommon("IntDiv", context, struct {
+pub fn IntDiv(context: PrimitiveContext) !?Completion {
+    return try integerOpCommon("IntDiv", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
             if (term == 0)
                 return Completion.initRuntimeError(ctx.vm, ctx.source_range, "Division by zero", .{});
@@ -86,8 +85,8 @@ pub fn IntDiv(context: PrimitiveContext) !Completion {
 
 /// Perform modulo on the receiver with the argument. The returned value is an
 /// integer.
-pub fn IntMod(context: PrimitiveContext) !Completion {
-    return integerOpCommon("IntMod", context, struct {
+pub fn IntMod(context: PrimitiveContext) !?Completion {
+    return try integerOpCommon("IntMod", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
             if (term == 0)
                 return Completion.initRuntimeError(ctx.vm, ctx.source_range, "Modulo by zero", .{});
@@ -98,8 +97,8 @@ pub fn IntMod(context: PrimitiveContext) !Completion {
 
 /// Perform a left shift on the receiver with the argument. The returned value
 /// is an integer.
-pub fn IntShl(context: PrimitiveContext) !Completion {
-    return integerOpCommon("IntShl", context, struct {
+pub fn IntShl(context: PrimitiveContext) !?Completion {
+    return try integerOpCommon("IntShl", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
             if (term < 0 or term > 62)
                 return Completion.initRuntimeError(ctx.vm, ctx.source_range, "Argument to _IntShl: must be between 0 and 62", .{});
@@ -114,8 +113,8 @@ pub fn IntShl(context: PrimitiveContext) !Completion {
 
 /// Perform a right shift on the receiver with the argument. The returned value
 /// is an integer.
-pub fn IntShr(context: PrimitiveContext) !Completion {
-    return integerOpCommon("IntShr", context, struct {
+pub fn IntShr(context: PrimitiveContext) !?Completion {
+    return try integerOpCommon("IntShr", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
             if (term < 0 or term > 62)
                 return Completion.initRuntimeError(ctx.vm, ctx.source_range, "Argument to _IntShr: must be between 0 and 62", .{});
@@ -130,8 +129,8 @@ pub fn IntShr(context: PrimitiveContext) !Completion {
 
 /// Perform a bitwise XOR on the receiver with the argument. The returned value
 /// is an integer.
-pub fn IntXor(context: PrimitiveContext) !Completion {
-    return integerOpCommon("IntXor", context, struct {
+pub fn IntXor(context: PrimitiveContext) !?Completion {
+    return try integerOpCommon("IntXor", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
             _ = ctx;
             return Completion.initNormal(Value.fromInteger(receiver ^ term));
@@ -141,8 +140,8 @@ pub fn IntXor(context: PrimitiveContext) !Completion {
 
 /// Perform a bitwise AND on the receiver with the argument. The returned value
 /// is an integer.
-pub fn IntAnd(context: PrimitiveContext) !Completion {
-    return integerOpCommon("IntAnd", context, struct {
+pub fn IntAnd(context: PrimitiveContext) !?Completion {
+    return try integerOpCommon("IntAnd", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
             _ = ctx;
             return Completion.initNormal(Value.fromInteger(receiver & term));
@@ -152,8 +151,8 @@ pub fn IntAnd(context: PrimitiveContext) !Completion {
 
 /// Return whether the receiver is less than its argument. The return value is
 /// either "true" or "false".
-pub fn IntLT(context: PrimitiveContext) !Completion {
-    return integerOpCommon("IntLT", context, struct {
+pub fn IntLT(context: PrimitiveContext) !?Completion {
+    return try integerOpCommon("IntLT", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
             return Completion.initNormal(
                 if (receiver < term)
@@ -167,8 +166,8 @@ pub fn IntLT(context: PrimitiveContext) !Completion {
 
 /// Return whether the receiver is greater than its argument. The return value
 /// is either "true" or "false".
-pub fn IntGT(context: PrimitiveContext) !Completion {
-    return integerOpCommon("IntGT", context, struct {
+pub fn IntGT(context: PrimitiveContext) !?Completion {
+    return try integerOpCommon("IntGT", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !Completion {
             return Completion.initNormal(
                 if (receiver > term)
@@ -183,12 +182,12 @@ pub fn IntGT(context: PrimitiveContext) !Completion {
 /// Return whether the receiver is equal to its argument. The return value is
 /// either "true" or "false". Note that passing a non-integer term is not an
 /// error and simply returns false.
-pub fn IntEq(context: PrimitiveContext) !Completion {
+pub fn IntEq(context: PrimitiveContext) !?Completion {
     const receiver = context.receiver.getValue();
-    const term = context.arguments[0].getValue();
+    const term = context.arguments[0];
 
     if (!receiver.isInteger()) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected integer as _IntEq: receiver",

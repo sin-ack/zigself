@@ -6,9 +6,16 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("./heap.zig");
+const slot_import = @import("./slot.zig");
+const Slot = slot_import.Slot;
 const Value = @import("./value.zig").Value;
+const Actor = @import("./Actor.zig");
 const Object = @import("./object.zig");
+const Script = @import("../language/script.zig");
+const Codegen = @import("./Codegen.zig");
 const ByteArray = @import("./byte_array.zig");
+const runtime_error = @import("./error.zig");
+const RegisterLocation = @import("./bytecode/register_location.zig").RegisterLocation;
 
 /// The allocator object that will be used throughout the virtual machine's
 /// lifetime.
@@ -20,7 +27,7 @@ heap: *Heap,
 /// a single instance of each message name for the respective block arities.
 block_message_names: std.AutoArrayHashMapUnmanaged(u8, Heap.Tracked),
 
-// References to global objects
+// --- References to global objects ---
 
 /// The root of the current Self world.
 lobby_object: Heap.Tracked = undefined,
@@ -33,7 +40,7 @@ global_true: Heap.Tracked = undefined,
 /// The global falsity value.
 global_false: Heap.Tracked = undefined,
 
-// Primitive object traits
+// --- Primitive object traits ---
 
 array_traits: Heap.Tracked = undefined,
 block_traits: Heap.Tracked = undefined,
@@ -41,20 +48,28 @@ float_traits: Heap.Tracked = undefined,
 string_traits: Heap.Tracked = undefined,
 integer_traits: Heap.Tracked = undefined,
 
-// Settings
+// --- Settings ---
 
 /// Whether the interpreter should be silent when an error happens.
 silent_errors: bool = false,
+
+// --- Current execution state ---
+
+registers: ?[]Value = null,
+argument_stack: std.ArrayListUnmanaged(Value) = .{},
+slot_stack: std.ArrayListUnmanaged(Slot) = .{},
+/// Whether the next created method is going to be an inline method.
+next_method_is_inline: bool = false,
 
 const Self = @This();
 
 /// Creates the virtual machine, including the heap and the global objects.
 pub fn create(allocator: Allocator) !*Self {
-    var heap = try Heap.create(allocator);
-    errdefer heap.destroy();
-
     var self = try allocator.create(Self);
     errdefer allocator.destroy(self);
+
+    var heap = try Heap.create(allocator, self);
+    errdefer heap.destroy();
 
     self.* = .{
         .allocator = allocator,
@@ -97,6 +112,9 @@ pub fn destroy(self: *Self) void {
         }
     }
     self.block_message_names.deinit(self.allocator);
+
+    self.argument_stack.deinit(self.allocator);
+    self.slot_stack.deinit(self.allocator);
 
     self.heap.destroy();
     self.allocator.destroy(self);
@@ -159,4 +177,97 @@ fn requiredSizeForBlockMessageName(argument_count: u8) usize {
     }
 
     return needed_space;
+}
+
+pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
+    var entrypoint_executable = try Codegen.generateExecutableFromScript(self.allocator, script);
+    defer entrypoint_executable.unref();
+
+    var actor = try Actor.create(self.allocator);
+    defer actor.destroy(self.allocator);
+
+    var completion = try actor.execute(self, entrypoint_executable);
+    defer completion.deinit(self);
+
+    switch (completion.data) {
+        .Normal => |value| {
+            return value;
+        },
+        .RuntimeError => |err| {
+            if (!self.silent_errors) {
+                std.debug.print("Received error at top level: {s}\n", .{err.message});
+                runtime_error.printTraceFromActivationStack(actor.activation_stack.getStack(), err.source_range);
+            }
+            return null;
+        },
+        else => unreachable,
+    }
+}
+
+pub fn readRegister(self: Self, location: RegisterLocation) Value {
+    return switch (location) {
+        .Nil => self.nil(),
+        else => |loc| self.registers.?[@enumToInt(loc)],
+    };
+}
+
+pub fn writeRegister(self: *Self, location: RegisterLocation, value: Value) void {
+    switch (location) {
+        .Nil => {},
+        else => |loc| self.registers.?[@enumToInt(loc)] = value,
+    }
+}
+
+pub fn pushArgument(self: *Self, argument: Value) !void {
+    try self.argument_stack.append(self.allocator, argument);
+}
+
+pub fn lastNArguments(self: Self, n: u8) []const Value {
+    const argument_count = self.argument_stack.items.len;
+    return self.argument_stack.items[argument_count - n .. argument_count];
+}
+
+pub fn popNArguments(self: *Self, n: u8) void {
+    self.argument_stack.shrinkRetainingCapacity(self.argument_stack.items.len - n);
+}
+
+/// Returns all the arguments that are currently on the argument stack. Intended
+/// for use in the garbage collector.
+pub fn allArguments(self: Self) []Value {
+    return self.argument_stack.items;
+}
+
+pub fn argumentStackHeight(self: Self) usize {
+    return self.allArguments().len;
+}
+
+pub fn restoreArgumentStackTo(self: *Self, height: usize) void {
+    self.argument_stack.shrinkRetainingCapacity(height);
+}
+
+pub fn pushSlot(self: *Self, slot: Slot) !void {
+    try self.slot_stack.append(self.allocator, slot);
+}
+
+pub fn lastNSlots(self: Self, n: u32) []const Slot {
+    const slot_count = self.slot_stack.items.len;
+    return self.slot_stack.items[slot_count - n .. slot_count];
+}
+
+pub fn popNSlots(self: *Self, n: u32) void {
+    self.slot_stack.shrinkRetainingCapacity(self.slot_stack.items.len - n);
+}
+
+/// Returns all the slots that are currently on the slot stack. Intended for use
+/// in the garbage collector.
+pub fn allSlots(self: Self) []Slot {
+    return self.slot_stack.items;
+}
+
+pub fn slotStackHeight(self: Self) usize {
+    return self.allSlots().len;
+}
+
+pub fn restoreSlotStackTo(self: *Self, height: usize) void {
+    self.slot_stack.shrinkRetainingCapacity(height);
 }

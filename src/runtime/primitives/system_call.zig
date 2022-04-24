@@ -10,38 +10,33 @@ const Object = @import("../object.zig");
 const Completion = @import("../completion.zig");
 const ManagedObject = @import("../object/managed.zig");
 const FileDescriptor = ManagedObject.FileDescriptor;
+const value_inspector = @import("../value_inspector.zig");
 
-const message_interpreter = @import("../interpreter/message.zig");
+const interpreter = @import("../interpreter.zig");
 
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 fn callFailureBlock(
     context: PrimitiveContext,
     errno: std.os.system.E,
-    block: Heap.Tracked,
-) !Completion {
+    block: Value,
+) !?Completion {
     const errno_int = @enumToInt(errno);
     const errno_value = Value.fromInteger(errno_int);
-    const tracked_errno_value = try context.vm.heap.track(errno_value);
-    defer tracked_errno_value.untrack(context.vm.heap);
 
-    const completion = try message_interpreter.sendMessage(context.interpreter_context, block, "value:", &.{tracked_errno_value}, context.source_range);
-    if (!completion.isNormal()) {
-        return completion;
-    }
-
-    return Completion.initNormal(context.vm.nil());
+    try context.vm.pushArgument(errno_value);
+    return try interpreter.sendMessage(context.vm, context.actor, block, "value:", context.target_location, context.source_range);
 }
 
 /// Open the path with the given flags and return a file descriptor.
 /// On failure, call the given block with the errno as the argument.
-pub fn Open_WithFlags_IfFail(context: PrimitiveContext) !Completion {
-    const file_path = context.arguments[0].getValue();
-    const flags_value = context.arguments[1].getValue();
+pub fn Open_WithFlags_IfFail(context: PrimitiveContext) !?Completion {
+    const file_path = context.arguments[0];
+    const flags_value = context.arguments[1];
     const failure_block = context.arguments[2];
 
     if (!(file_path.isObjectReference() and file_path.asObject().isByteArrayObject())) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected byte array as the first argument to _Open:WithFlags:IfFail:",
@@ -50,7 +45,7 @@ pub fn Open_WithFlags_IfFail(context: PrimitiveContext) !Completion {
     }
 
     if (!flags_value.isInteger()) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected integer as the second argument to _Open:WithFlags:IfFail:",
@@ -60,7 +55,7 @@ pub fn Open_WithFlags_IfFail(context: PrimitiveContext) !Completion {
 
     const flags = flags_value.asInteger();
     if (flags < 0) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Flags argument to _Open:WithFlags:IfFail: must be positive",
@@ -81,22 +76,22 @@ pub fn Open_WithFlags_IfFail(context: PrimitiveContext) !Completion {
         return Completion.initNormal(managed_fd.asValue());
     }
 
-    return callFailureBlock(context, errno, failure_block);
+    return try callFailureBlock(context, errno, failure_block);
 }
 
 /// Read the given amount of bytes into the given byte array at the given offset
 /// from the given file descriptor. If the byte array is smaller than the given
 /// amount of bytes, raises an error. On success, returns the amount of bytes
 /// read. On failure, call the given block with the errno as the argument.
-pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Completion {
-    const bytes_to_read_value = context.arguments[0].getValue();
-    const byte_array_value = context.arguments[1].getValue();
-    const offset_value = context.arguments[2].getValue();
-    const fd_value = context.arguments[3].getValue();
+pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !?Completion {
+    const bytes_to_read_value = context.arguments[0];
+    const byte_array_value = context.arguments[1];
+    const offset_value = context.arguments[2];
+    const fd_value = context.arguments[3];
     const failure_block = context.arguments[4];
 
     if (!bytes_to_read_value.isInteger()) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected integer as the first argument to _Read:BytesInto:AtOffset:From:IfFail:",
@@ -105,7 +100,7 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Completio
     }
 
     if (!(byte_array_value.isObjectReference() and byte_array_value.asObject().isByteArrayObject())) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected byte array object as the second argument to _Read:BytesInto:AtOffset:From:IfFail:",
@@ -114,7 +109,7 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Completio
     }
 
     if (!offset_value.isInteger()) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected integer as the third argument to _Read:BytesInto:AtOffset:From:IfFail:",
@@ -123,7 +118,7 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Completio
     }
 
     if (!(fd_value.isObjectReference() and fd_value.asObject().isManaged() and fd_value.asObject().asManaged().getManagedType() == .FileDescriptor)) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected file descriptor as the fourth argument to _Read:BytesInto:AtOffset:From:IfFail:",
@@ -133,7 +128,7 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Completio
 
     const bytes_to_read = bytes_to_read_value.asInteger();
     if (bytes_to_read < 0) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Bytes to read argument to _Read:BytesInto:AtOffset:From:IfFail: must be positive",
@@ -143,7 +138,7 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Completio
 
     const offset = offset_value.asInteger();
     if (offset < 0) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Offset argument to _Read:BytesInto:AtOffset:From:IfFail: must be positive",
@@ -153,7 +148,7 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Completio
 
     const byte_array = byte_array_value.asObject().asByteArrayObject();
     if (byte_array.getValues().len < offset) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Offset argument is larger than byte array size",
@@ -162,7 +157,7 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Completio
     }
 
     if (byte_array.getValues().len - @intCast(usize, offset) < bytes_to_read) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Bytes to read argument is larger than byte array size - offset",
@@ -178,22 +173,22 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Completio
         return Completion.initNormal(Value.fromUnsignedInteger(@intCast(usize, rc)));
     }
 
-    return callFailureBlock(context, errno, failure_block);
+    return try callFailureBlock(context, errno, failure_block);
 }
 
 /// Write the given amount of bytes from the given byte array at the given offset
 /// into the given file descriptor. If the byte array is smaller than the given
 /// amount of bytes, raises an error. On success, returns the amount of bytes
 /// written. On failure, call the given block with the errno as the argument.
-pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Completion {
-    const bytes_to_write_value = context.arguments[0].getValue();
-    const byte_array_value = context.arguments[1].getValue();
-    const offset_value = context.arguments[2].getValue();
-    const fd_value = context.arguments[3].getValue();
+pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !?Completion {
+    const bytes_to_write_value = context.arguments[0];
+    const byte_array_value = context.arguments[1];
+    const offset_value = context.arguments[2];
+    const fd_value = context.arguments[3];
     const failure_block = context.arguments[4];
 
     if (!bytes_to_write_value.isInteger()) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected integer as the first argument to _Write:BytesFrom:AtOffset:Into:IfFail:",
@@ -202,7 +197,8 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Completi
     }
 
     if (!(byte_array_value.isObjectReference() and byte_array_value.asObject().isByteArrayObject())) {
-        return Completion.initRuntimeError(
+        try value_inspector.inspectValue(.Multiline, context.vm, byte_array_value);
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected byte array object as the second argument to _Write:BytesFrom:AtOffset:Into:IfFail:",
@@ -211,7 +207,7 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Completi
     }
 
     if (!offset_value.isInteger()) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected integer as the third argument to _Write:BytesFrom:AtOffset:Into:IfFail:",
@@ -220,7 +216,7 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Completi
     }
 
     if (!(fd_value.isObjectReference() and fd_value.asObject().isManaged() and fd_value.asObject().asManaged().getManagedType() == .FileDescriptor)) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected file descriptor as the fourth argument to _Write:BytesFrom:AtOffset:Into:IfFail:",
@@ -230,7 +226,7 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Completi
 
     const bytes_to_write = bytes_to_write_value.asInteger();
     if (bytes_to_write < 0) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Bytes to write argument to _Write:BytesFrom:AtOffset:Into:IfFail: must be positive",
@@ -240,7 +236,7 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Completi
 
     const offset = offset_value.asInteger();
     if (offset < 0) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Offset argument to _Write:BytesFrom:AtOffset:Into:IfFail: must be positive",
@@ -250,7 +246,7 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Completi
 
     const byte_array = byte_array_value.asObject().asByteArrayObject();
     if (byte_array.getValues().len < offset) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Offset argument is larger than byte array size",
@@ -259,7 +255,7 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Completi
     }
 
     if (byte_array.getValues().len - @intCast(usize, offset) < bytes_to_write) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Bytes to write argument is larger than byte array size - offset",
@@ -275,16 +271,16 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Completi
         return Completion.initNormal(Value.fromUnsignedInteger(@intCast(usize, rc)));
     }
 
-    return callFailureBlock(context, errno, failure_block);
+    return try callFailureBlock(context, errno, failure_block);
 }
 
 /// Closes a file descriptor.
 /// If the file descriptor was already closed, this primitive does nothing.
-pub fn Close(context: PrimitiveContext) !Completion {
-    const fd_value = context.arguments[0].getValue();
+pub fn Close(context: PrimitiveContext) !?Completion {
+    const fd_value = context.arguments[0];
 
     if (!(fd_value.isObjectReference() and fd_value.asObject().isManaged() and fd_value.asObject().asManaged().getManagedType() == .FileDescriptor)) {
-        return Completion.initRuntimeError(
+        return try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "Expected file descriptor as the argument to _Close:",
@@ -299,4 +295,20 @@ pub fn Close(context: PrimitiveContext) !Completion {
     //       the managed object as it operates independently.
     managed_fd.value = fd.toValue();
     return Completion.initNormal(context.vm.nil());
+}
+
+/// Exit with the given return code.
+pub fn Exit(context: PrimitiveContext) !?Completion {
+    var status_code = context.arguments[0];
+    if (!status_code.isInteger()) {
+        return try Completion.initRuntimeError(
+            context.vm,
+            context.source_range,
+            "Expected integer for the status code argument of _Exit:, got {s}",
+            .{@tagName(status_code.getType())},
+        );
+    }
+
+    // The ultimate in garbage collection.
+    std.os.exit(@intCast(u8, status_code.asUnsignedInteger()));
 }

@@ -6,7 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Activation = @import("./activation.zig");
-const SourceRange = @import("../language/source_range.zig");
+const SourceRange = @import("./SourceRange.zig");
 
 fn writeTraceForFrame(message_name: []const u8, source_range: SourceRange) void {
     std.debug.print("  at {s} ({})\n", .{ message_name, source_range });
@@ -37,21 +37,20 @@ pub fn printTraceFromActivationStackUntil(stack: []Activation, first_source_rang
         return;
     }
 
-    var source_range = first_source_range;
+    var called_from = first_source_range;
 
     var i = @intCast(isize, stack.len - 1);
     while (i >= 0) : (i -= 1) {
         const activation_ptr = &stack[@intCast(usize, i)];
-        const context = activation_ptr.creation_context;
 
         if (until) |until_ptr| {
             if (until_ptr == activation_ptr) break;
         }
 
-        const message_name = context.message.getValue().asByteArray().getValues();
-        writeTraceForFrame(message_name, source_range);
+        const message_name = activation_ptr.creator_message.asByteArray().getValues();
+        writeTraceForFrame(message_name, called_from);
 
-        source_range = context.source_range;
+        called_from = activation_ptr.created_from;
     }
 }
 

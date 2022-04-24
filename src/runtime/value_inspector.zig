@@ -91,7 +91,7 @@ fn inspectObject(
             printWithIndent(display_type, indent, "|)", .{});
         },
         .Activation => {
-            const activation = object.asSlotsObject();
+            const activation = object.asActivationObject();
 
             std.debug.print("<activation object> (|{s}", .{separator});
             try inspectSlots(display_type, vm, activation, indent + 2, separator, &my_link);
@@ -102,7 +102,7 @@ fn inspectObject(
 
             std.debug.print("<method object \"{s}\"> ", .{method.getMap().method_name.asByteArray().getValues()});
 
-            if (method.getMap().getSlots().len > 0) {
+            if (method.getSlots().len > 0) {
                 std.debug.print("(|{s}", .{separator});
                 try inspectSlots(display_type, vm, method, indent + 2, separator, &my_link);
                 printWithIndent(display_type, indent, "|)", .{});
@@ -115,7 +115,7 @@ fn inspectObject(
 
             std.debug.print("<block object> ", .{});
 
-            if (block.getMap().getSlots().len > 0) {
+            if (block.getSlots().len > 0) {
                 std.debug.print("(|{s}", .{separator});
                 try inspectSlots(display_type, vm, block, indent + 2, separator, &my_link);
                 printWithIndent(display_type, indent, "|)", .{});
@@ -165,8 +165,7 @@ fn inspectSlots(
     separator: []const u8,
     visited_object_link: *const VisitedObjectLink,
 ) !void {
-    const map = object.getMap();
-    const slots = map.getSlots();
+    const slots = object.getSlots();
 
     for (slots) |slot| {
         const parent_marker: []const u8 = if (slot.isParent()) "*" else "";

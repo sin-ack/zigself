@@ -11,3 +11,9 @@ pub const GC_TRACK_SOURCE_DEBUG = false;
 /// Debugging of functions related to older generation objects pointing to newer
 /// generations.
 pub const REMEMBERED_SET_DEBUG = false;
+/// Debugging of activation exits (regular and non-local returns).
+pub const ACTIVATION_EXIT_DEBUG = false;
+/// Dump every executable after codegen.
+pub const EXECUTABLE_DUMP_DEBUG = false;
+/// Print every instruction that's executed.
+pub const EXECUTION_DEBUG = false;

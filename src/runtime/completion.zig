@@ -9,7 +9,7 @@ const Heap = @import("./heap.zig");
 const Value = @import("./value.zig").Value;
 const Activation = @import("./activation.zig");
 const interpreter = @import("./interpreter.zig");
-const SourceRange = @import("../language/source_range.zig");
+const SourceRange = @import("./SourceRange.zig");
 const VirtualMachine = @import("./virtual_machine.zig");
 
 const Self = @This();
@@ -63,7 +63,7 @@ pub fn initNonlocalReturn(target_activation: Activation.ActivationRef, value: He
 
 /// Creates a new runtime error completion with the given format string and parameters.
 /// Copies the source range object.
-pub fn initRuntimeError(vm: *VirtualMachine, source_range: SourceRange, comptime fmt: []const u8, args: anytype) interpreter.InterpreterError!Self {
+pub fn initRuntimeError(vm: *VirtualMachine, source_range: SourceRange, comptime fmt: []const u8, args: anytype) Allocator.Error!Self {
     const error_message = try std.fmt.allocPrint(vm.allocator, fmt, args);
     return Self{ .data = .{ .RuntimeError = .{ .message = error_message, .source_range = source_range.copy() } } };
 }

@@ -6,14 +6,15 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const hash = @import("../utility/hash.zig");
-const Object = @import("./object.zig");
-const Completion = @import("./completion.zig");
-const ByteArray = @import("./byte_array.zig");
-const SourceRange = @import("../language/source_range.zig");
-const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
-const object_lookup = @import("./object/lookup.zig");
 const Heap = @import("./heap.zig");
 const debug = @import("../debug.zig");
+const Object = @import("./object.zig");
+const RefPtr = @import("../utility/ref_counted.zig").RefPtr;
+const ByteArray = @import("./byte_array.zig");
+const Completion = @import("./completion.zig");
+const object_lookup = @import("./object/lookup.zig");
+const VirtualMachine = @import("./virtual_machine.zig");
+const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
@@ -115,42 +116,40 @@ pub const Value = packed struct {
 
     pub fn lookup(
         self: Value,
-        context: *InterpreterContext,
+        vm: *VirtualMachine,
         selector: []const u8,
-        source_range: SourceRange,
     ) LookupError!LookupResult {
         const selector_hash = SelectorHash.init(selector);
         if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up \"{s}\" (hash: {x}) on {}\n", .{ selector, selector_hash.regular, self });
 
-        return try self.lookupByHash(context, selector_hash, source_range);
+        return try self.lookupByHash(vm, selector_hash);
     }
 
     pub fn lookupByHash(
         self: Value,
-        context: *InterpreterContext,
+        vm: *VirtualMachine,
         selector_hash: SelectorHash,
-        source_range: SourceRange,
     ) LookupError!LookupResult {
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
-            .ObjectReference => self.asObject().lookupByHash(context, selector_hash, source_range),
+            .ObjectReference => self.asObject().lookupByHash(vm, selector_hash),
 
             .Integer => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits integer\n", .{});
-                const integer_traits = context.vm.integer_traits.getValue();
+                const integer_traits = vm.integer_traits.getValue();
                 if (selector_hash.regular == parent_hash)
                     return LookupResult{ .Regular = integer_traits };
 
-                return try integer_traits.lookupByHash(context, selector_hash, source_range);
+                return try integer_traits.lookupByHash(vm, selector_hash);
             },
             .FloatingPoint => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits float\n", .{});
 
-                const float_traits = context.vm.float_traits.getValue();
+                const float_traits = vm.float_traits.getValue();
                 if (selector_hash.regular == parent_hash)
                     return LookupResult{ .Regular = float_traits };
 
-                return try float_traits.lookupByHash(context, selector_hash, source_range);
+                return try float_traits.lookupByHash(vm, selector_hash);
             },
         };
     }
@@ -164,3 +163,57 @@ pub const Value = packed struct {
         };
     }
 };
+
+/// A value which stores a pointer to off-heap memory.
+pub fn PointerValue(comptime T: type) type {
+    return PointerValueAlignment(T, null);
+}
+
+pub fn PointerValueAlignment(comptime T: type, alignment: ?u29) type {
+    const PointerT = if (alignment) |a| *align(a) T else *T;
+
+    return packed struct {
+        value: Value,
+
+        const Self = @This();
+
+        pub fn init(value: PointerT) Self {
+            return .{ .value = Value.fromUnsignedInteger(@ptrToInt(value)) };
+        }
+
+        pub fn get(self: Self) PointerT {
+            return @intToPtr(PointerT, self.value.asUnsignedInteger());
+        }
+    };
+}
+
+/// A value which stores a pointer to off-heap ref-counted memory.
+pub fn RefCountedValue(comptime T: type) type {
+    const RefT = RefPtr(T);
+    const PointerT = PointerValue(T);
+
+    return packed struct {
+        value: PointerT,
+
+        const Self = @This();
+
+        pub fn init(ref_counted_value: RefT) Self {
+            ref_counted_value.ref();
+            return .{ .value = PointerT.init(ref_counted_value.value) };
+        }
+
+        /// Use if deinit requires no arguments.
+        pub fn deinit(self: Self) void {
+            self.get().unref();
+        }
+
+        /// Use if deinit requires the allocator.
+        pub fn deinitWithAllocator(self: Self, allocator: Allocator) void {
+            self.get().unrefWithAllocator(allocator);
+        }
+
+        pub fn get(self: Self) RefT {
+            return RefT{ .value = self.value.get() };
+        }
+    };
+}

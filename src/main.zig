@@ -9,7 +9,6 @@ const Script = @import("./language/script.zig");
 const ASTPrinter = @import("./language/ast_printer.zig");
 
 const VirtualMachine = @import("./runtime/virtual_machine.zig");
-const interpreter = @import("./runtime/interpreter.zig");
 
 const ArgumentSpec = struct {
     help: bool = false,
@@ -88,6 +87,6 @@ pub fn main() !u8 {
     var vm = try VirtualMachine.create(allocator);
     defer vm.destroy();
 
-    const result = try interpreter.executeScript(vm, entrypoint_script);
+    const result = try vm.executeEntrypointScript(entrypoint_script);
     return if (result == null) 1 else 0;
 }

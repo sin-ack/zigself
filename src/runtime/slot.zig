@@ -11,9 +11,9 @@ const Heap = @import("./heap.zig");
 const hash = @import("../utility/hash.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
+const Codegen = @import("./Codegen.zig");
 const ByteArray = @import("./byte_array.zig");
 const map_builder = @import("./object/map_builder.zig");
-const interpreter = @import("./interpreter.zig");
 
 /// The properties of a slot. This is shared by both ProtoSlot and Slot.
 const SlotProperties = packed struct {
@@ -397,14 +397,14 @@ pub const Slot = packed struct {
 
     /// Return how many slot spaces this slot needs on the map for its contents.
     /// Takes a slice of slots that come before this slot.
-    pub fn requiredSlotSpace(self: Slot, previous_slots: []const Slot) usize {
+    pub fn requiredSlotSpace(self: Slot, previous_slots: []const Slot) u32 {
         if (self.isInherited()) {
             // FIXME: Turn this into a runtime error instead of a panic.
             if (self.getSlotWithMyName(.Traverse, previous_slots) != null)
                 @panic("Name collision is not allowed for inherited slots");
 
             // 1 for the slot itself.
-            var slot_count: usize = 1;
+            var slot_count: u32 = 1;
 
             next_slot: for (self.value.asObject().asSlotsObject().getSlots()) |inherited_slot| {
                 if (inherited_slot.isInherited()) {
@@ -430,13 +430,13 @@ pub const Slot = packed struct {
     /// slot. May return a negative value if this slot overrides a previous
     /// assignable slot and does not consume an assignable slot value space
     /// itself.
-    pub fn requiredAssignableSlotValueSpace(self: Slot, previous_slots: []const Slot) isize {
+    pub fn requiredAssignableSlotValueSpace(self: Slot, previous_slots: []const Slot) i32 {
         if (self.isInherited()) {
             // FIXME: Turn this into a runtime error instead of a panic.
             if (self.getSlotWithMyName(.Traverse, previous_slots) != null)
                 @panic("Name collision is not allowed for inherited slots");
 
-            var slot_count: isize = 0;
+            var slot_count: i32 = 0;
 
             next_slot: for (self.value.asObject().asSlotsObject().getSlots()) |inherited_slot| {
                 if (inherited_slot.isInherited()) {
@@ -457,7 +457,7 @@ pub const Slot = packed struct {
             return slot_count;
         }
 
-        var diff: isize = 0;
+        var diff: i32 = 0;
         if (self.getSlotWithMyName(.Traverse, previous_slots)) |previous_slot| {
             if (previous_slot.isAssignable() and !previous_slot.isArgument())
                 diff -= 1;
@@ -544,12 +544,12 @@ pub const Slot = packed struct {
                 previous_slots = target_slots[0..slot_index.*];
             }
         } else if (self.isArgument()) {
-            std.debug.assert(argument_slot_index.* < interpreter.MaximumArguments);
+            std.debug.assert(argument_slot_index.* < Codegen.MaximumArguments);
 
             _ = current_slot_ptr.assignIndex(@intCast(u8, argument_slot_index.*));
             argument_slot_index.* += 1;
         } else if (self.isAssignable()) {
-            std.debug.assert(assignable_slot_index.* + argument_slot_index.* < interpreter.MaximumAssignableSlots);
+            std.debug.assert(assignable_slot_index.* + argument_slot_index.* < Codegen.MaximumAssignableSlots);
 
             const value = current_slot_ptr.assignIndex(@intCast(u8, assignable_slot_index.*));
             assignable_slot_values.appendAssumeCapacity(try heap.track(value));

@@ -8,13 +8,14 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
 const hash = @import("../utility/hash.zig");
+const debug = @import("../debug.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
 const ByteVector = @import("./byte_array.zig");
 const Activation = @import("./activation.zig");
 const HandleArea = @import("./handle_area.zig");
+const VirtualMachine = @import("./virtual_machine.zig");
 const ActivationStack = Activation.ActivationStack;
-const debug = @import("../debug.zig");
 
 const GC_DEBUG = debug.GC_DEBUG;
 const GC_TRACK_SOURCE_DEBUG = debug.GC_TRACK_SOURCE_DEBUG;
@@ -45,8 +46,12 @@ old_space: Space,
 handle_area: HandleArea,
 
 allocator: Allocator,
-/// The stack of activations owned by interpreter code.
-activation_stack: ?*const ActivationStack,
+/// The stack of activations owned by the (currently only) actor.
+// FIXME: This won't work once we have more than one actor.
+activation_stack: ?*const ActivationStack = null,
+/// The virtual machine running the whole thing. We use this to scan the
+/// argument and slot stacks during a scavenge/tenure.
+vm: *VirtualMachine,
 
 /// Tracks which return addresses track which addresses.
 caller_tracked_mapping: if (GC_TRACK_SOURCE_DEBUG) std.AutoArrayHashMap(*[*]u64, usize) else void,
@@ -56,11 +61,11 @@ const EdenSize = 1 * 1024 * 1024;
 const NewSpaceSize = 4 * 1024 * 1024;
 const InitialOldSpaceSize = 16 * 1024 * 1024;
 
-pub fn create(allocator: Allocator) !*Self {
+pub fn create(allocator: Allocator, vm: *VirtualMachine) !*Self {
     const self = try allocator.create(Self);
     errdefer allocator.destroy(self);
 
-    try self.init(allocator);
+    try self.init(allocator, vm);
     return self;
 }
 
@@ -69,30 +74,36 @@ pub fn destroy(self: *Self) void {
     self.allocator.destroy(self);
 }
 
-fn init(self: *Self, allocator: Allocator) !void {
-    self.allocator = allocator;
-    self.activation_stack = null;
+fn init(self: *Self, allocator: Allocator, vm: *VirtualMachine) !void {
+    var old_space = try Space.init(self, allocator, "old space", InitialOldSpaceSize);
+    errdefer old_space.deinit(allocator);
 
-    self.old_space = try Space.init(self, allocator, "old space", InitialOldSpaceSize);
-    errdefer self.old_space.deinit(allocator);
+    var from_space = try Space.init(self, allocator, "from space", NewSpaceSize);
+    errdefer from_space.deinit(allocator);
 
-    self.from_space = try Space.init(self, allocator, "from space", NewSpaceSize);
-    errdefer self.from_space.deinit(allocator);
+    var to_space = try Space.init(self, allocator, "to space", NewSpaceSize);
+    errdefer to_space.deinit(allocator);
 
-    self.to_space = try Space.init(self, allocator, "to space", NewSpaceSize);
-    errdefer self.to_space.deinit(allocator);
+    var eden = try Space.init(self, allocator, "eden", EdenSize);
+    errdefer eden.deinit(allocator);
 
-    self.eden = try Space.init(self, allocator, "eden", EdenSize);
+    var handle_area = try HandleArea.create(allocator);
+    errdefer handle_area.destroy();
+
+    self.* = .{
+        .vm = vm,
+        .allocator = allocator,
+        .caller_tracked_mapping = if (GC_TRACK_SOURCE_DEBUG) std.AutoArrayHashMap(*[*]u64, usize).init(allocator) else {},
+        .eden = eden,
+        .from_space = from_space,
+        .to_space = to_space,
+        .old_space = old_space,
+        .handle_area = handle_area,
+    };
 
     self.from_space.scavenge_target = &self.to_space;
     self.from_space.tenure_target = &self.old_space;
     self.eden.tenure_target = &self.from_space;
-
-    self.handle_area = try HandleArea.create(allocator);
-
-    if (GC_TRACK_SOURCE_DEBUG) {
-        self.caller_tracked_mapping = std.AutoArrayHashMap(*[*]u64, usize).init(allocator);
-    }
 
     if (GC_DEBUG) {
         std.debug.print("Heap.init: Eden is {*}-{*}\n", .{ self.eden.memory.ptr, self.eden.memory.ptr + self.eden.memory.len });
@@ -116,23 +127,13 @@ fn deinit(self: *Self) void {
 
 // Attempts to allocate `size` bytes in the object segment of the eden. If
 // necessary, garbage collection is performed in the process.
-// The given address must be a multiple of `@sizeOf(u64)`.
+// The given size must be a multiple of `@sizeOf(u64)`.
 pub fn allocateInObjectSegment(self: *Self, size: usize) ![*]u64 {
-    const stack: *const ActivationStack = if (self.activation_stack) |activation_stack|
-        activation_stack
-    else
-        &.{};
-
-    return try self.eden.allocateInObjectSegment(self.allocator, stack, size);
+    return try self.eden.allocateInObjectSegment(self.allocator, size);
 }
 
 pub fn allocateInByteVectorSegment(self: *Self, size: usize) ![*]u64 {
-    const stack: *const ActivationStack = if (self.activation_stack) |activation_stack|
-        activation_stack
-    else
-        &.{};
-
-    return try self.eden.allocateInByteVectorSegment(self.allocator, stack, size);
+    return try self.eden.allocateInByteVectorSegment(self.allocator, size);
 }
 
 pub fn setActivationStack(self: *Self, activation_stack: ?*const ActivationStack) void {
@@ -191,12 +192,7 @@ pub fn untrack(self: *Self, tracked: Tracked) void {
 /// garbage collection won't happen. Performs a pre-emptive garbage collection
 /// if there isn't enough space.
 pub fn ensureSpaceInEden(self: *Self, required_memory: usize) !void {
-    const stack: *const ActivationStack = if (self.activation_stack) |activation_stack|
-        activation_stack
-    else
-        &.{};
-
-    try self.eden.collectGarbage(self.allocator, required_memory, stack);
+    try self.eden.collectGarbage(self.allocator, required_memory);
 }
 
 /// Go through the whole heap, updating references to the given value with the
@@ -209,9 +205,31 @@ pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) !v
             if (activation.activation_object.data == old_value.data) {
                 activation.activation_object = new_value;
             }
+
+            // Go through the registers of this activation and update any
+            // references to the old value.
+            for (activation.registers) |*register| {
+                if (register.data == old_value.data)
+                    register.* = new_value;
+            }
         }
     }
 
+    // Go through the slot and argument stacks and update the values there
+    // as well.
+    for (self.vm.allSlots()) |*slot| {
+        if (slot.name.data == old_value.data)
+            slot.name = new_value;
+        if (slot.value.data == old_value.data)
+            slot.value = new_value;
+    }
+
+    for (self.vm.allArguments()) |*argument| {
+        if (argument.data == old_value.data)
+            argument.* = new_value;
+    }
+
+    // Finally scan each heap space and update the references.
     try self.eden.updateAllReferencesTo(self.allocator, old_value.asObjectAddress(), new_value.asObjectAddress(), null);
 }
 
@@ -303,8 +321,8 @@ const FinalizationSet = std.AutoArrayHashMapUnmanaged([*]u64, void);
 /// A set of objects which are tracked across garbage collection events.
 const TrackedSet = std.AutoArrayHashMapUnmanaged(*[*]u64, void);
 const Space = struct {
-    /// A reference back to the heap. Only used when GC_TRACK_SOURCE_DEBUG is enabled.
-    heap: if (GC_TRACK_SOURCE_DEBUG) *Self else void,
+    /// A reference back to the heap.
+    heap: *Self,
 
     /// The raw memory contents of the space. The space capacity can be learned
     /// with `memory.len`.
@@ -368,7 +386,7 @@ const Space = struct {
         var runtime_zero: usize = 0;
 
         return Space{
-            .heap = if (GC_TRACK_SOURCE_DEBUG) heap else {},
+            .heap = heap,
             .memory = memory,
             .object_segment = memory[0..runtime_zero],
             .byte_array_segment = (memory.ptr + memory.len)[0..runtime_zero],
@@ -416,10 +434,8 @@ const Space = struct {
         std.debug.assert(object_size % @sizeOf(u64) == 0);
 
         const object_size_in_words = object_size / @sizeOf(u64);
-        // We must have enough space at this point, so the empty activation
-        // stack doesn't matter (copyObjectTo is only called from within
-        // cheneyCommon).
-        const new_address = target_space.allocateInObjectSegment(allocator, &.{}, object_size) catch unreachable;
+        // We must have enough space at this point.
+        const new_address = target_space.allocateInObjectSegment(allocator, object_size) catch unreachable;
         std.mem.copy(u64, new_address[0..object_size_in_words], address[0..object_size_in_words]);
 
         // Add this object to the target space's finalization set if it is in
@@ -442,7 +458,7 @@ const Space = struct {
 
         const byte_array_size_in_words = byte_array_size / @sizeOf(u64);
         // We must have enough space at this point.
-        const new_address = target_space.allocateInByteVectorSegment(allocator, &.{}, byte_array_size) catch unreachable;
+        const new_address = target_space.allocateInByteVectorSegment(allocator, byte_array_size) catch unreachable;
         std.mem.copy(u64, new_address[0..byte_array_size_in_words], address[0..byte_array_size_in_words]);
 
         return new_address;
@@ -466,7 +482,6 @@ const Space = struct {
     pub fn cheneyCommon(
         self: *Space,
         allocator: Allocator,
-        activation_stack: *const ActivationStack,
         target_space: *Space,
         newer_generation_link: ?*const NewerGenerationLink,
     ) Allocator.Error!void {
@@ -479,7 +494,7 @@ const Space = struct {
 
             // Make the other space garbage collect first.
             const my_link = NewerGenerationLink{ .space = self, .previous = newer_generation_link };
-            try target_space.collectGarbageInternal(allocator, required_size, activation_stack, &my_link);
+            try target_space.collectGarbageInternal(allocator, required_size, &my_link);
 
             if (space_size - self.freeMemory() > target_space.freeMemory()) {
                 std.debug.panic("Even after a garbage collection, the target space doesn't have enough memory for me to perform a scavenge, sorry.", .{});
@@ -495,19 +510,59 @@ const Space = struct {
         var target_object_segment_index = target_space.object_segment.len;
 
         // Go through the whole activation stack, copying activation objects
-        // that are within this space
-        for (activation_stack.stack[0..activation_stack.depth]) |*activation| {
+        // that are within this space. Also look at its executables and
+        // copy any that looks like an object reference.
+        //
+        // FIXME: Not all registers of an activation are actively used, so this
+        //        will actually keep more things alive than it should. In the
+        //        future, we can use liveness analysis in order to determine the
+        //        minimum set of registers we should actually keep (this ties
+        //        back to register allocation).
+        const activation_stack = self.heap.activation_stack.?;
+        for (activation_stack.getStack()) |*activation| {
             const activation_object_reference = activation.activation_object;
             std.debug.assert(activation_object_reference.isObjectReference());
             const activation_object_address = activation_object_reference.asObjectAddress();
 
-            // If the activation object address is not within the object segment
-            // of our space, then we do not care about it.
-            if (!self.objectSegmentContains(activation_object_address))
-                continue;
+            // If the activation object address is within the object segment
+            // of our space then copy it.
+            if (self.objectSegmentContains(activation_object_address)) {
+                const new_address = try self.copyObjectTo(allocator, activation_object_address, target_space);
+                activation.activation_object = Value.fromObjectAddress(new_address);
+            }
 
-            const new_address = try self.copyObjectTo(allocator, activation_object_address, target_space);
-            activation.activation_object = Value.fromObjectAddress(new_address);
+            // Go through the registers of this activation and scan all
+            // registers for values to copy.
+            for (activation.registers) |*register| {
+                if (register.isObjectReference()) {
+                    if (try self.copyAddress(allocator, register.asObjectAddress(), target_space, false)) |new_address| {
+                        register.* = Value.fromObjectAddress(new_address);
+                    }
+                }
+            }
+        }
+
+        // Go through the virtual machine's slot and argument stacks,
+        // copying any values that should be copied
+        for (self.heap.vm.allSlots()) |*slot| {
+            std.debug.assert(slot.name.isObjectReference());
+            if (try self.copyAddress(allocator, slot.name.asObjectAddress(), target_space, false)) |new_address| {
+                slot.name = Value.fromObjectAddress(new_address);
+            }
+
+            if (slot.value.isObjectReference()) {
+                if (try self.copyAddress(allocator, slot.value.asObjectAddress(), target_space, false)) |new_address| {
+                    slot.value = Value.fromObjectAddress(new_address);
+                }
+            }
+        }
+
+        for (self.heap.vm.allArguments()) |*argument| {
+            if (argument.isObjectReference()) {
+                if (try self.copyAddress(allocator, argument.asObjectAddress(), target_space, false)) |new_address| {
+                    argument.* = Value.fromObjectAddress(new_address);
+                }
+            }
         }
 
         // Go through the tracked set, copying referenced objects
@@ -670,8 +725,8 @@ const Space = struct {
     /// scavenge target, a *tenure* is attempted towards the tenure target of
     /// this space. If a tenure target is not specified either, then the heap is
     /// simply expanded to accomodate the new objects.
-    pub fn collectGarbage(self: *Space, allocator: Allocator, required_memory: usize, activation_stack: *const ActivationStack) !void {
-        try self.collectGarbageInternal(allocator, required_memory, activation_stack, null);
+    pub fn collectGarbage(self: *Space, allocator: Allocator, required_memory: usize) !void {
+        try self.collectGarbageInternal(allocator, required_memory, null);
     }
 
     /// Performs the actual operation as described in collectGarbage. Takes an
@@ -681,7 +736,6 @@ const Space = struct {
         self: *Space,
         allocator: Allocator,
         required_memory: usize,
-        activation_stack: *const ActivationStack,
         newer_generation_link: ?*const NewerGenerationLink,
     ) !void {
         // See if we already have the required memory amount.
@@ -692,7 +746,7 @@ const Space = struct {
         // See if we can perform a scavenge first.
         if (self.scavenge_target) |scavenge_target| {
             if (GC_DEBUG) std.debug.print("Space.collectGarbage: Attempting to perform a scavenge to my scavenge target, {s}\n", .{scavenge_target.name});
-            try self.cheneyCommon(allocator, activation_stack, scavenge_target, newer_generation_link);
+            try self.cheneyCommon(allocator, scavenge_target, newer_generation_link);
             self.swapMemoryWith(scavenge_target);
 
             if (self.freeMemory() >= required_memory) {
@@ -707,7 +761,7 @@ const Space = struct {
             const tenure_target_previous_free_memory = tenure_target.freeMemory();
 
             if (GC_DEBUG) std.debug.print("Space.collectGarbage: Attempting to tenure to {s}\n", .{tenure_target.name});
-            try self.cheneyCommon(allocator, activation_stack, tenure_target, newer_generation_link);
+            try self.cheneyCommon(allocator, tenure_target, newer_generation_link);
 
             // FIXME: Return an error instead of panicing when the allocation
             //        is too large for this space. How should we handle large
@@ -764,8 +818,8 @@ const Space = struct {
 
     /// Allocates the requested amount in bytes in the object segment of this
     /// space, garbage collecting if there is not enough space.
-    pub fn allocateInObjectSegment(self: *Space, allocator: Allocator, activation_stack: *const ActivationStack, size: usize) ![*]u64 {
-        if (self.freeMemory() < size) try self.collectGarbage(allocator, size, activation_stack);
+    pub fn allocateInObjectSegment(self: *Space, allocator: Allocator, size: usize) ![*]u64 {
+        if (self.freeMemory() < size) try self.collectGarbage(allocator, size);
 
         const size_in_words = @divExact(size, @sizeOf(u64));
         const current_object_segment_offset = self.object_segment.len;
@@ -780,8 +834,8 @@ const Space = struct {
 
     /// Allocates the requested amount in bytes in the byte vector segment of
     /// this space, garbage collecting if there is not enough space.
-    pub fn allocateInByteVectorSegment(self: *Space, allocator: Allocator, activation_stack: *const ActivationStack, size: usize) ![*]u64 {
-        if (self.freeMemory() < size) try self.collectGarbage(allocator, size, activation_stack);
+    pub fn allocateInByteVectorSegment(self: *Space, allocator: Allocator, size: usize) ![*]u64 {
+        if (self.freeMemory() < size) try self.collectGarbage(allocator, size);
 
         const size_in_words = @divExact(size, @sizeOf(u64));
         self.byte_array_segment.ptr -= size_in_words;

@@ -7,12 +7,11 @@ const Allocator = std.mem.Allocator;
 
 const hash = @import("../../utility/hash.zig");
 const Slot = @import("../slot.zig");
+const debug = @import("../../debug.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const Completion = @import("../completion.zig");
-const SourceRange = @import("../../language/source_range.zig");
-const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
-const debug = @import("../../debug.zig");
+const VirtualMachine = @import("../virtual_machine.zig");
 
 const SLOTS_LOOKUP_DEBUG = debug.SLOTS_LOOKUP_DEBUG;
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
@@ -66,62 +65,60 @@ const value_hash = hash.stringHash("value");
 
 pub fn lookupByHash(
     self: Object,
-    context: *InterpreterContext,
+    vm: *VirtualMachine,
     selector_hash: SelectorHash,
-    source_range: SourceRange,
 ) LookupError!LookupResult {
     if (LOOKUP_DEBUG) std.debug.print("Object.lookupByHash: Looking up hash {x} on a {} object at {*}\n", .{ selector_hash, self.header.getObjectType(), self.header });
     if (selector_hash.regular == self_hash) {
         return LookupResult{ .Regular = self.asValue() };
     }
 
-    return try lookupInternal(self, context, selector_hash, null, source_range);
+    return try lookupInternal(self, vm, selector_hash, null);
 }
 
 const nothing = LookupResult{ .Nothing = .{} };
 fn lookupInternal(
     self: Object,
-    context: *InterpreterContext,
+    vm: *VirtualMachine,
     selector_hash: SelectorHash,
     previously_visited: ?*const VisitedValueLink,
-    source_range: SourceRange,
 ) LookupError!LookupResult {
     switch (self.header.getObjectType()) {
         .ForwardingReference, .Map, .Method => unreachable,
         .Slots => {
-            return try slotsLookup(context, Object.Slots, self.asSlotsObject(), selector_hash, previously_visited, source_range);
+            return try slotsLookup(vm, Object.Slots, self.asSlotsObject(), selector_hash, previously_visited);
         },
         .Activation => {
-            const slots_lookup_result = try slotsLookup(context, Object.Activation, self.asActivationObject(), selector_hash, previously_visited, source_range);
+            const slots_lookup_result = try slotsLookup(vm, Object.Activation, self.asActivationObject(), selector_hash, previously_visited);
             if (slots_lookup_result != .Nothing) return slots_lookup_result;
 
             // Receiver lookup
-            return try self.asActivationObject().receiver.lookupByHash(context, selector_hash, source_range);
+            return try self.asActivationObject().receiver.lookupByHash(vm, selector_hash);
         },
         .Block => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits block\n", .{});
             // NOTE: executeMessage will handle the execution of the block itself.
-            const block_traits = context.vm.block_traits.getValue();
+            const block_traits = vm.block_traits.getValue();
             if (selector_hash.regular == parent_hash)
                 return LookupResult{ .Regular = block_traits };
 
-            return try block_traits.lookupByHash(context, selector_hash, source_range);
+            return try block_traits.lookupByHash(vm, selector_hash);
         },
         .Array => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits array\n", .{});
-            const array_traits = context.vm.array_traits.getValue();
+            const array_traits = vm.array_traits.getValue();
             if (selector_hash.regular == parent_hash)
                 return LookupResult{ .Regular = array_traits };
 
-            return try array_traits.lookupByHash(context, selector_hash, source_range);
+            return try array_traits.lookupByHash(vm, selector_hash);
         },
         .ByteArray => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits string\n", .{});
-            const string_traits = context.vm.string_traits.getValue();
+            const string_traits = vm.string_traits.getValue();
             if (selector_hash.regular == parent_hash)
                 return LookupResult{ .Regular = string_traits };
 
-            return try string_traits.lookupByHash(context, selector_hash, source_range);
+            return try string_traits.lookupByHash(vm, selector_hash);
         },
         .Managed => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at a managed object type: {}\n", .{self.asManaged().getManagedType()});
@@ -136,12 +133,11 @@ fn lookupInternal(
 
 /// Self Handbook, §3.3.8 The lookup algorithm
 fn slotsLookup(
-    context: *InterpreterContext,
+    vm: *VirtualMachine,
     comptime ObjectType: type,
     object: *ObjectType,
     selector_hash: SelectorHash,
     previously_visited: ?*const VisitedValueLink,
-    source_range: SourceRange,
 ) LookupError!LookupResult {
     if (previously_visited) |visited| {
         var link: ?*const VisitedValueLink = visited;
@@ -191,7 +187,7 @@ fn slotsLookup(
                 slot.value;
 
             if (slot_value.isObjectReference()) {
-                const parent_lookup_result = try lookupInternal(slot_value.asObject(), context, selector_hash, &currently_visited, source_range);
+                const parent_lookup_result = try lookupInternal(slot_value.asObject(), vm, selector_hash, &currently_visited);
                 if (parent_lookup_result != .Nothing) return parent_lookup_result;
             } else {
                 @panic("FIXME: Allow integers and floating point numbers to be parent slot values (let me know of your usecase!)");

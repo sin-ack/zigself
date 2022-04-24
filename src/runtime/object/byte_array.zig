@@ -7,6 +7,7 @@ const std = @import("std");
 const Heap = @import("../heap.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
+const ByteArray = @import("../byte_array.zig");
 
 pub const ByteArrayObject = packed struct {
     header: Object.Header,
@@ -39,6 +40,10 @@ pub const ByteArrayObject = packed struct {
 
     pub fn getValues(self: *ByteArrayObject) []u8 {
         return self.header.getMap().asByteArrayMap().getValues();
+    }
+
+    pub fn getByteArray(self: *ByteArrayObject) ByteArray {
+        return self.getMap().getByteArray();
     }
 
     pub fn clone(self: *ByteArrayObject, heap: *Heap) !*ByteArrayObject {

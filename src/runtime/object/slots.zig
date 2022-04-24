@@ -10,17 +10,19 @@ const AST = @import("../../language/ast.zig");
 const hash = @import("../../utility/hash.zig");
 const Heap = @import("../heap.zig");
 const Slot = @import("../slot.zig").Slot;
+const Actor = @import("../Actor.zig");
 const Value = @import("../value.zig").Value;
-const Script = @import("../../language/script.zig");
 const Object = @import("../object.zig");
 const MapType = @import("./map.zig").MapType;
 const Location = @import("../../language/location.zig");
 const ByteArray = @import("../byte_array.zig");
 const MapBuilder = @import("./map_builder.zig").MapBuilder;
-const SourceRange = @import("../../language/source_range.zig");
+const SourceRange = @import("../SourceRange.zig");
+const BytecodeBlock = @import("../bytecode/Block.zig");
 const VirtualMachine = @import("../virtual_machine.zig");
+const RegisterLocation = @import("../bytecode/register_location.zig").RegisterLocation;
 const RuntimeActivation = @import("../activation.zig");
-const InterpreterContext = @import("../interpreter.zig").InterpreterContext;
+const BytecodeExecutable = @import("../bytecode/Executable.zig");
 
 /// Information about added/changed slots when an object is merged into another.
 const MergeInfo = struct {
@@ -388,30 +390,27 @@ pub const Method = packed struct {
         return self.slots.header.getMap().asMethodMap();
     }
 
-    pub fn getSlots(self: *Slots) []Slot {
+    pub fn getSlots(self: *Method) []Slot {
         return self.getMap().getSlots();
     }
 
     // --- Top level context creation ---
 
     const toplevel_context_string = "<top level>";
-    pub fn createTopLevelContextForScript(vm: *VirtualMachine, script: Script.Ref) !*Method {
-        const script_statements = script.value.ast_root.?.statements;
-
+    pub fn createTopLevelContextForExecutable(
+        vm: *VirtualMachine,
+        executable: BytecodeExecutable.Ref,
+        block: *BytecodeBlock,
+    ) !*Method {
         try vm.heap.ensureSpaceInEden(
             ByteArray.requiredSizeForAllocation(toplevel_context_string.len) +
                 Map.Method.requiredSizeForAllocation(0) +
                 Method.requiredSizeForAllocation(0),
         );
 
-        script.ref();
-        script_statements.ref();
         const toplevel_context_method_map = blk: {
-            errdefer script.unref();
-            errdefer script_statements.unrefWithAllocator(vm.allocator);
-
             const toplevel_context_name = try ByteArray.createFromString(vm.heap, toplevel_context_string);
-            break :blk try Map.Method.create(vm.heap, 0, 0, script_statements, false, toplevel_context_name, script);
+            break :blk try Map.Method.create(vm.heap, 0, 0, false, toplevel_context_name, block, executable);
         };
         return try create(vm.heap, toplevel_context_method_map, &.{});
     }
@@ -438,25 +437,19 @@ pub const Method = packed struct {
     /// Copies `source_range`.
     pub fn activateMethod(
         self: *Method,
-        heap: *Heap,
+        vm: *VirtualMachine,
         receiver: Value,
         arguments: []const Value,
-        source_range: SourceRange,
+        target_location: RegisterLocation,
+        created_from: SourceRange,
         out_activation: *RuntimeActivation,
     ) !void {
-        const activation_object = try Activation.create(
-            heap,
-            .Method,
-            self.slots.header.getMap(),
-            arguments,
-            self.getAssignableSlots(),
-            receiver,
-        );
+        const activation_object = try Activation.create(vm.heap, .Method, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
 
-        const tracked_method_name = try heap.track(self.getMap().method_name);
-        errdefer tracked_method_name.untrack(heap);
+        const register_slice = try activation_object.getBytecodeBlock().allocRegisterSlice(vm.allocator);
+        errdefer vm.allocator.free(register_slice);
 
-        try out_activation.initInPlace(heap, activation_object.asValue(), tracked_method_name, source_range, true);
+        try out_activation.initInPlace(activation_object.asValue(), target_location, register_slice, self.getMap().method_name, created_from);
     }
 };
 
@@ -494,7 +487,7 @@ pub const Block = packed struct {
         return self.slots.header.getMap().asBlockMap();
     }
 
-    pub fn getSlots(self: *Slots) []Slot {
+    pub fn getSlots(self: *Block) []Slot {
         return self.getMap().getSlots();
     }
 
@@ -546,25 +539,23 @@ pub const Block = packed struct {
     /// `source_range`.
     pub fn activateBlock(
         self: *Block,
-        context: *InterpreterContext,
+        vm: *VirtualMachine,
+        actor: *Actor,
         receiver: Value,
         arguments: []const Value,
-        message_name: Heap.Tracked,
-        source_range: SourceRange,
+        target_location: RegisterLocation,
+        creator_message: Value,
+        created_from: SourceRange,
         out_activation: *RuntimeActivation,
     ) !void {
-        const activation_object = try Activation.create(
-            context.vm.heap,
-            .Block,
-            self.slots.header.getMap(),
-            arguments,
-            self.getAssignableSlots(),
-            receiver,
-        );
+        const activation_object = try Activation.create(vm.heap, .Block, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
 
-        try out_activation.initInPlace(context.vm.heap, activation_object.asValue(), message_name, source_range, false);
-        out_activation.parent_activation = self.getMap().parent_activation.get(context);
-        out_activation.nonlocal_return_target_activation = self.getMap().nonlocal_return_target_activation.get(context);
+        const register_slice = try activation_object.getBytecodeBlock().allocRegisterSlice(vm.allocator);
+        errdefer vm.allocator.free(register_slice);
+
+        try out_activation.initInPlace(activation_object.asValue(), target_location, register_slice, creator_message, created_from);
+        out_activation.parent_activation = self.getMap().parent_activation.get(&actor.activation_stack);
+        out_activation.nonlocal_return_target_activation = self.getMap().nonlocal_return_target_activation.get(&actor.activation_stack);
     }
 };
 
@@ -662,12 +653,18 @@ pub const Activation = packed struct {
 
     // --- Map forwarding ---
 
-    pub fn getDefinitionScript(self: *Activation) Script.Ref {
-        return self.dispatch("getDefinitionScript");
+    pub fn getDefinitionExecutable(self: *Activation) BytecodeExecutable.Ref {
+        return switch (self.getActivationType()) {
+            .Method => self.getMethodMap().base_map.definition_executable_ref.get(),
+            .Block => self.getBlockMap().base_map.definition_executable_ref.get(),
+        };
     }
 
-    pub fn getStatementsSlice(self: *Activation) []AST.ExpressionNode {
-        return self.dispatch("getStatementsSlice");
+    pub fn getBytecodeBlock(self: *Activation) *BytecodeBlock {
+        return switch (self.getActivationType()) {
+            .Method => self.getMethodMap().base_map.block.get(),
+            .Block => self.getBlockMap().base_map.block.get(),
+        };
     }
 
     // --- Slots and slot values ---

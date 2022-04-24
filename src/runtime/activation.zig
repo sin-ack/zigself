@@ -6,33 +6,127 @@ const builtin = @import("builtin");
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("./heap.zig");
+const Actor = @import("./Actor.zig");
 const Value = @import("./value.zig").Value;
-const Script = @import("../language/script.zig");
-const SourceRange = @import("../language/source_range.zig");
+const Executable = @import("./bytecode/Executable.zig");
+const SourceRange = @import("./SourceRange.zig");
+const VirtualMachine = @import("./virtual_machine.zig");
+const RegisterLocation = @import("./bytecode/register_location.zig").RegisterLocation;
 
-const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
+/// The ID of the activation which is used with ActivationRef in order to check
+/// whether the activation is still alive or not.
+activation_id: u64,
+/// The activation object which holds the receiver for this activation and the
+/// arguments + assignable slots defined on the method or block. This is the
+/// response to the "self" object in an activation.
+activation_object: Value,
+/// The location to which the result of the activation (obtained via the
+/// exit_activation opcode) is written.
+target_location: RegisterLocation,
+/// This is the parent activation for the current block activation. The
+/// activation object of this activation will be used as the receiver of the
+/// block's own activation object. Not used with methods, since we don't want to
+/// inherit previous activation objects in methods (that would make the language
+/// dynamically scoped :^).
+parent_activation: ?*Self = null,
+/// Will be used as the target activation that a non-local return needs to rise
+/// to. Must be non-null when a non-local return is encountered, and when
+/// non-null, must point to an activation where
+/// `nonlocal_return_target_activation` is null.
+nonlocal_return_target_activation: ?*Self = null,
+
+// --- Activation creation info ---
+
+/// The message that created this activation as a byte array.
+creator_message: Value,
+/// This is the source range which caused the creation of this message.
+created_from: SourceRange,
+
+// --- Activation execution state ---
+
+/// The registers on which the instructions operate. This slice is owned and
+/// will be destroyed when the activation is deinitialized.
+registers: []Value,
+/// The index of the instruction that is currently being executed (the "program
+/// counter").
+pc: u32 = 0,
 
 const Self = @This();
 
-// FIXME: This isn't thread safe!
-var id: u64 = 0;
+/// Creates a copy of `created_from`.
+pub fn initInPlace(
+    self: *Self,
+    activation_object: Value,
+    target_location: RegisterLocation,
+    registers: []Value,
+    creator_message: Value,
+    created_from: SourceRange,
+) !void {
+    std.debug.assert(activation_object.isObjectReference());
 
-pub fn newActivationID() u64 {
-    id += 1;
-    return id;
+    self.* = .{
+        .activation_id = newActivationID(),
+        .activation_object = activation_object,
+        .target_location = target_location,
+        .creator_message = creator_message,
+        .created_from = created_from.copy(),
+        .registers = registers,
+    };
 }
 
-/// Used for keeping track of the message that was sent to start the current
-/// activation. This is then used in stack traces.
-pub const ActivationCreationContext = struct {
-    should_untrack_message_name_on_deinit: bool,
-    message: Heap.Tracked,
-    source_range: SourceRange,
-};
+pub fn deinit(self: *Self, allocator: Allocator) void {
+    self.created_from.deinit();
+    allocator.free(self.registers);
+}
+
+pub fn takeRef(self: *Self) ActivationRef {
+    return ActivationRef.init(self);
+}
+
+/// Return the result of the `self` message for the current context.
+pub fn selfObject(self: Self) Value {
+    return self.activation_object;
+}
+
+/// Return the executable that this activation was created from.
+pub fn creationExecutable(self: Self) Executable.Ref {
+    return self.created_from.executable;
+}
+
+/// Return the executable that this activation's method or block is defined in.
+pub fn definitionExecutable(self: Self) Executable.Ref {
+    const activation_object = self.activation_object.asObject().asActivationObject();
+    return activation_object.getDefinitionExecutable();
+}
+
+pub fn advanceInstruction(self: *Self) void {
+    self.pc += 1;
+}
+
+/// Resets the opcode index of this activation.
+pub fn restart(self: *Self) void {
+    self.pc = 0;
+}
+
+pub fn format(
+    activation: Self,
+    comptime fmt: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    _ = fmt;
+    _ = options;
+    const creator_message_byte_array = activation.creator_message.asByteArray();
+    try std.fmt.format(writer, "Activation{{ '{s}' created from {}, pc = {}, target_location = {} }}", .{
+        creator_message_byte_array.getValues(),
+        activation.created_from,
+        activation.pc,
+        activation.target_location,
+    });
+}
 
 pub const ActivationStack = struct {
-    stack: []Self = &[_]Self{},
+    stack: []Self,
     depth: usize = 0,
 
     pub fn init(allocator: Allocator, max_depth: usize) !ActivationStack {
@@ -55,7 +149,7 @@ pub const ActivationStack = struct {
     }
 
     /// Unwinds the stack until the given activation is reached.
-    pub fn restoreTo(self: *ActivationStack, activation: *Self) void {
+    pub fn restoreTo(self: *ActivationStack, allocator: Allocator, activation: *Self) void {
         if (std.debug.runtime_safety) {
             std.debug.assert(self.isActivationWithin(activation));
         }
@@ -66,7 +160,7 @@ pub const ActivationStack = struct {
         const distance = @divExact(@ptrToInt(current_activation) - @ptrToInt(activation), @sizeOf(Self));
         const target_depth = self.depth - distance;
         while (self.depth != target_depth) : (self.depth -= 1) {
-            self.stack[self.depth - 1].deinit();
+            self.stack[self.depth - 1].deinit(allocator);
         }
     }
 
@@ -90,6 +184,10 @@ pub const ActivationStack = struct {
         return @ptrToInt(activation) >= @ptrToInt(start_of_slice) and
             @ptrToInt(activation) < @ptrToInt(end_of_slice);
     }
+
+    pub fn setRegisters(self: *ActivationStack, vm: *VirtualMachine) void {
+        vm.registers = self.getCurrent().registers;
+    }
 };
 
 /// A reference to an activation. The pointer and saved ID values are stored as
@@ -110,11 +208,11 @@ pub const ActivationRef = packed struct {
         return @intToPtr(*Self, self.pointer.asUnsignedInteger());
     }
 
-    pub fn isAlive(self: ActivationRef, context: *InterpreterContext) bool {
+    pub fn isAlive(self: ActivationRef, stack: *ActivationStack) bool {
         const activation_ptr = self.getPointer();
 
         // Is this activation outside the currently-valid activation stack?
-        if (!context.activation_stack.isActivationWithin(activation_ptr)) return false;
+        if (!stack.isActivationWithin(activation_ptr)) return false;
         // Does the ID we saved match the currently-stored ID on the activation
         // we point to?
         if (self.saved_id.asUnsignedInteger() != activation_ptr.activation_id) return false;
@@ -123,74 +221,15 @@ pub const ActivationRef = packed struct {
         return true;
     }
 
-    pub fn get(self: ActivationRef, context: *InterpreterContext) ?*Self {
-        return if (self.isAlive(context)) self.getPointer() else null;
+    pub fn get(self: ActivationRef, stack: *ActivationStack) ?*Self {
+        return if (self.isAlive(stack)) self.getPointer() else null;
     }
 };
 
-activation_id: u64,
-heap: *Heap,
-activation_object: Value,
-creation_context: ActivationCreationContext,
-/// Will be used as the target activation that a non-local return needs to rise
-/// to. Must be non-null when a non-local return is encountered, and when
-/// non-null, must point to an activation where
-/// `nonlocal_return_target_activation` is null.
-nonlocal_return_target_activation: ?*Self = null,
-/// This is the parent activation for the current block activation. The
-/// activation object of this activation will be used as the parent of the
-/// block's activation. Not used with methods, since we don't want to inherit
-/// previous activation objects in methods (that would make the language
-/// dynamically scoped :^).
-parent_activation: ?*Self = null,
+// FIXME: This isn't thread safe!
+var id: u64 = 0;
 
-// --- Activation execution state ---
-
-/// The index of the statement that is currently being executed. This is an
-/// offset into the statement slice of the activation object.
-statement_index: usize = 0,
-
-pub fn initInPlace(
-    self: *Self,
-    heap: *Heap,
-    activation_object: Value,
-    creator_message: Heap.Tracked,
-    source_range: SourceRange,
-    should_untrack_message_name_on_deinit: bool,
-) !void {
-    std.debug.assert(activation_object.isObjectReference());
-
-    self.* = Self{
-        .activation_id = newActivationID(),
-        .heap = heap,
-        .activation_object = activation_object,
-        .creation_context = .{
-            .should_untrack_message_name_on_deinit = should_untrack_message_name_on_deinit,
-            .message = creator_message,
-            .source_range = source_range.copy(),
-        },
-    };
-}
-
-pub fn deinit(self: *Self) void {
-    self.creation_context.source_range.deinit();
-
-    if (self.creation_context.should_untrack_message_name_on_deinit) {
-        self.creation_context.message.untrack(self.heap);
-    }
-}
-
-pub fn takeRef(self: *Self) ActivationRef {
-    return ActivationRef.init(self);
-}
-
-/// Return the result of the `self` message for the current context.
-pub fn selfObject(self: *Self) Value {
-    return self.activation_object;
-}
-
-/// Return the script that this activation's method or block is defined in. In
-/// order to keep a reference the caller should ref the script.
-pub fn script(self: *Self) Script.Ref {
-    return self.creation_context.source_range.script;
+pub fn newActivationID() u64 {
+    id += 1;
+    return id;
 }
