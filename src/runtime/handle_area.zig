@@ -180,10 +180,8 @@ pub fn allocHandle(self: *Self) !HandleType {
             try self.allocateNewChunk();
             return self.latest_chunk.allocate() catch |second_err| switch (second_err) {
                 error.OutOfMemory => @panic("!!! Could not allocate a handle even after allocating a new chunk!"),
-                else => return second_err,
             };
         },
-        else => return err,
     };
 }
 

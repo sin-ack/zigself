@@ -368,7 +368,7 @@ const Space = struct {
         var runtime_zero: usize = 0;
 
         return Space{
-            .heap = if (GC_TRACK_SOURCE_DEBUG) heap else .{},
+            .heap = if (GC_TRACK_SOURCE_DEBUG) heap else {},
             .memory = memory,
             .object_segment = memory[0..runtime_zero],
             .byte_array_segment = (memory.ptr + memory.len)[0..runtime_zero],
@@ -795,7 +795,7 @@ const Space = struct {
 
     /// Adds the given address to the finalization set of this space.
     pub fn addToFinalizationSet(self: *Space, allocator: Allocator, address: [*]u64) !void {
-        try self.finalization_set.put(allocator, address, .{});
+        try self.finalization_set.put(allocator, address, {});
     }
 
     /// Returns whether the finalization set contains the given address.

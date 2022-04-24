@@ -556,7 +556,7 @@ fn parseBlock(self: *Self) ParseError!?*AST.BlockNode {
     const bracket_open_token = self.assertToken(.BracketOpen);
     const start_of_block = self.token_starts[bracket_open_token];
 
-    var slots = if (self.token_tags[self.token_index] == .Pipe)
+    var slots: []AST.SlotNode = if (self.token_tags[self.token_index] == .Pipe)
         (try self.parseSlotList(.Block, 0)) orelse return null
     else
         &[_]AST.SlotNode{};
