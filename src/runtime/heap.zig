@@ -14,7 +14,7 @@ const Object = @import("./object.zig");
 const ByteVector = @import("./byte_array.zig");
 const Activation = @import("./activation.zig");
 const HandleArea = @import("./handle_area.zig");
-const VirtualMachine = @import("./virtual_machine.zig");
+const VirtualMachine = @import("./VirtualMachine.zig");
 const ActivationStack = Activation.ActivationStack;
 
 const GC_DEBUG = debug.GC_DEBUG;

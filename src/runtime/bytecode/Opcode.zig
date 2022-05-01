@@ -7,7 +7,7 @@ const std = @import("std");
 const Actor = @import("../Actor.zig");
 const Block = @import("./Block.zig");
 const Completion = @import("../completion.zig");
-const VirtualMachine = @import("../virtual_machine.zig");
+const VirtualMachine = @import("../VirtualMachine.zig");
 const RegisterLocation = @import("./register_location.zig").RegisterLocation;
 
 // NOTE: This is set in Block.addOpcode

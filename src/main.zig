@@ -8,7 +8,7 @@ const zig_args = @import("zig-args");
 const Script = @import("./language/script.zig");
 const ASTPrinter = @import("./language/ast_printer.zig");
 
-const VirtualMachine = @import("./runtime/virtual_machine.zig");
+const VirtualMachine = @import("./runtime/VirtualMachine.zig");
 
 const ArgumentSpec = struct {
     help: bool = false,

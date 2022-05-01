@@ -10,7 +10,7 @@ const Value = @import("./value.zig").Value;
 const Activation = @import("./activation.zig");
 const interpreter = @import("./interpreter.zig");
 const SourceRange = @import("./SourceRange.zig");
-const VirtualMachine = @import("./virtual_machine.zig");
+const VirtualMachine = @import("./VirtualMachine.zig");
 
 const Self = @This();
 

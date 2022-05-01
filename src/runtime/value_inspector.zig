@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const Slot = @import("./slot.zig").Slot;
 const Object = @import("./object.zig");
 const Value = @import("./value.zig").Value;
-const VirtualMachine = @import("./virtual_machine.zig");
+const VirtualMachine = @import("./VirtualMachine.zig");
 
 pub const InspectDisplayType = enum { Inline, Multiline };
 const VisitedObjectLink = struct {

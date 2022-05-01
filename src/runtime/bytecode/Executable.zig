@@ -14,7 +14,7 @@ const Completion = @import("../completion.zig");
 const Activation = @import("../activation.zig");
 const SourceRange = @import("../SourceRange.zig");
 const ref_counted = @import("../../utility/ref_counted.zig");
-const VirtualMachine = @import("../virtual_machine.zig");
+const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationStack = Activation.ActivationStack;
 const RegisterLocation = @import("./register_location.zig").RegisterLocation;
 

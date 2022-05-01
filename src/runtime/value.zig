@@ -13,7 +13,7 @@ const RefPtr = @import("../utility/ref_counted.zig").RefPtr;
 const ByteArray = @import("./byte_array.zig");
 const Completion = @import("./completion.zig");
 const object_lookup = @import("./object/lookup.zig");
-const VirtualMachine = @import("./virtual_machine.zig");
+const VirtualMachine = @import("./VirtualMachine.zig");
 const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;

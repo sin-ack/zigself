@@ -12,7 +12,7 @@ const Object = @import("./object.zig");
 const Completion = @import("./completion.zig");
 const SourceRange = @import("./SourceRange.zig");
 const runtime_error = @import("./error.zig");
-const VirtualMachine = @import("./virtual_machine.zig");
+const VirtualMachine = @import("./VirtualMachine.zig");
 const RegisterLocation = @import("./bytecode/register_location.zig").RegisterLocation;
 
 const basic_primitives = @import("./primitives/basic.zig");

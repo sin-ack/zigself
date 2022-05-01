@@ -11,7 +11,7 @@ const debug = @import("../../debug.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
 const Completion = @import("../completion.zig");
-const VirtualMachine = @import("../virtual_machine.zig");
+const VirtualMachine = @import("../VirtualMachine.zig");
 
 const SLOTS_LOOKUP_DEBUG = debug.SLOTS_LOOKUP_DEBUG;
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;

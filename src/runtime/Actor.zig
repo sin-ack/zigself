@@ -11,7 +11,7 @@ const Completion = @import("./completion.zig");
 const Executable = @import("./bytecode/Executable.zig");
 const Activation = @import("./activation.zig");
 const interpreter = @import("./interpreter.zig");
-const VirtualMachine = @import("./virtual_machine.zig");
+const VirtualMachine = @import("./VirtualMachine.zig");
 const ActivationStack = Activation.ActivationStack;
 
 const ACTIVATION_EXIT_DEBUG = debug.ACTIVATION_EXIT_DEBUG;

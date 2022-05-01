@@ -10,7 +10,7 @@ const Actor = @import("./Actor.zig");
 const Value = @import("./value.zig").Value;
 const Executable = @import("./bytecode/Executable.zig");
 const SourceRange = @import("./SourceRange.zig");
-const VirtualMachine = @import("./virtual_machine.zig");
+const VirtualMachine = @import("./VirtualMachine.zig");
 const RegisterLocation = @import("./bytecode/register_location.zig").RegisterLocation;
 
 /// The ID of the activation which is used with ActivationRef in order to check
