@@ -12,7 +12,7 @@ const hash = @import("../utility/hash.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
 const Codegen = @import("./Codegen.zig");
-const ByteArray = @import("./byte_array.zig");
+const ByteArray = @import("./ByteArray.zig");
 const map_builder = @import("./object/map_builder.zig");
 
 /// The properties of a slot. This is shared by both ProtoSlot and Slot.

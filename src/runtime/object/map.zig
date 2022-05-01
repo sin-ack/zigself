@@ -18,7 +18,7 @@ const PointerValue = @import("../value.zig").PointerValue;
 const BytecodeBlock = @import("../bytecode/Block.zig");
 const RefCountedValue = @import("../value.zig").RefCountedValue;
 // Zig's shadowing rules are annoying.
-const ByteArrayTheFirst = @import("../byte_array.zig");
+const ByteArrayTheFirst = @import("../ByteArray.zig");
 const BytecodeExecutable = @import("../bytecode/Executable.zig");
 
 var static_map_map: ?Value = null;

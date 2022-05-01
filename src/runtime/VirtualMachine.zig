@@ -13,7 +13,7 @@ const Actor = @import("./Actor.zig");
 const Object = @import("./object.zig");
 const Script = @import("../language/script.zig");
 const Codegen = @import("./Codegen.zig");
-const ByteArray = @import("./byte_array.zig");
+const ByteArray = @import("./ByteArray.zig");
 const runtime_error = @import("./error.zig");
 const RegisterLocation = @import("./bytecode/register_location.zig").RegisterLocation;
 

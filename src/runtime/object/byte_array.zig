@@ -7,7 +7,7 @@ const std = @import("std");
 const Heap = @import("../heap.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
-const ByteArray = @import("../byte_array.zig");
+const ByteArray = @import("../ByteArray.zig");
 
 pub const ByteArrayObject = packed struct {
     header: Object.Header,
