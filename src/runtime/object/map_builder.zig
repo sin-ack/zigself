@@ -4,7 +4,7 @@
 
 const std = @import("std");
 
-const Heap = @import("../heap.zig");
+const Heap = @import("../Heap.zig");
 const Codegen = @import("../Codegen.zig");
 const Slot = @import("../slot.zig").Slot;
 const Value = @import("../value.zig").Value;

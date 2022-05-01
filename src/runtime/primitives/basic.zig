@@ -5,7 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("../heap.zig");
+const Heap = @import("../Heap.zig");
 const Script = @import("../../language/script.zig");
 const Codegen = @import("../Codegen.zig");
 const Completion = @import("../Completion.zig");

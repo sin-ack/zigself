@@ -6,7 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const hash = @import("../utility/hash.zig");
-const Heap = @import("./heap.zig");
+const Heap = @import("./Heap.zig");
 const debug = @import("../debug.zig");
 const Object = @import("./Object.zig");
 const RefPtr = @import("../utility/ref_counted.zig").RefPtr;

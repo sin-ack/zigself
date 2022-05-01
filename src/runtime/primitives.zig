@@ -5,7 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("./heap.zig");
+const Heap = @import("./Heap.zig");
 const Value = @import("./value.zig").Value;
 const Actor = @import("./Actor.zig");
 const Object = @import("./Object.zig");

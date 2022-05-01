@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("./heap.zig");
+const Heap = @import("./Heap.zig");
 const Value = @import("./value.zig").Value;
 const slots_objects = @import("./object/slots.zig");
 const byte_array_object = @import("./object/byte_array.zig");
