@@ -6,7 +6,7 @@ const std = @import("std");
 
 const Actor = @import("../Actor.zig");
 const Block = @import("./Block.zig");
-const Completion = @import("../completion.zig");
+const Completion = @import("../Completion.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const RegisterLocation = @import("./register_location.zig").RegisterLocation;
 

@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const debug = @import("../debug.zig");
 const Value = @import("./value.zig").Value;
-const Completion = @import("./completion.zig");
+const Completion = @import("./Completion.zig");
 const Executable = @import("./bytecode/Executable.zig");
 const Activation = @import("./activation.zig");
 const interpreter = @import("./interpreter.zig");

@@ -6,7 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Object = @import("../object.zig");
-const Completion = @import("../completion.zig");
+const Completion = @import("../Completion.zig");
 const value_inspector = @import("../value_inspector.zig");
 
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;

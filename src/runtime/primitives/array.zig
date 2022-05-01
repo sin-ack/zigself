@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const Heap = @import("../heap.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig");
-const Completion = @import("../completion.zig");
+const Completion = @import("../Completion.zig");
 
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
