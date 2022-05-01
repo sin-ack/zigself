@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const Heap = @import("./heap.zig");
 const Value = @import("./value.zig").Value;
-const Activation = @import("./activation.zig");
+const Activation = @import("./Activation.zig");
 const interpreter = @import("./interpreter.zig");
 const SourceRange = @import("./SourceRange.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");

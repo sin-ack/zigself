@@ -5,7 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Activation = @import("./activation.zig");
+const Activation = @import("./Activation.zig");
 const SourceRange = @import("./SourceRange.zig");
 
 fn writeTraceForFrame(message_name: []const u8, source_range: SourceRange) void {

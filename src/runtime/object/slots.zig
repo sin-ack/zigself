@@ -21,7 +21,7 @@ const SourceRange = @import("../SourceRange.zig");
 const BytecodeBlock = @import("../bytecode/Block.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const RegisterLocation = @import("../bytecode/register_location.zig").RegisterLocation;
-const RuntimeActivation = @import("../activation.zig");
+const RuntimeActivation = @import("../Activation.zig");
 const BytecodeExecutable = @import("../bytecode/Executable.zig");
 
 /// Information about added/changed slots when an object is merged into another.
