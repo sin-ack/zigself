@@ -13,7 +13,7 @@ const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig");
 const ByteVector = @import("./ByteArray.zig");
 const Activation = @import("./Activation.zig");
-const HandleArea = @import("./handle_area.zig");
+const HandleArea = @import("./HandleArea.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const ActivationStack = Activation.ActivationStack;
 
