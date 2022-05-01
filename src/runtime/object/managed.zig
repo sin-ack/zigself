@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const Heap = @import("../heap.zig");
 const Value = @import("../value.zig").Value;
-const Object = @import("../object.zig");
+const Object = @import("../Object.zig");
 
 const ManagedTypeShift = Object.ObjectTypeShift + Object.ObjectTypeBits;
 const ManagedTypeBits = 1;

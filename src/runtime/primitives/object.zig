@@ -5,7 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Object = @import("../object.zig");
+const Object = @import("../Object.zig");
 const Completion = @import("../Completion.zig");
 const value_inspector = @import("../value_inspector.zig");
 

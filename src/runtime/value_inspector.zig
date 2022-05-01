@@ -6,7 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Slot = @import("./slot.zig").Slot;
-const Object = @import("./object.zig");
+const Object = @import("./Object.zig");
 const Value = @import("./value.zig").Value;
 const VirtualMachine = @import("./VirtualMachine.zig");
 

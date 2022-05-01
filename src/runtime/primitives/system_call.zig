@@ -6,7 +6,7 @@ const std = @import("std");
 
 const Heap = @import("../heap.zig");
 const Value = @import("../value.zig").Value;
-const Object = @import("../object.zig");
+const Object = @import("../Object.zig");
 const Completion = @import("../Completion.zig");
 const ManagedObject = @import("../object/managed.zig");
 const FileDescriptor = ManagedObject.FileDescriptor;

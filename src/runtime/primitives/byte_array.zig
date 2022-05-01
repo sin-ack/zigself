@@ -6,7 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Value = @import("../value.zig").Value;
-const Object = @import("../object.zig");
+const Object = @import("../Object.zig");
 const Completion = @import("../Completion.zig");
 const ByteArray = @import("../ByteArray.zig");
 
