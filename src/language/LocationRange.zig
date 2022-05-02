@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
+//! This struct is an analogue to Range, but contains full Location information.
+
 const std = @import("std");
 
 const Location = @import("./location.zig");

@@ -122,7 +122,7 @@ pub fn parseScript(self: *Self) ParseError!AST.ScriptNode {
         );
     }
 
-    return AST.ScriptNode{ .statements = statements, .range = .{ .start = self.offsetToLocation(0), .end = self.offsetToLocation(self.buffer.len) } };
+    return AST.ScriptNode{ .statements = statements, .range = .{ .start = 0, .end = self.buffer.len } };
 }
 
 fn parseStatementList(self: *Self, allow_nonlocal_return: bool) ParseError!AST.StatementList.Ref {
@@ -187,7 +187,7 @@ fn parseStatement(self: *Self, nonlocal_return_state: *NonlocalReturnState) Pars
             var return_node = try self.allocator.create(AST.ReturnNode);
             return_node.* = .{
                 .expression = expression,
-                .range = .{ .start = self.offsetToLocation(start_of_expression), .end = expression.range().end },
+                .range = .{ .start = start_of_expression, .end = expression.range().end },
             };
             expression = AST.ExpressionNode{ .Return = return_node };
 
@@ -280,7 +280,7 @@ fn parseExpressionFromPrimary(
             .receiver = expr,
             .message_name = identifier_copy,
             .arguments = &.{},
-            .range = .{ .start = expr.range().start, .end = self.offsetToLocation(end_of_identifier) },
+            .range = .{ .start = expr.range().start, .end = end_of_identifier },
         };
         expr = AST.ExpressionNode{ .Message = message_node };
     }
@@ -354,7 +354,7 @@ fn parseBinaryMessage(self: *Self, receiver: ?AST.ExpressionNode) ParseError!?AS
         .receiver = receiver,
         .message_name = binary_message_copy,
         .arguments = arguments,
-        .range = .{ .start = if (receiver) |r| r.range().start else self.offsetToLocation(start_of_message), .end = term.range().end },
+        .range = .{ .start = if (receiver) |r| r.range().start else start_of_message, .end = term.range().end },
     };
 
     return AST.ExpressionNode{ .Message = message_node };
@@ -400,7 +400,7 @@ fn parseKeywordMessage(self: *Self, receiver: ?AST.ExpressionNode) ParseError!?A
         .receiver = receiver,
         .message_name = message_name.toOwnedSlice(),
         .arguments = arguments.toOwnedSlice(),
-        .range = .{ .start = if (receiver) |r| r.range().start else self.offsetToLocation(start_of_message), .end = end_of_last_argument },
+        .range = .{ .start = if (receiver) |r| r.range().start else start_of_message, .end = end_of_last_argument },
     };
 
     return AST.ExpressionNode{ .Message = message_node };
@@ -452,7 +452,7 @@ fn parseSlotsObjectOrSubexpr(self: *Self, must_not_be_method: bool, did_extract_
             if (must_not_be_method)
                 try self.diagnostics.reportDiagnostic(
                     .Error,
-                    object.range.start,
+                    self.offsetToLocation(object.range.start),
                     "Sub-expressions cannot have more than one expression",
                 );
 
@@ -468,7 +468,7 @@ fn parseSlotsObjectOrSubexpr(self: *Self, must_not_be_method: bool, did_extract_
             if (must_not_be_method)
                 try self.diagnostics.reportDiagnostic(
                     .Error,
-                    object.range.start,
+                    self.offsetToLocation(object.range.start),
                     "Sub-expressions must not use slot delimiters",
                 );
 
@@ -477,7 +477,7 @@ fn parseSlotsObjectOrSubexpr(self: *Self, must_not_be_method: bool, did_extract_
             if (must_not_be_method)
                 try self.diagnostics.reportDiagnostic(
                     .Error,
-                    object.range.start,
+                    self.offsetToLocation(object.range.start),
                     "Slots object cannot contain expressions, use methods",
                 );
 
@@ -487,7 +487,7 @@ fn parseSlotsObjectOrSubexpr(self: *Self, must_not_be_method: bool, did_extract_
         if (must_not_be_method)
             try self.diagnostics.reportDiagnostic(
                 .Error,
-                object.range.start,
+                self.offsetToLocation(object.range.start),
                 "Slots object cannot contain expressions, use methods",
             );
 
@@ -545,7 +545,7 @@ fn parseObject(self: *Self, did_use_slots: ?*bool, argument_slots: ?[]const AST.
     object_node.* = .{
         .slots = slots.toOwnedSlice(),
         .statements = statements,
-        .range = .{ .start = self.offsetToLocation(start_of_object), .end = self.offsetToLocation(end_of_object) },
+        .range = .{ .start = start_of_object, .end = end_of_object },
     };
 
     return object_node;
@@ -584,7 +584,7 @@ fn parseBlock(self: *Self) ParseError!?*AST.BlockNode {
     block_node.* = .{
         .slots = slots,
         .statements = statements,
-        .range = .{ .start = self.offsetToLocation(start_of_block), .end = self.offsetToLocation(end_of_block) },
+        .range = .{ .start = start_of_block, .end = end_of_block },
     };
     // Replace slots with an empty slice so that we don't free the slots after
     // we exit.
@@ -747,8 +747,8 @@ fn parseSlot(self: *Self, order: usize, allow_argument: bool, allow_inherited: b
                 .name = slot_name,
                 .value = null,
                 .range = .{
-                    .start = self.offsetToLocation(start_of_slot),
-                    .end = self.offsetToLocation(self.token_starts[self.token_index]),
+                    .start = start_of_slot,
+                    .end = self.token_starts[self.token_index],
                 },
             };
         } else if (self.consumeToken(.Equals)) |_| {} else {
@@ -833,7 +833,7 @@ fn parseSlot(self: *Self, order: usize, allow_argument: bool, allow_inherited: b
         .order = order,
         .name = slot_name,
         .value = value,
-        .range = .{ .start = self.offsetToLocation(start_of_slot), .end = value.range().end },
+        .range = .{ .start = start_of_slot, .end = value.range().end },
     };
 }
 
@@ -854,10 +854,7 @@ fn createSlotNodeFromArgument(self: *Self, order: usize) ParseError!AST.SlotNode
         .order = order,
         .name = identifier_copy,
         .value = null,
-        .range = .{
-            .start = self.offsetToLocation(start_of_identifier),
-            .end = self.offsetToLocation(end_of_identifier),
-        },
+        .range = .{ .start = start_of_identifier, .end = end_of_identifier },
     };
     return slot_node;
 }
@@ -974,10 +971,7 @@ fn parseString(self: *Self) ParseError!?AST.StringNode {
                 '\'' => {
                     return AST.StringNode{
                         .value = string_buffer.toOwnedSlice(),
-                        .range = .{
-                            .start = self.offsetToLocation(start_of_string),
-                            .end = self.offsetToLocation(offset + 1),
-                        },
+                        .range = .{ .start = start_of_string, .end = offset + 1 },
                     };
                 },
                 '\n' => {
@@ -1061,7 +1055,7 @@ fn parseIdentifier(self: *Self) ParseError!AST.IdentifierNode {
 
     const node = AST.IdentifierNode{
         .value = identifier_copy,
-        .range = .{ .start = self.offsetToLocation(start_of_identifier), .end = self.offsetToLocation(end_of_identifier) },
+        .range = .{ .start = start_of_identifier, .end = end_of_identifier },
     };
     return node;
 }
@@ -1164,7 +1158,7 @@ fn parseInteger(self: *Self) ParseError!AST.NumberNode {
 
     const node = AST.NumberNode{
         .value = .{ .Integer = integer },
-        .range = .{ .start = self.offsetToLocation(start_of_number), .end = self.offsetToLocation(offset) },
+        .range = .{ .start = start_of_number, .end = offset },
     };
     return node;
 }
@@ -1212,7 +1206,7 @@ fn parseFloatingPoint(self: *Self) ParseError!AST.NumberNode {
 
     const node = AST.NumberNode{
         .value = .{ .FloatingPoint = result },
-        .range = .{ .start = self.offsetToLocation(start_of_number), .end = self.offsetToLocation(offset) },
+        .range = .{ .start = start_of_number, .end = offset },
     };
     return node;
 }
@@ -1254,7 +1248,7 @@ fn expectToken(self: *Self, tag: Token.Tag) ParseError!bool {
 }
 
 /// Turn an offset into a line-and-column location.
-fn offsetToLocation(self: Self, offset: usize) Location {
+pub fn offsetToLocation(self: Self, offset: usize) Location {
     var line: usize = 1;
     var line_start: usize = undefined;
     var line_end: usize = undefined;

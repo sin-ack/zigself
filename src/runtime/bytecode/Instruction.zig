@@ -6,6 +6,7 @@ const std = @import("std");
 
 const Actor = @import("../Actor.zig");
 const Block = @import("./Block.zig");
+const Range = @import("../../language/Range.zig");
 const Completion = @import("../Completion.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const RegisterLocation = @import("./register_location.zig").RegisterLocation;
@@ -49,6 +50,9 @@ const Tag = enum(u32) {
     // Arguments
     PushArg,
 
+    // Source range
+    SourceRange,
+
     pub fn toString(self: Tag) []const u8 {
         return switch (self) {
             .Send => "send",
@@ -69,6 +73,7 @@ const Tag = enum(u32) {
             .ExitActivation => "exit_activation",
             .NonlocalReturn => "nonlocal_return",
             .PushArg => "push_arg",
+            .SourceRange => "source_range",
         };
     }
 
@@ -86,6 +91,7 @@ const Tag = enum(u32) {
             .CreateByteArray => Self.Payload.CreateByteArray,
             .ExitActivation, .NonlocalReturn => Self.Payload.ExitActivation,
             .PushArg => Self.Payload.PushArg,
+            .SourceRange => Self.Payload.SourceRange,
 
             .SetMethodInline => @panic("Attempted to get payload type of instruction without payload"),
         };
@@ -147,6 +153,8 @@ pub const Payload = struct {
     pub const ExitActivation = struct {
         value_location: RegisterLocation,
     };
+
+    pub const SourceRange = Range;
 };
 
 // --- Creation ---
@@ -224,6 +232,10 @@ pub fn pushArg(argument_location: RegisterLocation) Self {
     return .{ .tag = .PushArg, .arguments = .{ @enumToInt(argument_location), undefined, undefined } };
 }
 
+pub fn sourceRange(range: Range) Self {
+    return .{ .tag = .SourceRange, .arguments = .{ range.start, range.end, undefined } };
+}
+
 pub fn format(
     inst: Self,
     comptime fmt: []const u8,
@@ -290,6 +302,10 @@ pub fn format(
         .ExitActivation, .NonlocalReturn, .PushArg => {
             try std.fmt.format(writer, "(%{})", .{inst.arguments[0]});
         },
+
+        .SourceRange => {
+            try std.fmt.format(writer, "({}:{})", .{ inst.arguments[0], inst.arguments[1] });
+        },
     }
 }
 
@@ -343,6 +359,10 @@ pub fn payload(self: Self, comptime tag: Tag) tag.Payload() {
         },
         .PushArg => Payload.PushArg{
             .argument_location = RegisterLocation.fromIndex(@intCast(u32, self.arguments[0])),
+        },
+        .SourceRange => Payload.SourceRange{
+            .start = self.arguments[0],
+            .end = self.arguments[1],
         },
 
         .SetMethodInline => @panic("Attempted to get payload of instruction without payload"),

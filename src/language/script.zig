@@ -9,6 +9,7 @@ const ref_counted = @import("../utility/ref_counted.zig");
 const AST = @import("./ast.zig");
 const Parser = @import("./parser.zig");
 const Diagnostics = @import("./diagnostics.zig");
+const Location = @import("./location.zig");
 
 const Self = @This();
 pub const Ref = ref_counted.RefPtr(Self);
@@ -103,4 +104,12 @@ pub fn reportDiagnostics(self: Self, writer: anytype) !void {
         try writer.writeByteNTimes(' ', diagnostic.location.column - 1);
         try writer.writeAll("^\n");
     }
+}
+
+pub fn offsetToLocation(self: Self, offset: usize) Location {
+    return self.parser.offsetToLocation(offset);
+}
+
+pub fn getSourceLine(self: Self, location: Location) []const u8 {
+    return self.parser.buffer[location.line_start..location.line_end];
 }

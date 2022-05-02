@@ -9,12 +9,12 @@ const Activation = @import("./Activation.zig");
 const SourceRange = @import("./SourceRange.zig");
 
 fn writeTraceForFrame(message_name: []const u8, source_range: SourceRange) void {
-    std.debug.print("  at {s} ({})\n", .{ message_name, source_range });
-
-    const range = source_range.range;
+    const range = source_range.getLocationRange();
     const source_line = source_range.getStartLine() catch unreachable;
+
+    std.debug.print("  at {s} ({})\n", .{ message_name, source_range });
     // NOTE: The spaces are to get the arrow aligned with the source code
-    std.debug.print("  \x1b[37m{d:<3} |\x1b[0m {s}\n\x1b[92m        ", .{ source_range.range.start.line, source_line });
+    std.debug.print("  \x1b[37m{d:<3} |\x1b[0m {s}\n\x1b[92m        ", .{ range.start.line, source_line });
 
     // FIXME: Make this nicer
     const writer = std.io.getStdErr().writer();

@@ -71,11 +71,7 @@ pub fn pushEntrypointActivation(self: *Self, vm: *VirtualMachine, activation_sta
 /// context pointing at another executable. This is used when executing scripts
 /// by _RunScript, for example.
 pub fn pushSubEntrypointActivation(self: *Self, vm: *VirtualMachine, executable: Ref, target_location: RegisterLocation, activation_stack: *ActivationStack) !void {
-    var source_range = SourceRange.init(executable, .{
-        .start = .{ .line_start = 0, .line_end = 2, .line = 1, .column = 1 },
-        .end = .{ .line_start = 0, .line_end = 2, .line = 1, .column = 2 },
-    });
-    defer source_range.deinit();
+    var source_range = SourceRange.initNoRef(executable, .{ .start = 0, .end = 1 });
 
     const toplevel_context_method = try Object.Method.createTopLevelContextForExecutable(vm, Ref{ .value = self }, self.entrypointBlock());
     const activation_slot = activation_stack.getNewActivationSlot();

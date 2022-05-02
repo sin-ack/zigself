@@ -5,7 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Range = @import("./location_range.zig");
+const Range = @import("./Range.zig");
 const ref_counted = @import("../utility/ref_counted.zig");
 
 /// A ref-counted slice of statements.

@@ -44,6 +44,7 @@ fn generateScript(self: *Codegen, executable: *Executable, script_node: ast.Scri
     const script_block_index = try executable.makeBlock();
     const script_block = executable.getBlock(script_block_index);
     const last_expression_location = try self.generateStatementList(executable, script_block, script_node.statements.value.statements);
+
     _ = try script_block.addInstruction(executable.allocator, Instruction.exitActivation(last_expression_location));
 }
 
@@ -80,8 +81,6 @@ fn generateObject(self: *Codegen, executable: *Executable, block: *Block, object
     self.method_execution_depth = 0;
     defer self.method_execution_depth = saved_method_execution_depth;
 
-    // FIXME: Insert source range
-
     var assignable_slot_count: usize = 0;
     for (object.slots) |slot| {
         if (slot.is_mutable) assignable_slot_count += 1;
@@ -95,6 +94,7 @@ fn generateObject(self: *Codegen, executable: *Executable, block: *Block, object
 
     try self.generateSlotList(executable, block, object.slots);
 
+    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(object.range));
     return try block.addInstruction(executable.allocator, Instruction.createObject(@intCast(u32, object.slots.len)));
 }
 
@@ -104,6 +104,7 @@ fn generateBlock(self: *Codegen, executable: *Executable, block: *Block, block_n
     defer self.method_execution_depth = saved_method_execution_depth;
 
     const block_index = try self.generateSlotsAndCodeCommon(executable, block, block_node.slots, block_node.statements.value.statements);
+    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(block_node.range));
     return try block.addInstruction(executable.allocator, Instruction.createBlock(@intCast(u32, block_node.slots.len), block_index));
 }
 
@@ -112,6 +113,8 @@ fn generateMethod(self: *Codegen, executable: *Executable, block: *Block, method
     defer self.method_execution_depth -= 1;
 
     const block_index = try self.generateSlotsAndCodeCommon(executable, block, method.slots, method.statements.value.statements);
+
+    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(method.range));
     const method_name_location = try block.addInstruction(executable.allocator, Instruction.createByteArray(method_name));
 
     if (self.method_execution_depth > 1) {
@@ -133,6 +136,7 @@ fn generateMessage(self: *Codegen, executable: *Executable, block: *Block, messa
         const receiver_location = try self.generateExpression(executable, block, receiver);
         try self.generateArgumentList(executable, block, message.arguments);
 
+        _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(message.range));
         return if (message.message_name[0] == '_')
             try block.addInstruction(executable.allocator, Instruction.primSend(receiver_location, message.message_name[1..]))
         else
@@ -141,6 +145,7 @@ fn generateMessage(self: *Codegen, executable: *Executable, block: *Block, messa
 
     try self.generateArgumentList(executable, block, message.arguments);
 
+    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(message.range));
     return if (message.message_name[0] == '_')
         try block.addInstruction(executable.allocator, Instruction.selfPrimSend(message.message_name[1..]))
     else
@@ -149,6 +154,7 @@ fn generateMessage(self: *Codegen, executable: *Executable, block: *Block, messa
 
 fn generateReturn(self: *Codegen, executable: *Executable, block: *Block, return_node: *ast.ReturnNode) CodegenError!RegisterLocation {
     const expr_location = try self.generateExpression(executable, block, return_node.expression);
+    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(return_node.range));
     _ = try block.addInstruction(executable.allocator, Instruction.nonlocalReturn(expr_location));
     return RegisterLocation.Nil;
 }
@@ -161,6 +167,7 @@ fn generateReturn(self: *Codegen, executable: *Executable, block: *Block, return
 fn generateIdentifier(self: *Codegen, executable: *Executable, block: *Block, identifier: ast.IdentifierNode) CodegenError!RegisterLocation {
     _ = self;
 
+    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(identifier.range));
     return if (identifier.value[0] == '_')
         try block.addInstruction(executable.allocator, Instruction.selfPrimSend(identifier.value[1..]))
     else
@@ -170,12 +177,14 @@ fn generateIdentifier(self: *Codegen, executable: *Executable, block: *Block, id
 fn generateString(self: *Codegen, executable: *Executable, block: *Block, string: ast.StringNode) CodegenError!RegisterLocation {
     _ = self;
 
+    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(string.range));
     return try block.addInstruction(executable.allocator, Instruction.createByteArray(string.value));
 }
 
 fn generateNumber(self: *Codegen, executable: *Executable, block: *Block, number: ast.NumberNode) CodegenError!RegisterLocation {
     _ = self;
 
+    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(number.range));
     return switch (number.value) {
         .Integer => |i| try block.addInstruction(executable.allocator, Instruction.createInteger(i)),
         .FloatingPoint => |f| try block.addInstruction(executable.allocator, Instruction.createFloatingPoint(f)),
@@ -236,6 +245,7 @@ fn generateSlotList(self: *Codegen, executable: *Executable, block: *Block, slot
             break :blk RegisterLocation.Nil;
         };
 
+        _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(slot.range));
         const slot_name_index = try block.addInstruction(executable.allocator, Instruction.createByteArray(slot.name));
 
         if (slot.is_inherited) {

@@ -23,11 +23,7 @@ const Slot = slot_import.Slot;
 const EXECUTION_DEBUG = debug.EXECUTION_DEBUG;
 
 pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation, executable: Executable.Ref, inst: Instruction) !?Completion {
-    var dummy_source_range = SourceRange.init(executable, .{
-        .start = .{ .line_start = 0, .line_end = 2, .line = 1, .column = 1 },
-        .end = .{ .line_start = 0, .line_end = 2, .line = 1, .column = 2 },
-    });
-    defer dummy_source_range.deinit();
+    const source_range = SourceRange.initNoRef(executable, vm.range);
 
     if (EXECUTION_DEBUG) std.debug.print("[{s}] Executing: {} = {}\n", .{ executable.value.definition_script.value.file_path, inst.target, inst });
 
@@ -36,7 +32,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             const payload = inst.payload(.Send);
             const receiver = vm.readRegister(payload.receiver_location);
 
-            const completion = (try sendMessage(vm, actor, receiver, payload.message_name, inst.target, dummy_source_range)) orelse return null;
+            const completion = (try sendMessage(vm, actor, receiver, payload.message_name, inst.target, source_range)) orelse return null;
 
             if (completion.isNormal()) {
                 var result = completion.data.Normal;
@@ -63,7 +59,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
                 defer tracked_receiver.untrack(vm.heap);
 
                 const argument_slice = vm.lastNArguments(primitive.arity);
-                const completion = (try primitive.call(vm, actor, tracked_receiver, argument_slice, inst.target, dummy_source_range)) orelse return null;
+                const completion = (try primitive.call(vm, actor, tracked_receiver, argument_slice, inst.target, source_range)) orelse return null;
                 vm.popNArguments(primitive.arity);
 
                 if (completion.isNormal()) {
@@ -74,13 +70,13 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
                 return completion;
             }
 
-            return try Completion.initRuntimeError(vm, dummy_source_range, "Unknown primitive selector '{s}'", .{payload.message_name});
+            return try Completion.initRuntimeError(vm, source_range, "Unknown primitive selector '{s}'", .{payload.message_name});
         },
         .SelfSend => {
             const payload = inst.payload(.SelfSend);
             const receiver = actor.activation_stack.getCurrent().activation_object;
 
-            const completion = (try sendMessage(vm, actor, receiver, payload.message_name, inst.target, dummy_source_range)) orelse return null;
+            const completion = (try sendMessage(vm, actor, receiver, payload.message_name, inst.target, source_range)) orelse return null;
 
             if (completion.isNormal()) {
                 var result = completion.data.Normal;
@@ -107,7 +103,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
                 defer tracked_receiver.untrack(vm.heap);
 
                 const argument_slice = vm.lastNArguments(primitive.arity);
-                const completion = (try primitive.call(vm, actor, tracked_receiver, argument_slice, inst.target, dummy_source_range)) orelse return null;
+                const completion = (try primitive.call(vm, actor, tracked_receiver, argument_slice, inst.target, source_range)) orelse return null;
                 vm.popNArguments(primitive.arity);
 
                 if (completion.isNormal()) {
@@ -118,7 +114,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
                 return completion;
             }
 
-            return try Completion.initRuntimeError(vm, dummy_source_range, "Unknown primitive selector '{s}'", .{payload.message_name});
+            return try Completion.initRuntimeError(vm, source_range, "Unknown primitive selector '{s}'", .{payload.message_name});
         },
         .PushConstantSlot => {
             const payload = inst.payload(.PushConstantSlot);
@@ -331,6 +327,11 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             }
             try vm.pushArgument(argument);
 
+            return null;
+        },
+        .SourceRange => {
+            const range = inst.payload(.SourceRange);
+            vm.range = range;
             return null;
         },
     }

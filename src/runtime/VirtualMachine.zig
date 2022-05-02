@@ -9,6 +9,7 @@ const Heap = @import("./Heap.zig");
 const slot_import = @import("./slot.zig");
 const Slot = slot_import.Slot;
 const Value = @import("./value.zig").Value;
+const Range = @import("../language/Range.zig");
 const Actor = @import("./Actor.zig");
 const Object = @import("./Object.zig");
 const Script = @import("../language/script.zig");
@@ -60,6 +61,9 @@ argument_stack: std.ArrayListUnmanaged(Value) = .{},
 slot_stack: std.ArrayListUnmanaged(Slot) = .{},
 /// Whether the next created method is going to be an inline method.
 next_method_is_inline: bool = false,
+/// The currently active source range. This is updated by the source_range
+/// instruction.
+range: Range = .{ .start = 0, .end = 0 },
 
 const Self = @This();
 
