@@ -21,7 +21,7 @@ activation_id: u64,
 /// response to the "self" object in an activation.
 activation_object: Value,
 /// The location to which the result of the activation (obtained via the
-/// exit_activation opcode) is written.
+/// exit_activation instruction) is written.
 target_location: RegisterLocation,
 /// This is the parent activation for the current block activation. The
 /// activation object of this activation will be used as the receiver of the
@@ -103,7 +103,7 @@ pub fn advanceInstruction(self: *Self) void {
     self.pc += 1;
 }
 
-/// Resets the opcode index of this activation.
+/// Resets the instruction index of this activation.
 pub fn restart(self: *Self) void {
     self.pc = 0;
 }

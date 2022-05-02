@@ -7,7 +7,7 @@ const std = @import("std");
 const debug = @import("../debug.zig");
 const Actor = @import("./Actor.zig");
 const Value = @import("./value.zig").Value;
-const Opcode = @import("./bytecode/Opcode.zig");
+const Instruction = @import("./bytecode/Instruction.zig");
 const Object = @import("./Object.zig");
 const ByteArray = @import("./ByteArray.zig");
 const Activation = @import("./Activation.zig");
@@ -22,21 +22,21 @@ const Slot = slot_import.Slot;
 
 const EXECUTION_DEBUG = debug.EXECUTION_DEBUG;
 
-pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation, executable: Executable.Ref, opcode: Opcode) !?Completion {
+pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation, executable: Executable.Ref, inst: Instruction) !?Completion {
     var dummy_source_range = SourceRange.init(executable, .{
         .start = .{ .line_start = 0, .line_end = 2, .line = 1, .column = 1 },
         .end = .{ .line_start = 0, .line_end = 2, .line = 1, .column = 2 },
     });
     defer dummy_source_range.deinit();
 
-    if (EXECUTION_DEBUG) std.debug.print("[{s}] Executing: {} = {}\n", .{ executable.value.definition_script.value.file_path, opcode.target, opcode });
+    if (EXECUTION_DEBUG) std.debug.print("[{s}] Executing: {} = {}\n", .{ executable.value.definition_script.value.file_path, inst.target, inst });
 
-    switch (opcode.tag) {
+    switch (inst.tag) {
         .Send => {
-            const payload = opcode.payload(.Send);
+            const payload = inst.payload(.Send);
             const receiver = vm.readRegister(payload.receiver_location);
 
-            const completion = (try sendMessage(vm, actor, receiver, payload.message_name, opcode.target, dummy_source_range)) orelse return null;
+            const completion = (try sendMessage(vm, actor, receiver, payload.message_name, inst.target, dummy_source_range)) orelse return null;
 
             if (completion.isNormal()) {
                 var result = completion.data.Normal;
@@ -44,14 +44,14 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
                     result = result.asObject().asActivationObject().findActivationReceiver();
                 }
 
-                vm.writeRegister(opcode.target, result);
+                vm.writeRegister(inst.target, result);
                 return null;
             }
 
             return completion;
         },
         .PrimSend => {
-            const payload = opcode.payload(.PrimSend);
+            const payload = inst.payload(.PrimSend);
 
             if (primitives.getPrimitive(payload.message_name)) |primitive| {
                 var receiver = vm.readRegister(payload.receiver_location);
@@ -63,11 +63,11 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
                 defer tracked_receiver.untrack(vm.heap);
 
                 const argument_slice = vm.lastNArguments(primitive.arity);
-                const completion = (try primitive.call(vm, actor, tracked_receiver, argument_slice, opcode.target, dummy_source_range)) orelse return null;
+                const completion = (try primitive.call(vm, actor, tracked_receiver, argument_slice, inst.target, dummy_source_range)) orelse return null;
                 vm.popNArguments(primitive.arity);
 
                 if (completion.isNormal()) {
-                    vm.writeRegister(opcode.target, completion.data.Normal);
+                    vm.writeRegister(inst.target, completion.data.Normal);
                     return null;
                 }
 
@@ -77,10 +77,10 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             return try Completion.initRuntimeError(vm, dummy_source_range, "Unknown primitive selector '{s}'", .{payload.message_name});
         },
         .SelfSend => {
-            const payload = opcode.payload(.SelfSend);
+            const payload = inst.payload(.SelfSend);
             const receiver = actor.activation_stack.getCurrent().activation_object;
 
-            const completion = (try sendMessage(vm, actor, receiver, payload.message_name, opcode.target, dummy_source_range)) orelse return null;
+            const completion = (try sendMessage(vm, actor, receiver, payload.message_name, inst.target, dummy_source_range)) orelse return null;
 
             if (completion.isNormal()) {
                 var result = completion.data.Normal;
@@ -88,14 +88,14 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
                     result = result.asObject().asActivationObject().findActivationReceiver();
                 }
 
-                vm.writeRegister(opcode.target, result);
+                vm.writeRegister(inst.target, result);
                 return null;
             }
 
             return completion;
         },
         .SelfPrimSend => {
-            const payload = opcode.payload(.SelfPrimSend);
+            const payload = inst.payload(.SelfPrimSend);
 
             if (primitives.getPrimitive(payload.message_name)) |primitive| {
                 var receiver = actor.activation_stack.getCurrent().activation_object;
@@ -107,11 +107,11 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
                 defer tracked_receiver.untrack(vm.heap);
 
                 const argument_slice = vm.lastNArguments(primitive.arity);
-                const completion = (try primitive.call(vm, actor, tracked_receiver, argument_slice, opcode.target, dummy_source_range)) orelse return null;
+                const completion = (try primitive.call(vm, actor, tracked_receiver, argument_slice, inst.target, dummy_source_range)) orelse return null;
                 vm.popNArguments(primitive.arity);
 
                 if (completion.isNormal()) {
-                    vm.writeRegister(opcode.target, completion.data.Normal);
+                    vm.writeRegister(inst.target, completion.data.Normal);
                     return null;
                 }
 
@@ -121,7 +121,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             return try Completion.initRuntimeError(vm, dummy_source_range, "Unknown primitive selector '{s}'", .{payload.message_name});
         },
         .PushConstantSlot => {
-            const payload = opcode.payload(.PushConstantSlot);
+            const payload = inst.payload(.PushConstantSlot);
             const name_value = vm.readRegister(payload.name_location);
             const name_byte_array_object = name_value.asObject().asByteArrayObject();
             const value = vm.readRegister(payload.value_location);
@@ -130,7 +130,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             return null;
         },
         .PushAssignableSlot => {
-            const payload = opcode.payload(.PushAssignableSlot);
+            const payload = inst.payload(.PushAssignableSlot);
             const name_value = vm.readRegister(payload.name_location);
             const name_byte_array_object = name_value.asObject().asByteArrayObject();
             const value = vm.readRegister(payload.value_location);
@@ -139,7 +139,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             return null;
         },
         .PushArgumentSlot => {
-            const payload = opcode.payload(.PushArgumentSlot);
+            const payload = inst.payload(.PushArgumentSlot);
             const name_value = vm.readRegister(payload.name_location);
             const name_byte_array_object = name_value.asObject().asByteArrayObject();
 
@@ -147,7 +147,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             return null;
         },
         .PushInheritedSlot => {
-            const payload = opcode.payload(.PushInheritedSlot);
+            const payload = inst.payload(.PushInheritedSlot);
             const name_value = vm.readRegister(payload.name_location);
             const name_byte_array_object = name_value.asObject().asByteArrayObject();
             const value = vm.readRegister(payload.value_location);
@@ -156,17 +156,17 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             return null;
         },
         .CreateInteger => {
-            const payload = opcode.payload(.CreateInteger);
-            vm.writeRegister(opcode.target, Value.fromInteger(payload.value));
+            const payload = inst.payload(.CreateInteger);
+            vm.writeRegister(inst.target, Value.fromInteger(payload.value));
             return null;
         },
         .CreateFloatingPoint => {
-            const payload = opcode.payload(.CreateFloatingPoint);
-            vm.writeRegister(opcode.target, Value.fromFloatingPoint(payload.value));
+            const payload = inst.payload(.CreateFloatingPoint);
+            vm.writeRegister(inst.target, Value.fromFloatingPoint(payload.value));
             return null;
         },
         .CreateObject => {
-            const payload = opcode.payload(.CreateObject);
+            const payload = inst.payload(.CreateObject);
 
             const slots = vm.lastNSlots(payload.slot_count);
             var total_slot_count: u32 = 0;
@@ -184,12 +184,12 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             }
 
             const slots_object = try map_builder.createObject();
-            vm.writeRegister(opcode.target, slots_object.asValue());
+            vm.writeRegister(inst.target, slots_object.asValue());
             vm.popNSlots(payload.slot_count);
             return null;
         },
         .CreateMethod => {
-            const payload = opcode.payload(.CreateMethod);
+            const payload = inst.payload(.CreateMethod);
 
             defer vm.next_method_is_inline = false;
 
@@ -226,12 +226,12 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             }
 
             const method_object = try map_builder.createObject();
-            vm.writeRegister(opcode.target, method_object.asValue());
+            vm.writeRegister(inst.target, method_object.asValue());
             vm.popNSlots(payload.slot_count);
             return null;
         },
         .CreateBlock => {
-            const payload = opcode.payload(.CreateBlock);
+            const payload = inst.payload(.CreateBlock);
 
             const slots = vm.lastNSlots(payload.slot_count);
             var total_slot_count: u32 = 0;
@@ -277,12 +277,12 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             }
 
             const block_object = try map_builder.createObject();
-            vm.writeRegister(opcode.target, block_object.asValue());
+            vm.writeRegister(inst.target, block_object.asValue());
             vm.popNSlots(payload.slot_count);
             return null;
         },
         .CreateByteArray => {
-            const payload = opcode.payload(.CreateByteArray);
+            const payload = inst.payload(.CreateByteArray);
             const string = payload.string;
 
             try vm.heap.ensureSpaceInEden(
@@ -295,7 +295,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             const byte_array_map = try Object.Map.ByteArray.create(vm.heap, byte_array);
             const byte_array_object = try Object.ByteArray.create(vm.heap, byte_array_map);
 
-            vm.writeRegister(opcode.target, byte_array_object.asValue());
+            vm.writeRegister(inst.target, byte_array_object.asValue());
             return null;
         },
         .SetMethodInline => {
@@ -303,7 +303,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             return null;
         },
         .ExitActivation => {
-            const payload = opcode.payload(.ExitActivation);
+            const payload = inst.payload(.ExitActivation);
             const value = vm.readRegister(payload.value_location);
 
             if (actor.exitCurrentActivation(vm, last_activation, value) == .LastActivation)
@@ -311,7 +311,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             return null;
         },
         .NonlocalReturn => {
-            const payload = opcode.payload(.NonlocalReturn);
+            const payload = inst.payload(.NonlocalReturn);
             const value = vm.readRegister(payload.value_location);
 
             const current_activation = actor.activation_stack.getCurrent();
@@ -323,7 +323,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             return null;
         },
         .PushArg => {
-            const payload = opcode.payload(.PushArg);
+            const payload = inst.payload(.PushArg);
 
             var argument = vm.readRegister(payload.argument_location);
             if (argument.isObjectReference() and argument.asObject().isActivationObject()) {

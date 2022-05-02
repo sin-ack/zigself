@@ -9,7 +9,7 @@ const ast = @import("../language/ast.zig");
 const debug = @import("../debug.zig");
 const Block = @import("./bytecode/Block.zig");
 const Script = @import("../language/script.zig");
-const Opcode = @import("./bytecode/Opcode.zig");
+const Instruction = @import("./bytecode/Instruction.zig");
 const Executable = @import("./bytecode/Executable.zig");
 const RegisterLocation = @import("./bytecode/register_location.zig").RegisterLocation;
 
@@ -44,7 +44,7 @@ fn generateScript(self: *Codegen, executable: *Executable, script_node: ast.Scri
     const script_block_index = try executable.makeBlock();
     const script_block = executable.getBlock(script_block_index);
     const last_expression_location = try self.generateStatementList(executable, script_block, script_node.statements.value.statements);
-    _ = try script_block.addOpcode(executable.allocator, Opcode.exitActivation(last_expression_location));
+    _ = try script_block.addInstruction(executable.allocator, Instruction.exitActivation(last_expression_location));
 }
 
 fn generateStatementList(self: *Codegen, executable: *Executable, block: *Block, statements: []ast.ExpressionNode) CodegenError!RegisterLocation {
@@ -95,7 +95,7 @@ fn generateObject(self: *Codegen, executable: *Executable, block: *Block, object
 
     try self.generateSlotList(executable, block, object.slots);
 
-    return try block.addOpcode(executable.allocator, Opcode.createObject(@intCast(u32, object.slots.len)));
+    return try block.addInstruction(executable.allocator, Instruction.createObject(@intCast(u32, object.slots.len)));
 }
 
 fn generateBlock(self: *Codegen, executable: *Executable, block: *Block, block_node: *ast.BlockNode) CodegenError!RegisterLocation {
@@ -104,7 +104,7 @@ fn generateBlock(self: *Codegen, executable: *Executable, block: *Block, block_n
     defer self.method_execution_depth = saved_method_execution_depth;
 
     const block_index = try self.generateSlotsAndCodeCommon(executable, block, block_node.slots, block_node.statements.value.statements);
-    return try block.addOpcode(executable.allocator, Opcode.createBlock(@intCast(u32, block_node.slots.len), block_index));
+    return try block.addInstruction(executable.allocator, Instruction.createBlock(@intCast(u32, block_node.slots.len), block_index));
 }
 
 fn generateMethod(self: *Codegen, executable: *Executable, block: *Block, method_name: []const u8, method: *ast.ObjectNode) CodegenError!RegisterLocation {
@@ -112,19 +112,19 @@ fn generateMethod(self: *Codegen, executable: *Executable, block: *Block, method
     defer self.method_execution_depth -= 1;
 
     const block_index = try self.generateSlotsAndCodeCommon(executable, block, method.slots, method.statements.value.statements);
-    const method_name_location = try block.addOpcode(executable.allocator, Opcode.createByteArray(method_name));
+    const method_name_location = try block.addInstruction(executable.allocator, Instruction.createByteArray(method_name));
 
     if (self.method_execution_depth > 1) {
-        _ = try block.addOpcode(executable.allocator, Opcode.setMethodInline());
+        _ = try block.addInstruction(executable.allocator, Instruction.setMethodInline());
     }
 
-    return try block.addOpcode(executable.allocator, Opcode.createMethod(method_name_location, @intCast(u32, method.slots.len), block_index));
+    return try block.addInstruction(executable.allocator, Instruction.createMethod(method_name_location, @intCast(u32, method.slots.len), block_index));
 }
 
 fn generateArgumentList(self: *Codegen, executable: *Executable, block: *Block, arguments: []ast.ExpressionNode) !void {
     for (arguments) |argument| {
         const argument_location = try self.generateExpression(executable, block, argument);
-        _ = try block.addOpcode(executable.allocator, Opcode.pushArg(argument_location));
+        _ = try block.addInstruction(executable.allocator, Instruction.pushArg(argument_location));
     }
 }
 
@@ -134,22 +134,22 @@ fn generateMessage(self: *Codegen, executable: *Executable, block: *Block, messa
         try self.generateArgumentList(executable, block, message.arguments);
 
         return if (message.message_name[0] == '_')
-            try block.addOpcode(executable.allocator, Opcode.primSend(receiver_location, message.message_name[1..]))
+            try block.addInstruction(executable.allocator, Instruction.primSend(receiver_location, message.message_name[1..]))
         else
-            try block.addOpcode(executable.allocator, Opcode.send(receiver_location, message.message_name));
+            try block.addInstruction(executable.allocator, Instruction.send(receiver_location, message.message_name));
     }
 
     try self.generateArgumentList(executable, block, message.arguments);
 
     return if (message.message_name[0] == '_')
-        try block.addOpcode(executable.allocator, Opcode.selfPrimSend(message.message_name[1..]))
+        try block.addInstruction(executable.allocator, Instruction.selfPrimSend(message.message_name[1..]))
     else
-        try block.addOpcode(executable.allocator, Opcode.selfSend(message.message_name));
+        try block.addInstruction(executable.allocator, Instruction.selfSend(message.message_name));
 }
 
 fn generateReturn(self: *Codegen, executable: *Executable, block: *Block, return_node: *ast.ReturnNode) CodegenError!RegisterLocation {
     const expr_location = try self.generateExpression(executable, block, return_node.expression);
-    _ = try block.addOpcode(executable.allocator, Opcode.nonlocalReturn(expr_location));
+    _ = try block.addInstruction(executable.allocator, Instruction.nonlocalReturn(expr_location));
     return RegisterLocation.Nil;
 }
 
@@ -162,23 +162,23 @@ fn generateIdentifier(self: *Codegen, executable: *Executable, block: *Block, id
     _ = self;
 
     return if (identifier.value[0] == '_')
-        try block.addOpcode(executable.allocator, Opcode.selfPrimSend(identifier.value[1..]))
+        try block.addInstruction(executable.allocator, Instruction.selfPrimSend(identifier.value[1..]))
     else
-        try block.addOpcode(executable.allocator, Opcode.selfSend(identifier.value));
+        try block.addInstruction(executable.allocator, Instruction.selfSend(identifier.value));
 }
 
 fn generateString(self: *Codegen, executable: *Executable, block: *Block, string: ast.StringNode) CodegenError!RegisterLocation {
     _ = self;
 
-    return try block.addOpcode(executable.allocator, Opcode.createByteArray(string.value));
+    return try block.addInstruction(executable.allocator, Instruction.createByteArray(string.value));
 }
 
 fn generateNumber(self: *Codegen, executable: *Executable, block: *Block, number: ast.NumberNode) CodegenError!RegisterLocation {
     _ = self;
 
     return switch (number.value) {
-        .Integer => |i| try block.addOpcode(executable.allocator, Opcode.createInteger(i)),
-        .FloatingPoint => |f| try block.addOpcode(executable.allocator, Opcode.createFloatingPoint(f)),
+        .Integer => |i| try block.addInstruction(executable.allocator, Instruction.createInteger(i)),
+        .FloatingPoint => |f| try block.addInstruction(executable.allocator, Instruction.createFloatingPoint(f)),
     };
 }
 
@@ -208,7 +208,7 @@ fn generateSlotsAndCodeCommon(self: *Codegen, executable: *Executable, parent_bl
     const child_block = executable.getBlock(child_block_index);
 
     const last_expression_location = try self.generateStatementList(executable, child_block, statements);
-    _ = try child_block.addOpcode(executable.allocator, Opcode.exitActivation(last_expression_location));
+    _ = try child_block.addInstruction(executable.allocator, Instruction.exitActivation(last_expression_location));
 
     return child_block_index;
 }
@@ -236,23 +236,23 @@ fn generateSlotList(self: *Codegen, executable: *Executable, block: *Block, slot
             break :blk RegisterLocation.Nil;
         };
 
-        const slot_name_index = try block.addOpcode(executable.allocator, Opcode.createByteArray(slot.name));
+        const slot_name_index = try block.addInstruction(executable.allocator, Instruction.createByteArray(slot.name));
 
         if (slot.is_inherited) {
             std.debug.assert(!slot.is_mutable);
             std.debug.assert(!slot.is_argument);
             std.debug.assert(!slot.is_parent);
 
-            _ = try block.addOpcode(executable.allocator, Opcode.pushInheritedSlot(slot_name_index, slot_value_index));
+            _ = try block.addInstruction(executable.allocator, Instruction.pushInheritedSlot(slot_name_index, slot_value_index));
         } else if (slot.is_argument) {
             std.debug.assert(slot.is_mutable);
             std.debug.assert(!slot.is_parent);
 
-            _ = try block.addOpcode(executable.allocator, Opcode.pushArgumentSlot(slot_name_index, slot_value_index));
+            _ = try block.addInstruction(executable.allocator, Instruction.pushArgumentSlot(slot_name_index, slot_value_index));
         } else if (slot.is_mutable) {
-            _ = try block.addOpcode(executable.allocator, Opcode.pushAssignableSlot(slot_name_index, slot.is_parent, slot_value_index));
+            _ = try block.addInstruction(executable.allocator, Instruction.pushAssignableSlot(slot_name_index, slot.is_parent, slot_value_index));
         } else {
-            _ = try block.addOpcode(executable.allocator, Opcode.pushConstantSlot(slot_name_index, slot.is_parent, slot_value_index));
+            _ = try block.addInstruction(executable.allocator, Instruction.pushConstantSlot(slot_name_index, slot.is_parent, slot_value_index));
         }
     }
 }

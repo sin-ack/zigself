@@ -10,7 +10,7 @@ const Completion = @import("../Completion.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const RegisterLocation = @import("./register_location.zig").RegisterLocation;
 
-// NOTE: This is set in Block.addOpcode
+// NOTE: This is set in Block.addInstruction
 target: RegisterLocation = undefined,
 tag: Tag,
 // FIXME: Make this type less manual
@@ -87,7 +87,7 @@ const Tag = enum(u32) {
             .ExitActivation, .NonlocalReturn => Self.Payload.ExitActivation,
             .PushArg => Self.Payload.PushArg,
 
-            .SetMethodInline => @panic("Attempted to get payload type of opcode without payload"),
+            .SetMethodInline => @panic("Attempted to get payload type of instruction without payload"),
         };
     }
 };
@@ -225,7 +225,7 @@ pub fn pushArg(argument_location: RegisterLocation) Self {
 }
 
 pub fn format(
-    opcode: Self,
+    inst: Self,
     comptime fmt: []const u8,
     options: std.fmt.FormatOptions,
     writer: anytype,
@@ -233,52 +233,52 @@ pub fn format(
     _ = fmt;
     _ = options;
 
-    try std.fmt.format(writer, "{s}", .{opcode.tag.toString()});
+    try std.fmt.format(writer, "{s}", .{inst.tag.toString()});
 
-    switch (opcode.tag) {
+    switch (inst.tag) {
         .Send, .PrimSend => {
-            const message_name = @intToPtr([*]const u8, opcode.arguments[1])[0..opcode.arguments[2]];
-            try std.fmt.format(writer, "(%{}, \"{s}\")", .{ opcode.arguments[0], message_name });
+            const message_name = @intToPtr([*]const u8, inst.arguments[1])[0..inst.arguments[2]];
+            try std.fmt.format(writer, "(%{}, \"{s}\")", .{ inst.arguments[0], message_name });
         },
         .SelfSend, .SelfPrimSend => {
-            const message_name = @intToPtr([*]const u8, opcode.arguments[0])[0..opcode.arguments[1]];
+            const message_name = @intToPtr([*]const u8, inst.arguments[0])[0..inst.arguments[1]];
             try std.fmt.format(writer, "(\"{s}\")", .{message_name});
         },
 
         .PushConstantSlot, .PushAssignableSlot => {
-            try std.fmt.format(writer, "(%{}, {}, %{})", .{ opcode.arguments[0], opcode.arguments[1] != 0, opcode.arguments[2] });
+            try std.fmt.format(writer, "(%{}, {}, %{})", .{ inst.arguments[0], inst.arguments[1] != 0, inst.arguments[2] });
         },
 
         .PushArgumentSlot, .PushInheritedSlot => {
-            try std.fmt.format(writer, "(%{}, %{})", .{ opcode.arguments[0], opcode.arguments[1] });
+            try std.fmt.format(writer, "(%{}, %{})", .{ inst.arguments[0], inst.arguments[1] });
         },
 
         .CreateInteger => {
-            try std.fmt.format(writer, "({})", .{@bitCast(i64, opcode.arguments[0])});
+            try std.fmt.format(writer, "({})", .{@bitCast(i64, inst.arguments[0])});
         },
 
         .CreateFloatingPoint => {
-            try std.fmt.format(writer, "({})", .{@bitCast(f64, opcode.arguments[0])});
+            try std.fmt.format(writer, "({})", .{@bitCast(f64, inst.arguments[0])});
         },
 
         .CreateObject => {
-            try std.fmt.format(writer, "({})", .{opcode.arguments[0]});
+            try std.fmt.format(writer, "({})", .{inst.arguments[0]});
         },
 
         .CreateMethod => {
-            try std.fmt.format(writer, "(%{}, {}, #{})", .{ opcode.arguments[0], opcode.arguments[1], opcode.arguments[2] });
+            try std.fmt.format(writer, "(%{}, {}, #{})", .{ inst.arguments[0], inst.arguments[1], inst.arguments[2] });
         },
 
         .CreateBlock => {
-            try std.fmt.format(writer, "({}, #{})", .{ opcode.arguments[0], opcode.arguments[1] });
+            try std.fmt.format(writer, "({}, #{})", .{ inst.arguments[0], inst.arguments[1] });
         },
 
         .CreateByteArray => {
-            if (opcode.arguments[0] == 0) {
+            if (inst.arguments[0] == 0) {
                 // Empty slice
                 try std.fmt.formatText("(\"\")", "s", options, writer);
             } else {
-                const value = @intToPtr([*]const u8, opcode.arguments[0])[0..opcode.arguments[1]];
+                const value = @intToPtr([*]const u8, inst.arguments[0])[0..inst.arguments[1]];
                 try std.fmt.format(writer, "(\"{s}\")", .{value});
             }
         },
@@ -288,7 +288,7 @@ pub fn format(
         },
 
         .ExitActivation, .NonlocalReturn, .PushArg => {
-            try std.fmt.format(writer, "(%{})", .{opcode.arguments[0]});
+            try std.fmt.format(writer, "(%{})", .{inst.arguments[0]});
         },
     }
 }
@@ -345,6 +345,6 @@ pub fn payload(self: Self, comptime tag: Tag) tag.Payload() {
             .argument_location = RegisterLocation.fromIndex(@intCast(u32, self.arguments[0])),
         },
 
-        .SetMethodInline => @panic("Attempted to get payload of opcode without payload"),
+        .SetMethodInline => @panic("Attempted to get payload of instruction without payload"),
     };
 }

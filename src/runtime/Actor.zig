@@ -67,9 +67,9 @@ pub fn executeActivationStack(self: *Self, vm: *VirtualMachine, until: ?*Activat
         const activation_object = activation.activation_object.asObject().asActivationObject();
         const executable = activation_object.getDefinitionExecutable();
         const block = activation_object.getBytecodeBlock();
-        const opcode = block.getOpcode(activation.pc);
+        const inst = block.getInstruction(activation.pc);
 
-        if (try interpreter.execute(vm, self, until, executable, opcode.*)) |completion| {
+        if (try interpreter.execute(vm, self, until, executable, inst.*)) |completion| {
             switch (completion.data) {
                 // If a normal completion is returned, then the last activation
                 // has been exited and a result is reached.
@@ -96,7 +96,7 @@ pub fn exitCurrentActivation(self: *Self, vm: *VirtualMachine, last_activation: 
 }
 
 /// Exit the given activation with the given value and write it to the register
-/// for the opcode that initiated the activation. Returns
+/// for the instruction that initiated the activation. Returns
 /// ActivationExitState.LastActivation if the last activation has been exited.
 pub fn exitActivation(self: *Self, vm: *VirtualMachine, last_activation: ?*Activation, target_activation: *Activation, value: Value) ActivationExitState {
     if (ACTIVATION_EXIT_DEBUG) {

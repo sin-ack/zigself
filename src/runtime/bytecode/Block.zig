@@ -6,11 +6,11 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Value = @import("../value.zig").Value;
-const Opcode = @import("./Opcode.zig");
+const Instruction = @import("./Instruction.zig");
 const Executable = @import("./Executable.zig");
 const RegisterLocation = @import("./register_location.zig").RegisterLocation;
 
-opcodes: std.ArrayListUnmanaged(Opcode) = .{},
+instructions: std.ArrayListUnmanaged(Instruction) = .{},
 register_count: u32 = 0,
 
 const Self = @This();
@@ -28,7 +28,7 @@ fn init(self: *Self) void {
 }
 
 fn deinit(self: *Self, allocator: Allocator) void {
-    self.opcodes.deinit(allocator);
+    self.instructions.deinit(allocator);
 }
 
 pub fn destroy(self: *Self, allocator: Allocator) void {
@@ -36,17 +36,17 @@ pub fn destroy(self: *Self, allocator: Allocator) void {
     allocator.destroy(self);
 }
 
-pub fn getOpcode(self: *Self, index: u32) *Opcode {
-    return &self.opcodes.items[index];
+pub fn getInstruction(self: *Self, index: u32) *Instruction {
+    return &self.instructions.items[index];
 }
 
-pub fn addOpcode(self: *Self, allocator: Allocator, opcode: Opcode) !RegisterLocation {
-    var opcode_copy = opcode;
-    opcode_copy.target = self.makeRegister();
+pub fn addInstruction(self: *Self, allocator: Allocator, inst: Instruction) !RegisterLocation {
+    var inst_copy = inst;
+    inst_copy.target = self.makeRegister();
 
-    try self.opcodes.append(allocator, opcode_copy);
+    try self.instructions.append(allocator, inst_copy);
 
-    return opcode_copy.target;
+    return inst_copy.target;
 }
 
 fn makeRegister(self: *Self) RegisterLocation {
@@ -69,7 +69,7 @@ pub fn format(
     _ = fmt;
     _ = options;
 
-    for (block.opcodes.items) |opcode| {
-        try std.fmt.format(writer, "%{} = {}\n", .{ @enumToInt(opcode.target), opcode });
+    for (block.instructions.items) |inst| {
+        try std.fmt.format(writer, "%{} = {}\n", .{ @enumToInt(inst.target), inst });
     }
 }
