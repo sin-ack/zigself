@@ -7,11 +7,11 @@ const Allocator = std.mem.Allocator;
 
 const ast = @import("../language/ast.zig");
 const debug = @import("../debug.zig");
-const Block = @import("./bytecode/Block.zig");
+const Block = @import("./astcode/Block.zig");
 const Script = @import("../language/script.zig");
-const Instruction = @import("./bytecode/Instruction.zig");
-const Executable = @import("./bytecode/Executable.zig");
-const RegisterLocation = @import("./bytecode/register_location.zig").RegisterLocation;
+const Instruction = @import("./astcode/Instruction.zig");
+const Executable = @import("./astcode/Executable.zig");
+const RegisterLocation = @import("./astcode/register_location.zig").RegisterLocation;
 
 const EXECUTABLE_DUMP_DEBUG = debug.EXECUTABLE_DUMP_DEBUG;
 
@@ -21,16 +21,16 @@ pub const MaximumAssignableSlots = 255;
 
 method_execution_depth: usize = 0,
 
-const Codegen = @This();
-const CodegenError = Allocator.Error || error{CodegenFailure};
+const AstGen = @This();
+const AstGenError = Allocator.Error || error{AstGenFailure};
 
 /// Given a script, generate an Executable for it with its entrypoint being the
 /// first block it contains.
-pub fn generateExecutableFromScript(allocator: Allocator, script: Script.Ref) CodegenError!Executable.Ref {
+pub fn generateExecutableFromScript(allocator: Allocator, script: Script.Ref) AstGenError!Executable.Ref {
     const executable = try Executable.create(allocator, script);
     errdefer executable.unref();
 
-    var c = Codegen{};
+    var c = AstGen{};
     try c.generateScript(executable.value, script.value.ast_root.?);
     try executable.value.seal();
 
@@ -40,7 +40,7 @@ pub fn generateExecutableFromScript(allocator: Allocator, script: Script.Ref) Co
     return executable;
 }
 
-fn generateScript(self: *Codegen, executable: *Executable, script_node: ast.ScriptNode) CodegenError!void {
+fn generateScript(self: *AstGen, executable: *Executable, script_node: ast.ScriptNode) AstGenError!void {
     const script_block_index = try executable.makeBlock();
     const script_block = executable.getBlock(script_block_index);
     const last_expression_location = try self.generateStatementList(executable, script_block, script_node.statements.value.statements);
@@ -48,7 +48,7 @@ fn generateScript(self: *Codegen, executable: *Executable, script_node: ast.Scri
     _ = try script_block.addInstruction(executable.allocator, Instruction.exitActivation(last_expression_location));
 }
 
-fn generateStatementList(self: *Codegen, executable: *Executable, block: *Block, statements: []ast.ExpressionNode) CodegenError!RegisterLocation {
+fn generateStatementList(self: *AstGen, executable: *Executable, block: *Block, statements: []ast.ExpressionNode) AstGenError!RegisterLocation {
     var last_expression_location = RegisterLocation.Nil;
     for (statements) |expression| {
         last_expression_location = try self.generateExpression(executable, block, expression);
@@ -57,7 +57,7 @@ fn generateStatementList(self: *Codegen, executable: *Executable, block: *Block,
     return last_expression_location;
 }
 
-fn generateExpression(self: *Codegen, executable: *Executable, block: *Block, expression: ast.ExpressionNode) CodegenError!RegisterLocation {
+fn generateExpression(self: *AstGen, executable: *Executable, block: *Block, expression: ast.ExpressionNode) AstGenError!RegisterLocation {
     return switch (expression) {
         .Object => |object| self.generateObject(executable, block, object),
         .Block => |block_node| self.generateBlock(executable, block, block_node),
@@ -70,7 +70,7 @@ fn generateExpression(self: *Codegen, executable: *Executable, block: *Block, ex
     };
 }
 
-fn generateObject(self: *Codegen, executable: *Executable, block: *Block, object: *ast.ObjectNode) CodegenError!RegisterLocation {
+fn generateObject(self: *AstGen, executable: *Executable, block: *Block, object: *ast.ObjectNode) AstGenError!RegisterLocation {
     // Verify that we are generating bytecode for a slots object and not a
     // method; methods are generated through generateMethod.
     if (object.statements.value.statements.len > 0) {
@@ -89,7 +89,7 @@ fn generateObject(self: *Codegen, executable: *Executable, block: *Block, object
     if (assignable_slot_count > MaximumAssignableSlots) {
         // FIXME: Return rich errors
         // return Completion.initRuntimeError(context.vm, source_range, "Maximum assignable slot limit exceeded for slots object", .{});
-        return error.CodegenFailure;
+        return error.AstGenFailure;
     }
 
     try self.generateSlotList(executable, block, object.slots);
@@ -98,7 +98,7 @@ fn generateObject(self: *Codegen, executable: *Executable, block: *Block, object
     return try block.addInstruction(executable.allocator, Instruction.createObject(@intCast(u32, object.slots.len)));
 }
 
-fn generateBlock(self: *Codegen, executable: *Executable, block: *Block, block_node: *ast.BlockNode) CodegenError!RegisterLocation {
+fn generateBlock(self: *AstGen, executable: *Executable, block: *Block, block_node: *ast.BlockNode) AstGenError!RegisterLocation {
     const saved_method_execution_depth = self.method_execution_depth;
     self.method_execution_depth = 0;
     defer self.method_execution_depth = saved_method_execution_depth;
@@ -108,7 +108,7 @@ fn generateBlock(self: *Codegen, executable: *Executable, block: *Block, block_n
     return try block.addInstruction(executable.allocator, Instruction.createBlock(@intCast(u32, block_node.slots.len), block_index));
 }
 
-fn generateMethod(self: *Codegen, executable: *Executable, block: *Block, method_name: []const u8, method: *ast.ObjectNode) CodegenError!RegisterLocation {
+fn generateMethod(self: *AstGen, executable: *Executable, block: *Block, method_name: []const u8, method: *ast.ObjectNode) AstGenError!RegisterLocation {
     self.method_execution_depth += 1;
     defer self.method_execution_depth -= 1;
 
@@ -124,14 +124,14 @@ fn generateMethod(self: *Codegen, executable: *Executable, block: *Block, method
     return try block.addInstruction(executable.allocator, Instruction.createMethod(method_name_location, @intCast(u32, method.slots.len), block_index));
 }
 
-fn generateArgumentList(self: *Codegen, executable: *Executable, block: *Block, arguments: []ast.ExpressionNode) !void {
+fn generateArgumentList(self: *AstGen, executable: *Executable, block: *Block, arguments: []ast.ExpressionNode) !void {
     for (arguments) |argument| {
         const argument_location = try self.generateExpression(executable, block, argument);
         _ = try block.addInstruction(executable.allocator, Instruction.pushArg(argument_location));
     }
 }
 
-fn generateMessage(self: *Codegen, executable: *Executable, block: *Block, message: *ast.MessageNode) CodegenError!RegisterLocation {
+fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, message: *ast.MessageNode) AstGenError!RegisterLocation {
     if (message.receiver) |receiver| {
         const receiver_location = try self.generateExpression(executable, block, receiver);
         try self.generateArgumentList(executable, block, message.arguments);
@@ -152,7 +152,7 @@ fn generateMessage(self: *Codegen, executable: *Executable, block: *Block, messa
         try block.addInstruction(executable.allocator, Instruction.selfSend(message.message_name));
 }
 
-fn generateReturn(self: *Codegen, executable: *Executable, block: *Block, return_node: *ast.ReturnNode) CodegenError!RegisterLocation {
+fn generateReturn(self: *AstGen, executable: *Executable, block: *Block, return_node: *ast.ReturnNode) AstGenError!RegisterLocation {
     const expr_location = try self.generateExpression(executable, block, return_node.expression);
     _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(return_node.range));
     _ = try block.addInstruction(executable.allocator, Instruction.nonlocalReturn(expr_location));
@@ -164,7 +164,7 @@ fn generateReturn(self: *Codegen, executable: *Executable, block: *Block, return
 //       the lifetime of the executable it will be alive, in the future we might
 //       want to delete the AST after codegen.
 
-fn generateIdentifier(self: *Codegen, executable: *Executable, block: *Block, identifier: ast.IdentifierNode) CodegenError!RegisterLocation {
+fn generateIdentifier(self: *AstGen, executable: *Executable, block: *Block, identifier: ast.IdentifierNode) AstGenError!RegisterLocation {
     _ = self;
 
     _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(identifier.range));
@@ -174,14 +174,14 @@ fn generateIdentifier(self: *Codegen, executable: *Executable, block: *Block, id
         try block.addInstruction(executable.allocator, Instruction.selfSend(identifier.value));
 }
 
-fn generateString(self: *Codegen, executable: *Executable, block: *Block, string: ast.StringNode) CodegenError!RegisterLocation {
+fn generateString(self: *AstGen, executable: *Executable, block: *Block, string: ast.StringNode) AstGenError!RegisterLocation {
     _ = self;
 
     _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(string.range));
     return try block.addInstruction(executable.allocator, Instruction.createByteArray(string.value));
 }
 
-fn generateNumber(self: *Codegen, executable: *Executable, block: *Block, number: ast.NumberNode) CodegenError!RegisterLocation {
+fn generateNumber(self: *AstGen, executable: *Executable, block: *Block, number: ast.NumberNode) AstGenError!RegisterLocation {
     _ = self;
 
     _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(number.range));
@@ -191,7 +191,7 @@ fn generateNumber(self: *Codegen, executable: *Executable, block: *Block, number
     };
 }
 
-fn generateSlotsAndCodeCommon(self: *Codegen, executable: *Executable, parent_block: *Block, slots: []ast.SlotNode, statements: []ast.ExpressionNode) CodegenError!u32 {
+fn generateSlotsAndCodeCommon(self: *AstGen, executable: *Executable, parent_block: *Block, slots: []ast.SlotNode, statements: []ast.ExpressionNode) AstGenError!u32 {
     var assignable_slot_count: usize = 0;
     var argument_slot_count: usize = 0;
     for (slots) |slot| {
@@ -202,13 +202,13 @@ fn generateSlotsAndCodeCommon(self: *Codegen, executable: *Executable, parent_bl
     if (argument_slot_count > MaximumArguments) {
         // FIXME: Return rich errors
         // return Completion.initRuntimeError(context.vm, source_range, "Maximum argument slot limit exceeded for block object", .{});
-        return error.CodegenFailure;
+        return error.AstGenFailure;
     }
 
     if (assignable_slot_count > MaximumAssignableSlots) {
         // FIXME: Return rich errors
         // return Completion.initRuntimeError(context.vm, source_range, "Maximum assignable slot limit exceeded for block object", .{});
-        return error.CodegenFailure;
+        return error.AstGenFailure;
     }
 
     try self.generateSlotList(executable, parent_block, slots);
@@ -222,7 +222,7 @@ fn generateSlotsAndCodeCommon(self: *Codegen, executable: *Executable, parent_bl
     return child_block_index;
 }
 
-fn generateSlotList(self: *Codegen, executable: *Executable, block: *Block, slots: []ast.SlotNode) CodegenError!void {
+fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots: []ast.SlotNode) AstGenError!void {
     for (slots) |slot| {
         const slot_value_index = blk: {
             if (slot.value) |value| {

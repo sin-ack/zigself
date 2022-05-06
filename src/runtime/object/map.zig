@@ -15,11 +15,11 @@ const Object = @import("../Object.zig");
 const Activation = @import("../Activation.zig");
 const MapBuilder = @import("./map_builder.zig").MapBuilder;
 const PointerValue = @import("../value.zig").PointerValue;
-const BytecodeBlock = @import("../bytecode/Block.zig");
+const BytecodeBlock = @import("../astcode/Block.zig");
 const RefCountedValue = @import("../value.zig").RefCountedValue;
 // Zig's shadowing rules are annoying.
 const ByteArrayTheFirst = @import("../ByteArray.zig");
-const BytecodeExecutable = @import("../bytecode/Executable.zig");
+const BytecodeExecutable = @import("../astcode/Executable.zig");
 
 var static_map_map: ?Value = null;
 

@@ -162,9 +162,9 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
         }
 
         const result = vm.executeEntrypointScript(script) catch |err| {
-            // Codegen failures are things that we test for, so expected-error
+            // AstGen failures are things that we test for, so expected-error
             // tests should be assumed "passing".
-            if (err == error.CodegenFailure and the_test.expects_error) {
+            if (err == error.AstGenFailure and the_test.expects_error) {
                 try passed_tests.append(the_test.basename);
                 continue :next_test;
             }

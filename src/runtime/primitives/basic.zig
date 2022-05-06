@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const Heap = @import("../Heap.zig");
 const Script = @import("../../language/script.zig");
-const Codegen = @import("../Codegen.zig");
+const AstGen = @import("../AstGen.zig");
 const Completion = @import("../Completion.zig");
 const interpreter = @import("../interpreter.zig");
 const error_set_utils = @import("../../utility/error_set.zig");
@@ -71,8 +71,8 @@ pub fn RunScript(context: PrimitiveContext) !?Completion {
         return try Completion.initRuntimeError(context.vm, context.source_range, "Failed parsing the script passed to _RunScript", .{});
     }
 
-    const executable = Codegen.generateExecutableFromScript(context.vm.allocator, script) catch |err| switch (err) {
-        error.CodegenFailure => return try Completion.initRuntimeError(context.vm, context.source_range, "Code generation for the script passed to _RunScript failed", .{}),
+    const executable = AstGen.generateExecutableFromScript(context.vm.allocator, script) catch |err| switch (err) {
+        error.AstGenFailure => return try Completion.initRuntimeError(context.vm, context.source_range, "Code generation for the script passed to _RunScript failed", .{}),
         error.OutOfMemory => return error.OutOfMemory,
     };
     defer executable.unref();
@@ -108,8 +108,8 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !?Completion {
         return try interpreter.sendMessage(context.vm, context.actor, context.arguments[0], "value", context.target_location, context.source_range);
     }
 
-    const executable = Codegen.generateExecutableFromScript(context.vm.allocator, script) catch |err| switch (err) {
-        error.CodegenFailure => {
+    const executable = AstGen.generateExecutableFromScript(context.vm.allocator, script) catch |err| switch (err) {
+        error.AstGenFailure => {
             // TODO: Pass error information to the failure block.
             std.debug.print("Code generation for the script passed to _EvaluateStringIfFail: failed", .{});
             return try interpreter.sendMessage(context.vm, context.actor, context.arguments[0], "value", context.target_location, context.source_range);

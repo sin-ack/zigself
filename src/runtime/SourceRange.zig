@@ -6,7 +6,7 @@ const std = @import("std");
 
 const Range = @import("../language/Range.zig");
 const LocationRange = @import("../language/LocationRange.zig");
-const Executable = @import("./bytecode/Executable.zig");
+const Executable = @import("./astcode/Executable.zig");
 
 const Self = @This();
 

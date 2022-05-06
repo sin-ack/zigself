@@ -13,10 +13,10 @@ const Range = @import("../language/Range.zig");
 const Actor = @import("./Actor.zig");
 const Object = @import("./Object.zig");
 const Script = @import("../language/script.zig");
-const Codegen = @import("./Codegen.zig");
+const AstGen = @import("./AstGen.zig");
 const ByteArray = @import("./ByteArray.zig");
 const runtime_error = @import("./error.zig");
-const RegisterLocation = @import("./bytecode/register_location.zig").RegisterLocation;
+const RegisterLocation = @import("./astcode/register_location.zig").RegisterLocation;
 
 /// The allocator object that will be used throughout the virtual machine's
 /// lifetime.
@@ -184,7 +184,7 @@ fn requiredSizeForBlockMessageName(argument_count: u8) usize {
 }
 
 pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
-    var entrypoint_executable = try Codegen.generateExecutableFromScript(self.allocator, script);
+    var entrypoint_executable = try AstGen.generateExecutableFromScript(self.allocator, script);
     defer entrypoint_executable.unref();
 
     var actor = try Actor.create(self.allocator);

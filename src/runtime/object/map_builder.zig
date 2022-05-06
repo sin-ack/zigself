@@ -5,11 +5,11 @@
 const std = @import("std");
 
 const Heap = @import("../Heap.zig");
-const Codegen = @import("../Codegen.zig");
+const AstGen = @import("../AstGen.zig");
 const Slot = @import("../slot.zig").Slot;
 const Value = @import("../value.zig").Value;
 
-pub const AssignableSlotValues = std.BoundedArray(Heap.Tracked, Codegen.MaximumAssignableSlots);
+pub const AssignableSlotValues = std.BoundedArray(Heap.Tracked, AstGen.MaximumAssignableSlots);
 
 /// This struct allows one to build out a map's slots and eventually construct
 /// an object using it. It holds the assignable slot values and assigns an index
@@ -75,7 +75,7 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
                 ObjectType.requiredSizeForAllocation(@intCast(u8, self.assignable_slot_index)),
             );
 
-            var slot_values: [Codegen.MaximumAssignableSlots]Value = undefined;
+            var slot_values: [AstGen.MaximumAssignableSlots]Value = undefined;
             const slot_values_slice = slot_values[0..self.assignable_slot_index];
             self.writeAssignableSlotValuesTo(slot_values_slice);
 

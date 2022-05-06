@@ -18,11 +18,11 @@ const Location = @import("../../language/location.zig");
 const ByteArray = @import("../ByteArray.zig");
 const MapBuilder = @import("./map_builder.zig").MapBuilder;
 const SourceRange = @import("../SourceRange.zig");
-const BytecodeBlock = @import("../bytecode/Block.zig");
+const BytecodeBlock = @import("../astcode/Block.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
-const RegisterLocation = @import("../bytecode/register_location.zig").RegisterLocation;
+const RegisterLocation = @import("../astcode/register_location.zig").RegisterLocation;
 const RuntimeActivation = @import("../Activation.zig");
-const BytecodeExecutable = @import("../bytecode/Executable.zig");
+const BytecodeExecutable = @import("../astcode/Executable.zig");
 
 /// Information about added/changed slots when an object is merged into another.
 const MergeInfo = struct {

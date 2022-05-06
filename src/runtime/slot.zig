@@ -11,7 +11,7 @@ const Heap = @import("./Heap.zig");
 const hash = @import("../utility/hash.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./Object.zig");
-const Codegen = @import("./Codegen.zig");
+const AstGen = @import("./AstGen.zig");
 const ByteArray = @import("./ByteArray.zig");
 const map_builder = @import("./object/map_builder.zig");
 
@@ -431,12 +431,12 @@ pub const Slot = packed struct {
                 previous_slots = target_slots[0..slot_index.*];
             }
         } else if (self.isArgument()) {
-            std.debug.assert(argument_slot_index.* < Codegen.MaximumArguments);
+            std.debug.assert(argument_slot_index.* < AstGen.MaximumArguments);
 
             _ = current_slot_ptr.assignIndex(@intCast(u8, argument_slot_index.*));
             argument_slot_index.* += 1;
         } else if (self.isAssignable()) {
-            std.debug.assert(assignable_slot_index.* + argument_slot_index.* < Codegen.MaximumAssignableSlots);
+            std.debug.assert(assignable_slot_index.* + argument_slot_index.* < AstGen.MaximumAssignableSlots);
 
             const value = current_slot_ptr.assignIndex(@intCast(u8, assignable_slot_index.*));
             assignable_slot_values.appendAssumeCapacity(try heap.track(value));
