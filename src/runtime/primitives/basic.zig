@@ -118,8 +118,8 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !?Completion {
     };
     defer executable.unref();
 
-    const argument_stack_height = context.vm.argumentStackHeight();
-    const slot_stack_height = context.vm.slotStackHeight();
+    const argument_stack_height = context.vm.argument_stack.height();
+    const slot_stack_height = context.vm.slot_stack.height();
     const activation_before_script = context.actor.activation_stack.getCurrent();
     try executable.value.pushSubEntrypointActivation(context.vm, context.source_range.executable, context.target_location, &context.actor.activation_stack);
 
@@ -133,8 +133,8 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !?Completion {
             runtime_error.printTraceFromActivationStackUntil(context.actor.activation_stack.getStack(), err.source_range, activation_before_script);
 
             context.actor.activation_stack.restoreTo(context.vm.allocator, activation_before_script);
-            context.vm.restoreArgumentStackTo(argument_stack_height);
-            context.vm.restoreSlotStackTo(slot_stack_height);
+            context.vm.argument_stack.restoreTo(argument_stack_height);
+            context.vm.slot_stack.restoreTo(slot_stack_height);
 
             return try interpreter.sendMessage(context.vm, context.actor, context.arguments[0], "value", context.target_location, context.source_range);
         },

@@ -24,7 +24,7 @@ fn callFailureBlock(
     const errno_int = @enumToInt(errno);
     const errno_value = Value.fromInteger(errno_int);
 
-    try context.vm.pushArgument(errno_value);
+    try context.vm.argument_stack.push(context.vm.allocator, errno_value);
     return try interpreter.sendMessage(context.vm, context.actor, block, "value:", context.target_location, context.source_range);
 }
 

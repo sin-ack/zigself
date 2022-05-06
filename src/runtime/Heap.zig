@@ -217,14 +217,14 @@ pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) !v
 
     // Go through the slot and argument stacks and update the values there
     // as well.
-    for (self.vm.allSlots()) |*slot| {
+    for (self.vm.slot_stack.allItems()) |*slot| {
         if (slot.name.data == old_value.data)
             slot.name = new_value;
         if (slot.value.data == old_value.data)
             slot.value = new_value;
     }
 
-    for (self.vm.allArguments()) |*argument| {
+    for (self.vm.argument_stack.allItems()) |*argument| {
         if (argument.data == old_value.data)
             argument.* = new_value;
     }
@@ -544,7 +544,7 @@ const Space = struct {
 
         // Go through the virtual machine's slot and argument stacks,
         // copying any values that should be copied
-        for (self.heap.vm.allSlots()) |*slot| {
+        for (self.heap.vm.slot_stack.allItems()) |*slot| {
             std.debug.assert(slot.name.isObjectReference());
             if (try self.copyAddress(allocator, slot.name.asObjectAddress(), target_space, false)) |new_address| {
                 slot.name = Value.fromObjectAddress(new_address);
@@ -557,7 +557,7 @@ const Space = struct {
             }
         }
 
-        for (self.heap.vm.allArguments()) |*argument| {
+        for (self.heap.vm.argument_stack.allItems()) |*argument| {
             if (argument.isObjectReference()) {
                 if (try self.copyAddress(allocator, argument.asObjectAddress(), target_space, false)) |new_address| {
                     argument.* = Value.fromObjectAddress(new_address);

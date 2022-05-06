@@ -58,9 +58,9 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
                 const tracked_receiver = try vm.heap.track(receiver);
                 defer tracked_receiver.untrack(vm.heap);
 
-                const argument_slice = vm.lastNArguments(primitive.arity);
+                const argument_slice = vm.argument_stack.lastNItems(primitive.arity);
                 const completion = (try primitive.call(vm, actor, tracked_receiver, argument_slice, inst.target, source_range)) orelse return null;
-                vm.popNArguments(primitive.arity);
+                vm.argument_stack.popNItems(primitive.arity);
 
                 if (completion.isNormal()) {
                     vm.writeRegister(inst.target, completion.data.Normal);
@@ -102,9 +102,9 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
                 const tracked_receiver = try vm.heap.track(receiver);
                 defer tracked_receiver.untrack(vm.heap);
 
-                const argument_slice = vm.lastNArguments(primitive.arity);
+                const argument_slice = vm.argument_stack.lastNItems(primitive.arity);
                 const completion = (try primitive.call(vm, actor, tracked_receiver, argument_slice, inst.target, source_range)) orelse return null;
-                vm.popNArguments(primitive.arity);
+                vm.argument_stack.popNItems(primitive.arity);
 
                 if (completion.isNormal()) {
                     vm.writeRegister(inst.target, completion.data.Normal);
@@ -122,7 +122,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             const name_byte_array_object = name_value.asObject().asByteArrayObject();
             const value = vm.readRegister(payload.value_location);
 
-            try vm.pushSlot(Slot.initConstant(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
+            try vm.slot_stack.push(vm.allocator, Slot.initConstant(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
             return null;
         },
         .PushAssignableSlot => {
@@ -131,7 +131,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             const name_byte_array_object = name_value.asObject().asByteArrayObject();
             const value = vm.readRegister(payload.value_location);
 
-            try vm.pushSlot(Slot.initAssignable(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
+            try vm.slot_stack.push(vm.allocator, Slot.initAssignable(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
             return null;
         },
         .PushArgumentSlot => {
@@ -139,7 +139,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             const name_value = vm.readRegister(payload.name_location);
             const name_byte_array_object = name_value.asObject().asByteArrayObject();
 
-            try vm.pushSlot(Slot.initArgument(name_byte_array_object.getByteArray()));
+            try vm.slot_stack.push(vm.allocator, Slot.initArgument(name_byte_array_object.getByteArray()));
             return null;
         },
         .PushInheritedSlot => {
@@ -148,7 +148,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             const name_byte_array_object = name_value.asObject().asByteArrayObject();
             const value = vm.readRegister(payload.value_location);
 
-            try vm.pushSlot(Slot.initInherited(name_byte_array_object.getByteArray(), value));
+            try vm.slot_stack.push(vm.allocator, Slot.initInherited(name_byte_array_object.getByteArray(), value));
             return null;
         },
         .CreateInteger => {
@@ -164,7 +164,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
         .CreateObject => {
             const payload = inst.payload(.CreateObject);
 
-            const slots = vm.lastNSlots(payload.slot_count);
+            const slots = vm.slot_stack.lastNItems(payload.slot_count);
             var total_slot_count: u32 = 0;
             for (slots) |slot, i| {
                 total_slot_count += slot.requiredSlotSpace(slots[0..i]);
@@ -181,7 +181,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
 
             const slots_object = try map_builder.createObject();
             vm.writeRegister(inst.target, slots_object.asValue());
-            vm.popNSlots(payload.slot_count);
+            vm.slot_stack.popNItems(payload.slot_count);
             return null;
         },
         .CreateMethod => {
@@ -189,7 +189,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
 
             defer vm.next_method_is_inline = false;
 
-            const slots = vm.lastNSlots(payload.slot_count);
+            const slots = vm.slot_stack.lastNItems(payload.slot_count);
             var total_slot_count: u32 = 0;
             var argument_slot_count: u8 = 0;
             for (slots) |slot, i| {
@@ -223,13 +223,13 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
 
             const method_object = try map_builder.createObject();
             vm.writeRegister(inst.target, method_object.asValue());
-            vm.popNSlots(payload.slot_count);
+            vm.slot_stack.popNItems(payload.slot_count);
             return null;
         },
         .CreateBlock => {
             const payload = inst.payload(.CreateBlock);
 
-            const slots = vm.lastNSlots(payload.slot_count);
+            const slots = vm.slot_stack.lastNItems(payload.slot_count);
             var total_slot_count: u32 = 0;
             var argument_slot_count: u8 = 0;
             for (slots) |slot, i| {
@@ -274,7 +274,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
 
             const block_object = try map_builder.createObject();
             vm.writeRegister(inst.target, block_object.asValue());
-            vm.popNSlots(payload.slot_count);
+            vm.slot_stack.popNItems(payload.slot_count);
             return null;
         },
         .CreateByteArray => {
@@ -325,7 +325,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             if (argument.isObjectReference() and argument.asObject().isActivationObject()) {
                 argument = argument.asObject().asActivationObject().findActivationReceiver();
             }
-            try vm.pushArgument(argument);
+            try vm.argument_stack.push(vm.allocator, argument);
 
             return null;
         },
@@ -363,11 +363,11 @@ pub fn sendMessage(
             const receiver_as_block = block_receiver.asObject().asBlockObject();
             if (receiver_as_block.isCorrectMessageForBlockExecution(message_name)) {
                 const argument_count = receiver_as_block.getArgumentSlotCount();
-                const argument_slice = vm.lastNArguments(argument_count);
+                const argument_slice = vm.argument_stack.lastNItems(argument_count);
 
                 try executeBlock(vm, actor, receiver_as_block, argument_slice, target_location, source_range);
 
-                vm.popNArguments(argument_count);
+                vm.argument_stack.popNItems(argument_count);
                 return null;
             }
         }
@@ -378,18 +378,18 @@ pub fn sendMessage(
             if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
                 const method_object = lookup_result.asObject().asMethodObject();
                 const argument_count = method_object.getArgumentSlotCount();
-                const argument_slice = vm.lastNArguments(argument_count);
+                const argument_slice = vm.argument_stack.lastNItems(argument_count);
 
                 try executeMethod(vm, actor, receiver, method_object, argument_slice, target_location, source_range);
 
-                vm.popNArguments(argument_count);
+                vm.argument_stack.popNItems(argument_count);
                 return null;
             } else {
                 return Completion.initNormal(lookup_result);
             }
         },
         .Assignment => |assignment_context| {
-            const argument_slice = vm.lastNArguments(1);
+            const argument_slice = vm.argument_stack.lastNItems(1);
             var argument = argument_slice[0];
             // NOTE: This is required, for instance, when we are assigning `self` to
             //       a slot (happens more often than you might think!). We need to strip
@@ -405,7 +405,7 @@ pub fn sendMessage(
             // David will remember that.
             try vm.heap.rememberObjectReference(object_that_has_the_assignable_slot.asValue(), argument);
 
-            vm.popNArguments(1);
+            vm.argument_stack.popNItems(1);
             return Completion.initNormal(receiver);
         },
         .Nothing => try Completion.initRuntimeError(vm, source_range, "Unknown selector '{s}'", .{message_name}),

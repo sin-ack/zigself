@@ -8,9 +8,10 @@ const Allocator = std.mem.Allocator;
 const Heap = @import("./Heap.zig");
 const slot_import = @import("./slot.zig");
 const Slot = slot_import.Slot;
-const Value = @import("./value.zig").Value;
-const Range = @import("../language/Range.zig");
 const Actor = @import("./Actor.zig");
+const Range = @import("../language/Range.zig");
+const Stack = @import("./stack.zig").Stack;
+const Value = @import("./value.zig").Value;
 const Object = @import("./Object.zig");
 const Script = @import("../language/script.zig");
 const AstGen = @import("./AstGen.zig");
@@ -57,8 +58,8 @@ silent_errors: bool = false,
 // --- Current execution state ---
 
 registers: ?[]Value = null,
-argument_stack: std.ArrayListUnmanaged(Value) = .{},
-slot_stack: std.ArrayListUnmanaged(Slot) = .{},
+argument_stack: Stack(Value) = .{},
+slot_stack: Stack(Slot) = .{},
 /// Whether the next created method is going to be an inline method.
 next_method_is_inline: bool = false,
 /// The currently active source range. This is updated by the source_range
@@ -220,58 +221,4 @@ pub fn writeRegister(self: *Self, location: RegisterLocation, value: Value) void
         .Nil => {},
         else => |loc| self.registers.?[@enumToInt(loc)] = value,
     }
-}
-
-pub fn pushArgument(self: *Self, argument: Value) !void {
-    try self.argument_stack.append(self.allocator, argument);
-}
-
-pub fn lastNArguments(self: Self, n: u8) []const Value {
-    const argument_count = self.argument_stack.items.len;
-    return self.argument_stack.items[argument_count - n .. argument_count];
-}
-
-pub fn popNArguments(self: *Self, n: u8) void {
-    self.argument_stack.shrinkRetainingCapacity(self.argument_stack.items.len - n);
-}
-
-/// Returns all the arguments that are currently on the argument stack. Intended
-/// for use in the garbage collector.
-pub fn allArguments(self: Self) []Value {
-    return self.argument_stack.items;
-}
-
-pub fn argumentStackHeight(self: Self) usize {
-    return self.allArguments().len;
-}
-
-pub fn restoreArgumentStackTo(self: *Self, height: usize) void {
-    self.argument_stack.shrinkRetainingCapacity(height);
-}
-
-pub fn pushSlot(self: *Self, slot: Slot) !void {
-    try self.slot_stack.append(self.allocator, slot);
-}
-
-pub fn lastNSlots(self: Self, n: u32) []const Slot {
-    const slot_count = self.slot_stack.items.len;
-    return self.slot_stack.items[slot_count - n .. slot_count];
-}
-
-pub fn popNSlots(self: *Self, n: u32) void {
-    self.slot_stack.shrinkRetainingCapacity(self.slot_stack.items.len - n);
-}
-
-/// Returns all the slots that are currently on the slot stack. Intended for use
-/// in the garbage collector.
-pub fn allSlots(self: Self) []Slot {
-    return self.slot_stack.items;
-}
-
-pub fn slotStackHeight(self: Self) usize {
-    return self.allSlots().len;
-}
-
-pub fn restoreSlotStackTo(self: *Self, height: usize) void {
-    self.slot_stack.shrinkRetainingCapacity(height);
 }
