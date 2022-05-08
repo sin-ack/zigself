@@ -8,10 +8,10 @@ const Allocator = std.mem.Allocator;
 
 const Actor = @import("./Actor.zig");
 const Value = @import("./value.zig").Value;
-const Executable = @import("./astcode/Executable.zig");
+const Executable = @import("./lowcode/Executable.zig");
 const SourceRange = @import("./SourceRange.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
-const RegisterLocation = @import("./astcode/register_location.zig").RegisterLocation;
+const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
 
 /// The ID of the activation which is used with ActivationRef in order to check
 /// whether the activation is still alive or not.
@@ -37,6 +37,8 @@ nonlocal_return_target_activation: ?*Self = null,
 
 // --- Activation creation info ---
 
+/// The VM stack snapshot at the time which this activation was created.
+stack_snapshot: VirtualMachine.StackSnapshot,
 /// The message that created this activation as a byte array.
 creator_message: Value,
 /// This is the source range which caused the creation of this message.
@@ -44,9 +46,6 @@ created_from: SourceRange,
 
 // --- Activation execution state ---
 
-/// The registers on which the instructions operate. This slice is owned and
-/// will be destroyed when the activation is deinitialized.
-registers: []Value,
 /// The index of the instruction that is currently being executed (the "program
 /// counter").
 pc: u32 = 0,
@@ -58,7 +57,7 @@ pub fn initInPlace(
     self: *Self,
     activation_object: Value,
     target_location: RegisterLocation,
-    registers: []Value,
+    stack_snapshot: VirtualMachine.StackSnapshot,
     creator_message: Value,
     created_from: SourceRange,
 ) !void {
@@ -68,15 +67,14 @@ pub fn initInPlace(
         .activation_id = newActivationID(),
         .activation_object = activation_object,
         .target_location = target_location,
+        .stack_snapshot = stack_snapshot,
         .creator_message = creator_message,
         .created_from = created_from.copy(),
-        .registers = registers,
     };
 }
 
-pub fn deinit(self: *Self, allocator: Allocator) void {
+pub fn deinit(self: *Self) void {
     self.created_from.deinit();
-    allocator.free(self.registers);
 }
 
 pub fn takeRef(self: *Self) ActivationRef {
@@ -149,7 +147,7 @@ pub const ActivationStack = struct {
     }
 
     /// Unwinds the stack until the given activation is reached.
-    pub fn restoreTo(self: *ActivationStack, allocator: Allocator, activation: *Self) void {
+    pub fn restoreTo(self: *ActivationStack, activation: *Self) void {
         if (std.debug.runtime_safety) {
             std.debug.assert(self.isActivationWithin(activation));
         }
@@ -160,7 +158,7 @@ pub const ActivationStack = struct {
         const distance = @divExact(@ptrToInt(current_activation) - @ptrToInt(activation), @sizeOf(Self));
         const target_depth = self.depth - distance;
         while (self.depth != target_depth) : (self.depth -= 1) {
-            self.stack[self.depth - 1].deinit(allocator);
+            self.stack[self.depth - 1].deinit();
         }
     }
 
@@ -183,10 +181,6 @@ pub const ActivationStack = struct {
 
         return @ptrToInt(activation) >= @ptrToInt(start_of_slice) and
             @ptrToInt(activation) < @ptrToInt(end_of_slice);
-    }
-
-    pub fn setRegisters(self: *ActivationStack, vm: *VirtualMachine) void {
-        vm.registers = self.getCurrent().registers;
     }
 };
 

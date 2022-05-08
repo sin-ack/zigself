@@ -205,19 +205,24 @@ pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) !v
             if (activation.activation_object.data == old_value.data) {
                 activation.activation_object = new_value;
             }
-
-            // Go through the registers of this activation and update any
-            // references to the old value.
-            for (activation.registers) |*register| {
-                if (register.data == old_value.data)
-                    register.* = new_value;
-            }
         }
     }
+
+    const VisitorContext = struct { old_value: Value, new_value: Value };
+    self.vm.register_file.visitValues(VisitorContext{ .old_value = old_value, .new_value = new_value }, struct {
+        fn f(context: VisitorContext, value: *Value) !void {
+            if (value.data == context.old_value.data)
+                value.* = context.new_value;
+        }
+    }.f) catch unreachable;
 
     // Go through the slot and argument stacks and update the values there
     // as well.
     for (self.vm.slot_stack.allItems()) |*slot| {
+        // FIXME: This should be handled in VirtualMachine.visitValues.
+        if (std.meta.eql(VirtualMachine.SlotSentinel, slot.*))
+            continue;
+
         if (slot.name.data == old_value.data)
             slot.name = new_value;
         if (slot.value.data == old_value.data)
@@ -225,8 +230,17 @@ pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) !v
     }
 
     for (self.vm.argument_stack.allItems()) |*argument| {
+        // FIXME: This should be handled in VirtualMachine.visitValues.
+        if (std.meta.eql(VirtualMachine.ValueSentinel, argument.*))
+            continue;
+
         if (argument.data == old_value.data)
             argument.* = new_value;
+    }
+
+    for (self.vm.saved_register_stack.allItems()) |*saved_register| {
+        if (saved_register.value.data == old_value.data)
+            saved_register.value = new_value;
     }
 
     // Finally scan each heap space and update the references.
@@ -530,21 +544,26 @@ const Space = struct {
                 const new_address = try self.copyObjectTo(allocator, activation_object_address, target_space);
                 activation.activation_object = Value.fromObjectAddress(new_address);
             }
+        }
 
-            // Go through the registers of this activation and scan all
-            // registers for values to copy.
-            for (activation.registers) |*register| {
-                if (register.isObjectReference()) {
-                    if (try self.copyAddress(allocator, register.asObjectAddress(), target_space, false)) |new_address| {
-                        register.* = Value.fromObjectAddress(new_address);
+        const VisitorContext = struct { self: *Space, allocator: Allocator, target_space: *Space };
+        self.heap.vm.register_file.visitValues(VisitorContext{ .self = self, .allocator = allocator, .target_space = target_space }, struct {
+            fn f(context: VisitorContext, value: *Value) !void {
+                if (value.isObjectReference()) {
+                    if (try context.self.copyAddress(context.allocator, value.asObjectAddress(), context.target_space, false)) |new_address| {
+                        value.* = Value.fromObjectAddress(new_address);
                     }
                 }
             }
-        }
+        }.f) catch |err| return @errSetCast(Allocator.Error, err);
 
         // Go through the virtual machine's slot and argument stacks,
         // copying any values that should be copied
         for (self.heap.vm.slot_stack.allItems()) |*slot| {
+            // FIXME: This should be handled in VirtualMachine.visitValues.
+            if (std.meta.eql(VirtualMachine.SlotSentinel, slot.*))
+                continue;
+
             std.debug.assert(slot.name.isObjectReference());
             if (try self.copyAddress(allocator, slot.name.asObjectAddress(), target_space, false)) |new_address| {
                 slot.name = Value.fromObjectAddress(new_address);
@@ -558,9 +577,21 @@ const Space = struct {
         }
 
         for (self.heap.vm.argument_stack.allItems()) |*argument| {
+            // FIXME: This should be handled in VirtualMachine.visitValues.
+            if (std.meta.eql(VirtualMachine.ValueSentinel, argument.*))
+                continue;
+
             if (argument.isObjectReference()) {
                 if (try self.copyAddress(allocator, argument.asObjectAddress(), target_space, false)) |new_address| {
                     argument.* = Value.fromObjectAddress(new_address);
+                }
+            }
+        }
+
+        for (self.heap.vm.saved_register_stack.allItems()) |*saved_register| {
+            if (saved_register.value.isObjectReference()) {
+                if (try self.copyAddress(allocator, saved_register.value.asObjectAddress(), target_space, false)) |new_address| {
+                    saved_register.value = Value.fromObjectAddress(new_address);
                 }
             }
         }

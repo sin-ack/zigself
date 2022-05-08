@@ -4,21 +4,21 @@
 
 const std = @import("std");
 
+const Slot = slot_import.Slot;
 const debug = @import("../debug.zig");
 const Actor = @import("./Actor.zig");
 const Value = @import("./value.zig").Value;
-const Instruction = @import("./astcode/Instruction.zig");
 const Object = @import("./Object.zig");
 const ByteArray = @import("./ByteArray.zig");
 const Activation = @import("./Activation.zig");
 const Completion = @import("./Completion.zig");
-const Executable = @import("./astcode/Executable.zig");
+const Executable = @import("./lowcode/Executable.zig");
 const primitives = @import("./primitives.zig");
+const Instruction = @import("./lowcode/Instruction.zig");
 const SourceRange = @import("./SourceRange.zig");
-const VirtualMachine = @import("./VirtualMachine.zig");
-const RegisterLocation = @import("./astcode/register_location.zig").RegisterLocation;
 const slot_import = @import("./slot.zig");
-const Slot = slot_import.Slot;
+const VirtualMachine = @import("./VirtualMachine.zig");
+const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
 
 const EXECUTION_DEBUG = debug.EXECUTION_DEBUG;
 
@@ -201,7 +201,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
                     argument_slot_count += 1;
             }
 
-            const method_name_as_object = vm.readRegister(payload.method_name).asObject().asByteArrayObject();
+            const method_name_as_object = vm.readRegister(payload.method_name_location).asObject().asByteArrayObject();
             const block = executable.value.getBlock(payload.block_index);
             // FIXME: Support inline methods
             var method_map = try Object.Map.Method.create(
@@ -298,24 +298,24 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             vm.next_method_is_inline = true;
             return null;
         },
-        .ExitActivation => {
-            const payload = inst.payload(.ExitActivation);
-            const value = vm.readRegister(payload.value_location);
-
-            if (actor.exitCurrentActivation(vm, last_activation, value) == .LastActivation)
-                return Completion.initNormal(value);
+        .Return => {
+            if (actor.exitCurrentActivation(vm, last_activation) == .LastActivation)
+                return Completion.initNormal(vm.readRegister(.ret));
             return null;
         },
         .NonlocalReturn => {
-            const payload = inst.payload(.NonlocalReturn);
-            const value = vm.readRegister(payload.value_location);
-
             const current_activation = actor.activation_stack.getCurrent();
             // FIXME: Better name
             const target_activation = current_activation.nonlocal_return_target_activation.?;
 
-            if (actor.exitActivation(vm, last_activation, target_activation, value) == .LastActivation)
-                return Completion.initNormal(value);
+            if (actor.exitActivation(vm, last_activation, target_activation) == .LastActivation)
+                return Completion.initNormal(vm.readRegister(.ret));
+            return null;
+        },
+        .WriteReturnValue => {
+            const payload = inst.payload(.WriteReturnValue);
+            const value = vm.readRegister(payload.value_location);
+            vm.writeRegister(.ret, value);
             return null;
         },
         .PushArg => {
@@ -329,9 +329,37 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
 
             return null;
         },
+        .PushRegisters => {
+            const payload = inst.payload(.PushRegisters);
+
+            var iterator = payload.clobbered_registers.iterator(.{});
+            while (iterator.next()) |clobbered_register| {
+                // FIXME: Remove manual register number adjustment!
+                const register = RegisterLocation.fromInt(@intCast(u32, clobbered_register + 2));
+                try vm.saved_register_stack.push(vm.allocator, .{ .register = register, .value = vm.readRegister(register) });
+            }
+
+            return null;
+        },
         .SourceRange => {
             const range = inst.payload(.SourceRange);
             vm.range = range;
+            return null;
+        },
+        .PushArgumentSentinel => {
+            try vm.argument_stack.pushSentinel(vm.allocator);
+            return null;
+        },
+        .PushSlotSentinel => {
+            try vm.slot_stack.pushSentinel(vm.allocator);
+            return null;
+        },
+        .VerifyArgumentSentinel => {
+            vm.argument_stack.verifySentinel();
+            return null;
+        },
+        .VerifySlotSentinel => {
+            vm.slot_stack.verifySentinel();
             return null;
         },
     }
@@ -368,6 +396,10 @@ pub fn sendMessage(
                 try executeBlock(vm, actor, receiver_as_block, argument_slice, target_location, source_range);
 
                 vm.argument_stack.popNItems(argument_count);
+                // Bump the argument stack height of the (now current)
+                // activation since we've now popped this activation's items off
+                // it.
+                actor.activation_stack.getCurrent().stack_snapshot.bumpArgumentHeight(vm);
                 return null;
             }
         }
@@ -383,6 +415,10 @@ pub fn sendMessage(
                 try executeMethod(vm, actor, receiver, method_object, argument_slice, target_location, source_range);
 
                 vm.argument_stack.popNItems(argument_count);
+                // Bump the argument stack height of the (now current)
+                // activation since we've now popped this activation's items off
+                // it.
+                actor.activation_stack.getCurrent().stack_snapshot.bumpArgumentHeight(vm);
                 return null;
             } else {
                 return Completion.initNormal(lookup_result);
@@ -451,7 +487,6 @@ fn executeBlock(
         source_range,
         activation_slot,
     );
-    actor.activation_stack.setRegisters(vm);
 }
 
 fn executeMethod(
@@ -496,5 +531,4 @@ fn executeMethod(
 
     const activation_slot = actor.activation_stack.getNewActivationSlot();
     try method.activateMethod(vm, receiver_of_method, arguments, target_location, source_range, activation_slot);
-    actor.activation_stack.setRegisters(vm);
 }

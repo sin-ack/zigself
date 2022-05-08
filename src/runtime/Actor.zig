@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const debug = @import("../debug.zig");
 const Value = @import("./value.zig").Value;
 const Completion = @import("./Completion.zig");
-const Executable = @import("./astcode/Executable.zig");
+const Executable = @import("./lowcode/Executable.zig");
 const Activation = @import("./Activation.zig");
 const interpreter = @import("./interpreter.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
@@ -44,7 +44,7 @@ fn init(self: *Self, activation_stack: ActivationStack) !void {
 
 fn deinit(self: *Self, allocator: Allocator) void {
     for (self.activation_stack.getStack()) |*activation| {
-        activation.deinit(allocator);
+        activation.deinit();
     }
     self.activation_stack.deinit(allocator);
 }
@@ -89,16 +89,16 @@ pub fn executeActivationStack(self: *Self, vm: *VirtualMachine, until: ?*Activat
 
 pub const ActivationExitState = enum { LastActivation, NotLastActivation };
 
-pub fn exitCurrentActivation(self: *Self, vm: *VirtualMachine, last_activation: ?*Activation, value: Value) ActivationExitState {
+pub fn exitCurrentActivation(self: *Self, vm: *VirtualMachine, last_activation: ?*Activation) ActivationExitState {
     if (ACTIVATION_EXIT_DEBUG) std.debug.print("Actor.exitCurrentActivation: Exiting this activation\n", .{});
     const current_activation = self.activation_stack.getCurrent();
-    return self.exitActivation(vm, last_activation, current_activation, value);
+    return self.exitActivation(vm, last_activation, current_activation);
 }
 
-/// Exit the given activation with the given value and write it to the register
-/// for the instruction that initiated the activation. Returns
+/// Exit the given activation and write the result of the return register to the
+/// register for the instruction that initiated the activation. Returns
 /// ActivationExitState.LastActivation if the last activation has been exited.
-pub fn exitActivation(self: *Self, vm: *VirtualMachine, last_activation: ?*Activation, target_activation: *Activation, value: Value) ActivationExitState {
+pub fn exitActivation(self: *Self, vm: *VirtualMachine, last_activation: ?*Activation, target_activation: *Activation) ActivationExitState {
     if (ACTIVATION_EXIT_DEBUG) {
         std.debug.print("Actor.exitActivation: Exiting activation\n", .{});
         for (self.activation_stack.getStack()) |*a, i| {
@@ -115,12 +115,25 @@ pub fn exitActivation(self: *Self, vm: *VirtualMachine, last_activation: ?*Activ
     const target_location = target_activation.target_location;
 
     // Restore to the given activation + 1 more to exit this one
-    self.activation_stack.restoreTo(vm.allocator, target_activation);
-    self.activation_stack.popActivation().deinit(vm.allocator);
+    self.activation_stack.restoreTo(target_activation);
+    const activation_stack_snapshot = self.activation_stack.getCurrent().stack_snapshot;
+    self.activation_stack.popActivation().deinit();
+
+    // Restore each register until the current activation's saved register stack height
+    // FIXME: Factor this out
+    const activation_saved_register_height = activation_stack_snapshot.saved_register_height;
+    const saved_register_stack = vm.saved_register_stack.allItems();
+    const saved_register_count = saved_register_stack.len;
+    for (saved_register_stack[activation_saved_register_height..]) |_, i| {
+        const saved_register = saved_register_stack[saved_register_count - 1 - i];
+        vm.writeRegister(saved_register.register, saved_register.value);
+    }
+
+    // Restore the stack snapshot of the activation we just exited
+    vm.restoreStackSnapshot(activation_stack_snapshot);
 
     if (last_activation) |last| {
         if (self.activation_stack.getCurrent() == last) {
-            self.activation_stack.setRegisters(vm);
             return .LastActivation;
         }
     } else {
@@ -128,7 +141,6 @@ pub fn exitActivation(self: *Self, vm: *VirtualMachine, last_activation: ?*Activ
             return .LastActivation;
     }
 
-    self.activation_stack.setRegisters(vm);
-    vm.writeRegister(target_location, value);
+    vm.writeRegister(target_location, vm.readRegister(.ret));
     return .NotLastActivation;
 }

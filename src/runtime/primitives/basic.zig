@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const Heap = @import("../Heap.zig");
 const Script = @import("../../language/script.zig");
 const AstGen = @import("../AstGen.zig");
+const CodeGen = @import("../CodeGen.zig");
 const Completion = @import("../Completion.zig");
 const interpreter = @import("../interpreter.zig");
 const error_set_utils = @import("../../utility/error_set.zig");
@@ -71,10 +72,13 @@ pub fn RunScript(context: PrimitiveContext) !?Completion {
         return try Completion.initRuntimeError(context.vm, context.source_range, "Failed parsing the script passed to _RunScript", .{});
     }
 
-    const executable = AstGen.generateExecutableFromScript(context.vm.allocator, script) catch |err| switch (err) {
+    const ast_executable = AstGen.generateExecutableFromScript(context.vm.allocator, script) catch |err| switch (err) {
         error.AstGenFailure => return try Completion.initRuntimeError(context.vm, context.source_range, "Code generation for the script passed to _RunScript failed", .{}),
         error.OutOfMemory => return error.OutOfMemory,
     };
+    defer ast_executable.destroy();
+
+    const executable = try CodeGen.lowerExecutable(context.vm.allocator, ast_executable);
     defer executable.unref();
 
     try executable.value.pushSubEntrypointActivation(context.vm, context.source_range.executable, context.target_location, &context.actor.activation_stack);
@@ -108,7 +112,7 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !?Completion {
         return try interpreter.sendMessage(context.vm, context.actor, context.arguments[0], "value", context.target_location, context.source_range);
     }
 
-    const executable = AstGen.generateExecutableFromScript(context.vm.allocator, script) catch |err| switch (err) {
+    const ast_executable = AstGen.generateExecutableFromScript(context.vm.allocator, script) catch |err| switch (err) {
         error.AstGenFailure => {
             // TODO: Pass error information to the failure block.
             std.debug.print("Code generation for the script passed to _EvaluateStringIfFail: failed", .{});
@@ -116,10 +120,12 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !?Completion {
         },
         error.OutOfMemory => return error.OutOfMemory,
     };
+    defer ast_executable.destroy();
+
+    const executable = try CodeGen.lowerExecutable(context.vm.allocator, ast_executable);
     defer executable.unref();
 
-    const argument_stack_height = context.vm.argument_stack.height();
-    const slot_stack_height = context.vm.slot_stack.height();
+    const stack_snapshot = context.vm.takeStackSnapshot();
     const activation_before_script = context.actor.activation_stack.getCurrent();
     try executable.value.pushSubEntrypointActivation(context.vm, context.source_range.executable, context.target_location, &context.actor.activation_stack);
 
@@ -132,9 +138,8 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !?Completion {
             std.debug.print("Received error while evaluating string: {s}\n", .{err.message});
             runtime_error.printTraceFromActivationStackUntil(context.actor.activation_stack.getStack(), err.source_range, activation_before_script);
 
-            context.actor.activation_stack.restoreTo(context.vm.allocator, activation_before_script);
-            context.vm.argument_stack.restoreTo(argument_stack_height);
-            context.vm.slot_stack.restoreTo(slot_stack_height);
+            context.actor.activation_stack.restoreTo(activation_before_script);
+            context.vm.restoreStackSnapshot(stack_snapshot);
 
             return try interpreter.sendMessage(context.vm, context.actor, context.arguments[0], "value", context.target_location, context.source_range);
         },

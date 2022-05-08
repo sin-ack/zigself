@@ -13,7 +13,7 @@ const Completion = @import("./Completion.zig");
 const SourceRange = @import("./SourceRange.zig");
 const runtime_error = @import("./error.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
-const RegisterLocation = @import("./astcode/register_location.zig").RegisterLocation;
+const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
 
 const basic_primitives = @import("./primitives/basic.zig");
 const byte_array_primitives = @import("./primitives/byte_array.zig");
@@ -38,7 +38,10 @@ pub const PrimitiveContext = struct {
     /// The arguments that were passed to this primitive. The amount is always
     /// equivalent to the amount of colons in the primitive name.
     arguments: []const Value,
-    /// The location in the current activation to which the result of the activation should be written. It is fine for primitives to just return the result of the primitive as a normal completion directly, but if a new activation needs to be added, then this should be passed in.
+    /// The location in the current activation to which the result of the
+    /// activation should be written. It is fine for primitives to just return
+    /// the result of the primitive as a normal completion directly, but if a
+    /// new activation needs to be added, then this should be passed in.
     target_location: RegisterLocation,
     /// The source range which triggered this primitive call. This will be
     /// passed to runtime error completions in the case of errors.

@@ -17,6 +17,12 @@ pub const RegisterLocation = enum(u32) {
         return @intToEnum(RegisterLocation, index);
     }
 
+    pub fn registerOffset(self: RegisterLocation) u32 {
+        const offset = @enumToInt(self);
+        std.debug.assert(offset > 0);
+        return offset - 1;
+    }
+
     pub fn format(
         loc: RegisterLocation,
         comptime fmt: []const u8,

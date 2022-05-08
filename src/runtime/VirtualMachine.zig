@@ -15,9 +15,11 @@ const Value = @import("./value.zig").Value;
 const Object = @import("./Object.zig");
 const Script = @import("../language/script.zig");
 const AstGen = @import("./AstGen.zig");
+const CodeGen = @import("./CodeGen.zig");
 const ByteArray = @import("./ByteArray.zig");
+const RegisterFile = @import("./lowcode/RegisterFile.zig");
 const runtime_error = @import("./error.zig");
-const RegisterLocation = @import("./astcode/register_location.zig").RegisterLocation;
+const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
 
 /// The allocator object that will be used throughout the virtual machine's
 /// lifetime.
@@ -57,9 +59,10 @@ silent_errors: bool = false,
 
 // --- Current execution state ---
 
-registers: ?[]Value = null,
-argument_stack: Stack(Value) = .{},
-slot_stack: Stack(Slot) = .{},
+register_file: RegisterFile = .{},
+argument_stack: Stack(Value, "Argument stack", ValueSentinel) = .{},
+slot_stack: Stack(Slot, "Slot stack", SlotSentinel) = .{},
+saved_register_stack: Stack(SavedRegister, "Saved register stack", null) = .{},
 /// Whether the next created method is going to be an inline method.
 next_method_is_inline: bool = false,
 /// The currently active source range. This is updated by the source_range
@@ -67,6 +70,36 @@ next_method_is_inline: bool = false,
 range: Range = .{ .start = 0, .end = 0 },
 
 const Self = @This();
+
+// Sentinel values for the stacks
+// FIXME: These should not be pub. Make heap visit each value by calling vm.visitValues()
+//        instead of explicitly reaching into the VM.
+pub const ValueSentinel = Value{ .data = 0xCCCCCCCCCCCCCCCC };
+pub const SlotSentinel = Slot{ .name = ValueSentinel, .properties = .{ .properties = ValueSentinel }, .value = ValueSentinel };
+
+/// A snapshot of the current heights of each stack in the VM which can be
+/// restored after a non-local return.
+pub const StackSnapshot = struct {
+    argument_height: usize,
+    slot_height: usize,
+    saved_register_height: usize,
+
+    /// Bump just the argument stack height. This is necessary because the stack
+    /// snapshot for an activation is created while the stack still contains the
+    /// arguments for the activation, meaning the stack will be higher than it
+    /// actually is when the activation is entered.
+    pub fn bumpArgumentHeight(self: *StackSnapshot, vm: *Self) void {
+        self.argument_height = vm.argument_stack.height();
+    }
+};
+
+/// A saved register, which is restored at activation exit.
+pub const SavedRegister = struct {
+    /// The register to restore the value to.
+    register: RegisterLocation,
+    /// The value which should be restored.
+    value: Value,
+};
 
 /// Creates the virtual machine, including the heap and the global objects.
 pub fn create(allocator: Allocator) !*Self {
@@ -96,6 +129,8 @@ pub fn create(allocator: Allocator) !*Self {
     self.string_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
     self.integer_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
 
+    self.register_file.init();
+
     return self;
 }
 
@@ -120,6 +155,7 @@ pub fn destroy(self: *Self) void {
 
     self.argument_stack.deinit(self.allocator);
     self.slot_stack.deinit(self.allocator);
+    self.saved_register_stack.deinit(self.allocator);
 
     self.heap.destroy();
     self.allocator.destroy(self);
@@ -185,7 +221,10 @@ fn requiredSizeForBlockMessageName(argument_count: u8) usize {
 }
 
 pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
-    var entrypoint_executable = try AstGen.generateExecutableFromScript(self.allocator, script);
+    var entrypoint_ast_executable = try AstGen.generateExecutableFromScript(self.allocator, script);
+    defer entrypoint_ast_executable.destroy();
+
+    var entrypoint_executable = try CodeGen.lowerExecutable(self.allocator, entrypoint_ast_executable);
     defer entrypoint_executable.unref();
 
     var actor = try Actor.create(self.allocator);
@@ -211,14 +250,25 @@ pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
 
 pub fn readRegister(self: Self, location: RegisterLocation) Value {
     return switch (location) {
-        .Nil => self.nil(),
-        else => |loc| self.registers.?[@enumToInt(loc)],
+        .zero => self.nil(),
+        else => self.register_file.read(location),
     };
 }
 
 pub fn writeRegister(self: *Self, location: RegisterLocation, value: Value) void {
-    switch (location) {
-        .Nil => {},
-        else => |loc| self.registers.?[@enumToInt(loc)] = value,
-    }
+    self.register_file.write(location, value);
+}
+
+pub fn takeStackSnapshot(self: Self) StackSnapshot {
+    return .{
+        .argument_height = self.argument_stack.height(),
+        .slot_height = self.slot_stack.height(),
+        .saved_register_height = self.saved_register_stack.height(),
+    };
+}
+
+pub fn restoreStackSnapshot(self: *Self, snapshot: StackSnapshot) void {
+    self.argument_stack.restoreTo(snapshot.argument_height);
+    self.slot_stack.restoreTo(snapshot.slot_height);
+    self.saved_register_stack.restoreTo(snapshot.saved_register_height);
 }

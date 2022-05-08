@@ -13,7 +13,11 @@ pub const GC_TRACK_SOURCE_DEBUG = false;
 pub const REMEMBERED_SET_DEBUG = false;
 /// Debugging of activation exits (regular and non-local returns).
 pub const ACTIVATION_EXIT_DEBUG = false;
-/// Dump every executable after codegen.
-pub const EXECUTABLE_DUMP_DEBUG = false;
+/// Dump every ASTcode executable after astgen.
+pub const AST_EXECUTABLE_DUMP_DEBUG = false;
+/// Dump every lowcode executable after astgen.
+pub const LOW_EXECUTABLE_DUMP_DEBUG = false;
 /// Print every instruction that's executed.
 pub const EXECUTION_DEBUG = false;
+/// Print pushes and pops to VM stacks.
+pub const STACK_DEBUG = false;

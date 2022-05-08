@@ -10,12 +10,20 @@ const Range = @import("../../language/Range.zig");
 const Completion = @import("../Completion.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const RegisterLocation = @import("./register_location.zig").RegisterLocation;
+const RegisterPool = @import("./RegisterPool.zig");
 
-// NOTE: This is set in Block.addInstruction
-target: RegisterLocation = undefined,
+target: RegisterLocation,
 tag: Tag,
 // FIXME: Make this type less manual
 arguments: [3]u64,
+
+// NOTE: This check is for push_registers and it verifies that the
+//       RegisterBitSet mask can always fit into a single instruction argument
+//       (this will hopefully be always true ^^;).
+comptime {
+    if (@sizeOf(RegisterPool.RegisterBitSet) > @sizeOf(u64))
+        @compileError("!!! The RegisterBitSet can no longer fit in a single instruction argument!");
+}
 
 const Self = @This();
 
@@ -43,8 +51,12 @@ const Tag = enum(u32) {
     // Modifiers
     SetMethodInline,
 
+    // Register saving at activation entry point
+    PushRegisters,
+
     // Exiting an activation
-    ExitActivation,
+    WriteReturnValue,
+    Return,
     NonlocalReturn,
 
     // Arguments
@@ -69,6 +81,7 @@ const Tag = enum(u32) {
             .PushAssignableSlot => "push_assignable_slot",
             .PushArgumentSlot => "push_argument_slot",
             .PushInheritedSlot => "push_inherited_slot",
+            .PushRegisters => "push_registers",
             .CreateInteger => "create_integer",
             .CreateFloatingPoint => "create_floating_point",
             .CreateObject => "create_object",
@@ -76,7 +89,8 @@ const Tag = enum(u32) {
             .CreateBlock => "create_block",
             .CreateByteArray => "create_byte_array",
             .SetMethodInline => "set_method_inline",
-            .ExitActivation => "exit_activation",
+            .WriteReturnValue => "write_return_value",
+            .Return => "return",
             .NonlocalReturn => "nonlocal_return",
             .PushArg => "push_arg",
             .SourceRange => "source_range",
@@ -99,10 +113,13 @@ const Tag = enum(u32) {
             .CreateInteger => Self.Payload.CreateInteger,
             .CreateFloatingPoint => Self.Payload.CreateFloatingPoint,
             .CreateByteArray => Self.Payload.CreateByteArray,
-            .ExitActivation, .NonlocalReturn => Self.Payload.ExitActivation,
+            .PushRegisters => Self.Payload.PushRegisters,
+            .WriteReturnValue => Self.Payload.WriteReturnValue,
             .PushArg => Self.Payload.PushArg,
             .SourceRange => Self.Payload.SourceRange,
 
+            .Return,
+            .NonlocalReturn,
             .SetMethodInline,
             .PushArgumentSentinel,
             .PushSlotSentinel,
@@ -132,6 +149,10 @@ pub const Payload = struct {
     pub const PushNonParentSlot = struct {
         name_location: RegisterLocation,
         value_location: RegisterLocation,
+    };
+
+    pub const PushRegisters = struct {
+        clobbered_registers: RegisterPool.RegisterBitSet,
     };
 
     pub const CreateInteger = struct {
@@ -165,7 +186,7 @@ pub const Payload = struct {
         argument_location: RegisterLocation,
     };
 
-    pub const ExitActivation = struct {
+    pub const WriteReturnValue = struct {
         value_location: RegisterLocation,
     };
 
@@ -174,97 +195,105 @@ pub const Payload = struct {
 
 // --- Creation ---
 
-pub fn send(receiver_location: RegisterLocation, message_name: []const u8) Self {
-    return .{ .tag = .Send, .arguments = .{ @enumToInt(receiver_location), @ptrToInt(message_name.ptr), message_name.len } };
+pub fn send(target: RegisterLocation, receiver_location: RegisterLocation, message_name: []const u8) Self {
+    return .{ .tag = .Send, .target = target, .arguments = .{ receiver_location.asInt(), @ptrToInt(message_name.ptr), message_name.len } };
 }
 
-pub fn primSend(receiver_location: RegisterLocation, message_name: []const u8) Self {
-    return .{ .tag = .PrimSend, .arguments = .{ @enumToInt(receiver_location), @ptrToInt(message_name.ptr), message_name.len } };
+pub fn primSend(target: RegisterLocation, receiver_location: RegisterLocation, message_name: []const u8) Self {
+    return .{ .tag = .PrimSend, .target = target, .arguments = .{ receiver_location.asInt(), @ptrToInt(message_name.ptr), message_name.len } };
 }
 
-pub fn selfSend(message_name: []const u8) Self {
-    return .{ .tag = .SelfSend, .arguments = .{ @ptrToInt(message_name.ptr), message_name.len, undefined } };
+pub fn selfSend(target: RegisterLocation, message_name: []const u8) Self {
+    return .{ .tag = .SelfSend, .target = target, .arguments = .{ @ptrToInt(message_name.ptr), message_name.len, undefined } };
 }
 
-pub fn selfPrimSend(message_name: []const u8) Self {
-    return .{ .tag = .SelfPrimSend, .arguments = .{ @ptrToInt(message_name.ptr), message_name.len, undefined } };
+pub fn selfPrimSend(target: RegisterLocation, message_name: []const u8) Self {
+    return .{ .tag = .SelfPrimSend, .target = target, .arguments = .{ @ptrToInt(message_name.ptr), message_name.len, undefined } };
 }
 
-pub fn pushConstantSlot(name_location: RegisterLocation, is_parent: bool, value_location: RegisterLocation) Self {
-    return .{ .tag = .PushConstantSlot, .arguments = .{ @enumToInt(name_location), @boolToInt(is_parent), @enumToInt(value_location) } };
+pub fn pushConstantSlot(target: RegisterLocation, name_location: RegisterLocation, is_parent: bool, value_location: RegisterLocation) Self {
+    return .{ .tag = .PushConstantSlot, .target = target, .arguments = .{ name_location.asInt(), @boolToInt(is_parent), value_location.asInt() } };
 }
 
-pub fn pushAssignableSlot(name_location: RegisterLocation, is_parent: bool, value_location: RegisterLocation) Self {
-    return .{ .tag = .PushAssignableSlot, .arguments = .{ @enumToInt(name_location), @boolToInt(is_parent), @enumToInt(value_location) } };
+pub fn pushAssignableSlot(target: RegisterLocation, name_location: RegisterLocation, is_parent: bool, value_location: RegisterLocation) Self {
+    return .{ .tag = .PushAssignableSlot, .target = target, .arguments = .{ name_location.asInt(), @boolToInt(is_parent), value_location.asInt() } };
 }
 
-pub fn pushArgumentSlot(name_location: RegisterLocation, value_location: RegisterLocation) Self {
-    return .{ .tag = .PushArgumentSlot, .arguments = .{ @enumToInt(name_location), @enumToInt(value_location), undefined } };
+pub fn pushArgumentSlot(target: RegisterLocation, name_location: RegisterLocation, value_location: RegisterLocation) Self {
+    return .{ .tag = .PushArgumentSlot, .target = target, .arguments = .{ name_location.asInt(), value_location.asInt(), undefined } };
 }
 
-pub fn pushInheritedSlot(name_location: RegisterLocation, value_location: RegisterLocation) Self {
-    return .{ .tag = .PushInheritedSlot, .arguments = .{ @enumToInt(name_location), @enumToInt(value_location), undefined } };
+pub fn pushInheritedSlot(target: RegisterLocation, name_location: RegisterLocation, value_location: RegisterLocation) Self {
+    return .{ .tag = .PushInheritedSlot, .target = target, .arguments = .{ name_location.asInt(), value_location.asInt(), undefined } };
 }
 
 // FIXME: Turn this into i62
-pub fn createInteger(value: i64) Self {
-    return .{ .tag = .CreateInteger, .arguments = .{ @bitCast(u64, value), undefined, undefined } };
+pub fn createInteger(target: RegisterLocation, value: i64) Self {
+    return .{ .tag = .CreateInteger, .target = target, .arguments = .{ @bitCast(u64, value), undefined, undefined } };
 }
 
-pub fn createFloatingPoint(value: f64) Self {
-    return .{ .tag = .CreateFloatingPoint, .arguments = .{ @bitCast(u64, value), undefined, undefined } };
+pub fn createFloatingPoint(target: RegisterLocation, value: f64) Self {
+    return .{ .tag = .CreateFloatingPoint, .target = target, .arguments = .{ @bitCast(u64, value), undefined, undefined } };
 }
 
-pub fn createObject(slot_count: u32) Self {
-    return .{ .tag = .CreateObject, .arguments = .{ slot_count, undefined, undefined } };
+pub fn createObject(target: RegisterLocation, slot_count: u32) Self {
+    return .{ .tag = .CreateObject, .target = target, .arguments = .{ slot_count, undefined, undefined } };
 }
 
-pub fn createMethod(method_name_location: RegisterLocation, slot_count: u32, block_index: u32) Self {
-    return .{ .tag = .CreateMethod, .arguments = .{ @enumToInt(method_name_location), slot_count, block_index } };
+pub fn createMethod(target: RegisterLocation, method_name_location: RegisterLocation, slot_count: u32, block_index: u32) Self {
+    return .{ .tag = .CreateMethod, .target = target, .arguments = .{ method_name_location.asInt(), slot_count, block_index } };
 }
 
-pub fn createBlock(slot_count: u32, block_index: u32) Self {
-    return .{ .tag = .CreateBlock, .arguments = .{ slot_count, block_index, undefined } };
+pub fn createBlock(target: RegisterLocation, slot_count: u32, block_index: u32) Self {
+    return .{ .tag = .CreateBlock, .target = target, .arguments = .{ slot_count, block_index, undefined } };
 }
 
-pub fn createByteArray(value: []const u8) Self {
-    return .{ .tag = .CreateByteArray, .arguments = .{ @ptrToInt(value.ptr), value.len, undefined } };
+pub fn createByteArray(target: RegisterLocation, value: []const u8) Self {
+    return .{ .tag = .CreateByteArray, .target = target, .arguments = .{ @ptrToInt(value.ptr), value.len, undefined } };
 }
 
-pub fn setMethodInline() Self {
-    return .{ .tag = .SetMethodInline, .arguments = .{ undefined, undefined, undefined } };
+pub fn setMethodInline(target: RegisterLocation) Self {
+    return .{ .tag = .SetMethodInline, .target = target, .arguments = .{ undefined, undefined, undefined } };
 }
 
-pub fn exitActivation(expression_location: RegisterLocation) Self {
-    return .{ .tag = .ExitActivation, .arguments = .{ @enumToInt(expression_location), undefined, undefined } };
+pub fn pushRegisters(target: RegisterLocation, clobbered_registers: RegisterPool.RegisterBitSet) Self {
+    return .{ .tag = .PushRegisters, .target = target, .arguments = .{ clobbered_registers.mask, undefined, undefined } };
 }
 
-pub fn nonlocalReturn(expression_location: RegisterLocation) Self {
-    return .{ .tag = .NonlocalReturn, .arguments = .{ @enumToInt(expression_location), undefined, undefined } };
+pub fn writeReturnValue(target: RegisterLocation, value_location: RegisterLocation) Self {
+    return .{ .tag = .WriteReturnValue, .target = target, .arguments = .{ value_location.asInt(), undefined, undefined } };
 }
 
-pub fn pushArg(argument_location: RegisterLocation) Self {
-    return .{ .tag = .PushArg, .arguments = .{ @enumToInt(argument_location), undefined, undefined } };
+pub fn return_(target: RegisterLocation) Self {
+    return .{ .tag = .Return, .target = target, .arguments = .{ undefined, undefined, undefined } };
 }
 
-pub fn sourceRange(range: Range) Self {
-    return .{ .tag = .SourceRange, .arguments = .{ range.start, range.end, undefined } };
+pub fn nonlocalReturn(target: RegisterLocation) Self {
+    return .{ .tag = .NonlocalReturn, .target = target, .arguments = .{ undefined, undefined, undefined } };
 }
 
-pub fn pushArgumentSentinel() Self {
-    return .{ .tag = .PushArgumentSentinel, .arguments = .{ undefined, undefined, undefined } };
+pub fn pushArg(target: RegisterLocation, argument_location: RegisterLocation) Self {
+    return .{ .tag = .PushArg, .target = target, .arguments = .{ argument_location.asInt(), undefined, undefined } };
 }
 
-pub fn pushSlotSentinel() Self {
-    return .{ .tag = .PushSlotSentinel, .arguments = .{ undefined, undefined, undefined } };
+pub fn sourceRange(target: RegisterLocation, range: Range) Self {
+    return .{ .tag = .SourceRange, .target = target, .arguments = .{ range.start, range.end, undefined } };
 }
 
-pub fn verifyArgumentSentinel() Self {
-    return .{ .tag = .VerifyArgumentSentinel, .arguments = .{ undefined, undefined, undefined } };
+pub fn pushArgumentSentinel(target: RegisterLocation) Self {
+    return .{ .tag = .PushArgumentSentinel, .target = target, .arguments = .{ undefined, undefined, undefined } };
 }
 
-pub fn verifySlotSentinel() Self {
-    return .{ .tag = .VerifySlotSentinel, .arguments = .{ undefined, undefined, undefined } };
+pub fn pushSlotSentinel(target: RegisterLocation) Self {
+    return .{ .tag = .PushSlotSentinel, .target = target, .arguments = .{ undefined, undefined, undefined } };
+}
+
+pub fn verifyArgumentSentinel(target: RegisterLocation) Self {
+    return .{ .tag = .VerifyArgumentSentinel, .target = target, .arguments = .{ undefined, undefined, undefined } };
+}
+
+pub fn verifySlotSentinel(target: RegisterLocation) Self {
+    return .{ .tag = .VerifySlotSentinel, .target = target, .arguments = .{ undefined, undefined, undefined } };
 }
 
 pub fn format(
@@ -281,7 +310,7 @@ pub fn format(
     switch (inst.tag) {
         .Send, .PrimSend => {
             const message_name = @intToPtr([*]const u8, inst.arguments[1])[0..inst.arguments[2]];
-            try std.fmt.format(writer, "(%{}, \"{s}\")", .{ inst.arguments[0], message_name });
+            try std.fmt.format(writer, "({}, \"{s}\")", .{ RegisterLocation.fromInt(@intCast(u32, inst.arguments[0])), message_name });
         },
         .SelfSend, .SelfPrimSend => {
             const message_name = @intToPtr([*]const u8, inst.arguments[0])[0..inst.arguments[1]];
@@ -289,11 +318,11 @@ pub fn format(
         },
 
         .PushConstantSlot, .PushAssignableSlot => {
-            try std.fmt.format(writer, "(%{}, {}, %{})", .{ inst.arguments[0], inst.arguments[1] != 0, inst.arguments[2] });
+            try std.fmt.format(writer, "({}, {}, {})", .{ RegisterLocation.fromInt(@intCast(u32, inst.arguments[0])), inst.arguments[1] != 0, RegisterLocation.fromInt(@intCast(u32, inst.arguments[2])) });
         },
 
         .PushArgumentSlot, .PushInheritedSlot => {
-            try std.fmt.format(writer, "(%{}, %{})", .{ inst.arguments[0], inst.arguments[1] });
+            try std.fmt.format(writer, "({}, {})", .{ RegisterLocation.fromInt(@intCast(u32, inst.arguments[0])), RegisterLocation.fromInt(@intCast(u32, inst.arguments[1])) });
         },
 
         .CreateInteger => {
@@ -309,7 +338,7 @@ pub fn format(
         },
 
         .CreateMethod => {
-            try std.fmt.format(writer, "(%{}, {}, #{})", .{ inst.arguments[0], inst.arguments[1], inst.arguments[2] });
+            try std.fmt.format(writer, "({}, {}, #{})", .{ RegisterLocation.fromInt(@intCast(u32, inst.arguments[0])), inst.arguments[1], inst.arguments[2] });
         },
 
         .CreateBlock => {
@@ -326,6 +355,13 @@ pub fn format(
             }
         },
 
+        .PushRegisters => {
+            // NOTE: Update width whenever MaskInt changes in bit width
+            try std.fmt.format(writer, "({b:0>8})", .{@intCast(RegisterPool.RegisterBitSet.MaskInt, inst.arguments[0])});
+        },
+
+        .Return,
+        .NonlocalReturn,
         .SetMethodInline,
         .PushArgumentSentinel,
         .PushSlotSentinel,
@@ -335,8 +371,8 @@ pub fn format(
             try std.fmt.format(writer, "()", .{});
         },
 
-        .ExitActivation, .NonlocalReturn, .PushArg => {
-            try std.fmt.format(writer, "(%{})", .{inst.arguments[0]});
+        .WriteReturnValue, .PushArg => {
+            try std.fmt.format(writer, "({})", .{RegisterLocation.fromInt(@intCast(u32, inst.arguments[0]))});
         },
 
         .SourceRange => {
@@ -350,22 +386,24 @@ pub fn payload(self: Self, comptime tag: Tag) tag.Payload() {
 
     return switch (tag) {
         .Send, .PrimSend => Payload.Send{
-            .receiver_location = RegisterLocation.fromIndex(@intCast(u32, self.arguments[0])),
+            .receiver_location = RegisterLocation.fromInt(@intCast(u32, self.arguments[0])),
             .message_name = @intToPtr([*]const u8, self.arguments[1])[0..self.arguments[2]],
         },
         .SelfSend, .SelfPrimSend => Payload.SelfSend{
             .message_name = @intToPtr([*]const u8, self.arguments[0])[0..self.arguments[1]],
         },
         .PushConstantSlot, .PushAssignableSlot => Payload.PushParentableSlot{
-            .name_location = RegisterLocation.fromIndex(@intCast(u32, self.arguments[0])),
+            .name_location = RegisterLocation.fromInt(@intCast(u32, self.arguments[0])),
             .is_parent = self.arguments[1] != 0,
-            .value_location = RegisterLocation.fromIndexAllowNil(@intCast(u32, self.arguments[2])),
+            .value_location = RegisterLocation.fromInt(@intCast(u32, self.arguments[2])),
         },
         .PushArgumentSlot, .PushInheritedSlot => Payload.PushNonParentSlot{
-            .name_location = RegisterLocation.fromIndex(@intCast(u32, self.arguments[0])),
-            .value_location = RegisterLocation.fromIndexAllowNil(@intCast(u32, self.arguments[1])),
+            .name_location = RegisterLocation.fromInt(@intCast(u32, self.arguments[0])),
+            .value_location = RegisterLocation.fromInt(@intCast(u32, self.arguments[1])),
         },
-
+        .PushRegisters => Payload.PushRegisters{
+            .clobbered_registers = RegisterPool.RegisterBitSet{ .mask = @intCast(RegisterPool.RegisterBitSet.MaskInt, self.arguments[0]) },
+        },
         .CreateInteger => Payload.CreateInteger{
             .value = @bitCast(i64, self.arguments[0]),
         },
@@ -376,7 +414,7 @@ pub fn payload(self: Self, comptime tag: Tag) tag.Payload() {
             .slot_count = @intCast(u32, self.arguments[0]),
         },
         .CreateMethod => Payload.CreateMethod{
-            .method_name_location = RegisterLocation.fromIndex(@intCast(u32, self.arguments[0])),
+            .method_name_location = RegisterLocation.fromInt(@intCast(u32, self.arguments[0])),
             .slot_count = @intCast(u32, self.arguments[1]),
             .block_index = @intCast(u32, self.arguments[2]),
         },
@@ -391,17 +429,19 @@ pub fn payload(self: Self, comptime tag: Tag) tag.Payload() {
             else
                 @intToPtr([*]const u8, self.arguments[0])[0..self.arguments[1]],
         },
-        .ExitActivation, .NonlocalReturn => Payload.ExitActivation{
-            .value_location = RegisterLocation.fromIndexAllowNil(@intCast(u32, self.arguments[0])),
+        .WriteReturnValue => Payload.WriteReturnValue{
+            .value_location = RegisterLocation.fromInt(@intCast(u32, self.arguments[0])),
         },
         .PushArg => Payload.PushArg{
-            .argument_location = RegisterLocation.fromIndex(@intCast(u32, self.arguments[0])),
+            .argument_location = RegisterLocation.fromInt(@intCast(u32, self.arguments[0])),
         },
         .SourceRange => Payload.SourceRange{
             .start = self.arguments[0],
             .end = self.arguments[1],
         },
 
+        .Return,
+        .NonlocalReturn,
         .SetMethodInline,
         .PushArgumentSentinel,
         .PushSlotSentinel,

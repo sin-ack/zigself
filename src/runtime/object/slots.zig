@@ -18,11 +18,11 @@ const Location = @import("../../language/location.zig");
 const ByteArray = @import("../ByteArray.zig");
 const MapBuilder = @import("./map_builder.zig").MapBuilder;
 const SourceRange = @import("../SourceRange.zig");
-const BytecodeBlock = @import("../astcode/Block.zig");
+const BytecodeBlock = @import("../lowcode/Block.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
-const RegisterLocation = @import("../astcode/register_location.zig").RegisterLocation;
+const RegisterLocation = @import("../lowcode/register_location.zig").RegisterLocation;
 const RuntimeActivation = @import("../Activation.zig");
-const BytecodeExecutable = @import("../astcode/Executable.zig");
+const BytecodeExecutable = @import("../lowcode/Executable.zig");
 
 /// Information about added/changed slots when an object is merged into another.
 const MergeInfo = struct {
@@ -445,11 +445,7 @@ pub const Method = packed struct {
         out_activation: *RuntimeActivation,
     ) !void {
         const activation_object = try Activation.create(vm.heap, .Method, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
-
-        const register_slice = try activation_object.getBytecodeBlock().allocRegisterSlice(vm.allocator);
-        errdefer vm.allocator.free(register_slice);
-
-        try out_activation.initInPlace(activation_object.asValue(), target_location, register_slice, self.getMap().method_name, created_from);
+        try out_activation.initInPlace(activation_object.asValue(), target_location, vm.takeStackSnapshot(), self.getMap().method_name, created_from);
     }
 };
 
@@ -550,10 +546,7 @@ pub const Block = packed struct {
     ) !void {
         const activation_object = try Activation.create(vm.heap, .Block, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
 
-        const register_slice = try activation_object.getBytecodeBlock().allocRegisterSlice(vm.allocator);
-        errdefer vm.allocator.free(register_slice);
-
-        try out_activation.initInPlace(activation_object.asValue(), target_location, register_slice, creator_message, created_from);
+        try out_activation.initInPlace(activation_object.asValue(), target_location, vm.takeStackSnapshot(), creator_message, created_from);
         out_activation.parent_activation = self.getMap().parent_activation.get(&actor.activation_stack);
         out_activation.nonlocal_return_target_activation = self.getMap().nonlocal_return_target_activation.get(&actor.activation_stack);
     }
