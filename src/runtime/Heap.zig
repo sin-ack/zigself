@@ -205,6 +205,10 @@ pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) !v
             if (activation.activation_object.data == old_value.data) {
                 activation.activation_object = new_value;
             }
+
+            if (activation.creator_message.data == old_value.data) {
+                activation.creator_message = new_value;
+            }
         }
     }
 
@@ -543,6 +547,10 @@ const Space = struct {
             if (self.objectSegmentContains(activation_object_address)) {
                 const new_address = try self.copyObjectTo(allocator, activation_object_address, target_space);
                 activation.activation_object = Value.fromObjectAddress(new_address);
+            }
+
+            if (try self.copyAddress(allocator, activation.creator_message.asObjectAddress(), target_space, false)) |new_address| {
+                activation.creator_message = Value.fromObjectAddress(new_address);
             }
         }
 
