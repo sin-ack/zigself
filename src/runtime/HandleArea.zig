@@ -113,8 +113,12 @@ const Chunk = packed struct {
         self.next = null;
     }
 
+    pub fn isFull(self: Chunk) bool {
+        return self.high_water_mark == MaximumHandlesInChunk;
+    }
+
     pub fn allocate(self: *Chunk) !HandleType {
-        if (self.high_water_mark == MaximumHandlesInChunk) {
+        if (self.isFull()) {
             return error.OutOfMemory;
         }
 
@@ -196,8 +200,18 @@ pub fn allocHandle(self: *Self) !HandleType {
 
 pub fn freeHandle(self: *Self, handle: HandleType) void {
     const chunk = Chunk.fromHandle(handle);
-    if (chunk.free(handle) and chunk != self.latest_chunk) {
-        self.moveChunkIntoUnusedPool(chunk);
+    if (chunk.free(handle)) {
+        if (chunk != self.latest_chunk) {
+            self.moveChunkIntoUnusedPool(chunk);
+        } else {
+            // It is possible (has happened in practice!) that we free every
+            // single handle in the latest chunk, and hit the high water mark
+            // when doing so. In that case we simply need to reset the HWM of
+            // the latest chunk; otherwise, the next allocHandle call will cause
+            // a new chunk to be allocated unnecessarily.
+            if (chunk.isFull())
+                chunk.high_water_mark = 0;
+        }
     }
 }
 
