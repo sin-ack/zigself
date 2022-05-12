@@ -131,6 +131,15 @@ const Chunk = packed struct {
             @panic("Attempting to free handle from chunk which doesn't own it");
         }
 
+        // If the handle we are given is the handle we just allocated, then
+        // simply "rewind" the HWM and pretend we never allocated it.
+        if (self.high_water_mark > 0) {
+            const handle_address = @ptrToInt(handle);
+            const previous_allocation_address = @ptrToInt(&self.getMemoryArea()[self.high_water_mark - 1]);
+            if (handle_address == previous_allocation_address)
+                self.high_water_mark -= 1;
+        }
+
         self.count -= 1;
         return self.count == 0;
     }
