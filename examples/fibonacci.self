@@ -7,7 +7,7 @@
     ).
 
     main = (
-        1 to: 20 + 1 Do: [| :i |
+        1 to: 25 + 1 Do: [| :i |
             'Fibonacci(', i asString, ') is: ', (fib: i) asString; printLine.
         ].
     ).
