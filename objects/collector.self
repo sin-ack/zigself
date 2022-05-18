@@ -49,6 +49,20 @@ std traits _AddSlots: (|
         asVector = (collectInto: std vector copy).
         asSet = (collectInto: std hashSet copy).
 
+        asArray = (| array. current. i |
+            array: std array copySize: size.
+            current: self.
+            i: size prec.
+
+            [nil == current] whileFalse: [
+                array at: i Put: current value.
+                current: current previous.
+                i: i prec.
+            ].
+
+            array
+        ).
+
         size = (| current |
             nil == cachedSize ifFalse: [ ^ cachedSize ].
 
