@@ -13,15 +13,13 @@ std _AddSlots: (|
 std traits _AddSlots: (| array = std array parent |).
 
 std traits array _AddSlots: (|
-    parent* = std traits clonable.
+    mutable* = std mixins mutableCollection.
+    indexable* = std mixins indexableCollection.
+    parent* = std traits collection.
 
     at: i = (_ArrayAt: i).
     at: i Put: value = (_ArrayAt: i Put: value).
     size = (_ArraySize).
-
-    each: block = (
-        0 to: size Do: [| :i | block value: (at: i) With: i ].
-    ).
 
     copySize: n FillingExtrasWith: value = (_ArrayCopySize: n FillingExtrasWith: value).
     copySize: n   = (copySize: n FillingExtrasWith: nil).
