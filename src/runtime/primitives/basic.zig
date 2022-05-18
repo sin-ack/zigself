@@ -96,7 +96,7 @@ pub fn RunScript(context: PrimitiveContext) !ExecutionResult {
 }
 
 pub fn EvaluateStringIfFail(context: PrimitiveContext) !ExecutionResult {
-    if (!context.vm.isInActorMode())
+    if (context.vm.isInActorMode())
         @panic("TODO make '_EvaluateStringIfFail:' work with actor mode");
 
     const receiver = context.receiver.getValue();
