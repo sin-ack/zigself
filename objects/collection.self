@@ -106,5 +106,11 @@ std traits _AddSlots: (|
             each: [| :item. :i | (block value: item With: i) ifTrue: [ ^ presentBlock value: i ] ].
             absentBlock value.
         ).
+
+        fold: blk Initial: initial = (| result |
+            result: initial.
+            each: [| :v | result: blk value: result With: v ].
+            result
+        ).
     |).
 |).
