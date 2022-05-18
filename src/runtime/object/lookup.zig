@@ -16,7 +16,6 @@ const VirtualMachine = @import("../VirtualMachine.zig");
 const SLOTS_LOOKUP_DEBUG = debug.SLOTS_LOOKUP_DEBUG;
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
-pub const LookupError = Allocator.Error;
 const VisitedValueLink = struct { previous: ?*const VisitedValueLink = null, value: Value };
 
 /// The result of a lookup operation.
@@ -33,6 +32,13 @@ pub const LookupResult = union(enum) {
     Assignment: struct {
         object: Object,
         value_ptr: *Value,
+    },
+    /// A message send to another actor through the use of an actor proxy. This
+    /// will be returned when the user performs a lookup on an actor proxy
+    /// object.
+    ActorMessage: struct {
+        target_actor: *Object.Actor,
+        method: *Object.Method,
     },
 };
 
@@ -67,13 +73,13 @@ pub fn lookupByHash(
     self: Object,
     vm: *VirtualMachine,
     selector_hash: SelectorHash,
-) LookupError!LookupResult {
+) LookupResult {
     if (LOOKUP_DEBUG) std.debug.print("Object.lookupByHash: Looking up hash {x} on a {} object at {*}\n", .{ selector_hash, self.header.getObjectType(), self.header });
     if (selector_hash.regular == self_hash) {
         return LookupResult{ .Regular = self.asValue() };
     }
 
-    return try lookupInternal(self, vm, selector_hash, null);
+    return lookupInternal(self, vm, selector_hash, null);
 }
 
 const nothing = LookupResult{ .Nothing = .{} };
@@ -82,18 +88,18 @@ fn lookupInternal(
     vm: *VirtualMachine,
     selector_hash: SelectorHash,
     previously_visited: ?*const VisitedValueLink,
-) LookupError!LookupResult {
+) LookupResult {
     switch (self.header.getObjectType()) {
         .ForwardingReference, .Map, .Method => unreachable,
         .Slots => {
-            return try slotsLookup(vm, Object.Slots, self.asSlotsObject(), selector_hash, previously_visited);
+            return slotsLookup(vm, Object.Slots, self.asSlotsObject(), selector_hash, previously_visited);
         },
         .Activation => {
-            const slots_lookup_result = try slotsLookup(vm, Object.Activation, self.asActivationObject(), selector_hash, previously_visited);
+            const slots_lookup_result = slotsLookup(vm, Object.Activation, self.asActivationObject(), selector_hash, previously_visited);
             if (slots_lookup_result != .Nothing) return slots_lookup_result;
 
             // Receiver lookup
-            return try self.asActivationObject().receiver.lookupByHash(vm, selector_hash);
+            return self.asActivationObject().receiver.lookupByHash(vm, selector_hash);
         },
         .Block => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits block\n", .{});
@@ -102,7 +108,7 @@ fn lookupInternal(
             if (selector_hash.regular == parent_hash)
                 return LookupResult{ .Regular = block_traits };
 
-            return try block_traits.lookupByHash(vm, selector_hash);
+            return block_traits.lookupByHash(vm, selector_hash);
         },
         .Array => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits array\n", .{});
@@ -110,7 +116,7 @@ fn lookupInternal(
             if (selector_hash.regular == parent_hash)
                 return LookupResult{ .Regular = array_traits };
 
-            return try array_traits.lookupByHash(vm, selector_hash);
+            return array_traits.lookupByHash(vm, selector_hash);
         },
         .ByteArray => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits string\n", .{});
@@ -118,7 +124,7 @@ fn lookupInternal(
             if (selector_hash.regular == parent_hash)
                 return LookupResult{ .Regular = string_traits };
 
-            return try string_traits.lookupByHash(vm, selector_hash);
+            return string_traits.lookupByHash(vm, selector_hash);
         },
         .Managed => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at a managed object type: {}\n", .{self.asManaged().getManagedType()});
@@ -127,6 +133,37 @@ fn lookupInternal(
             }
 
             return nothing;
+        },
+        .Actor => {
+            @panic("TODO lookup on actor objects");
+        },
+        .ActorProxy => {
+            if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at an actor proxy object\n", .{});
+            const actor_proxy = self.asActorProxyObject();
+            const target_actor = actor_proxy.actor_object.asObject().asActorObject();
+            return switch (target_actor.context.lookupByHash(vm, selector_hash)) {
+                .Nothing => nothing,
+                // FIXME: This should probably cause a different kind of error.
+                .Assignment => nothing,
+                .Regular => |lookup_result| blk: {
+                    if (!(lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject())) {
+                        // NOTE: In zigSelf, all messages are async. Therefore
+                        //       sending a message to a non-method slot will not
+                        //       return any meaningful value to the user.
+                        //       However it should also still be valid, so we
+                        //       cannot return nothing here.
+                        break :blk LookupResult{ .Regular = vm.nil() };
+                    }
+
+                    break :blk LookupResult{
+                        .ActorMessage = .{
+                            .target_actor = target_actor,
+                            .method = lookup_result.asObject().asMethodObject(),
+                        },
+                    };
+                },
+                .ActorMessage => unreachable,
+            };
         },
     }
 }
@@ -138,7 +175,7 @@ fn slotsLookup(
     object: *ObjectType,
     selector_hash: SelectorHash,
     previously_visited: ?*const VisitedValueLink,
-) LookupError!LookupResult {
+) LookupResult {
     if (previously_visited) |visited| {
         var link: ?*const VisitedValueLink = visited;
         while (link) |l| {
@@ -187,7 +224,7 @@ fn slotsLookup(
                 slot.value;
 
             if (slot_value.isObjectReference()) {
-                const parent_lookup_result = try lookupInternal(slot_value.asObject(), vm, selector_hash, &currently_visited);
+                const parent_lookup_result = lookupInternal(slot_value.asObject(), vm, selector_hash, &currently_visited);
                 if (parent_lookup_result != .Nothing) return parent_lookup_result;
             } else {
                 @panic("FIXME: Allow integers and floating point numbers to be parent slot values (let me know of your usecase!)");

@@ -13,6 +13,7 @@ const Completion = @import("./Completion.zig");
 const SourceRange = @import("./SourceRange.zig");
 const runtime_error = @import("./error.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
+const ExecutionResult = @import("./interpreter.zig").ExecutionResult;
 const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
 
 const basic_primitives = @import("./primitives/basic.zig");
@@ -21,6 +22,7 @@ const array_primitives = @import("./primitives/array.zig");
 const number_primitives = @import("./primitives/number.zig");
 const object_primitives = @import("./primitives/object.zig");
 const system_call_primitives = @import("./primitives/system_call.zig");
+const actor_primitives = @import("./primitives/actor.zig");
 
 /// The context passed to a primitive.
 pub const PrimitiveContext = struct {
@@ -55,7 +57,7 @@ pub const PrimitiveContext = struct {
 const PrimitiveSpec = struct {
     name: []const u8,
     arity: u8,
-    function: fn (context: PrimitiveContext) Allocator.Error!?Completion,
+    function: fn (context: PrimitiveContext) Allocator.Error!ExecutionResult,
 
     pub fn call(
         self: PrimitiveSpec,
@@ -65,7 +67,7 @@ const PrimitiveSpec = struct {
         arguments: []const Value,
         target_location: RegisterLocation,
         source_range: SourceRange,
-    ) Allocator.Error!?Completion {
+    ) Allocator.Error!ExecutionResult {
         return try self.function(PrimitiveContext{
             .vm = vm,
             .actor = actor,
@@ -121,6 +123,13 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "Write:BytesFrom:AtOffset:Into:IfFail:", .arity = 5, .function = system_call_primitives.Write_BytesFrom_AtOffset_Into_IfFail },
     .{ .name = "Close:", .arity = 1, .function = system_call_primitives.Close },
     .{ .name = "Exit:", .arity = 1, .function = system_call_primitives.Exit },
+    // Actor primitives
+    .{ .name = "Genesis:", .arity = 1, .function = actor_primitives.Genesis },
+    .{ .name = "ActorSpawn:", .arity = 1, .function = actor_primitives.ActorSpawn },
+    .{ .name = "ActorSetEntrypoint:", .arity = 1, .function = actor_primitives.ActorSetEntrypoint },
+    .{ .name = "ActorResume", .arity = 0, .function = actor_primitives.ActorResume },
+    .{ .name = "ActorYieldReason", .arity = 0, .function = actor_primitives.ActorYieldReason },
+    .{ .name = "ActorYield", .arity = 0, .function = actor_primitives.ActorYield },
 };
 
 // FIXME: This is very naive! We shouldn't need to linear search every single

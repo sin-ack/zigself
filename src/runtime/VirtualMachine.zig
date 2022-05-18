@@ -6,18 +6,14 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("./Heap.zig");
-const slot_import = @import("./slot.zig");
-const Slot = slot_import.Slot;
 const Actor = @import("./Actor.zig");
-const Range = @import("../language/Range.zig");
-const Stack = @import("./stack.zig").Stack;
 const Value = @import("./value.zig").Value;
+const Range = @import("../language/Range.zig");
 const Object = @import("./Object.zig");
 const Script = @import("../language/script.zig");
 const AstGen = @import("./AstGen.zig");
 const CodeGen = @import("./CodeGen.zig");
 const ByteArray = @import("./ByteArray.zig");
-const RegisterFile = @import("./lowcode/RegisterFile.zig");
 const runtime_error = @import("./error.zig");
 const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
 
@@ -46,6 +42,7 @@ global_false: Heap.Tracked = undefined,
 
 // --- Primitive object traits ---
 
+actor_traits: Heap.Tracked = undefined,
 array_traits: Heap.Tracked = undefined,
 block_traits: Heap.Tracked = undefined,
 float_traits: Heap.Tracked = undefined,
@@ -57,49 +54,29 @@ integer_traits: Heap.Tracked = undefined,
 /// Whether the interpreter should be silent when an error happens.
 silent_errors: bool = false,
 
+// --- Actors ---
+
+/// The "global actor", which is the actor that is spawned when the VM is started.
+// NOTE: Initialization deferred until the VM object is complete
+global_actor: *Actor = undefined,
+/// The "genesis actor" which is the actor that acts as the
+/// coordinator/scheduler for other actors once the _Genesis: message is sent
+/// until actor mode is exited.
+genesis_actor: ?*Actor = null,
+/// All the regular actors that currently exist. A regular actor is an actor
+/// that is spawned by either another regular actor or the genesis actor.
+///
+/// These actors are owned by the Actor object, and are weakly referenced here.
+regular_actors: RegularActorSet = .{},
+
 // --- Current execution state ---
 
-register_file: RegisterFile = .{},
-argument_stack: Stack(Value, "Argument stack", ValueSentinel) = .{},
-slot_stack: Stack(Slot, "Slot stack", SlotSentinel) = .{},
-saved_register_stack: Stack(SavedRegister, "Saved register stack", null) = .{},
-/// Whether the next created method is going to be an inline method.
-next_method_is_inline: bool = false,
-/// The currently active source range. This is updated by the source_range
-/// instruction.
-range: Range = .{ .start = 0, .end = 0 },
+/// The actor that is currently executing.
+// NOTE: Initialization deferred until the VM object is complete
+current_actor: *Actor = undefined,
 
 const Self = @This();
-
-// Sentinel values for the stacks
-// FIXME: These should not be pub. Make heap visit each value by calling vm.visitValues()
-//        instead of explicitly reaching into the VM.
-pub const ValueSentinel = Value{ .data = 0xCCCCCCCCCCCCCCCC };
-pub const SlotSentinel = Slot{ .name = ValueSentinel, .properties = .{ .properties = ValueSentinel }, .value = ValueSentinel };
-
-/// A snapshot of the current heights of each stack in the VM which can be
-/// restored after a non-local return.
-pub const StackSnapshot = struct {
-    argument_height: usize,
-    slot_height: usize,
-    saved_register_height: usize,
-
-    /// Bump just the argument stack height. This is necessary because the stack
-    /// snapshot for an activation is created while the stack still contains the
-    /// arguments for the activation, meaning the stack will be higher than it
-    /// actually is when the activation is entered.
-    pub fn bumpArgumentHeight(self: *StackSnapshot, vm: *Self) void {
-        self.argument_height = vm.argument_stack.height();
-    }
-};
-
-/// A saved register, which is restored at activation exit.
-pub const SavedRegister = struct {
-    /// The register to restore the value to.
-    register: RegisterLocation,
-    /// The value which should be restored.
-    value: Value,
-};
+const RegularActorSet = std.AutoArrayHashMapUnmanaged(*Actor, void);
 
 /// Creates the virtual machine, including the heap and the global objects.
 pub fn create(allocator: Allocator) !*Self {
@@ -123,22 +100,29 @@ pub fn create(allocator: Allocator) !*Self {
     self.global_true = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
     self.global_false = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
 
+    self.actor_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
     self.array_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
     self.block_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
     self.float_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
     self.string_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
     self.integer_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
 
-    self.register_file.init();
+    self.global_actor = try Actor.create(self, self.lobby_object.getValue());
+    self.current_actor = self.global_actor;
 
     return self;
 }
 
 pub fn destroy(self: *Self) void {
+    // NOTE: All actors are finalized by the actor object that they're owned
+    //       by when the heap is deallocated.
+    self.regular_actors.deinit(self.allocator);
+
     self.lobby_object.untrack(self.heap);
     self.global_nil.untrack(self.heap);
     self.global_true.untrack(self.heap);
     self.global_false.untrack(self.heap);
+    self.actor_traits.untrack(self.heap);
     self.array_traits.untrack(self.heap);
     self.block_traits.untrack(self.heap);
     self.float_traits.untrack(self.heap);
@@ -152,10 +136,6 @@ pub fn destroy(self: *Self) void {
         }
     }
     self.block_message_names.deinit(self.allocator);
-
-    self.argument_stack.deinit(self.allocator);
-    self.slot_stack.deinit(self.allocator);
-    self.saved_register_stack.deinit(self.allocator);
 
     self.heap.destroy();
     self.allocator.destroy(self);
@@ -227,48 +207,146 @@ pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
     var entrypoint_executable = try CodeGen.lowerExecutable(self.allocator, entrypoint_ast_executable);
     defer entrypoint_executable.unref();
 
-    var actor = try Actor.create(self.allocator);
-    defer actor.destroy(self.allocator);
+    try entrypoint_executable.value.pushEntrypointActivation(self, &self.current_actor.activation_stack);
 
-    var completion = try actor.execute(self, entrypoint_executable);
-    defer completion.deinit(self);
+    while (true) {
+        // The location to which the actor's parent actor should have the result
+        // written.
+        const current_actor_target_location = self.current_actor.activation_stack.getStack()[0].target_location;
 
-    switch (completion.data) {
-        .Normal => |value| {
-            return value;
-        },
-        .RuntimeError => |err| {
-            if (!self.silent_errors) {
-                std.debug.print("Received error at top level: {s}\n", .{err.message});
-                runtime_error.printTraceFromActivationStack(actor.activation_stack.getStack(), err.source_range);
-            }
-            return null;
-        },
-        else => unreachable,
+        switch (try self.current_actor.execute(self)) {
+            .ActorSwitch => continue,
+            .Completion => |*completion| {
+                defer completion.deinit(self);
+
+                switch (completion.data) {
+                    .Normal => |value| {
+                        self.current_actor.unwindStacks();
+
+                        if (self.current_actor == self.global_actor) {
+                            return value;
+                        }
+
+                        if (self.genesis_actor) |genesis_actor| {
+                            if (self.current_actor == genesis_actor) {
+                                self.global_actor.writeRegister(current_actor_target_location, value);
+                                self.genesis_actor = null;
+                                self.switchToActor(self.global_actor);
+                            } else {
+                                self.current_actor.yield_reason = .Dead;
+                                // FIXME: Write something meaningful to the
+                                //        return location of _ActorResume for the
+                                //        genesis actor.
+                                self.switchToActor(genesis_actor);
+                            }
+                        }
+                    },
+                    .RuntimeError => |err| {
+                        if (self.isInRegularActor()) {
+                            if (!self.silent_errors) {
+                                std.debug.print("Actor received error at top level: {s}\n", .{err.message});
+                                runtime_error.printTraceFromActivationStack(self.current_actor.activation_stack.getStack(), err.source_range);
+                            }
+
+                            const actor = self.current_actor;
+                            if (!self.unregisterRegularActor(actor))
+                                @panic("!!! Failed to unregister regular actor with runtime error!");
+
+                            actor.yield_reason = .RuntimeError;
+                            // FIXME: Write something meaningful to the return
+                            //        location of _ActorResume for the genesis
+                            //        actor.
+                            self.switchToActor(self.genesis_actor.?);
+                            continue;
+                        }
+
+                        if (!self.silent_errors) {
+                            std.debug.print("Received error at top level: {s}\n", .{err.message});
+                            runtime_error.printTraceFromActivationStack(self.current_actor.activation_stack.getStack(), err.source_range);
+                        }
+
+                        self.switchToActor(self.global_actor);
+                        // Clean up the genesis actor in case more code is run
+                        // in the VM later on.
+                        self.genesis_actor = null;
+
+                        self.current_actor.unwindStacks();
+                        return null;
+                    },
+                    else => unreachable,
+                }
+            },
+        }
     }
 }
 
 pub fn readRegister(self: Self, location: RegisterLocation) Value {
     return switch (location) {
         .zero => self.nil(),
-        else => self.register_file.read(location),
+        else => self.current_actor.readRegister(location),
     };
 }
 
 pub fn writeRegister(self: *Self, location: RegisterLocation, value: Value) void {
-    self.register_file.write(location, value);
+    self.current_actor.writeRegister(location, value);
 }
 
-pub fn takeStackSnapshot(self: Self) StackSnapshot {
-    return .{
-        .argument_height = self.argument_stack.height(),
-        .slot_height = self.slot_stack.height(),
-        .saved_register_height = self.saved_register_stack.height(),
-    };
+pub fn takeStackSnapshot(self: *Self) Actor.StackSnapshot {
+    return self.current_actor.takeStackSnapshot();
 }
 
-pub fn restoreStackSnapshot(self: *Self, snapshot: StackSnapshot) void {
-    self.argument_stack.restoreTo(snapshot.argument_height);
-    self.slot_stack.restoreTo(snapshot.slot_height);
-    self.saved_register_stack.restoreTo(snapshot.saved_register_height);
+pub fn restoreStackSnapshot(self: *Self, snapshot: Actor.StackSnapshot) void {
+    self.current_actor.restoreStackSnapshot(snapshot);
+}
+
+pub fn visitValues(
+    self: *Self,
+    context: anytype,
+    visitor: fn (ctx: @TypeOf(context), value: *Value) Allocator.Error!void,
+) !void {
+    try self.global_actor.visitValues(context, visitor);
+    if (self.genesis_actor) |actor|
+        try actor.visitValues(context, visitor);
+
+    for (self.regular_actors.keys()) |actor|
+        try actor.visitValues(context, visitor);
+}
+
+pub fn isInActorMode(self: *Self) bool {
+    return self.genesis_actor != null;
+}
+
+pub fn isInRegularActor(self: *Self) bool {
+    return self.current_actor != self.global_actor and self.current_actor != self.genesis_actor;
+}
+
+pub fn isInGenesisActor(self: *Self) bool {
+    if (self.genesis_actor) |genesis_actor| {
+        return self.current_actor == genesis_actor;
+    }
+
+    return false;
+}
+
+pub fn setGenesisActor(self: *Self, actor: *Actor) void {
+    std.debug.assert(!self.isInActorMode());
+    self.genesis_actor = actor;
+}
+
+pub fn switchToActor(self: *Self, actor: *Actor) void {
+    self.current_actor = actor;
+    actor.yield_reason = .None;
+}
+
+pub fn registerRegularActor(self: *Self, actor: *Actor) !void {
+    const gop = try self.regular_actors.getOrPut(self.allocator, actor);
+    std.debug.assert(!gop.found_existing);
+}
+
+pub fn unregisterRegularActor(self: *Self, actor: *Actor) bool {
+    return self.regular_actors.swapRemove(actor);
+}
+
+pub fn regularActorIsRegistered(self: Self, actor: *Actor) bool {
+    return self.regular_actors.contains(actor);
 }

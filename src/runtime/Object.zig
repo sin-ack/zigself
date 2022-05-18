@@ -13,6 +13,7 @@ const byte_array_object = @import("./object/byte_array.zig");
 const array_object = @import("./object/array.zig");
 const managed_object = @import("./object/managed.zig");
 const map_objects = @import("./object/map.zig");
+const actor_objects = @import("./object/actor.zig");
 
 const Self = @This();
 
@@ -24,6 +25,8 @@ pub const ByteArray = byte_array_object.ByteArrayObject;
 pub const Array = array_object.ArrayObject;
 pub const Managed = managed_object.ManagedObject;
 pub const Map = map_objects.Map;
+pub const Actor = actor_objects.ActorObject;
+pub const ActorProxy = actor_objects.ActorProxyObject;
 
 pub usingnamespace @import("./object/lookup.zig");
 
@@ -41,6 +44,8 @@ const ObjectType = enum(u64) {
     ByteArray = 0b0101 << ObjectTypeShift,
     Array = 0b0110 << ObjectTypeShift,
     Managed = 0b0111 << ObjectTypeShift,
+    Actor = 0b1000 << ObjectTypeShift,
+    ActorProxy = 0b1001 << ObjectTypeShift,
     Map = 0b1111 << ObjectTypeShift,
 };
 
@@ -73,22 +78,25 @@ pub fn getSizeInMemory(self: Self) usize {
         .Array => self.asArrayObject().getSizeInMemory(),
         .Managed => self.asManaged().getSizeInMemory(),
         .Map => self.asMap().getSizeInMemory(),
+        .Actor => self.asActorObject().getSizeInMemory(),
+        .ActorProxy => self.asActorProxyObject().getSizeInMemory(),
     };
 }
 
 pub fn shouldFinalize(self: Self) bool {
     return switch (self.header.getObjectType()) {
-        .ForwardingReference, .Slots, .Activation, .Method, .Block, .Array, .ByteArray => false,
-        .Managed => true,
+        .ForwardingReference, .Slots, .Activation, .Method, .Block, .Array, .ByteArray, .ActorProxy => false,
+        .Managed, .Actor => true,
         .Map => self.asMap().shouldFinalize(),
     };
 }
 
 pub fn finalize(self: Self, allocator: Allocator) void {
     switch (self.header.getObjectType()) {
-        .ForwardingReference, .Slots, .Activation, .Method, .Block, .Array, .ByteArray => unreachable,
+        .ForwardingReference, .Slots, .Activation, .Method, .Block, .Array, .ByteArray, .ActorProxy => unreachable,
         .Map => self.asMap().finalize(allocator),
         .Managed => self.asManaged().finalize(allocator),
+        .Actor => self.asActorObject().finalize(allocator),
     }
 }
 
@@ -105,6 +113,8 @@ pub fn clone(self: Self, heap: *Heap) !Self {
         .Array => fromAddress((try self.asArrayObject().clone(heap)).asObjectAddress()),
         // Managed values are not clonable. Instead we return the same (immutable) reference.
         .Managed => self,
+        .Actor => @panic("TODO Handle cloning of actor object"),
+        .ActorProxy => fromAddress((try self.asActorProxyObject().clone(heap)).asObjectAddress()),
     };
 }
 
@@ -242,6 +252,40 @@ fn mustBeMap(self: Self) void {
 pub fn asMap(self: Self) *Map {
     if (builtin.mode == .Debug) self.mustBeMap();
     return @ptrCast(*Map, self.header);
+}
+
+// Actor objects
+
+pub fn isActorObject(self: Self) bool {
+    return self.header.getObjectType() == .Actor;
+}
+
+fn mustBeActorObject(self: Self) void {
+    if (!self.isActorObject()) {
+        std.debug.panic("Expected the object at {*} to be an actor", .{self.header});
+    }
+}
+
+pub fn asActorObject(self: Self) *Actor {
+    if (builtin.mode == .Debug) self.mustBeActorObject();
+    return @ptrCast(*Actor, self.header);
+}
+
+// Actor proxy objects
+
+pub fn isActorProxyObject(self: Self) bool {
+    return self.header.getObjectType() == .ActorProxy;
+}
+
+fn mustBeActorProxyObject(self: Self) void {
+    if (!self.isActorProxyObject()) {
+        std.debug.panic("Expected the object at {*} to be an actor proxy", .{self.header});
+    }
+}
+
+pub fn asActorProxyObject(self: Self) *ActorProxy {
+    if (builtin.mode == .Debug) self.mustBeActorProxyObject();
+    return @ptrCast(*ActorProxy, self.header);
 }
 
 // Forwarding references

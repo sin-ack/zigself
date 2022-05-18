@@ -46,9 +46,6 @@ old_space: Space,
 handle_area: HandleArea,
 
 allocator: Allocator,
-/// The stack of activations owned by the (currently only) actor.
-// FIXME: This won't work once we have more than one actor.
-activation_stack: ?*const ActivationStack = null,
 /// The virtual machine running the whole thing. We use this to scan the
 /// argument and slot stacks during a scavenge/tenure.
 vm: *VirtualMachine,
@@ -136,10 +133,6 @@ pub fn allocateInByteVectorSegment(self: *Self, size: usize) ![*]u64 {
     return try self.eden.allocateInByteVectorSegment(self.allocator, size);
 }
 
-pub fn setActivationStack(self: *Self, activation_stack: ?*const ActivationStack) void {
-    self.activation_stack = activation_stack;
-}
-
 /// Mark the given address within the heap as an object which needs to know when
 /// it is finalized. The address must've just been allocated (i.e. still in
 /// eden).
@@ -198,54 +191,13 @@ pub fn ensureSpaceInEden(self: *Self, required_memory: usize) !void {
 /// Go through the whole heap, updating references to the given value with the
 /// new value.
 pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) !void {
-    // If the activation stack exists then go through it and update all
-    // references.
-    if (self.activation_stack) |activation_stack| {
-        for (activation_stack.getStack()) |*activation| {
-            if (activation.activation_object.data == old_value.data) {
-                activation.activation_object = new_value;
-            }
-
-            if (activation.creator_message.data == old_value.data) {
-                activation.creator_message = new_value;
-            }
-        }
-    }
-
     const VisitorContext = struct { old_value: Value, new_value: Value };
-    self.vm.register_file.visitValues(VisitorContext{ .old_value = old_value, .new_value = new_value }, struct {
+    self.vm.visitValues(VisitorContext{ .old_value = old_value, .new_value = new_value }, struct {
         fn f(context: VisitorContext, value: *Value) !void {
             if (value.data == context.old_value.data)
                 value.* = context.new_value;
         }
     }.f) catch unreachable;
-
-    // Go through the slot and argument stacks and update the values there
-    // as well.
-    for (self.vm.slot_stack.allItems()) |*slot| {
-        // FIXME: This should be handled in VirtualMachine.visitValues.
-        if (std.meta.eql(VirtualMachine.SlotSentinel, slot.*))
-            continue;
-
-        if (slot.name.data == old_value.data)
-            slot.name = new_value;
-        if (slot.value.data == old_value.data)
-            slot.value = new_value;
-    }
-
-    for (self.vm.argument_stack.allItems()) |*argument| {
-        // FIXME: This should be handled in VirtualMachine.visitValues.
-        if (std.meta.eql(VirtualMachine.ValueSentinel, argument.*))
-            continue;
-
-        if (argument.data == old_value.data)
-            argument.* = new_value;
-    }
-
-    for (self.vm.saved_register_stack.allItems()) |*saved_register| {
-        if (saved_register.value.data == old_value.data)
-            saved_register.value = new_value;
-    }
 
     // Finally scan each heap space and update the references.
     try self.eden.updateAllReferencesTo(self.allocator, old_value.asObjectAddress(), new_value.asObjectAddress(), null);
@@ -527,82 +479,18 @@ const Space = struct {
         // length after everything else has been copied in.
         var target_object_segment_index = target_space.object_segment.len;
 
-        // Go through the whole activation stack, copying activation objects
-        // that are within this space. Also look at its executables and
-        // copy any that looks like an object reference.
-        //
-        // FIXME: Not all registers of an activation are actively used, so this
-        //        will actually keep more things alive than it should. In the
-        //        future, we can use liveness analysis in order to determine the
-        //        minimum set of registers we should actually keep (this ties
-        //        back to register allocation).
-        const activation_stack = self.heap.activation_stack.?;
-        for (activation_stack.getStack()) |*activation| {
-            const activation_object_reference = activation.activation_object;
-            std.debug.assert(activation_object_reference.isObjectReference());
-            const activation_object_address = activation_object_reference.asObjectAddress();
-
-            // If the activation object address is within the object segment
-            // of our space then copy it.
-            if (self.objectSegmentContains(activation_object_address)) {
-                const new_address = try self.copyObjectTo(allocator, activation_object_address, target_space);
-                activation.activation_object = Value.fromObjectAddress(new_address);
-            }
-
-            if (try self.copyAddress(allocator, activation.creator_message.asObjectAddress(), target_space, false)) |new_address| {
-                activation.creator_message = Value.fromObjectAddress(new_address);
-            }
-        }
-
+        // Visit all the values in the VM and copy any addresses.
         const VisitorContext = struct { self: *Space, allocator: Allocator, target_space: *Space };
-        self.heap.vm.register_file.visitValues(VisitorContext{ .self = self, .allocator = allocator, .target_space = target_space }, struct {
-            fn f(context: VisitorContext, value: *Value) !void {
+        const context = VisitorContext{ .self = self, .allocator = allocator, .target_space = target_space };
+        try self.heap.vm.visitValues(context, struct {
+            fn f(ctx: VisitorContext, value: *Value) !void {
                 if (value.isObjectReference()) {
-                    if (try context.self.copyAddress(context.allocator, value.asObjectAddress(), context.target_space, false)) |new_address| {
+                    if (try ctx.self.copyAddress(ctx.allocator, value.asObjectAddress(), ctx.target_space, false)) |new_address| {
                         value.* = Value.fromObjectAddress(new_address);
                     }
                 }
             }
-        }.f) catch |err| return @errSetCast(Allocator.Error, err);
-
-        // Go through the virtual machine's slot and argument stacks,
-        // copying any values that should be copied
-        for (self.heap.vm.slot_stack.allItems()) |*slot| {
-            // FIXME: This should be handled in VirtualMachine.visitValues.
-            if (std.meta.eql(VirtualMachine.SlotSentinel, slot.*))
-                continue;
-
-            std.debug.assert(slot.name.isObjectReference());
-            if (try self.copyAddress(allocator, slot.name.asObjectAddress(), target_space, false)) |new_address| {
-                slot.name = Value.fromObjectAddress(new_address);
-            }
-
-            if (slot.value.isObjectReference()) {
-                if (try self.copyAddress(allocator, slot.value.asObjectAddress(), target_space, false)) |new_address| {
-                    slot.value = Value.fromObjectAddress(new_address);
-                }
-            }
-        }
-
-        for (self.heap.vm.argument_stack.allItems()) |*argument| {
-            // FIXME: This should be handled in VirtualMachine.visitValues.
-            if (std.meta.eql(VirtualMachine.ValueSentinel, argument.*))
-                continue;
-
-            if (argument.isObjectReference()) {
-                if (try self.copyAddress(allocator, argument.asObjectAddress(), target_space, false)) |new_address| {
-                    argument.* = Value.fromObjectAddress(new_address);
-                }
-            }
-        }
-
-        for (self.heap.vm.saved_register_stack.allItems()) |*saved_register| {
-            if (saved_register.value.isObjectReference()) {
-                if (try self.copyAddress(allocator, saved_register.value.asObjectAddress(), target_space, false)) |new_address| {
-                    saved_register.value = Value.fromObjectAddress(new_address);
-                }
-            }
-        }
+        }.f);
 
         // Go through the tracked set, copying referenced objects
         for (self.tracked_set.keys()) |handle| {

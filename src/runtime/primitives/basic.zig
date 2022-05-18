@@ -14,11 +14,12 @@ const interpreter = @import("../interpreter.zig");
 const error_set_utils = @import("../../utility/error_set.zig");
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
+const ExecutionResult = interpreter.ExecutionResult;
 const runtime_error = @import("../error.zig");
 
 /// Return the static "nil" slots object.
-pub fn Nil(context: PrimitiveContext) !?Completion {
-    return Completion.initNormal(context.vm.nil());
+pub fn Nil(context: PrimitiveContext) !ExecutionResult {
+    return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
 }
 
 /// Return the given path relative to the current activation's definition
@@ -34,10 +35,12 @@ fn getRelativePathToScript(context: PrimitiveContext, path: []const u8) ![]const
 }
 
 /// Run the given script file, and return the result of the last expression.
-pub fn RunScript(context: PrimitiveContext) !?Completion {
+pub fn RunScript(context: PrimitiveContext) !ExecutionResult {
     const receiver = context.receiver.getValue();
     if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
-        return try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray for the receiver of _RunScript", .{});
+        return ExecutionResult.completion(
+            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray for the receiver of _RunScript", .{}),
+        );
     }
 
     // FIXME: Find a way to handle errors here. These hacks are nasty.
@@ -48,32 +51,36 @@ pub fn RunScript(context: PrimitiveContext) !?Completion {
 
     var script = Script.createFromFilePath(context.vm.allocator, target_path) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        else => |e| return try Completion.initRuntimeError(
+        else => |e| return ExecutionResult.completion(try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "An unexpected error was raised from script.initInPlaceFromFilePath: {s}",
             .{@errorName(e)},
-        ),
+        )),
     };
     defer script.unref();
 
     const did_parse_without_errors = script.value.parseScript() catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        else => |e| return try Completion.initRuntimeError(
+        else => |e| return ExecutionResult.completion(try Completion.initRuntimeError(
             context.vm,
             context.source_range,
             "An unexpected error was raised from script.parseScript: {s}",
             .{@errorName(e)},
-        ),
+        )),
     };
 
     script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
     if (!did_parse_without_errors) {
-        return try Completion.initRuntimeError(context.vm, context.source_range, "Failed parsing the script passed to _RunScript", .{});
+        return ExecutionResult.completion(
+            try Completion.initRuntimeError(context.vm, context.source_range, "Failed parsing the script passed to _RunScript", .{}),
+        );
     }
 
     const ast_executable = AstGen.generateExecutableFromScript(context.vm.allocator, script) catch |err| switch (err) {
-        error.AstGenFailure => return try Completion.initRuntimeError(context.vm, context.source_range, "Code generation for the script passed to _RunScript failed", .{}),
+        error.AstGenFailure => return ExecutionResult.completion(
+            try Completion.initRuntimeError(context.vm, context.source_range, "Code generation for the script passed to _RunScript failed", .{}),
+        ),
         error.OutOfMemory => return error.OutOfMemory,
     };
     defer ast_executable.destroy();
@@ -81,14 +88,22 @@ pub fn RunScript(context: PrimitiveContext) !?Completion {
     const executable = try CodeGen.lowerExecutable(context.vm.allocator, ast_executable);
     defer executable.unref();
 
+    // Advance the instruction for the activation that will be returned to.
+    context.actor.activation_stack.getCurrent().advanceInstruction();
+
     try executable.value.pushSubEntrypointActivation(context.vm, context.source_range.executable, context.target_location, &context.actor.activation_stack);
-    return null;
+    return ExecutionResult.activationChange();
 }
 
-pub fn EvaluateStringIfFail(context: PrimitiveContext) !?Completion {
+pub fn EvaluateStringIfFail(context: PrimitiveContext) !ExecutionResult {
+    if (!context.vm.isInActorMode())
+        @panic("TODO make '_EvaluateStringIfFail:' work with actor mode");
+
     const receiver = context.receiver.getValue();
     if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
-        return try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray for the receiver of _RunScript", .{});
+        return ExecutionResult.completion(
+            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray for the receiver of _RunScript", .{}),
+        );
     }
 
     const receiver_byte_array = receiver.asObject().asByteArrayObject();
@@ -102,21 +117,51 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !?Completion {
         else => |e| {
             // TODO: Instead of printing this error like this, pass it to the failure block.
             std.debug.print("An unexpected error was raised from script.parseScript: {s}\n", .{@errorName(e)});
-            return try interpreter.sendMessage(context.vm, context.actor, context.arguments[0], "value", context.target_location, context.source_range);
+            if (try interpreter.sendMessage(
+                context.vm,
+                context.actor,
+                context.arguments[0],
+                "value",
+                context.target_location,
+                context.source_range,
+            )) |completion| {
+                return ExecutionResult.completion(completion);
+            }
+            return ExecutionResult.activationChange();
         },
     };
 
     script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
     if (!did_parse_without_errors) {
         // TODO: Pass error information to the failure block.
-        return try interpreter.sendMessage(context.vm, context.actor, context.arguments[0], "value", context.target_location, context.source_range);
+        if (try interpreter.sendMessage(
+            context.vm,
+            context.actor,
+            context.arguments[0],
+            "value",
+            context.target_location,
+            context.source_range,
+        )) |completion| {
+            return ExecutionResult.completion(completion);
+        }
+        return ExecutionResult.activationChange();
     }
 
     const ast_executable = AstGen.generateExecutableFromScript(context.vm.allocator, script) catch |err| switch (err) {
         error.AstGenFailure => {
             // TODO: Pass error information to the failure block.
             std.debug.print("Code generation for the script passed to _EvaluateStringIfFail: failed", .{});
-            return try interpreter.sendMessage(context.vm, context.actor, context.arguments[0], "value", context.target_location, context.source_range);
+            if (try interpreter.sendMessage(
+                context.vm,
+                context.actor,
+                context.arguments[0],
+                "value",
+                context.target_location,
+                context.source_range,
+            )) |completion| {
+                return ExecutionResult.completion(completion);
+            }
+            return ExecutionResult.activationChange();
         },
         error.OutOfMemory => return error.OutOfMemory,
     };
@@ -127,39 +172,61 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !?Completion {
 
     const stack_snapshot = context.vm.takeStackSnapshot();
     const activation_before_script = context.actor.activation_stack.getCurrent();
+    activation_before_script.advanceInstruction();
     try executable.value.pushSubEntrypointActivation(context.vm, context.source_range.executable, context.target_location, &context.actor.activation_stack);
 
-    var completion = try context.actor.executeActivationStack(context.vm, activation_before_script);
-    switch (completion.data) {
-        .RuntimeError => |err| {
-            defer completion.deinit(context.vm);
+    switch (try context.actor.executeUntil(context.vm, activation_before_script)) {
+        .ActorSwitch => unreachable,
+        .Completion => |*completion| {
+            switch (completion.data) {
+                .RuntimeError => |err| {
+                    defer completion.deinit(context.vm);
 
-            // TODO: Pass error information to failure block
-            std.debug.print("Received error while evaluating string: {s}\n", .{err.message});
-            runtime_error.printTraceFromActivationStackUntil(context.actor.activation_stack.getStack(), err.source_range, activation_before_script);
+                    // TODO: Pass error information to failure block
+                    std.debug.print("Received error while evaluating string: {s}\n", .{err.message});
+                    runtime_error.printTraceFromActivationStackUntil(context.actor.activation_stack.getStack(), err.source_range, activation_before_script);
 
-            context.actor.activation_stack.restoreTo(activation_before_script);
-            context.vm.restoreStackSnapshot(stack_snapshot);
+                    context.actor.activation_stack.restoreTo(activation_before_script);
+                    context.vm.restoreStackSnapshot(stack_snapshot);
 
-            return try interpreter.sendMessage(context.vm, context.actor, context.arguments[0], "value", context.target_location, context.source_range);
+                    if (try interpreter.sendMessage(
+                        context.vm,
+                        context.actor,
+                        context.arguments[0],
+                        "value",
+                        context.target_location,
+                        context.source_range,
+                    )) |block_completion| {
+                        return ExecutionResult.completion(block_completion);
+                    }
+                    return ExecutionResult.activationChange();
+                },
+                else => return ExecutionResult.completion(completion.*),
+            }
         },
-        else => return completion,
     }
 }
 
 /// Raise the argument as an error. The argument must be a byte vector.
-pub fn Error(context: PrimitiveContext) !?Completion {
+pub fn Error(context: PrimitiveContext) !ExecutionResult {
     var argument = context.arguments[0];
     if (!(argument.isObjectReference() and argument.asObject().isByteArrayObject())) {
-        return try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray as _Error: argument", .{});
+        return ExecutionResult.completion(
+            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray as _Error: argument", .{}),
+        );
     }
 
-    return try Completion.initRuntimeError(context.vm, context.source_range, "Error raised in Self code: {s}", .{argument.asObject().asByteArrayObject().getValues()});
+    return ExecutionResult.completion(try Completion.initRuntimeError(
+        context.vm,
+        context.source_range,
+        "Error raised in Self code: {s}",
+        .{argument.asObject().asByteArrayObject().getValues()},
+    ));
 }
 
 /// Restarts the current method, executing it from the first statement.
 /// This primitive is intended to be used internally only.
-pub fn Restart(context: PrimitiveContext) !?Completion {
+pub fn Restart(context: PrimitiveContext) !ExecutionResult {
     _ = context;
-    return Completion.initRestart();
+    return ExecutionResult.completion(Completion.initRestart());
 }

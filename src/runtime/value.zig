@@ -18,7 +18,6 @@ const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
-const LookupError = object_lookup.LookupError;
 const LookupResult = object_lookup.LookupResult;
 const SelectorHash = object_lookup.SelectorHash;
 const parent_hash = hash.stringHash("parent");
@@ -118,18 +117,18 @@ pub const Value = packed struct {
         self: Value,
         vm: *VirtualMachine,
         selector: []const u8,
-    ) LookupError!LookupResult {
+    ) LookupResult {
         const selector_hash = SelectorHash.init(selector);
         if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up \"{s}\" (hash: {x}) on {}\n", .{ selector, selector_hash.regular, self });
 
-        return try self.lookupByHash(vm, selector_hash);
+        return self.lookupByHash(vm, selector_hash);
     }
 
     pub fn lookupByHash(
         self: Value,
         vm: *VirtualMachine,
         selector_hash: SelectorHash,
-    ) LookupError!LookupResult {
+    ) LookupResult {
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
             .ObjectReference => self.asObject().lookupByHash(vm, selector_hash),
@@ -140,7 +139,7 @@ pub const Value = packed struct {
                 if (selector_hash.regular == parent_hash)
                     return LookupResult{ .Regular = integer_traits };
 
-                return try integer_traits.lookupByHash(vm, selector_hash);
+                return integer_traits.lookupByHash(vm, selector_hash);
             },
             .FloatingPoint => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits float\n", .{});
@@ -149,7 +148,7 @@ pub const Value = packed struct {
                 if (selector_hash.regular == parent_hash)
                     return LookupResult{ .Regular = float_traits };
 
-                return try float_traits.lookupByHash(vm, selector_hash);
+                return float_traits.lookupByHash(vm, selector_hash);
             },
         };
     }

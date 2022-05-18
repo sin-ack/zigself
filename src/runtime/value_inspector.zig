@@ -154,6 +154,14 @@ fn inspectObject(
             std.debug.print("<managed object: {}> ", .{managed.getManagedType()});
             try inspectValueInternal(display_type, vm, managed.value, indent, &my_link);
         },
+        .Actor => {
+            // TODO: Add more detailed inspection
+            std.debug.print("<actor>", .{});
+        },
+        .ActorProxy => {
+            // TODO: Add more detailed inspection
+            std.debug.print("<actor proxy>", .{});
+        },
     }
 }
 

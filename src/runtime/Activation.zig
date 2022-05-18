@@ -38,7 +38,7 @@ nonlocal_return_target_activation: ?*Self = null,
 // --- Activation creation info ---
 
 /// The VM stack snapshot at the time which this activation was created.
-stack_snapshot: VirtualMachine.StackSnapshot,
+stack_snapshot: Actor.StackSnapshot,
 /// The message that created this activation as a byte array.
 creator_message: Value,
 /// This is the source range which caused the creation of this message.
@@ -57,7 +57,7 @@ pub fn initInPlace(
     self: *Self,
     activation_object: Value,
     target_location: RegisterLocation,
-    stack_snapshot: VirtualMachine.StackSnapshot,
+    stack_snapshot: Actor.StackSnapshot,
     creator_message: Value,
     created_from: SourceRange,
 ) !void {

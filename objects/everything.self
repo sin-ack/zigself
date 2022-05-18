@@ -35,3 +35,6 @@ _AddSlots: (| nil = _Nil |).
 "Interacting with the OS."
 'os.self' _RunScript.
 'file.self' _RunScript.
+
+"Actors and everything to do with them."
+'actor.self' _RunScript.

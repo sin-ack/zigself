@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const Value = @import("../value.zig").Value;
 const register_location = @import("./register_location.zig");
@@ -62,7 +63,7 @@ pub fn write(self: *RegisterFile, location: RegisterLocation, value: Value) void
 pub fn visitValues(
     self: *RegisterFile,
     context: anytype,
-    visitor: fn (ctx: @TypeOf(context), register: *Value) anyerror!void,
+    visitor: fn (ctx: @TypeOf(context), register: *Value) Allocator.Error!void,
 ) !void {
     for (self.general_purpose) |*register| {
         try visitor(context, register);

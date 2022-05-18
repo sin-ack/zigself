@@ -8,21 +8,26 @@ const Allocator = std.mem.Allocator;
 const Object = @import("../Object.zig");
 const Completion = @import("../Completion.zig");
 const value_inspector = @import("../value_inspector.zig");
-
+const ExecutionResult = @import("../interpreter.zig").ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 /// Adds the slots in the argument object to the receiver object. The slots
 /// are copied. The objects at each slot are not cloned, however.
-pub fn AddSlots(context: PrimitiveContext) !?Completion {
+pub fn AddSlots(context: PrimitiveContext) !ExecutionResult {
     const receiver = context.receiver.getValue();
     const argument = context.arguments[0];
 
     if (!(receiver.isObjectReference() and receiver.asObject().isSlotsObject())) {
-        return try Completion.initRuntimeError(context.vm, context.source_range, "Expected Slots as the receiver to _AddSlots:", .{});
+        try value_inspector.inspectValue(.Multiline, context.vm, receiver);
+        return ExecutionResult.completion(
+            try Completion.initRuntimeError(context.vm, context.source_range, "Expected Slots as the receiver to _AddSlots:", .{}),
+        );
     }
 
     if (!(argument.isObjectReference() and argument.asObject().isSlotsObject())) {
-        return try Completion.initRuntimeError(context.vm, context.source_range, "Expected Slots as the argument to _AddSlots:", .{});
+        return ExecutionResult.completion(
+            try Completion.initRuntimeError(context.vm, context.source_range, "Expected Slots as the argument to _AddSlots:", .{}),
+        );
     }
 
     var receiver_object = receiver.asObject().asSlotsObject();
@@ -38,7 +43,7 @@ pub fn AddSlots(context: PrimitiveContext) !?Completion {
     argument_object = context.arguments[0].asObject().asSlotsObject();
 
     const new_object = try receiver_object.addSlotsFrom(argument_object, context.vm.allocator, context.vm.heap);
-    return Completion.initNormal(new_object.asValue());
+    return ExecutionResult.completion(Completion.initNormal(new_object.asValue()));
 }
 
 // FIXME: Re-enable this.
@@ -88,25 +93,25 @@ pub fn RemoveSlot_IfFail(context: PrimitiveContext) !Completion {
 }
 
 /// Inspect the receiver and print it to stderr. Return the receiver.
-pub fn Inspect(context: PrimitiveContext) !?Completion {
+pub fn Inspect(context: PrimitiveContext) !ExecutionResult {
     const receiver = context.receiver.getValue();
     try value_inspector.inspectValue(.Multiline, context.vm, receiver);
-    return Completion.initNormal(receiver);
+    return ExecutionResult.completion(Completion.initNormal(receiver));
 }
 
 /// Make an identical shallow copy of the receiver and return it.
-pub fn Clone(context: PrimitiveContext) !?Completion {
+pub fn Clone(context: PrimitiveContext) !ExecutionResult {
     const receiver = context.receiver.getValue();
-    return Completion.initNormal(try receiver.clone(context.vm.heap));
+    return ExecutionResult.completion(Completion.initNormal(try receiver.clone(context.vm.heap)));
 }
 
 /// Return whether the receiver and argument are identical. Returns either
 /// the global "true" or "false" object.
-pub fn Eq(context: PrimitiveContext) error{}!?Completion {
-    return Completion.initNormal(
+pub fn Eq(context: PrimitiveContext) error{}!ExecutionResult {
+    return ExecutionResult.completion(Completion.initNormal(
         if (context.receiver.getValue().data == context.arguments[0].data)
             context.vm.getTrue()
         else
             context.vm.getFalse(),
-    );
+    ));
 }
