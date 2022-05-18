@@ -96,6 +96,9 @@ pub fn RunScript(context: PrimitiveContext) !ExecutionResult {
 }
 
 pub fn EvaluateStringIfFail(context: PrimitiveContext) !ExecutionResult {
+    // FIXME: _EvaluateStringIfFail: should be replaced with _EvaluateString and
+    //       fail the current actor the same way _RunScript does. The REPL
+    //       should create a new actor for each string evaluation.
     if (context.vm.isInActorMode())
         @panic("TODO make '_EvaluateStringIfFail:' work with actor mode");
 
