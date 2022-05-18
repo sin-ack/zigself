@@ -102,7 +102,7 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !ExecutionResult {
     const receiver = context.receiver.getValue();
     if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
         return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray for the receiver of _RunScript", .{}),
+            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray for the receiver of _EvaluateStringIfFail:", .{}),
         );
     }
 
