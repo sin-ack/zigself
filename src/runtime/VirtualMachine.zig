@@ -234,6 +234,8 @@ pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
                                 self.switchToActor(self.global_actor);
                             } else {
                                 self.current_actor.yield_reason = .Dead;
+                                if (!self.unregisterRegularActor(self.current_actor))
+                                    @panic("!!! Actor {*} was not registered as a regular actor while dying!");
                                 // FIXME: Write something meaningful to the
                                 //        return location of _ActorResume for the
                                 //        genesis actor.
@@ -249,8 +251,11 @@ pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
                             }
 
                             const actor = self.current_actor;
+                            // FIXME: In the future we will want to hang onto
+                            //        the regular actor in order to obtain debug
+                            //        information from it.
                             if (!self.unregisterRegularActor(actor))
-                                @panic("!!! Failed to unregister regular actor with runtime error!");
+                                @panic("!!! Actor {*} was not registered as a regular actor while receiving a runtime error!");
 
                             actor.yield_reason = .RuntimeError;
                             // FIXME: Write something meaningful to the return
