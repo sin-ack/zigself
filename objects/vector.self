@@ -50,6 +50,12 @@ std traits _AddSlots: (|
             self
         ).
 
+        shift = (| value |
+            value: at: 0.
+            remove: 0.
+            value
+        ).
+
         capacity = (items size).
 
         shrinkToFit = (private resizeTo: size. self).
