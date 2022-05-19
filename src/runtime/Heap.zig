@@ -509,22 +509,15 @@ const Space = struct {
                 const object_size_in_bytes = entry.value_ptr.*;
                 const object_slice = start_of_object[0 .. object_size_in_bytes / @sizeOf(u64)];
 
-                var found_references: usize = 0;
                 for (object_slice) |*word| {
                     const value = Value{ .data = word.* };
                     if (value.isObjectReference()) {
                         const address = value.asObjectAddress();
                         if (try self.copyAddress(allocator, address, target_space, false)) |new_address| {
                             word.* = Value.fromObjectAddress(new_address).data;
-                            found_references += 1;
                         }
                     }
                 }
-
-                // Make sure that the object in the remembered set actually has a
-                // purpose of being there, i.e. actually contains references to this
-                // space.
-                std.debug.assert(found_references > 0);
 
                 try target_space.remembered_set.put(allocator, start_of_object, object_size_in_bytes);
             }
