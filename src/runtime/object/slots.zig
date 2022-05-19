@@ -536,7 +536,6 @@ pub const Block = packed struct {
     pub fn activateBlock(
         self: *Block,
         vm: *VirtualMachine,
-        actor: *Actor,
         receiver: Value,
         arguments: []const Value,
         target_location: RegisterLocation,
@@ -547,8 +546,8 @@ pub const Block = packed struct {
         const activation_object = try Activation.create(vm.heap, .Block, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
 
         try out_activation.initInPlace(activation_object.asValue(), target_location, vm.takeStackSnapshot(), creator_message, created_from);
-        out_activation.parent_activation = self.getMap().parent_activation.get(&actor.activation_stack);
-        out_activation.nonlocal_return_target_activation = self.getMap().nonlocal_return_target_activation.get(&actor.activation_stack);
+        out_activation.parent_activation = self.getMap().parent_activation;
+        out_activation.nonlocal_return_target_activation = self.getMap().nonlocal_return_target_activation;
     }
 };
 

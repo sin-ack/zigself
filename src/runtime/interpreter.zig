@@ -53,7 +53,7 @@ pub const ExecutionResult = union(enum) {
 
 const activation_change = ExecutionResult.activationChange();
 const success = ExecutionResult.success();
-pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation, executable: Executable.Ref, inst: Instruction) !ExecutionResult {
+pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activation.ActivationRef, executable: Executable.Ref, inst: Instruction) !ExecutionResult {
     const source_range = SourceRange.initNoRef(executable, actor.range);
 
     if (EXECUTION_DEBUG) std.debug.print("[{*} {s}] Executing: {} = {}\n", .{ actor, executable.value.definition_script.value.file_path, inst.target, inst });
@@ -298,14 +298,17 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             // parent_activation. If the parent activation is a block, it will also
             // contain a target activation; if it's a method the target activation _is_
             // the parent.
-            const nonlocal_return_target_activation = if (parent_activation.nonlocal_return_target_activation) |target| target else parent_activation;
-            std.debug.assert(nonlocal_return_target_activation.nonlocal_return_target_activation == null);
+            const nonlocal_return_target_activation = if (parent_activation.nonlocal_return_target_activation) |target|
+                target
+            else
+                parent_activation.takeRef(actor.activation_stack);
+            std.debug.assert(nonlocal_return_target_activation.get(actor.activation_stack).?.nonlocal_return_target_activation == null);
 
             var block_map = try Object.Map.Block.create(
                 vm.heap,
                 argument_slot_count,
                 total_slot_count,
-                parent_activation,
+                parent_activation.takeRef(actor.activation_stack),
                 nonlocal_return_target_activation,
                 block,
                 executable,
@@ -345,16 +348,18 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation: ?*Activation
             return success;
         },
         .Return => {
-            if (actor.exitCurrentActivation(vm, last_activation) == .LastActivation)
+            if (actor.exitCurrentActivation(vm, last_activation_ref) == .LastActivation)
                 return ExecutionResult.completion(Completion.initNormal(vm.readRegister(.ret)));
             return activation_change;
         },
         .NonlocalReturn => {
             const current_activation = actor.activation_stack.getCurrent();
             // FIXME: Better name
-            const target_activation = current_activation.nonlocal_return_target_activation.?;
+            const target_activation_ref = current_activation.nonlocal_return_target_activation.?;
+            const target_activation = target_activation_ref.get(actor.activation_stack) orelse
+                return ExecutionResult.completion(try Completion.initRuntimeError(vm, source_range, "Attempted to non-local return to non-existent activation", .{}));
 
-            if (actor.exitActivation(vm, last_activation, target_activation) == .LastActivation)
+            if (actor.exitActivation(vm, last_activation_ref, target_activation) == .LastActivation)
                 return ExecutionResult.completion(Completion.initNormal(vm.readRegister(.ret)));
             return activation_change;
         },
@@ -549,12 +554,11 @@ fn executeBlock(
         block = tracked_block.getValue().asObject().asBlockObject();
     }
 
-    const parent_activation_object = block.getMap().parent_activation.get(&actor.activation_stack).?.activation_object;
-    const activation_slot = actor.activation_stack.getNewActivationSlot();
+    const parent_activation_object = block.getMap().parent_activation.get(actor.activation_stack).?.activation_object;
+    const activation_slot = try actor.activation_stack.getNewActivationSlot(vm.allocator);
     const tracked_message_name = try vm.getOrCreateBlockMessageName(@intCast(u8, arguments.len));
     try block.activateBlock(
         vm,
-        actor,
         parent_activation_object,
         arguments,
         target_location,
@@ -604,6 +608,6 @@ fn executeMethod(
         receiver_of_method = receiver_of_method.asObject().asActivationObject().findActivationReceiver();
     }
 
-    const activation_slot = actor.activation_stack.getNewActivationSlot();
+    const activation_slot = try actor.activation_stack.getNewActivationSlot(vm.allocator);
     try method.activateMethod(vm, receiver_of_method, arguments, target_location, source_range, activation_slot);
 }

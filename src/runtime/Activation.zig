@@ -28,12 +28,12 @@ target_location: RegisterLocation,
 /// block's own activation object. Not used with methods, since we don't want to
 /// inherit previous activation objects in methods (that would make the language
 /// dynamically scoped :^).
-parent_activation: ?*Self = null,
+parent_activation: ?ActivationRef = null,
 /// Will be used as the target activation that a non-local return needs to rise
 /// to. Must be non-null when a non-local return is encountered, and when
 /// non-null, must point to an activation where
 /// `nonlocal_return_target_activation` is null.
-nonlocal_return_target_activation: ?*Self = null,
+nonlocal_return_target_activation: ?ActivationRef = null,
 
 // --- Activation creation info ---
 
@@ -77,8 +77,8 @@ pub fn deinit(self: *Self) void {
     self.created_from.deinit();
 }
 
-pub fn takeRef(self: *Self) ActivationRef {
-    return ActivationRef.init(self);
+pub fn takeRef(self: *Self, stack: ActivationStack) ActivationRef {
+    return ActivationRef.init(self, stack);
 }
 
 /// Return the result of the `self` message for the current context.
@@ -124,26 +124,24 @@ pub fn format(
 }
 
 pub const ActivationStack = struct {
-    stack: []Self,
-    depth: usize = 0,
+    stack: std.ArrayListUnmanaged(Self) = .{},
 
-    pub fn init(allocator: Allocator, max_depth: usize) !ActivationStack {
-        const stack = try allocator.alloc(Self, max_depth);
-
-        return ActivationStack{ .stack = stack };
-    }
-
-    pub fn deinit(self: ActivationStack, allocator: Allocator) void {
-        allocator.free(self.stack);
+    pub fn deinit(self: *ActivationStack, allocator: Allocator) void {
+        self.stack.deinit(allocator);
     }
 
     pub fn getStack(self: ActivationStack) []Self {
-        return self.stack[0..self.depth];
+        return self.stack.items;
+    }
+
+    pub fn getDepth(self: ActivationStack) usize {
+        return self.stack.items.len;
     }
 
     pub fn getCurrent(self: ActivationStack) *Self {
-        std.debug.assert(self.depth > 0);
-        return &self.stack[self.depth - 1];
+        const depth = self.getDepth();
+        std.debug.assert(depth > 0);
+        return &self.stack.items[depth - 1];
     }
 
     /// Unwinds the stack until the given activation is reached.
@@ -156,57 +154,77 @@ pub const ActivationStack = struct {
         std.debug.assert(@ptrToInt(current_activation) >= @ptrToInt(activation));
 
         const distance = @divExact(@ptrToInt(current_activation) - @ptrToInt(activation), @sizeOf(Self));
-        const target_depth = self.depth - distance;
-        while (self.depth != target_depth) : (self.depth -= 1) {
-            self.stack[self.depth - 1].deinit();
+        var current_depth = self.getDepth();
+        const target_depth = current_depth - distance;
+        while (current_depth != target_depth) : (current_depth -= 1) {
+            self.stack.items[current_depth - 1].deinit();
         }
+
+        self.stack.shrinkRetainingCapacity(target_depth);
     }
 
-    pub fn getNewActivationSlot(self: *ActivationStack) *Self {
-        // NOTE: Will trigger a crash if maximum stack depth was exceeded.
-        const activation = &self.stack[self.depth];
-        self.depth += 1;
+    pub fn getNewActivationSlot(self: *ActivationStack, allocator: Allocator) !*Self {
+        try self.stack.ensureUnusedCapacity(allocator, 1);
+        self.stack.items.len += 1;
+        const activation = &self.stack.items[self.getDepth() - 1];
         return activation;
     }
 
     pub fn popActivation(self: *ActivationStack) *Self {
-        self.depth -= 1;
-        const activation = &self.stack[self.depth];
+        const new_depth = self.getDepth() - 1;
+
+        // NOTE: We intentionally return the activation that's out of the
+        //       bounds of the stack. This value is used very briefly.
+        const activation = &self.stack.items[new_depth];
+        self.stack.shrinkRetainingCapacity(new_depth);
+
         return activation;
     }
 
-    pub fn isActivationWithin(self: ActivationStack, activation: *Self) bool {
-        const start_of_slice = self.stack.ptr;
-        const end_of_slice = start_of_slice + self.depth;
+    pub fn clear(self: *ActivationStack) void {
+        self.stack.clearRetainingCapacity();
+    }
+
+    fn isActivationWithin(self: ActivationStack, activation: *Self) bool {
+        const start_of_slice = self.stack.items.ptr;
+        const end_of_slice = start_of_slice + self.stack.items.len;
 
         return @ptrToInt(activation) >= @ptrToInt(start_of_slice) and
             @ptrToInt(activation) < @ptrToInt(end_of_slice);
+    }
+
+    pub fn offsetOf(self: ActivationStack, activation: *Self) usize {
+        std.debug.assert(self.isActivationWithin(activation));
+
+        const start_of_slice = self.stack.items.ptr;
+        return @divExact(@ptrToInt(activation) - @ptrToInt(start_of_slice), @sizeOf(Self));
     }
 };
 
 /// A reference to an activation. The pointer and saved ID values are stored as
 /// Values, which makes this struct object heap-safe.
 pub const ActivationRef = packed struct {
-    pointer: Value,
+    offset: Value,
     saved_id: Value,
 
-    pub fn init(activation: *Self) ActivationRef {
-        const ptr = @ptrToInt(activation);
+    pub fn init(activation: *Self, stack: ActivationStack) ActivationRef {
         return .{
-            .pointer = Value.fromUnsignedInteger(ptr),
+            .offset = Value.fromUnsignedInteger(@intCast(u64, stack.offsetOf(activation))),
             .saved_id = Value.fromUnsignedInteger(activation.activation_id),
         };
     }
 
-    fn getPointer(self: ActivationRef) *Self {
-        return @intToPtr(*Self, self.pointer.asUnsignedInteger());
+    fn getPointer(self: ActivationRef, stack: ActivationStack) *Self {
+        return &stack.stack.items[self.offset.asUnsignedInteger()];
     }
 
-    pub fn isAlive(self: ActivationRef, stack: *ActivationStack) bool {
-        const activation_ptr = self.getPointer();
+    pub fn isAlive(self: ActivationRef, stack: ActivationStack) bool {
+        const offset = self.offset.asUnsignedInteger();
 
         // Is this activation outside the currently-valid activation stack?
-        if (!stack.isActivationWithin(activation_ptr)) return false;
+        if (stack.getDepth() <= offset) return false;
+
+        const activation_ptr = self.getPointer(stack);
         // Does the ID we saved match the currently-stored ID on the activation
         // we point to?
         if (self.saved_id.asUnsignedInteger() != activation_ptr.activation_id) return false;
@@ -215,8 +233,8 @@ pub const ActivationRef = packed struct {
         return true;
     }
 
-    pub fn get(self: ActivationRef, stack: *ActivationStack) ?*Self {
-        return if (self.isAlive(stack)) self.getPointer() else null;
+    pub fn get(self: ActivationRef, stack: ActivationStack) ?*Self {
+        return if (self.isAlive(stack)) self.getPointer(stack) else null;
     }
 };
 

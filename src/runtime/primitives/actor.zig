@@ -255,7 +255,7 @@ pub fn ActorSpawn(context: PrimitiveContext) !ExecutionResult {
     const actor_object = new_actor.actor_object.asObject().asActorObject();
 
     // FIXME: Make this nicer by providing a "actor.activateMethod or something."
-    const new_activation = new_actor.activation_stack.getNewActivationSlot();
+    const new_activation = try new_actor.activation_stack.getNewActivationSlot(context.vm.allocator);
     try entrypoint_method.activateMethod(
         context.vm,
         actor_object.context,
@@ -330,7 +330,7 @@ pub fn ActorResume(context: PrimitiveContext) !ExecutionResult {
     }
 
     // NOTE: Need to advance the current actor to the next instruction to be returned to after the this actor exits.
-    context.vm.current_actor.activation_stack.getCurrent().advanceInstruction();
+    context.actor.activation_stack.getCurrent().advanceInstruction();
 
     const actor = receiver.asObject().asActorObject().getActor();
     std.debug.assert(context.vm.regularActorIsRegistered(actor));

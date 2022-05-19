@@ -28,7 +28,7 @@ actor_object: Value,
 
 entrypoint_selector: ?Value = null,
 yield_reason: YieldReason = .None,
-activation_stack: ActivationStack,
+activation_stack: ActivationStack = .{},
 
 /// The mailbox stores the messages that were sent to this actor through actor
 /// proxy objects.
@@ -133,22 +133,19 @@ pub fn spawn(
     const self = try create(vm, actor_context);
     errdefer self.destroy(vm.allocator);
 
-    const new_activation = self.activation_stack.getNewActivationSlot();
+    const new_activation = try self.activation_stack.getNewActivationSlot(vm.allocator);
     try method.activateMethod(vm, actor_context, &.{}, target_location, source_range, new_activation);
 
     return self;
 }
 
 pub fn create(vm: *VirtualMachine, actor_context: Value) !*Self {
-    const activation_stack = try ActivationStack.init(vm.allocator, MaximumStackDepth);
-    errdefer activation_stack.deinit(vm.allocator);
-
     const self = try vm.allocator.create(Self);
     errdefer vm.allocator.destroy(self);
 
     const actor_object = try Object.Actor.create(vm.heap, self, actor_context);
 
-    self.init(activation_stack, actor_object);
+    self.init(actor_object);
     return self;
 }
 
@@ -157,9 +154,8 @@ pub fn destroy(self: *Self, allocator: Allocator) void {
     allocator.destroy(self);
 }
 
-fn init(self: *Self, activation_stack: ActivationStack, actor_object: *Object.Actor) void {
+fn init(self: *Self, actor_object: *Object.Actor) void {
     self.* = .{
-        .activation_stack = activation_stack,
         .actor_object = actor_object.asValue(),
     };
 
@@ -181,7 +177,7 @@ fn deinit(self: *Self, allocator: Allocator) void {
 
 pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
     const actor_context = self.actor_object.asObject().asActorObject().context;
-    const current_activation = self.activation_stack.getCurrent();
+    const current_activation_ref = self.activation_stack.getCurrent().takeRef(self.activation_stack);
 
     // Go through the mailbox and activate all the messages that have been sent
     // so far.
@@ -190,10 +186,10 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
         while (it) |node| : (it = node.next) {
             const method = node.data.method.asObject().asMethodObject();
 
-            const new_activation = self.activation_stack.getNewActivationSlot();
+            const new_activation = try self.activation_stack.getNewActivationSlot(vm.allocator);
             try method.activateMethod(vm, actor_context, node.data.arguments, .zero, node.data.source_range, new_activation);
 
-            switch (try self.executeUntil(vm, current_activation)) {
+            switch (try self.executeUntil(vm, current_activation_ref)) {
                 .ActorSwitch => {
                     return ActorResult{
                         .Completion = try Completion.initRuntimeError(vm, node.data.source_range, "Actor message caused actor switch", .{}),
@@ -206,7 +202,7 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
                 },
             }
 
-            std.debug.assert(self.activation_stack.getCurrent() == current_activation);
+            std.debug.assert(self.activation_stack.getCurrent() == current_activation_ref.get(self.activation_stack).?);
         }
     }
 
@@ -218,7 +214,7 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
 
 /// Execute the activation stack of this actor until the given activation (or if
 /// `until` is null, until all activations have been resolved).
-pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?*Activation) !ActorResult {
+pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?Activation.ActivationRef) !ActorResult {
     var activation = self.activation_stack.getCurrent();
     var activation_object = activation.activation_object.asObject().asActivationObject();
     var executable = activation_object.getDefinitionExecutable();
@@ -256,16 +252,23 @@ pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?*Activation) !Acto
 
 pub const ActivationExitState = enum { LastActivation, NotLastActivation };
 
-pub fn exitCurrentActivation(self: *Self, vm: *VirtualMachine, last_activation: ?*Activation) ActivationExitState {
+pub fn exitCurrentActivation(self: *Self, vm: *VirtualMachine, last_activation_ref: ?Activation.ActivationRef) ActivationExitState {
     if (ACTIVATION_EXIT_DEBUG) std.debug.print("Actor.exitCurrentActivation: Exiting this activation\n", .{});
     const current_activation = self.activation_stack.getCurrent();
-    return self.exitActivation(vm, last_activation, current_activation);
+    return self.exitActivation(vm, last_activation_ref, current_activation);
 }
 
 /// Exit the given activation and write the result of the return register to the
 /// register for the instruction that initiated the activation. Returns
 /// ActivationExitState.LastActivation if the last activation has been exited.
-pub fn exitActivation(self: *Self, vm: *VirtualMachine, last_activation: ?*Activation, target_activation: *Activation) ActivationExitState {
+pub fn exitActivation(
+    self: *Self,
+    vm: *VirtualMachine,
+    last_activation_ref: ?Activation.ActivationRef,
+    target_activation: *Activation,
+) ActivationExitState {
+    const last_activation = if (last_activation_ref) |ref| ref.get(self.activation_stack).? else null;
+
     if (ACTIVATION_EXIT_DEBUG) {
         std.debug.print("Actor.exitActivation: Exiting activation\n", .{});
         for (self.activation_stack.getStack()) |*a, i| {
@@ -291,7 +294,7 @@ pub fn exitActivation(self: *Self, vm: *VirtualMachine, last_activation: ?*Activ
             return .LastActivation;
         }
     } else {
-        if (self.activation_stack.depth == 0)
+        if (self.activation_stack.getDepth() == 0)
             return .LastActivation;
     }
 
@@ -390,7 +393,7 @@ pub fn unwindStacks(self: *Self) void {
     for (self.activation_stack.getStack()) |*activation| {
         activation.deinit();
     }
-    self.activation_stack.depth = 0;
+    self.activation_stack.clear();
 
     self.argument_stack.restoreTo(0);
     self.slot_stack.restoreTo(0);

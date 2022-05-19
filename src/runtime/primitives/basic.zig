@@ -174,16 +174,21 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !ExecutionResult {
     defer executable.unref();
 
     const stack_snapshot = context.vm.takeStackSnapshot();
-    const activation_before_script = context.actor.activation_stack.getCurrent();
+    var activation_before_script = context.actor.activation_stack.getCurrent();
     activation_before_script.advanceInstruction();
     try executable.value.pushSubEntrypointActivation(context.vm, context.source_range.executable, context.target_location, &context.actor.activation_stack);
 
-    switch (try context.actor.executeUntil(context.vm, activation_before_script)) {
+    const activation_before_script_ref = activation_before_script.takeRef(context.actor.activation_stack);
+
+    switch (try context.actor.executeUntil(context.vm, activation_before_script_ref)) {
         .ActorSwitch => unreachable,
         .Completion => |*completion| {
             switch (completion.data) {
                 .RuntimeError => |err| {
                     defer completion.deinit(context.vm);
+
+                    // Refresh activation pointer
+                    activation_before_script = activation_before_script_ref.get(context.actor.activation_stack).?;
 
                     // TODO: Pass error information to failure block
                     std.debug.print("Received error while evaluating string: {s}\n", .{err.message});

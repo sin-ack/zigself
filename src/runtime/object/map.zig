@@ -406,8 +406,8 @@ const BlockMap = packed struct {
         heap: *Heap,
         argument_slot_count: u8,
         total_slot_count: u32,
-        parent_activation: *Activation,
-        nonlocal_return_target_activation: *Activation,
+        parent_activation: Activation.ActivationRef,
+        nonlocal_return_target_activation: Activation.ActivationRef,
         block: *BytecodeBlock,
         executable: BytecodeExecutable.Ref,
     ) !*BlockMap {
@@ -427,14 +427,14 @@ const BlockMap = packed struct {
         map_map: Value,
         argument_slot_count: u8,
         total_slot_count: u32,
-        parent_activation: *Activation,
-        nonlocal_return_target_activation: *Activation,
+        parent_activation: Activation.ActivationRef,
+        nonlocal_return_target_activation: Activation.ActivationRef,
         block: *BytecodeBlock,
         executable: BytecodeExecutable.Ref,
     ) void {
         self.base_map.init(.Block, map_map, argument_slot_count, total_slot_count, block, executable);
-        self.parent_activation = parent_activation.takeRef();
-        self.nonlocal_return_target_activation = nonlocal_return_target_activation.takeRef();
+        self.parent_activation = parent_activation;
+        self.nonlocal_return_target_activation = nonlocal_return_target_activation;
     }
 
     pub fn finalize(self: *BlockMap, allocator: Allocator) void {
