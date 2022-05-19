@@ -519,7 +519,9 @@ const Space = struct {
                     }
                 }
 
-                try target_space.remembered_set.put(allocator, start_of_object, object_size_in_bytes);
+                if (!target_space.objectSegmentContains(start_of_object)) {
+                    try target_space.addToRememberedSet(allocator, start_of_object, object_size_in_bytes);
+                }
             }
         }
 
