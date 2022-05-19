@@ -212,6 +212,9 @@ pub fn ActorSpawn(context: PrimitiveContext) !ExecutionResult {
         },
     }
 
+    // Refresh pointers in case the actor execution caused a GC
+    receiver = context.receiver.getValue();
+
     var entrypoint_selector = entrypoint_selector: {
         if (new_actor.entrypoint_selector) |message_value| {
             break :entrypoint_selector message_value.asObject().asByteArrayObject().getValues();
