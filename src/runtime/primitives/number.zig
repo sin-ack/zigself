@@ -163,6 +163,17 @@ pub fn IntAnd(context: PrimitiveContext) !ExecutionResult {
     }.op);
 }
 
+/// Perform a bitwise OR on the receiver with the argument. The returned value
+/// is an integer.
+pub fn IntOr(context: PrimitiveContext) !ExecutionResult {
+    return try integerOpCommon("IntOr", context, struct {
+        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
+            _ = ctx;
+            return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(receiver | term)));
+        }
+    }.op);
+}
+
 /// Return whether the receiver is less than its argument. The return value is
 /// either "true" or "false".
 pub fn IntLT(context: PrimitiveContext) !ExecutionResult {
