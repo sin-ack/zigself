@@ -1060,7 +1060,7 @@ fn parseIdentifier(self: *Self) ParseError!AST.IdentifierNode {
     return node;
 }
 
-const IntegerParseState = enum { Start, Zero, Decimal, Hexadecimal, Octal };
+const IntegerParseState = enum { Start, Zero, Decimal, Hexadecimal, Octal, Binary };
 fn parseInteger(self: *Self) ParseError!AST.NumberNode {
     const number_token = self.assertToken(.Integer);
     const start_of_number = self.token_starts[number_token];
@@ -1087,6 +1087,9 @@ fn parseInteger(self: *Self) ParseError!AST.NumberNode {
                 },
                 'o', 'O' => {
                     state = .Octal;
+                },
+                'b', 'B' => {
+                    state = .Binary;
                 },
                 '0'...'9' => unreachable,
                 else => break,
@@ -1151,6 +1154,23 @@ fn parseInteger(self: *Self) ParseError!AST.NumberNode {
                     }
                 },
                 '8', '9' => unreachable,
+                else => break,
+            },
+            .Binary => switch (c) {
+                '0', '1' => {
+                    const digit = c - '0';
+
+                    if (@mulWithOverflow(i62, integer, 2, &integer)) {
+                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
+                        break;
+                    }
+
+                    if (@addWithOverflow(i62, integer, digit, &integer)) {
+                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
+                        break;
+                    }
+                },
+                '2'...'9' => unreachable,
                 else => break,
             },
         }

@@ -23,6 +23,7 @@ const State = enum {
     DecimalOrFloatingPoint,
     Hexadecimal,
     Octal,
+    Binary,
     FractionOrPeriod,
     Fraction,
     LessThan,
@@ -319,6 +320,9 @@ pub fn next(self: *Self) Token {
                 'o', 'O' => {
                     state = .Octal;
                 },
+                'b', 'B' => {
+                    state = .Binary;
+                },
                 // It is invalid to have a number like 0123.
                 '0'...'9' => {
                     token.tag = .Invalid;
@@ -381,6 +385,14 @@ pub fn next(self: *Self) Token {
             .Octal => switch (c) {
                 '0'...'7' => {},
                 '8', '9' => {
+                    token.tag = .Invalid;
+                    break;
+                },
+                else => break,
+            },
+            .Binary => switch (c) {
+                '0', '1' => {},
+                '2'...'9' => {
                     token.tag = .Invalid;
                     break;
                 },
