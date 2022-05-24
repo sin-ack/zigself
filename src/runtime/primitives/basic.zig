@@ -175,7 +175,6 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !ExecutionResult {
 
     const stack_snapshot = context.vm.takeStackSnapshot();
     var activation_before_script = context.actor.activation_stack.getCurrent();
-    activation_before_script.advanceInstruction();
     try executable.value.pushSubEntrypointActivation(context.vm, context.source_range.executable, context.target_location, &context.actor.activation_stack);
 
     const activation_before_script_ref = activation_before_script.takeRef(context.actor.activation_stack);
@@ -207,6 +206,9 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !ExecutionResult {
                     )) |block_completion| {
                         return ExecutionResult.completion(block_completion);
                     }
+
+                    // Because we're changing the activation, we need to manually adjust the PC.
+                    activation_before_script.advanceInstruction();
                     return ExecutionResult.activationChange();
                 },
                 else => return ExecutionResult.completion(completion.*),
