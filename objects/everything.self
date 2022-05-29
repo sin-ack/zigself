@@ -38,3 +38,4 @@ _AddSlots: (| nil = _Nil |).
 
 "Actors and everything to do with them."
 'actor.self' _RunScript.
+'scheduler.self' _RunScript.
