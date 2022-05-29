@@ -25,6 +25,25 @@ std traits _AddSlots: (|
              object."
             actorSpawned = 5.
         |).
+
+        "Override this in your object in order to change the entrypoint."
+        entrypoint = 'main'.
+
+        "Send this message to spawn a new actor."
+        spawn = (
+            _ActorSpawn: 'spawnEntrypoint'.
+        ).
+
+        spawnEntrypoint = (
+            _ActorSetEntrypoint: entrypoint.
+            copy
+        ).
+
+        main = (
+            _Error: 'The actor is missing an entrypoint!'.
+        ).
+
+        yield = (_ActorYield).
     |).
 |).
 
