@@ -72,7 +72,7 @@ pub fn destroy(self: *Self) void {
 }
 
 fn init(self: *Self, allocator: Allocator, vm: *VirtualMachine) !void {
-    var old_space = try Space.init(self, allocator, "old space", InitialOldSpaceSize);
+    var old_space = Space.lazyInit(self, "old space", InitialOldSpaceSize);
     errdefer old_space.deinit(allocator);
 
     var from_space = try Space.init(self, allocator, "from space", NewSpaceSize);
@@ -101,13 +101,6 @@ fn init(self: *Self, allocator: Allocator, vm: *VirtualMachine) !void {
     self.from_space.scavenge_target = &self.to_space;
     self.from_space.tenure_target = &self.old_space;
     self.eden.tenure_target = &self.from_space;
-
-    if (GC_DEBUG) {
-        std.debug.print("Heap.init: Eden is {*}-{*}\n", .{ self.eden.memory.ptr, self.eden.memory.ptr + self.eden.memory.len });
-        std.debug.print("Heap.init: From space is {*}-{*}\n", .{ self.from_space.memory.ptr, self.from_space.memory.ptr + self.from_space.memory.len });
-        std.debug.print("Heap.init: To space is {*}-{*}\n", .{ self.to_space.memory.ptr, self.to_space.memory.ptr + self.to_space.memory.len });
-        std.debug.print("Heap.init: Old space is {*}-{*}\n", .{ self.old_space.memory.ptr, self.old_space.memory.ptr + self.old_space.memory.len });
-    }
 }
 
 fn deinit(self: *Self) void {
@@ -294,13 +287,18 @@ const Space = struct {
     /// A reference back to the heap.
     heap: *Self,
 
+    /// If true, then memory is undefined, and the next time an allocation is
+    /// requested the memory space should be allocated.
+    lazy_allocate: bool = true,
+    /// The size of this memory space.
+    size: usize,
     /// The raw memory contents of the space. The space capacity can be learned
-    /// with `memory.len`.
-    memory: []u64,
+    /// with `memory.len`. Uninitialized while `lazy_allocate` is true.
+    memory: []u64 = undefined,
     /// A slice of the current object segment in this space.
-    object_segment: []u64,
+    object_segment: []u64 = undefined,
     /// A slice of the current byte array segment in this space.
-    byte_array_segment: []u64,
+    byte_array_segment: []u64 = undefined,
     /// The set of objects which reference an object in this space. When a
     /// constant or assignable slot from a previous space references this space,
     /// it is added to this set; when it starts referencing another space, it is
@@ -347,27 +345,43 @@ const Space = struct {
         previous: ?*const NewerGenerationLink,
     };
 
+    pub fn lazyInit(heap: *Self, comptime name: [*:0]const u8, size: usize) Space {
+        return Space{
+            .heap = heap,
+            .name = name,
+            .size = size,
+            .remembered_set = .{},
+            .finalization_set = .{},
+            .tracked_set = .{},
+        };
+    }
+
     pub fn init(heap: *Self, allocator: Allocator, comptime name: [*:0]const u8, size: usize) !Space {
-        var memory = try allocator.alloc(u64, size / @sizeOf(u64));
+        var self = lazyInit(heap, name, size);
+        try self.allocateMemory(allocator);
+        return self;
+    }
+
+    fn allocateMemory(self: *Space, allocator: Allocator) !void {
+        var memory = try allocator.alloc(u64, @divExact(self.size, @sizeOf(u64)));
 
         // REVIEW: When Zig fixes its zero-length arrays to not create a slice
         //         with an undefined address, get rid of this and just use
         //         memory[0..0].
         var runtime_zero: usize = 0;
 
-        return Space{
-            .heap = heap,
-            .memory = memory,
-            .object_segment = memory[0..runtime_zero],
-            .byte_array_segment = (memory.ptr + memory.len)[0..runtime_zero],
-            .remembered_set = .{},
-            .finalization_set = .{},
-            .tracked_set = .{},
-            .name = name,
-        };
+        self.lazy_allocate = false;
+        self.memory = memory;
+        self.object_segment = memory[0..runtime_zero];
+        self.byte_array_segment = (memory.ptr + memory.len)[0..runtime_zero];
+
+        if (GC_DEBUG) std.debug.print("Heap.init: {s} is {*}-{*}\n", .{ self.name, self.memory.ptr, self.memory.ptr + self.memory.len });
     }
 
     pub fn deinit(self: *Space, allocator: Allocator) void {
+        if (self.lazy_allocate)
+            return;
+
         // Finalize everything that needs to be finalized.
         var finalization_it = self.finalization_set.iterator();
         while (finalization_it.next()) |entry| {
@@ -741,6 +755,9 @@ const Space = struct {
     /// Allocates the requested amount in bytes in the object segment of this
     /// space, garbage collecting if there is not enough space.
     pub fn allocateInObjectSegment(self: *Space, allocator: Allocator, size: usize) ![*]u64 {
+        if (self.lazy_allocate)
+            try self.allocateMemory(allocator);
+
         if (self.freeMemory() < size) try self.collectGarbage(allocator, size);
 
         const size_in_words = @divExact(size, @sizeOf(u64));
@@ -757,6 +774,9 @@ const Space = struct {
     /// Allocates the requested amount in bytes in the byte vector segment of
     /// this space, garbage collecting if there is not enough space.
     pub fn allocateInByteVectorSegment(self: *Space, allocator: Allocator, size: usize) ![*]u64 {
+        if (self.lazy_allocate)
+            try self.allocateMemory(allocator);
+
         if (self.freeMemory() < size) try self.collectGarbage(allocator, size);
 
         const size_in_words = @divExact(size, @sizeOf(u64));
