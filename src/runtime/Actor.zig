@@ -23,17 +23,27 @@ const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLoca
 
 const ACTIVATION_EXIT_DEBUG = debug.ACTIVATION_EXIT_DEBUG;
 
-// The actor object that this actor is represented by in Self code.
+/// The actor object that this actor is represented by in Self code.
 actor_object: Value,
 
+/// The selector that will be sent to the actor context after the actor spawn
+/// message has been sent to the actor. This selector must be set via
+/// _ActorSetEntrypoint: in the actor spawn method.
 entrypoint_selector: ?Value = null,
+/// The reason this actor has yielded.
 yield_reason: YieldReason = .None,
+/// The activation stack stores the list of activations that are currently on
+/// this actor. When an activation is exited, execution flow returns to the
+/// previous activation on the stack. If a non-local return happens, however,
+/// the control flow instead returns to the non-local return target.
 activation_stack: ActivationStack = .{},
 
 /// The mailbox stores the messages that were sent to this actor through actor
 /// proxy objects.
 mailbox: Mailbox = .{},
 
+/// The register file stores the register values for this actor. Lowcode
+/// execution uses these registers to perform its operations.
 register_file: RegisterFile = .{},
 argument_stack: Stack(Value, "Argument stack", ValueSentinel) = .{},
 slot_stack: Stack(Slot, "Slot stack", SlotSentinel) = .{},
