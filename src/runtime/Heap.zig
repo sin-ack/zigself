@@ -884,6 +884,12 @@ const Space = struct {
         new_address: [*]u64,
         new_address_space: ?*Space,
     ) !void {
+        if (self.lazy_allocate) {
+            // This space hasn't been allocated yet, so there's no reason to
+            // check it.
+            return;
+        }
+
         const new_address_value = Value.fromObjectAddress(new_address);
         const old_address_as_reference = Value.fromObjectAddress(old_address).data;
         const new_address_as_reference = new_address_value.data;
