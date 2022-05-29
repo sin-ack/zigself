@@ -2,7 +2,7 @@ const std = @import("std");
 
 const zig_args = std.build.Pkg{
     .name = "zig-args",
-    .path = .{ .path = "./vendor/zig-args/args.zig" },
+    .source = .{ .path = "./vendor/zig-args/args.zig" },
 };
 
 pub fn build(b: *std.build.Builder) void {
@@ -37,7 +37,7 @@ pub fn build(b: *std.build.Builder) void {
     test_harness_exe.setBuildMode(mode);
     test_harness_exe.addPackage(.{
         .name = "zigself",
-        .path = .{ .path = "src/package.zig" },
+        .source = .{ .path = "src/package.zig" },
     });
 
     const test_harness_run_cmd = test_harness_exe.run();
