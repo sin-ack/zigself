@@ -5,7 +5,9 @@
 const std = @import("std");
 
 const Heap = @import("./Heap.zig");
-const Value = @import("./value.zig").Value;
+const value = @import("./value.zig");
+const Value = value.Value;
+const IntegerValue = value.IntegerValue;
 
 const Self = @This();
 
@@ -32,7 +34,7 @@ pub fn fromAddress(address: [*]u64) Self {
 
 pub fn getValues(self: Self) []u8 {
     const header_size = @sizeOf(Header);
-    const total_length = self.header.length.asUnsignedInteger();
+    const total_length = self.header.length.get();
 
     return @ptrCast([*]u8, self.header)[header_size..total_length];
 }
@@ -42,7 +44,7 @@ pub fn asValue(self: Self) Value {
 }
 
 pub fn getSizeInMemory(self: Self) usize {
-    return requiredSizeForAllocation(self.header.length.asUnsignedInteger() - @sizeOf(Header));
+    return requiredSizeForAllocation(self.header.length.get() - @sizeOf(Header));
 }
 
 /// Return the size required for the byte vector with `length` amount of
@@ -57,10 +59,10 @@ pub fn requiredSizeForAllocation(length: u64) usize {
 pub const Header = packed struct {
     /// The length of the bytevector object, including the size of the
     /// header.
-    length: Value,
+    length: IntegerValue(.Unsigned),
 
     pub fn init(self: *Header, byte_array_length: u64) void {
-        self.length = Value.fromUnsignedInteger(@sizeOf(Header) + byte_array_length);
+        self.length = IntegerValue(.Unsigned).init(@sizeOf(Header) + byte_array_length);
     }
 
     pub fn asByteVector(self: *Header) Self {

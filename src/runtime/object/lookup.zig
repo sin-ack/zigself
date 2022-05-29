@@ -140,7 +140,7 @@ fn lookupInternal(
         .ActorProxy => {
             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at an actor proxy object\n", .{});
             const actor_proxy = self.asActorProxyObject();
-            const target_actor = actor_proxy.actor_object.asObject().asActorObject();
+            const target_actor = actor_proxy.actor_object.get();
             return switch (target_actor.context.lookupByHash(vm, selector_hash)) {
                 .Nothing => nothing,
                 // FIXME: This should probably cause a different kind of error.

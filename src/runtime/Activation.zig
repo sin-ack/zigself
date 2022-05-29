@@ -7,10 +7,13 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Actor = @import("./Actor.zig");
-const Value = @import("./value.zig").Value;
+const value = @import("./value.zig");
+const Value = value.Value;
 const Executable = @import("./lowcode/Executable.zig");
 const SourceRange = @import("./SourceRange.zig");
+const IntegerValue = value.IntegerValue;
 const VirtualMachine = @import("./VirtualMachine.zig");
+const ActivationValue = value.ActivationValue;
 const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
 
 /// The ID of the activation which is used with ActivationRef in order to check
@@ -19,7 +22,7 @@ activation_id: u64,
 /// The activation object which holds the receiver for this activation and the
 /// arguments + assignable slots defined on the method or block. This is the
 /// response to the "self" object in an activation.
-activation_object: Value,
+activation_object: ActivationValue,
 /// The location to which the result of the activation (obtained via the
 /// exit_activation instruction) is written.
 target_location: RegisterLocation,
@@ -55,14 +58,12 @@ const Self = @This();
 /// Creates a copy of `created_from`.
 pub fn initInPlace(
     self: *Self,
-    activation_object: Value,
+    activation_object: ActivationValue,
     target_location: RegisterLocation,
     stack_snapshot: Actor.StackSnapshot,
     creator_message: Value,
     created_from: SourceRange,
 ) !void {
-    std.debug.assert(activation_object.isObjectReference());
-
     self.* = .{
         .activation_id = newActivationID(),
         .activation_object = activation_object,
@@ -82,7 +83,7 @@ pub fn takeRef(self: *Self, stack: ActivationStack) ActivationRef {
 }
 
 /// Return the result of the `self` message for the current context.
-pub fn selfObject(self: Self) Value {
+pub fn selfObject(self: Self) ActivationValue {
     return self.activation_object;
 }
 
@@ -93,8 +94,7 @@ pub fn creationExecutable(self: Self) Executable.Ref {
 
 /// Return the executable that this activation's method or block is defined in.
 pub fn definitionExecutable(self: Self) Executable.Ref {
-    const activation_object = self.activation_object.asObject().asActivationObject();
-    return activation_object.getDefinitionExecutable();
+    return self.activation_object.get().getDefinitionExecutable();
 }
 
 pub fn advanceInstruction(self: *Self) void {
@@ -204,22 +204,22 @@ pub const ActivationStack = struct {
 /// A reference to an activation. The pointer and saved ID values are stored as
 /// Values, which makes this struct object heap-safe.
 pub const ActivationRef = packed struct {
-    offset: Value,
-    saved_id: Value,
+    offset: IntegerValue(.Unsigned),
+    saved_id: IntegerValue(.Unsigned),
 
     pub fn init(activation: *Self, stack: ActivationStack) ActivationRef {
         return .{
-            .offset = Value.fromUnsignedInteger(@intCast(u64, stack.offsetOf(activation))),
-            .saved_id = Value.fromUnsignedInteger(activation.activation_id),
+            .offset = IntegerValue(.Unsigned).init(@intCast(u64, stack.offsetOf(activation))),
+            .saved_id = IntegerValue(.Unsigned).init(activation.activation_id),
         };
     }
 
     fn getPointer(self: ActivationRef, stack: ActivationStack) *Self {
-        return &stack.stack.items[self.offset.asUnsignedInteger()];
+        return &stack.stack.items[self.offset.get()];
     }
 
     pub fn isAlive(self: ActivationRef, stack: ActivationStack) bool {
-        const offset = self.offset.asUnsignedInteger();
+        const offset = self.offset.get();
 
         // Is this activation outside the currently-valid activation stack?
         if (stack.getDepth() <= offset) return false;
@@ -227,7 +227,7 @@ pub const ActivationRef = packed struct {
         const activation_ptr = self.getPointer(stack);
         // Does the ID we saved match the currently-stored ID on the activation
         // we point to?
-        if (self.saved_id.asUnsignedInteger() != activation_ptr.activation_id) return false;
+        if (self.saved_id.get() != activation_ptr.activation_id) return false;
 
         // It's alive.
         return true;

@@ -114,7 +114,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
         },
         .SelfSend => {
             const payload = inst.payload(.SelfSend);
-            const receiver = actor.activation_stack.getCurrent().activation_object;
+            const receiver = actor.activation_stack.getCurrent().activation_object.value;
 
             const completion = (try sendMessage(vm, actor, receiver, payload.message_name, inst.target, source_range)) orelse
                 return activation_change;
@@ -135,11 +135,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
             const payload = inst.payload(.SelfPrimSend);
 
             if (primitives.getPrimitive(payload.message_name)) |primitive| {
-                var receiver = actor.activation_stack.getCurrent().activation_object;
-                if (receiver.isObjectReference() and receiver.asObject().isActivationObject()) {
-                    receiver = receiver.asObject().asActivationObject().findActivationReceiver();
-                }
-
+                var receiver = actor.activation_stack.getCurrent().activation_object.get().findActivationReceiver();
                 const tracked_receiver = try vm.heap.track(receiver);
                 defer tracked_receiver.untrack(vm.heap);
 
@@ -515,7 +511,7 @@ pub fn sendMessage(
 
             try actor_message.target_actor.getActor().putMessageInMailbox(
                 vm.allocator,
-                actor.actor_object.asObject().asActorObject(),
+                actor.actor_object.get(),
                 method_object,
                 copied_arguments_slice,
                 source_range,
@@ -559,7 +555,7 @@ fn executeBlock(
     const tracked_message_name = try vm.getOrCreateBlockMessageName(@intCast(u8, arguments.len));
     try block.activateBlock(
         vm,
-        parent_activation_object,
+        parent_activation_object.value,
         arguments,
         target_location,
         tracked_message_name.getValue(),

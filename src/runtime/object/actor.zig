@@ -10,6 +10,7 @@ const Actor = @import("../Actor.zig");
 const value = @import("../value.zig");
 const Value = value.Value;
 const Object = @import("../Object.zig");
+const ActorValue = value.ActorValue;
 const SourceRange = @import("../SourceRange.zig");
 const PointerValue = value.PointerValue;
 const VirtualMachine = @import("../VirtualMachine.zig");
@@ -93,7 +94,7 @@ pub const ActorObject = packed struct {
 pub const ActorProxyObject = packed struct {
     header: Object.Header,
     /// The Actor object to proxy messages to.
-    actor_object: Value,
+    actor_object: ActorValue,
 
     /// Create the Actor object without sending a message to it.
     pub fn create(heap: *Heap, actor_object: *ActorObject) !*ActorProxyObject {
@@ -107,7 +108,7 @@ pub const ActorProxyObject = packed struct {
 
     fn init(self: *ActorProxyObject, actor_map: Value, actor_object: *ActorObject) void {
         self.header.init(.ActorProxy, actor_map);
-        self.actor_object = actor_object.asValue();
+        self.actor_object = ActorValue.init(actor_object);
     }
 
     pub fn asObjectAddress(self: *ActorProxyObject) [*]u64 {
@@ -119,7 +120,7 @@ pub const ActorProxyObject = packed struct {
     }
 
     pub fn getActorObject(self: *ActorProxyObject) *ActorObject {
-        return self.actor_object.asObject().asActorObject();
+        return self.actor_object.get();
     }
 
     pub fn clone(self: *ActorProxyObject, heap: *Heap) !*ActorProxyObject {

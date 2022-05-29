@@ -196,7 +196,7 @@ pub fn ActorSpawn(context: PrimitiveContext) !ExecutionResult {
             switch (completion.data) {
                 .Normal => |value| {
                     new_actor.unwindStacks();
-                    new_actor.actor_object.asObject().asActorObject().context = value;
+                    new_actor.actor_object.get().context = value;
                 },
                 .RuntimeError => |err| {
                     if (!context.vm.silent_errors) {
@@ -205,7 +205,7 @@ pub fn ActorSpawn(context: PrimitiveContext) !ExecutionResult {
                     }
 
                     new_actor.yield_reason = .RuntimeError;
-                    return ExecutionResult.completion(Completion.initNormal(new_actor.actor_object));
+                    return ExecutionResult.completion(Completion.initNormal(new_actor.actor_object.value));
                 },
                 else => unreachable,
             }
@@ -217,7 +217,7 @@ pub fn ActorSpawn(context: PrimitiveContext) !ExecutionResult {
 
     var entrypoint_selector = entrypoint_selector: {
         if (new_actor.entrypoint_selector) |message_value| {
-            break :entrypoint_selector message_value.asObject().asByteArrayObject().getValues();
+            break :entrypoint_selector message_value.get().getValues();
         }
 
         if (!context.vm.unregisterRegularActor(new_actor))
@@ -252,9 +252,9 @@ pub fn ActorSpawn(context: PrimitiveContext) !ExecutionResult {
         return ExecutionResult.completion(completion);
     }
 
-    const actor_object = new_actor.actor_object.asObject().asActorObject();
+    const actor_object = new_actor.actor_object.get();
 
-    // FIXME: Make this nicer by providing a "actor.activateMethod or something."
+    // FIXME: Make this nicer by providing a "actor.activateMethod" or something.
     const new_activation = try new_actor.activation_stack.getNewActivationSlot(context.vm.allocator);
     try entrypoint_method.activateMethod(
         context.vm,
@@ -282,11 +282,11 @@ pub fn ActorSpawn(context: PrimitiveContext) !ExecutionResult {
     // (because we advance the pc in each of the aforementioned primitives).
     const genesis_current_activation = genesis_actor.activation_stack.getCurrent();
     const genesis_pc_before_last = genesis_current_activation.pc - 1;
-    const genesis_activation_object = genesis_current_activation.activation_object.asObject().asActivationObject();
+    const genesis_activation_object = genesis_current_activation.activation_object.get();
     const genesis_definition_block = genesis_activation_object.getBytecodeBlock();
     const genesis_inst_before_last = genesis_definition_block.getInstruction(genesis_pc_before_last);
 
-    genesis_actor.writeRegister(genesis_inst_before_last.target, new_actor.actor_object);
+    genesis_actor.writeRegister(genesis_inst_before_last.target, new_actor.actor_object.value);
 
     return ExecutionResult.actorSwitch();
 }
@@ -309,7 +309,9 @@ pub fn ActorSetEntrypoint(context: PrimitiveContext) !ExecutionResult {
         );
     }
 
-    context.actor.entrypoint_selector = entrypoint_selector_name;
+    // FIXME: Eliminate the checks above by providing something like
+    // "entrypoint_selector_name.asObjectInPrimitive(prim_name, argument_id, object_type)".
+    context.actor.entrypoint_selector = .{ .value = entrypoint_selector_name };
     return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
 }
 
@@ -414,7 +416,7 @@ pub fn ActorSender(context: PrimitiveContext) !ExecutionResult {
         Object.ActorProxy.requiredSizeForAllocation(),
     );
 
-    const actor_object = context.actor.message_sender.?.asObject().asActorObject();
+    const actor_object = context.actor.message_sender.?.get();
     const actor_proxy = try Object.ActorProxy.create(context.vm.heap, actor_object);
 
     return ExecutionResult.completion(Completion.initNormal(actor_proxy.asValue()));

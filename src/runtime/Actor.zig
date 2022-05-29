@@ -7,29 +7,33 @@ const Allocator = std.mem.Allocator;
 
 const Slot = @import("./slot.zig").Slot;
 const debug = @import("../debug.zig");
-const Value = @import("./value.zig").Value;
+const Value = value_import.Value;
 const Stack = @import("./stack.zig").Stack;
 const Range = @import("../language/Range.zig");
 const Object = @import("./Object.zig");
 const Completion = @import("./Completion.zig");
 const Executable = @import("./lowcode/Executable.zig");
+const ActorValue = value_import.ActorValue;
 const Activation = @import("./Activation.zig");
+const MethodValue = value_import.MethodValue;
 const interpreter = @import("./interpreter.zig");
 const SourceRange = @import("./SourceRange.zig");
+const value_import = @import("./value.zig");
 const RegisterFile = @import("./lowcode/RegisterFile.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
+const ByteArrayValue = value_import.ByteArrayValue;
 const ActivationStack = Activation.ActivationStack;
 const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
 
 const ACTIVATION_EXIT_DEBUG = debug.ACTIVATION_EXIT_DEBUG;
 
 /// The actor object that this actor is represented by in Self code.
-actor_object: Value,
+actor_object: ActorValue,
 
 /// The selector that will be sent to the actor context after the actor spawn
 /// message has been sent to the actor. This selector must be set via
 /// _ActorSetEntrypoint: in the actor spawn method.
-entrypoint_selector: ?Value = null,
+entrypoint_selector: ?ByteArrayValue = null,
 /// The reason this actor has yielded.
 yield_reason: YieldReason = .None,
 /// The activation stack stores the list of activations that are currently on
@@ -40,7 +44,7 @@ activation_stack: ActivationStack = .{},
 
 /// The actor object that sent the current message. Can be queried inside
 /// messages with _ActorSender. It is an error to query it outside of messages.
-message_sender: ?Value = null,
+message_sender: ?ActorValue = null,
 
 /// The mailbox stores the messages that were sent to this actor through actor
 /// proxy objects.
@@ -120,10 +124,10 @@ pub const YieldReason = enum(u32) {
 /// A single message sent to this actor from another actor.
 pub const Message = struct {
     /// The actor object that sent this message.
-    sender: Value,
+    sender: ActorValue,
     /// The method that will be executed on the actor context. Belongs to this
     /// actor.
-    method: Value,
+    method: MethodValue,
     /// The arguments of this message as an owned slice.
     arguments: []Value,
     /// The SourceRange which spawned this message.
@@ -170,7 +174,7 @@ pub fn destroy(self: *Self, allocator: Allocator) void {
 
 fn init(self: *Self, actor_object: *Object.Actor) void {
     self.* = .{
-        .actor_object = actor_object.asValue(),
+        .actor_object = ActorValue.init(actor_object),
     };
 
     self.register_file.init();
@@ -190,7 +194,7 @@ fn deinit(self: *Self, allocator: Allocator) void {
 }
 
 pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
-    const actor_context = self.actor_object.asObject().asActorObject().context;
+    const actor_context = self.actor_object.get().context;
     const current_activation_ref = self.activation_stack.getCurrent().takeRef(self.activation_stack);
 
     // Go through the mailbox and activate all the messages that have been sent
@@ -198,7 +202,7 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
     {
         var it = self.mailbox.first;
         while (it) |node| : (it = node.next) {
-            const method = node.data.method.asObject().asMethodObject();
+            const method = node.data.method.get();
 
             const new_activation = try self.activation_stack.getNewActivationSlot(vm.allocator);
             try method.activateMethod(vm, actor_context, node.data.arguments, .zero, node.data.source_range, new_activation);
@@ -233,7 +237,7 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
 /// `until` is null, until all activations have been resolved).
 pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?Activation.ActivationRef) !ActorResult {
     var activation = self.activation_stack.getCurrent();
-    var activation_object = activation.activation_object.asObject().asActivationObject();
+    var activation_object = activation.activation_object.get();
     var executable = activation_object.getDefinitionExecutable();
     var block = activation_object.getBytecodeBlock();
 
@@ -246,7 +250,7 @@ pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?Activation.Activat
             },
             .ActivationChange => {
                 activation = self.activation_stack.getCurrent();
-                activation_object = activation.activation_object.asObject().asActivationObject();
+                activation_object = activation.activation_object.get();
                 executable = activation_object.getDefinitionExecutable();
                 block = activation_object.getBytecodeBlock();
             },
@@ -359,20 +363,20 @@ pub fn visitValues(
     context: anytype,
     visitor: fn (ctx: @TypeOf(context), value: *Value) Allocator.Error!void,
 ) !void {
-    try visitor(context, &self.actor_object);
+    try visitor(context, &self.actor_object.value);
 
     // Go through the register file.
     try self.register_file.visitValues(context, visitor);
 
     if (self.entrypoint_selector) |*value|
-        try visitor(context, value);
+        try visitor(context, &value.value);
 
     if (self.message_sender) |*value|
-        try visitor(context, value);
+        try visitor(context, &value.value);
 
     // Go through the activation stack.
     for (self.activation_stack.getStack()) |*activation| {
-        try visitor(context, &activation.activation_object);
+        try visitor(context, &activation.activation_object.value);
         try visitor(context, &activation.creator_message);
     }
 
@@ -399,8 +403,8 @@ pub fn visitValues(
     {
         var it = self.mailbox.first;
         while (it) |node| : (it = node.next) {
-            try visitor(context, &node.data.sender);
-            try visitor(context, &node.data.method);
+            try visitor(context, &node.data.sender.value);
+            try visitor(context, &node.data.method.value);
             for (node.data.arguments) |*argument| {
                 try visitor(context, argument);
             }
@@ -432,8 +436,8 @@ pub fn putMessageInMailbox(
     const node = try allocator.create(Mailbox.Node);
     node.* = .{
         .data = .{
-            .sender = sender.asValue(),
-            .method = method.asValue(),
+            .sender = ActorValue.init(sender),
+            .method = MethodValue.init(method),
             .arguments = arguments,
             .source_range = source_range,
         },

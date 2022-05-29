@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const hash = @import("../utility/hash.zig");
@@ -216,3 +217,70 @@ pub fn RefCountedValue(comptime T: type) type {
         }
     };
 }
+
+pub const IntegerValueSignedness = enum { Signed, Unsigned };
+/// A value which is known to be an integer.
+pub fn IntegerValue(comptime signedness: IntegerValueSignedness) type {
+    const IntegerT = switch (signedness) {
+        .Signed => i64,
+        .Unsigned => u64,
+    };
+    const init_function = switch (signedness) {
+        .Signed => Value.fromInteger,
+        .Unsigned => Value.fromUnsignedInteger,
+    };
+    const conversion_function = switch (signedness) {
+        .Signed => Value.asInteger,
+        .Unsigned => Value.asUnsignedInteger,
+    };
+
+    return packed struct {
+        value: Value,
+
+        const Self = @This();
+
+        pub fn init(value: IntegerT) Self {
+            return .{ .value = init_function(value) };
+        }
+
+        pub fn get(self: Self) IntegerT {
+            if (builtin.mode == .Debug) {
+                if (!self.value.isInteger()) {
+                    @panic("!!! IntegerValue does not contain an integer!");
+                }
+            }
+
+            return conversion_function(self.value);
+        }
+    };
+}
+
+/// A value which is of a known object type. Attempting to get the value as an
+/// object when something else is stored is a runtime panic in debug, and
+/// undefined behavior in release mode.
+pub fn ObjectValue(comptime ObjectT: type, comptime is_fn: []const u8) type {
+    return packed struct {
+        value: Value,
+
+        const Self = @This();
+
+        pub fn init(ptr: *ObjectT) Self {
+            return .{ .value = ptr.asValue() };
+        }
+
+        pub fn get(self: Self) *ObjectT {
+            if (builtin.mode == .Debug) {
+                if (!(self.value.isObjectReference() and @call(.{}, @field(self.value.asObject(), is_fn), .{}))) {
+                    @panic("!!! " ++ is_fn ++ " check failed on object!");
+                }
+            }
+
+            return @ptrCast(*ObjectT, self.value.asObjectAddress());
+        }
+    };
+}
+
+pub const ActorValue = ObjectValue(Object.Actor, "isActorObject");
+pub const MethodValue = ObjectValue(Object.Method, "isMethodObject");
+pub const ByteArrayValue = ObjectValue(Object.ByteArray, "isByteArrayObject");
+pub const ActivationValue = ObjectValue(Object.Activation, "isActivationObject");

@@ -11,15 +11,17 @@ const hash = @import("../../utility/hash.zig");
 const Heap = @import("../Heap.zig");
 const Slot = @import("../slot.zig").Slot;
 const Actor = @import("../Actor.zig");
-const Value = @import("../value.zig").Value;
+const Value = value_import.Value;
 const Object = @import("../Object.zig");
 const MapType = @import("./map.zig").MapType;
 const Location = @import("../../language/location.zig");
 const ByteArray = @import("../ByteArray.zig");
 const MapBuilder = @import("./map_builder.zig").MapBuilder;
 const SourceRange = @import("../SourceRange.zig");
+const value_import = @import("../value.zig");
 const BytecodeBlock = @import("../lowcode/Block.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
+const ActivationValue = value_import.ActivationValue;
 const RegisterLocation = @import("../lowcode/register_location.zig").RegisterLocation;
 const RuntimeActivation = @import("../Activation.zig");
 const BytecodeExecutable = @import("../lowcode/Executable.zig");
@@ -445,7 +447,7 @@ pub const Method = packed struct {
         out_activation: *RuntimeActivation,
     ) !void {
         const activation_object = try Activation.create(vm.heap, .Method, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
-        try out_activation.initInPlace(activation_object.asValue(), target_location, vm.takeStackSnapshot(), self.getMap().method_name, created_from);
+        try out_activation.initInPlace(ActivationValue.init(activation_object), target_location, vm.takeStackSnapshot(), self.getMap().method_name, created_from);
     }
 };
 
@@ -545,7 +547,7 @@ pub const Block = packed struct {
     ) !void {
         const activation_object = try Activation.create(vm.heap, .Block, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
 
-        try out_activation.initInPlace(activation_object.asValue(), target_location, vm.takeStackSnapshot(), creator_message, created_from);
+        try out_activation.initInPlace(ActivationValue.init(activation_object), target_location, vm.takeStackSnapshot(), creator_message, created_from);
         out_activation.parent_activation = self.getMap().parent_activation;
         out_activation.nonlocal_return_target_activation = self.getMap().nonlocal_return_target_activation;
     }

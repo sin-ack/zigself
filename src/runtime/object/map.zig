@@ -10,13 +10,15 @@ const AST = @import("../../language/ast.zig");
 const Heap = @import("../Heap.zig");
 const Slot = @import("../slot.zig").Slot;
 const hash = @import("../../utility/hash.zig");
-const Value = @import("../value.zig").Value;
+const Value = value_import.Value;
 const Object = @import("../Object.zig");
 const Activation = @import("../Activation.zig");
 const MapBuilder = @import("./map_builder.zig").MapBuilder;
-const PointerValue = @import("../value.zig").PointerValue;
+const IntegerValue = value_import.IntegerValue;
+const PointerValue = value_import.PointerValue;
+const value_import = @import("../value.zig");
 const BytecodeBlock = @import("../lowcode/Block.zig");
-const RefCountedValue = @import("../value.zig").RefCountedValue;
+const RefCountedValue = value_import.RefCountedValue;
 // Zig's shadowing rules are annoying.
 const ByteArrayTheFirst = @import("../ByteArray.zig");
 const BytecodeExecutable = @import("../lowcode/Executable.zig");
@@ -493,7 +495,7 @@ const ByteArrayMap = packed struct {
 /// A map for an array object.
 const ArrayMap = packed struct {
     map: Map,
-    size: Value,
+    size: IntegerValue(.Unsigned),
 
     pub fn create(heap: *Heap, size: usize) !*ArrayMap {
         const memory_size = requiredSizeForAllocation();
@@ -508,7 +510,7 @@ const ArrayMap = packed struct {
 
     fn init(self: *ArrayMap, map_map: Value, size: usize) void {
         self.map.init(.Array, map_map);
-        self.size = Value.fromUnsignedInteger(size);
+        self.size = IntegerValue(.Unsigned).init(@as(u64, size));
     }
 
     pub fn asValue(self: *ArrayMap) Value {
@@ -516,7 +518,7 @@ const ArrayMap = packed struct {
     }
 
     pub fn getSize(self: *ArrayMap) usize {
-        return self.size.asUnsignedInteger();
+        return @intCast(usize, self.size.get());
     }
 
     pub fn getSizeInMemory(self: *ArrayMap) usize {
