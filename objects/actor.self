@@ -44,6 +44,7 @@ std traits _AddSlots: (|
         ).
 
         yield = (_ActorYield).
+        sender = (_ActorSender).
     |).
 |).
 

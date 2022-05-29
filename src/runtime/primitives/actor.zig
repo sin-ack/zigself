@@ -392,3 +392,30 @@ pub fn ActorYield(context: PrimitiveContext) !ExecutionResult {
 
     return ExecutionResult.actorSwitch();
 }
+
+/// Return the current actor's sender. Raise a runtime error if the actor
+/// doesn't have a sender (isn't in a message).
+pub fn ActorSender(context: PrimitiveContext) !ExecutionResult {
+    if (!context.vm.isInRegularActor()) {
+        return ExecutionResult.completion(
+            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorSender sent outside of a regular actor", .{}),
+        );
+    }
+
+    if (context.actor.message_sender == null) {
+        return ExecutionResult.completion(
+            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorSender sent outside of a message", .{}),
+        );
+    }
+
+    // FIXME: It would be nice to use a single actor proxy instead of spawning
+    //        them on demand, as replying to senders is a common operation.
+    try context.vm.heap.ensureSpaceInEden(
+        Object.ActorProxy.requiredSizeForAllocation(),
+    );
+
+    const actor_object = context.actor.message_sender.?.asObject().asActorObject();
+    const actor_proxy = try Object.ActorProxy.create(context.vm.heap, actor_object);
+
+    return ExecutionResult.completion(Completion.initNormal(actor_proxy.asValue()));
+}

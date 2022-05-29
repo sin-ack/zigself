@@ -38,6 +38,10 @@ yield_reason: YieldReason = .None,
 /// the control flow instead returns to the non-local return target.
 activation_stack: ActivationStack = .{},
 
+/// The actor object that sent the current message. Can be queried inside
+/// messages with _ActorSender. It is an error to query it outside of messages.
+message_sender: ?Value = null,
+
 /// The mailbox stores the messages that were sent to this actor through actor
 /// proxy objects.
 mailbox: Mailbox = .{},
@@ -199,6 +203,8 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
             const new_activation = try self.activation_stack.getNewActivationSlot(vm.allocator);
             try method.activateMethod(vm, actor_context, node.data.arguments, .zero, node.data.source_range, new_activation);
 
+            self.message_sender = node.data.sender;
+
             switch (try self.executeUntil(vm, current_activation_ref)) {
                 .ActorSwitch => {
                     return ActorResult{
@@ -216,6 +222,7 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
         }
     }
 
+    self.message_sender = null;
     self.clearMailbox(vm.allocator);
 
     // Execute the activation stack of this actor normally.
@@ -356,7 +363,11 @@ pub fn visitValues(
 
     // Go through the register file.
     try self.register_file.visitValues(context, visitor);
+
     if (self.entrypoint_selector) |*value|
+        try visitor(context, value);
+
+    if (self.message_sender) |*value|
         try visitor(context, value);
 
     // Go through the activation stack.
