@@ -124,6 +124,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "Write:BytesFrom:AtOffset:Into:IfFail:", .arity = 5, .function = system_call_primitives.Write_BytesFrom_AtOffset_Into_IfFail },
     .{ .name = "Close:", .arity = 1, .function = system_call_primitives.Close },
     .{ .name = "Exit:", .arity = 1, .function = system_call_primitives.Exit },
+    .{ .name = "PollFDs:Events:WaitingForMS:IfFail:", .arity = 4, .function = system_call_primitives.PollFDs_Events_WaitingForMS_IfFail },
     // Actor primitives
     .{ .name = "Genesis:", .arity = 1, .function = actor_primitives.Genesis },
     .{ .name = "ActorSpawn:", .arity = 1, .function = actor_primitives.ActorSpawn },

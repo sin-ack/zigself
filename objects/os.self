@@ -19,6 +19,10 @@ std _AddSlots: (|
             _Write: count BytesFrom: buffer AtOffset: offset Into: fd IfFail: failBlock.
         ).
 
+        pollFDs: fds Events: events WaitingForMS: ms IfFail: failBlock = (
+            _PollFDs: fds Events: events WaitingForMS: ms IfFail: failBlock.
+        ).
+
         tryWhileInterrupted: block IfFail: failBlock = (
             [| :restart |
                 block value: [| :err |

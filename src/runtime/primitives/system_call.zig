@@ -317,3 +317,118 @@ pub fn Exit(context: PrimitiveContext) !ExecutionResult {
     // The ultimate in garbage collection.
     std.os.exit(@intCast(u8, status_code.asUnsignedInteger()));
 }
+
+/// The maximum amount of pollfd structures that can be on the stack before
+/// switching to heap allocation.
+const MaximumInlinePollFDs = 32;
+
+/// Poll the given file descriptors with the associated events to listen for.
+/// Write the returned events to the events parameter. Wait for events up to
+/// `WaitingForMS' milliseconds. If an error is encountered with the system
+/// call, send `value:' to `IfFail' with the errno.
+pub fn PollFDs_Events_WaitingForMS_IfFail(context: PrimitiveContext) !ExecutionResult {
+    const fds_value = context.arguments[0];
+    const events_value = context.arguments[1];
+    const timeout_ms_value = context.arguments[2];
+    const failure_block = context.arguments[3];
+
+    if (!(fds_value.isObjectReference() and fds_value.asObject().isArrayObject())) {
+        return ExecutionResult.completion(try Completion.initRuntimeError(
+            context.vm,
+            context.source_range,
+            "Expected array object as the first argument to _PollFDs:Events:WaitingForMS:",
+            .{},
+        ));
+    }
+
+    if (!(events_value.isObjectReference() and events_value.asObject().isArrayObject())) {
+        return ExecutionResult.completion(try Completion.initRuntimeError(
+            context.vm,
+            context.source_range,
+            "Expected array object as the second argument to _PollFDs:Events:WaitingForMS:",
+            .{},
+        ));
+    }
+
+    if (!timeout_ms_value.isInteger()) {
+        return ExecutionResult.completion(try Completion.initRuntimeError(
+            context.vm,
+            context.source_range,
+            "Expected integer as the third argument to _PollFDs:Events:WaitingForMS:",
+            .{},
+        ));
+    }
+
+    const fds = fds_value.asObject().asArrayObject();
+    const events = events_value.asObject().asArrayObject();
+    const timeout_ms = timeout_ms_value.asInteger();
+
+    if (fds.getSize() != events.getSize()) {
+        return ExecutionResult.completion(try Completion.initRuntimeError(
+            context.vm,
+            context.source_range,
+            "The first and second arguments to _PollFDs:Events:WaitingForMS: must have the same size",
+            .{},
+        ));
+    }
+
+    for (fds.getValues()) |fd| {
+        if (!fd.isInteger()) {
+            return ExecutionResult.completion(try Completion.initRuntimeError(
+                context.vm,
+                context.source_range,
+                "The first argument to _PollFDs:Events:WaitingForMS: must be an array of integers",
+                .{},
+            ));
+        }
+    }
+
+    for (events.getValues()) |event_flags| {
+        if (!event_flags.isInteger()) {
+            return ExecutionResult.completion(try Completion.initRuntimeError(
+                context.vm,
+                context.source_range,
+                "The second argument to _PollFDs:Events:WaitingForMS: must be an array of integers",
+                .{},
+            ));
+        }
+    }
+
+    const fd_count = fds.getSize();
+    var inline_poll_fds: [MaximumInlinePollFDs]std.os.pollfd = undefined;
+    var poll_fds = poll_fds: {
+        if (fd_count <= MaximumInlinePollFDs) {
+            break :poll_fds inline_poll_fds[0..fd_count];
+        } else {
+            break :poll_fds try context.vm.allocator.alloc(std.os.pollfd, fd_count);
+        }
+    };
+
+    defer {
+        if (fd_count > MaximumInlinePollFDs)
+            context.vm.allocator.free(poll_fds);
+    }
+
+    const fd_values = fds.getValues();
+    const event_values = events.getValues();
+    for (fd_values) |fd, i| {
+        const event_flags = event_values[i];
+
+        poll_fds[i] = .{
+            .fd = @intCast(i32, fd.asInteger()),
+            .events = @intCast(i16, event_flags.asInteger()),
+            .revents = 0,
+        };
+    }
+
+    const rc = std.os.system.poll(poll_fds.ptr, fds.getSize(), @intCast(i32, timeout_ms));
+    const errno = std.os.system.getErrno(rc);
+    if (errno == .SUCCESS) {
+        for (poll_fds) |pollfd, i| {
+            event_values[i] = Value.fromInteger(@intCast(i64, pollfd.revents));
+        }
+        return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intCast(usize, rc))));
+    }
+
+    return try callFailureBlock(context, errno, failure_block);
+}
