@@ -28,7 +28,7 @@ pub fn createUninitialized(heap: *Heap, size: usize) !Self {
     return Self{ .header = header };
 }
 
-pub fn fromAddress(address: [*]u64) Self {
+pub inline fn fromAddress(address: [*]u64) Self {
     return .{ .header = @ptrCast(*align(@alignOf(u64)) Header, address) };
 }
 
