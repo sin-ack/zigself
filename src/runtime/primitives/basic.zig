@@ -18,13 +18,13 @@ const ExecutionResult = interpreter.ExecutionResult;
 const runtime_error = @import("../error.zig");
 
 /// Return the static "nil" slots object.
-pub fn Nil(context: PrimitiveContext) !ExecutionResult {
+pub fn Nil(context: *PrimitiveContext) !ExecutionResult {
     return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
 }
 
 /// Return the given path relative to the current activation's definition
 /// script's running path. The caller must free the returned slice.
-fn getRelativePathToScript(context: PrimitiveContext, path: []const u8) ![]const u8 {
+fn getRelativePathToScript(context: *PrimitiveContext, path: []const u8) ![]const u8 {
     const current_activation = context.actor.activation_stack.getCurrent();
     const current_script = current_activation.definitionExecutable().value.definition_script.value;
     const running_script_path = current_script.running_path;
@@ -35,18 +35,13 @@ fn getRelativePathToScript(context: PrimitiveContext, path: []const u8) ![]const
 }
 
 /// Run the given script file, and return the result of the last expression.
-pub fn RunScript(context: PrimitiveContext) !ExecutionResult {
-    const receiver = context.receiver.getValue();
-    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray for the receiver of _RunScript", .{}),
-        );
-    }
+pub fn RunScript(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_RunScript:");
+    const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
 
     // FIXME: Find a way to handle errors here. These hacks are nasty.
 
-    const receiver_byte_array = receiver.asObject().asByteArrayObject();
-    const target_path = try getRelativePathToScript(context, receiver_byte_array.getValues());
+    const target_path = try getRelativePathToScript(context, receiver.getValues());
     defer context.vm.allocator.free(target_path);
 
     var script = Script.createFromFilePath(context.vm.allocator, target_path) catch |err| switch (err) {
@@ -95,24 +90,19 @@ pub fn RunScript(context: PrimitiveContext) !ExecutionResult {
     return ExecutionResult.activationChange();
 }
 
-pub fn EvaluateStringIfFail(context: PrimitiveContext) !ExecutionResult {
+pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
     // FIXME: _EvaluateStringIfFail: should be replaced with _EvaluateString and
     //       fail the current actor the same way _RunScript does. The REPL
     //       should create a new actor for each string evaluation.
     if (context.vm.isInActorMode())
         @panic("TODO make '_EvaluateStringIfFail:' work with actor mode");
 
-    const receiver = context.receiver.getValue();
-    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray for the receiver of _EvaluateStringIfFail:", .{}),
-        );
-    }
+    const arguments = context.getArguments("_EvaluateStringIfFail:");
+    const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
+    const failure_block = arguments.getValue(0);
 
-    const receiver_byte_array = receiver.asObject().asByteArrayObject();
     const running_script_path = context.actor.activation_stack.getCurrent().definitionExecutable().value.definition_script.value.running_path;
-
-    var script = try Script.createFromString(context.vm.allocator, running_script_path, receiver_byte_array.getValues());
+    var script = try Script.createFromString(context.vm.allocator, running_script_path, receiver.getValues());
     defer script.unref();
 
     const did_parse_without_errors = script.value.parseScript() catch |err| switch (err) {
@@ -123,7 +113,7 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !ExecutionResult {
             if (try interpreter.sendMessage(
                 context.vm,
                 context.actor,
-                context.arguments[0],
+                failure_block,
                 "value",
                 context.target_location,
                 context.source_range,
@@ -140,7 +130,7 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !ExecutionResult {
         if (try interpreter.sendMessage(
             context.vm,
             context.actor,
-            context.arguments[0],
+            failure_block,
             "value",
             context.target_location,
             context.source_range,
@@ -157,7 +147,7 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !ExecutionResult {
             if (try interpreter.sendMessage(
                 context.vm,
                 context.actor,
-                context.arguments[0],
+                failure_block,
                 "value",
                 context.target_location,
                 context.source_range,
@@ -199,7 +189,7 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !ExecutionResult {
                     if (try interpreter.sendMessage(
                         context.vm,
                         context.actor,
-                        context.arguments[0],
+                        failure_block,
                         "value",
                         context.target_location,
                         context.source_range,
@@ -218,25 +208,21 @@ pub fn EvaluateStringIfFail(context: PrimitiveContext) !ExecutionResult {
 }
 
 /// Raise the argument as an error. The argument must be a byte vector.
-pub fn Error(context: PrimitiveContext) !ExecutionResult {
-    var argument = context.arguments[0];
-    if (!(argument.isObjectReference() and argument.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray as _Error: argument", .{}),
-        );
-    }
+pub fn Error(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_Error:");
+    const message = try arguments.getObject(0, .ByteArray);
 
     return ExecutionResult.completion(try Completion.initRuntimeError(
         context.vm,
         context.source_range,
         "Error raised in Self code: {s}",
-        .{argument.asObject().asByteArrayObject().getValues()},
+        .{message.getValues()},
     ));
 }
 
 /// Restarts the current method, executing it from the first statement.
 /// This primitive is intended to be used internally only.
-pub fn Restart(context: PrimitiveContext) !ExecutionResult {
+pub fn Restart(context: *PrimitiveContext) !ExecutionResult {
     _ = context;
     return ExecutionResult.completion(Completion.initRestart());
 }

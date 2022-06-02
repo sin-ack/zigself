@@ -35,7 +35,7 @@ pub const ObjectTypeBits = 4;
 const ObjectTypeMask: u64 = ((1 << ObjectTypeBits) - 1) << ObjectTypeShift;
 
 /// The object types that are available in the system.
-const ObjectType = enum(u64) {
+pub const ObjectType = enum(u64) {
     ForwardingReference = 0b0000 << ObjectTypeShift,
     Slots = 0b0001 << ObjectTypeShift,
     Activation = 0b0010 << ObjectTypeShift,
@@ -117,6 +117,54 @@ pub fn clone(self: Self, heap: *Heap) !Self {
         .ActorProxy => fromAddress((try self.asActorProxyObject().clone(heap)).asObjectAddress()),
     };
 }
+
+// FIXME: This name really sucks. What would be a better name that doesn't clash
+//        with ObjectType?
+pub fn ObjectT(comptime object_type: ObjectType) type {
+    return switch (object_type) {
+        .ForwardingReference => unreachable,
+        .Slots => Slots,
+        .Activation => Activation,
+        .Method => Method,
+        .Block => Block,
+        .ByteArray => ByteArray,
+        .Array => Array,
+        .Managed => Managed,
+        .Actor => Actor,
+        .ActorProxy => ActorProxy,
+        .Map => Map,
+    };
+}
+
+/// Return a human readable name for the given object type.
+pub fn humanReadableNameFor(comptime object_type: ObjectType) []const u8 {
+    return switch (object_type) {
+        .ForwardingReference => unreachable,
+        .Slots => "slots object",
+        .Activation => "activation object",
+        .Method => "method object",
+        .Block => "block object",
+        .ByteArray => "byte array object",
+        .Array => "array object",
+        .Managed => "managed object",
+        .Actor => "actor object",
+        .ActorProxy => "actor proxy object",
+        .Map => "map",
+    };
+}
+
+/// Return this object as the given object type, or return null if it cannot
+/// be returned.
+pub inline fn asType(self: Self, comptime object_type: ObjectType) ?*ObjectT(object_type) {
+    if (builtin.mode == .Debug) {
+        if (self.header.getObjectType() != object_type) return null;
+    }
+
+    return @ptrCast(*ObjectT(object_type), self.header);
+}
+
+// TODO: Deprecate and remove the functions below, and replace them with the
+//       unified asType function across the codebase.
 
 // Slots objects
 

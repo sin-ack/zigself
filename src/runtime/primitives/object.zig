@@ -13,43 +13,28 @@ const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 /// Adds the slots in the argument object to the receiver object. The slots
 /// are copied. The objects at each slot are not cloned, however.
-pub fn AddSlots(context: PrimitiveContext) !ExecutionResult {
-    const receiver = context.receiver.getValue();
-    const argument = context.arguments[0];
-
-    if (!(receiver.isObjectReference() and receiver.asObject().isSlotsObject())) {
-        try value_inspector.inspectValue(.Multiline, context.vm, receiver);
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected Slots as the receiver to _AddSlots:", .{}),
-        );
-    }
-
-    if (!(argument.isObjectReference() and argument.asObject().isSlotsObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected Slots as the argument to _AddSlots:", .{}),
-        );
-    }
-
-    var receiver_object = receiver.asObject().asSlotsObject();
-    var argument_object = argument.asObject().asSlotsObject();
+pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_AddSlots:");
+    var receiver = try arguments.getObject(PrimitiveContext.Receiver, .Slots);
+    var argument = try arguments.getObject(0, .Slots);
 
     // Avoid any further GCs by reserving the space beforehand
     try context.vm.heap.ensureSpaceInEden(
-        try Object.Slots.requiredSizeForMerging(receiver_object, argument_object, context.vm.allocator),
+        try Object.Slots.requiredSizeForMerging(receiver, argument, context.vm.allocator),
     );
 
     // Refresh the pointers in case that caused a GC
-    receiver_object = context.receiver.getValue().asObject().asSlotsObject();
-    argument_object = context.arguments[0].asObject().asSlotsObject();
+    receiver = context.receiver.getValue().asObject().asType(.Slots).?;
+    argument = context.arguments[0].asObject().asType(.Slots).?;
 
-    const new_object = try receiver_object.addSlotsFrom(argument_object, context.vm.allocator, context.vm.heap);
+    const new_object = try receiver.addSlotsFrom(argument, context.vm.allocator, context.vm.heap);
     return ExecutionResult.completion(Completion.initNormal(new_object.asValue()));
 }
 
 // FIXME: Re-enable this.
 /// Removes the given slot. If the slot isn't found or otherwise cannot be
 /// removed, the second argument is evaluated as a block.
-pub fn RemoveSlot_IfFail(context: PrimitiveContext) !Completion {
+pub fn RemoveSlot_IfFail(context: *PrimitiveContext) !Completion {
     var receiver = context.receiver.getValue();
     var slot_name = context.arguments[0].getValue();
     var fail_block = context.arguments[1].getValue();
@@ -93,21 +78,21 @@ pub fn RemoveSlot_IfFail(context: PrimitiveContext) !Completion {
 }
 
 /// Inspect the receiver and print it to stderr. Return the receiver.
-pub fn Inspect(context: PrimitiveContext) !ExecutionResult {
+pub fn Inspect(context: *PrimitiveContext) !ExecutionResult {
     const receiver = context.receiver.getValue();
     try value_inspector.inspectValue(.Multiline, context.vm, receiver);
     return ExecutionResult.completion(Completion.initNormal(receiver));
 }
 
 /// Make an identical shallow copy of the receiver and return it.
-pub fn Clone(context: PrimitiveContext) !ExecutionResult {
+pub fn Clone(context: *PrimitiveContext) !ExecutionResult {
     const receiver = context.receiver.getValue();
     return ExecutionResult.completion(Completion.initNormal(try receiver.clone(context.vm.heap)));
 }
 
 /// Return whether the receiver and argument are identical. Returns either
 /// the global "true" or "false" object.
-pub fn Eq(context: PrimitiveContext) error{}!ExecutionResult {
+pub fn Eq(context: *PrimitiveContext) error{}!ExecutionResult {
     return ExecutionResult.completion(Completion.initNormal(
         if (context.receiver.getValue().data == context.arguments[0].data)
             context.vm.getTrue()

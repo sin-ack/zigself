@@ -18,7 +18,7 @@ const ExecutionResult = interpreter.ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 fn callFailureBlock(
-    context: PrimitiveContext,
+    context: *PrimitiveContext,
     errno: std.os.system.E,
     block: Value,
 ) !ExecutionResult {
@@ -35,41 +35,14 @@ fn callFailureBlock(
 
 /// Open the path with the given flags and return a file descriptor.
 /// On failure, call the given block with the errno as the argument.
-pub fn Open_WithFlags_IfFail(context: PrimitiveContext) !ExecutionResult {
-    const file_path = context.arguments[0];
-    const flags_value = context.arguments[1];
-    const failure_block = context.arguments[2];
-
-    if (!(file_path.isObjectReference() and file_path.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected byte array as the first argument to _Open:WithFlags:IfFail:",
-            .{},
-        ));
-    }
-
-    if (!flags_value.isInteger()) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected integer as the second argument to _Open:WithFlags:IfFail:",
-            .{},
-        ));
-    }
-
-    const flags = flags_value.asInteger();
-    if (flags < 0) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Flags argument to _Open:WithFlags:IfFail: must be positive",
-            .{},
-        ));
-    }
+pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_Open:WithFlags:IfFail:");
+    const file_path = try arguments.getObject(0, .ByteArray);
+    const flags = try arguments.getInteger(1, .Unsigned);
+    const failure_block = arguments.getValue(2);
 
     // FIXME: Handle this error
-    const null_terminated_path = std.os.toPosixPath(file_path.asObject().asByteArrayObject().getValues()) catch unreachable;
+    const null_terminated_path = std.os.toPosixPath(file_path.getValues()) catch unreachable;
 
     const rc = std.os.system.open(&null_terminated_path, @intCast(u32, flags), 0);
     const errno = std.os.system.getErrno(rc);
@@ -88,70 +61,23 @@ pub fn Open_WithFlags_IfFail(context: PrimitiveContext) !ExecutionResult {
 /// from the given file descriptor. If the byte array is smaller than the given
 /// amount of bytes, raises an error. On success, returns the amount of bytes
 /// read. On failure, call the given block with the errno as the argument.
-pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !ExecutionResult {
-    const bytes_to_read_value = context.arguments[0];
-    const byte_array_value = context.arguments[1];
-    const offset_value = context.arguments[2];
-    const fd_value = context.arguments[3];
-    const failure_block = context.arguments[4];
+pub fn Read_BytesInto_AtOffset_From_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_Read:BytesInto:AtOffset:From:IfFail:");
+    const bytes_to_read = try arguments.getInteger(0, .Unsigned);
+    const byte_array = try arguments.getObject(1, .ByteArray);
+    const offset = try arguments.getInteger(2, .Unsigned);
+    const fd = try arguments.getObject(3, .Managed);
+    const failure_block = arguments.getValue(4);
 
-    if (!bytes_to_read_value.isInteger()) {
+    if (fd.getManagedType() != .FileDescriptor) {
         return ExecutionResult.completion(try Completion.initRuntimeError(
             context.vm,
             context.source_range,
-            "Expected integer as the first argument to _Read:BytesInto:AtOffset:From:IfFail:",
+            "Expected file descriptor as argument 4 of _Read:BytesInto:AtOffset:From:IfFail:",
             .{},
         ));
     }
 
-    if (!(byte_array_value.isObjectReference() and byte_array_value.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected byte array object as the second argument to _Read:BytesInto:AtOffset:From:IfFail:",
-            .{},
-        ));
-    }
-
-    if (!offset_value.isInteger()) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected integer as the third argument to _Read:BytesInto:AtOffset:From:IfFail:",
-            .{},
-        ));
-    }
-
-    if (!(fd_value.isObjectReference() and fd_value.asObject().isManaged() and fd_value.asObject().asManaged().getManagedType() == .FileDescriptor)) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected file descriptor as the fourth argument to _Read:BytesInto:AtOffset:From:IfFail:",
-            .{},
-        ));
-    }
-
-    const bytes_to_read = bytes_to_read_value.asInteger();
-    if (bytes_to_read < 0) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Bytes to read argument to _Read:BytesInto:AtOffset:From:IfFail: must be positive",
-            .{},
-        ));
-    }
-
-    const offset = offset_value.asInteger();
-    if (offset < 0) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Offset argument to _Read:BytesInto:AtOffset:From:IfFail: must be positive",
-            .{},
-        ));
-    }
-
-    const byte_array = byte_array_value.asObject().asByteArrayObject();
     if (byte_array.getValues().len < offset) {
         return ExecutionResult.completion(try Completion.initRuntimeError(
             context.vm,
@@ -170,8 +96,8 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Execution
         ));
     }
 
-    const fd = FileDescriptor.fromValue(fd_value.asObject().asManaged().value).fd;
-    const rc = std.os.system.read(fd, byte_array.getValues().ptr + @intCast(usize, offset), @intCast(usize, bytes_to_read));
+    const fd_value = FileDescriptor.fromValue(fd.value).fd;
+    const rc = std.os.system.read(fd_value, byte_array.getValues().ptr + @intCast(usize, offset), @intCast(usize, bytes_to_read));
 
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
@@ -185,71 +111,23 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: PrimitiveContext) !Execution
 /// into the given file descriptor. If the byte array is smaller than the given
 /// amount of bytes, raises an error. On success, returns the amount of bytes
 /// written. On failure, call the given block with the errno as the argument.
-pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !ExecutionResult {
-    const bytes_to_write_value = context.arguments[0];
-    const byte_array_value = context.arguments[1];
-    const offset_value = context.arguments[2];
-    const fd_value = context.arguments[3];
-    const failure_block = context.arguments[4];
+pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_Write:BytesFrom:AtOffset:Into:IfFail:");
+    const bytes_to_write = try arguments.getInteger(0, .Unsigned);
+    const byte_array = try arguments.getObject(1, .ByteArray);
+    const offset = try arguments.getInteger(2, .Unsigned);
+    const fd = try arguments.getObject(3, .Managed);
+    const failure_block = arguments.getValue(4);
 
-    if (!bytes_to_write_value.isInteger()) {
+    if (fd.getManagedType() != .FileDescriptor) {
         return ExecutionResult.completion(try Completion.initRuntimeError(
             context.vm,
             context.source_range,
-            "Expected integer as the first argument to _Write:BytesFrom:AtOffset:Into:IfFail:",
+            "Expected file descriptor as argument 4 of _Write:BytesFrom:AtOffset:Into:IfFail:",
             .{},
         ));
     }
 
-    if (!(byte_array_value.isObjectReference() and byte_array_value.asObject().isByteArrayObject())) {
-        try value_inspector.inspectValue(.Multiline, context.vm, byte_array_value);
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected byte array object as the second argument to _Write:BytesFrom:AtOffset:Into:IfFail:",
-            .{},
-        ));
-    }
-
-    if (!offset_value.isInteger()) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected integer as the third argument to _Write:BytesFrom:AtOffset:Into:IfFail:",
-            .{},
-        ));
-    }
-
-    if (!(fd_value.isObjectReference() and fd_value.asObject().isManaged() and fd_value.asObject().asManaged().getManagedType() == .FileDescriptor)) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected file descriptor as the fourth argument to _Write:BytesFrom:AtOffset:Into:IfFail:",
-            .{},
-        ));
-    }
-
-    const bytes_to_write = bytes_to_write_value.asInteger();
-    if (bytes_to_write < 0) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Bytes to write argument to _Write:BytesFrom:AtOffset:Into:IfFail: must be positive",
-            .{},
-        ));
-    }
-
-    const offset = offset_value.asInteger();
-    if (offset < 0) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Offset argument to _Write:BytesFrom:AtOffset:Into:IfFail: must be positive",
-            .{},
-        ));
-    }
-
-    const byte_array = byte_array_value.asObject().asByteArrayObject();
     if (byte_array.getValues().len < offset) {
         return ExecutionResult.completion(try Completion.initRuntimeError(
             context.vm,
@@ -268,8 +146,8 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Executio
         ));
     }
 
-    const fd = FileDescriptor.fromValue(fd_value.asObject().asManaged().value).fd;
-    const rc = std.os.system.write(fd, byte_array.getValues().ptr + @intCast(usize, offset), @intCast(usize, bytes_to_write));
+    const fd_value = FileDescriptor.fromValue(fd.value).fd;
+    const rc = std.os.system.write(fd_value, byte_array.getValues().ptr + @intCast(usize, offset), @intCast(usize, bytes_to_write));
 
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
@@ -281,41 +159,34 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: PrimitiveContext) !Executio
 
 /// Closes a file descriptor.
 /// If the file descriptor was already closed, this primitive does nothing.
-pub fn Close(context: PrimitiveContext) !ExecutionResult {
-    const fd_value = context.arguments[0];
+pub fn Close(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_Close:");
+    const fd_object = try arguments.getObject(0, .Managed);
 
-    if (!(fd_value.isObjectReference() and fd_value.asObject().isManaged() and fd_value.asObject().asManaged().getManagedType() == .FileDescriptor)) {
+    if (fd_object.getManagedType() != .FileDescriptor) {
         return ExecutionResult.completion(try Completion.initRuntimeError(
             context.vm,
             context.source_range,
-            "Expected file descriptor as the argument to _Close:",
+            "Expected file descriptor as argument 1 of _Close:",
             .{},
         ));
     }
 
-    const managed_fd = fd_value.asObject().asManaged();
-    var fd = FileDescriptor.fromValue(managed_fd.value);
+    var fd = FileDescriptor.fromValue(fd_object.value);
     fd.close();
     // NOTE: Now that we closed the fd, we need to stuff this value back into
     //       the managed object as it operates independently.
-    managed_fd.value = fd.toValue();
+    fd_object.value = fd.toValue();
     return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
 }
 
 /// Exit with the given return code.
-pub fn Exit(context: PrimitiveContext) !ExecutionResult {
-    var status_code = context.arguments[0];
-    if (!status_code.isInteger()) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected integer for the status code argument of _Exit:, got {s}",
-            .{@tagName(status_code.getType())},
-        ));
-    }
+pub fn Exit(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_Exit:");
+    const status_code = try arguments.getInteger(0, .Unsigned);
 
     // The ultimate in garbage collection.
-    std.os.exit(@intCast(u8, status_code.asUnsignedInteger()));
+    std.os.exit(@intCast(u8, status_code));
 }
 
 /// The maximum amount of pollfd structures that can be on the stack before
@@ -326,48 +197,18 @@ const MaximumInlinePollFDs = 32;
 /// Write the returned events to the events parameter. Wait for events up to
 /// `WaitingForMS' milliseconds. If an error is encountered with the system
 /// call, send `value:' to `IfFail' with the errno.
-pub fn PollFDs_Events_WaitingForMS_IfFail(context: PrimitiveContext) !ExecutionResult {
-    const fds_value = context.arguments[0];
-    const events_value = context.arguments[1];
-    const timeout_ms_value = context.arguments[2];
-    const failure_block = context.arguments[3];
-
-    if (!(fds_value.isObjectReference() and fds_value.asObject().isArrayObject())) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected array object as the first argument to _PollFDs:Events:WaitingForMS:",
-            .{},
-        ));
-    }
-
-    if (!(events_value.isObjectReference() and events_value.asObject().isArrayObject())) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected array object as the second argument to _PollFDs:Events:WaitingForMS:",
-            .{},
-        ));
-    }
-
-    if (!timeout_ms_value.isInteger()) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected integer as the third argument to _PollFDs:Events:WaitingForMS:",
-            .{},
-        ));
-    }
-
-    const fds = fds_value.asObject().asArrayObject();
-    const events = events_value.asObject().asArrayObject();
-    const timeout_ms = timeout_ms_value.asInteger();
+pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_PollFDs:Events:WaitingForMS:IfFail:");
+    const fds = try arguments.getObject(0, .Array);
+    const events = try arguments.getObject(1, .Array);
+    const timeout_ms = try arguments.getInteger(2, .Signed);
+    const failure_block = arguments.getValue(3);
 
     if (fds.getSize() != events.getSize()) {
         return ExecutionResult.completion(try Completion.initRuntimeError(
             context.vm,
             context.source_range,
-            "The first and second arguments to _PollFDs:Events:WaitingForMS: must have the same size",
+            "Argument 1 and 2 of _PollFDs:Events:WaitingForMS: must have the same size",
             .{},
         ));
     }
@@ -377,7 +218,7 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: PrimitiveContext) !ExecutionR
             return ExecutionResult.completion(try Completion.initRuntimeError(
                 context.vm,
                 context.source_range,
-                "The first argument to _PollFDs:Events:WaitingForMS: must be an array of integers",
+                "Argument 1 of _PollFDs:Events:WaitingForMS: must be an array of integers",
                 .{},
             ));
         }
@@ -388,7 +229,7 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: PrimitiveContext) !ExecutionR
             return ExecutionResult.completion(try Completion.initRuntimeError(
                 context.vm,
                 context.source_range,
-                "The second argument to _PollFDs:Events:WaitingForMS: must be an array of integers",
+                "Argument 2 of _PollFDs:Events:WaitingForMS: must be an array of integers",
                 .{},
             ));
         }

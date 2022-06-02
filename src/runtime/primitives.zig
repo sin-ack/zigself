@@ -6,15 +6,17 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("./Heap.zig");
-const Value = @import("./value.zig").Value;
+const Value = value_import.Value;
 const Actor = @import("./Actor.zig");
 const Object = @import("./Object.zig");
 const Completion = @import("./Completion.zig");
 const SourceRange = @import("./SourceRange.zig");
+const value_import = @import("./value.zig");
 const runtime_error = @import("./error.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const ExecutionResult = @import("./interpreter.zig").ExecutionResult;
 const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
+const IntegerValueSignedness = value_import.IntegerValueSignedness;
 
 const basic_primitives = @import("./primitives/basic.zig");
 const byte_array_primitives = @import("./primitives/byte_array.zig");
@@ -23,6 +25,8 @@ const number_primitives = @import("./primitives/number.zig");
 const object_primitives = @import("./primitives/object.zig");
 const system_call_primitives = @import("./primitives/system_call.zig");
 const actor_primitives = @import("./primitives/actor.zig");
+
+const PrimitiveError = Allocator.Error || error{GetArgumentFailure};
 
 /// The context passed to a primitive.
 pub const PrimitiveContext = struct {
@@ -48,7 +52,106 @@ pub const PrimitiveContext = struct {
     /// The source range which triggered this primitive call. This will be
     /// passed to runtime error completions in the case of errors.
     source_range: SourceRange,
+    /// The error we received when getting arguments. This is set by
+    /// PrimitiveArguments when an error is received (who also returns a
+    /// GetArgumentFailure error).
+    get_argument_error: ?ExecutionResult = null,
+
+    /// Send this value to PrimitiveArguments.get* functions to get the
+    /// receiver.
+    pub const Receiver: isize = -1;
+
+    pub fn getArguments(
+        self: *PrimitiveContext,
+        comptime primitive_name: []const u8,
+    ) PrimitiveArguments(primitive_name) {
+        return PrimitiveArguments(primitive_name).init(self);
+    }
 };
+
+/// Helper struct for returning typed values for primitives (and returning
+/// errors when the arguments don't match the specified types).
+fn PrimitiveArguments(comptime primitive_name: []const u8) type {
+    return struct {
+        /// The context lifeline.
+        context: *PrimitiveContext,
+
+        const Self = @This();
+
+        pub fn init(context: *PrimitiveContext) Self {
+            return .{ .context = context };
+        }
+
+        pub inline fn getValue(self: Self, comptime index: isize) Value {
+            return switch (index) {
+                PrimitiveContext.Receiver => self.context.receiver.getValue(),
+                0...std.math.maxInt(isize) => self.context.arguments[index],
+                else => unreachable,
+            };
+        }
+
+        fn IntegerType(comptime signedness: IntegerValueSignedness) type {
+            return switch (signedness) {
+                .Signed => i64,
+                .Unsigned => u64,
+            };
+        }
+
+        fn getArgumentMessage(comptime index: isize) []const u8 {
+            return switch (index) {
+                PrimitiveContext.Receiver => " receiver of ",
+                0...std.math.maxInt(isize) => std.fmt.comptimePrint(" argument {} of ", .{index + 1}),
+                else => unreachable,
+            };
+        }
+
+        pub inline fn getInteger(self: Self, comptime index: isize, comptime signedness: IntegerValueSignedness) !IntegerType(signedness) {
+            const value = self.getValue(index);
+
+            if (!value.isInteger()) {
+                self.context.get_argument_error = ExecutionResult.completion(try Completion.initRuntimeError(
+                    self.context.vm,
+                    self.context.source_range,
+                    "Expected integer for" ++ getArgumentMessage(index) ++ primitive_name,
+                    .{},
+                ));
+                return error.GetArgumentFailure;
+            }
+
+            const value_as_integer = value.asInteger();
+            if (signedness == .Signed) return value_as_integer;
+
+            if (value_as_integer < 0) {
+                self.context.get_argument_error = ExecutionResult.completion(try Completion.initRuntimeError(
+                    self.context.vm,
+                    self.context.source_range,
+                    "Expected positive integer for" ++ getArgumentMessage(index) ++ primitive_name,
+                    .{},
+                ));
+                return error.GetArgumentFailure;
+            }
+
+            return @intCast(u64, value_as_integer);
+        }
+
+        pub inline fn getObject(self: Self, comptime index: isize, comptime object_type: Object.ObjectType) !*Object.ObjectT(object_type) {
+            const value = self.getValue(index);
+
+            if (value.isObjectReference()) {
+                if (value.asObject().asType(object_type)) |object|
+                    return object;
+            }
+
+            self.context.get_argument_error = ExecutionResult.completion(try Completion.initRuntimeError(
+                self.context.vm,
+                self.context.source_range,
+                "Expected " ++ Object.humanReadableNameFor(object_type) ++ " for" ++ getArgumentMessage(index) ++ primitive_name,
+                .{},
+            ));
+            return error.GetArgumentFailure;
+        }
+    };
+}
 
 /// A primitive specification. The `name` field specifies the exact selector the
 /// primitive uses (i.e. `DoFoo:WithBar:`, or `StringPrint`), and the `function`
@@ -57,7 +160,7 @@ pub const PrimitiveContext = struct {
 const PrimitiveSpec = struct {
     name: []const u8,
     arity: u8,
-    function: fn (context: PrimitiveContext) Allocator.Error!ExecutionResult,
+    function: fn (context: *PrimitiveContext) PrimitiveError!ExecutionResult,
 
     pub fn call(
         self: PrimitiveSpec,
@@ -67,15 +170,20 @@ const PrimitiveSpec = struct {
         arguments: []const Value,
         target_location: RegisterLocation,
         source_range: SourceRange,
-    ) Allocator.Error!ExecutionResult {
-        return try self.function(PrimitiveContext{
+    ) PrimitiveError!ExecutionResult {
+        var context = PrimitiveContext{
             .vm = vm,
             .actor = actor,
             .receiver = receiver,
             .arguments = arguments,
             .target_location = target_location,
             .source_range = source_range,
-        });
+        };
+
+        return self.function(&context) catch |err| switch (err) {
+            error.GetArgumentFailure => context.get_argument_error.?,
+            else => |e| e,
+        };
     }
 };
 

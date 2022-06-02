@@ -71,15 +71,16 @@ fn findMethodForActorSpawnAndReserveMemoryForActivation(
 }
 
 /// Create a new actor which then becomes the genesis actor.
-pub fn Genesis(context: PrimitiveContext) !ExecutionResult {
-    var receiver = context.receiver.getValue();
-    const message_name = context.arguments[0];
-
+pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
     if (context.vm.isInActorMode()) {
         return ExecutionResult.completion(
             try Completion.initRuntimeError(context.vm, context.source_range, "_Genesis: sent while the VM is in actor mode", .{}),
         );
     }
+
+    const arguments = context.getArguments("_Genesis:");
+    var receiver = context.receiver.getValue();
+    const selector = (try arguments.getObject(0, .ByteArray)).getValues();
 
     // FIXME: We should perhaps allow any object to be the genesis actor
     //        context, so blocks can also work for example.
@@ -89,13 +90,6 @@ pub fn Genesis(context: PrimitiveContext) !ExecutionResult {
         );
     }
 
-    if (!(message_name.isObjectReference() and message_name.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected first argument of _Genesis: to be a byte array", .{}),
-        );
-    }
-
-    const selector = message_name.asObject().asByteArrayObject().getValues();
     var method: *Object.Method = undefined;
     if (try findMethodForActorSpawnAndReserveMemoryForActivation(
         context.vm,
@@ -122,15 +116,16 @@ pub fn Genesis(context: PrimitiveContext) !ExecutionResult {
 /// after sending the message given in the first argument to it. If this is sent
 /// in a regular actor, then additionally create an ActorProxy object and write
 /// it to the result location of the primitive.
-pub fn ActorSpawn(context: PrimitiveContext) !ExecutionResult {
-    var receiver = context.receiver.getValue();
-    const message_name = context.arguments[0];
-
+pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     if (!context.vm.isInActorMode()) {
         return ExecutionResult.completion(
             try Completion.initRuntimeError(context.vm, context.source_range, "_ActorSpawn: sent while the VM is not in actor mode", .{}),
         );
     }
+
+    const arguments = context.getArguments("_ActorSpawn:");
+    var receiver = context.receiver.getValue();
+    const spawn_selector = (try arguments.getObject(0, .ByteArray)).getValues();
 
     const genesis_actor = context.vm.genesis_actor.?;
 
@@ -142,18 +137,10 @@ pub fn ActorSpawn(context: PrimitiveContext) !ExecutionResult {
         );
     }
 
-    if (!(message_name.isObjectReference() and message_name.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected first argument of _ActorSpawn: to be a byte array", .{}),
-        );
-    }
-
     // NOTE: Need to advance the current actor to the next instruction to be returned to after the this actor exits.
     context.vm.current_actor.activation_stack.getCurrent().advanceInstruction();
 
-    const spawn_selector = message_name.asObject().asByteArrayObject().getValues();
     var spawn_method: *Object.Method = undefined;
-
     if (try findMethodForActorSpawnAndReserveMemoryForActivation(
         context.vm,
         context.source_range,
@@ -294,48 +281,36 @@ pub fn ActorSpawn(context: PrimitiveContext) !ExecutionResult {
 /// Sets the actor's entrypoint selector, which is the message that is sent to
 /// the activation once the spawn activation is complete (in order to prime it
 /// for its resuming).
-pub fn ActorSetEntrypoint(context: PrimitiveContext) !ExecutionResult {
-    var entrypoint_selector_name = context.arguments[0];
-
+pub fn ActorSetEntrypoint(context: *PrimitiveContext) !ExecutionResult {
     if (!context.vm.isInRegularActor()) {
         return ExecutionResult.completion(
             try Completion.initRuntimeError(context.vm, context.source_range, "_ActorSetEntrypoint: sent outside of a regular actor", .{}),
         );
     }
 
-    if (!(entrypoint_selector_name.isObjectReference() and entrypoint_selector_name.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected first argument of _ActorSetEntrypoint: to be a byte array", .{}),
-        );
-    }
+    const arguments = context.getArguments("_ActorSetEntrypoint:");
+    const entrypoint_selector_name = try arguments.getObject(0, .ByteArray);
 
-    // FIXME: Eliminate the checks above by providing something like
-    // "entrypoint_selector_name.asObjectInPrimitive(prim_name, argument_id, object_type)".
-    context.actor.entrypoint_selector = .{ .value = entrypoint_selector_name };
+    context.actor.entrypoint_selector = .{ .value = entrypoint_selector_name.asValue() };
     return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
 }
 
 /// Resume the activation from where it last left off.
-pub fn ActorResume(context: PrimitiveContext) !ExecutionResult {
-    const receiver = context.receiver.getValue();
-
+pub fn ActorResume(context: *PrimitiveContext) !ExecutionResult {
     if (!context.vm.isInGenesisActor()) {
         return ExecutionResult.completion(
             try Completion.initRuntimeError(context.vm, context.source_range, "_ActorResume sent outside of the genesis actor", .{}),
         );
     }
 
-    if (!(receiver.isObjectReference() and receiver.asObject().isActorObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected receiver of _ActorResume to be an actor object", .{}),
-        );
-    }
+    const arguments = context.getArguments("_ActorResume");
+    const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Actor);
+
+    const actor = receiver.getActor();
+    std.debug.assert(context.vm.regularActorIsRegistered(actor));
 
     // NOTE: Need to advance the current actor to the next instruction to be returned to after the this actor exits.
     context.actor.activation_stack.getCurrent().advanceInstruction();
-
-    const actor = receiver.asObject().asActorObject().getActor();
-    std.debug.assert(context.vm.regularActorIsRegistered(actor));
 
     // Preemptively write a nil to the _ActorResume location so we don't hold
     // onto a temporary accidentally.
@@ -361,27 +336,21 @@ pub fn ActorResume(context: PrimitiveContext) !ExecutionResult {
 }
 
 /// Return the reason this actor has yielded.
-pub fn ActorYieldReason(context: PrimitiveContext) !ExecutionResult {
-    const receiver = context.receiver.getValue();
-
+pub fn ActorYieldReason(context: *PrimitiveContext) !ExecutionResult {
     if (!context.vm.isInGenesisActor()) {
         return ExecutionResult.completion(
             try Completion.initRuntimeError(context.vm, context.source_range, "_ActorYieldReason sent outside of the genesis actor", .{}),
         );
     }
 
-    if (!(receiver.isObjectReference() and receiver.asObject().isActorObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected receiver of _ActorYieldReason to be an actor object", .{}),
-        );
-    }
-
-    const actor = receiver.asObject().asActorObject().getActor();
+    const arguments = context.getArguments("_ActorResume");
+    const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Actor);
+    const actor = receiver.getActor();
     return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@enumToInt(actor.yield_reason))));
 }
 
 /// Yield this actor.
-pub fn ActorYield(context: PrimitiveContext) !ExecutionResult {
+pub fn ActorYield(context: *PrimitiveContext) !ExecutionResult {
     if (!context.vm.isInRegularActor()) {
         return ExecutionResult.completion(
             try Completion.initRuntimeError(context.vm, context.source_range, "_ActorYield sent outside of a regular actor", .{}),
@@ -397,7 +366,7 @@ pub fn ActorYield(context: PrimitiveContext) !ExecutionResult {
 
 /// Return the current actor's sender. Raise a runtime error if the actor
 /// doesn't have a sender (isn't in a message).
-pub fn ActorSender(context: PrimitiveContext) !ExecutionResult {
+pub fn ActorSender(context: *PrimitiveContext) !ExecutionResult {
     if (!context.vm.isInRegularActor()) {
         return ExecutionResult.completion(
             try Completion.initRuntimeError(context.vm, context.source_range, "_ActorSender sent outside of a regular actor", .{}),

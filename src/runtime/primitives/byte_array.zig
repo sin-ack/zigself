@@ -13,41 +13,22 @@ const ExecutionResult = @import("../interpreter.zig").ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 /// Return the size of the byte vector in bytes.
-pub fn ByteArraySize(context: PrimitiveContext) !ExecutionResult {
-    const receiver = context.receiver.getValue();
-    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray as _ByteArraySize receiver", .{}),
-        );
-    }
-
-    return ExecutionResult.completion(
-        Completion.initNormal(Value.fromInteger(@intCast(i64, receiver.asObject().asByteArrayObject().getValues().len))),
-    );
+pub fn ByteArraySize(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_ByteArraySize");
+    const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
+    return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(@intCast(i64, receiver.getValues().len))));
 }
 
 /// Return a byte at the given (integer) position of the receiver, which is a
 /// byte vector. Fails if the index is out of bounds or if the receiver is not a
 /// byte vector.
-pub fn ByteAt(context: PrimitiveContext) !ExecutionResult {
-    const receiver = context.receiver.getValue();
-    const argument = context.arguments[0];
+pub fn ByteAt(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_ByteAt:");
+    const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
+    const position = try arguments.getInteger(0, .Unsigned);
 
-    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray as _ByteAt: receiver", .{}),
-        );
-    }
-
-    if (!argument.isInteger()) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected integer as _ByteAt: argument", .{}),
-        );
-    }
-
-    const values = receiver.asObject().asByteArrayObject().getValues();
-    const position = @intCast(usize, argument.asInteger());
-    if (position < 0 or position >= values.len) {
+    const values = receiver.getValues();
+    if (position >= values.len) {
         return ExecutionResult.completion(try Completion.initRuntimeError(
             context.vm,
             context.source_range,
@@ -62,33 +43,15 @@ pub fn ByteAt(context: PrimitiveContext) !ExecutionResult {
 /// Place the second argument at the position given by the first argument on the
 /// byte vector receiver. Fails if the index is out of bounds or if the receiver
 /// is not a byte vector.
-pub fn ByteAt_Put(context: PrimitiveContext) !ExecutionResult {
-    const receiver = context.receiver.getValue();
-    const first_argument = context.arguments[0];
-    const second_argument = context.arguments[1];
+pub fn ByteAt_Put(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_ByteAt:Put:");
+    const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
+    const position = try arguments.getInteger(0, .Unsigned);
+    const new_value = try arguments.getInteger(1, .Unsigned);
 
-    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray as _ByteAt:Put: receiver", .{}),
-        );
-    }
+    var values = receiver.getValues();
 
-    if (!first_argument.isInteger()) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected integer as first _ByteAt:Put: argument", .{}),
-        );
-    }
-    if (!second_argument.isInteger()) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected integer as second _ByteAt:Put: argument", .{}),
-        );
-    }
-
-    var values = receiver.asObject().asByteArrayObject().getValues();
-    const position = @intCast(usize, first_argument.asInteger());
-    const new_value = second_argument.asInteger();
-
-    if (position < 0 or position >= values.len) {
+    if (position >= values.len) {
         return ExecutionResult.completion(try Completion.initRuntimeError(
             context.vm,
             context.source_range,
@@ -97,62 +60,28 @@ pub fn ByteAt_Put(context: PrimitiveContext) !ExecutionResult {
         ));
     }
 
-    if (new_value < 0 or new_value > 255) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "New value passed to _ByteAt:Put: cannot be cast to a byte", .{}),
-        );
+    if (new_value > 255) {
+        return ExecutionResult.completion(try Completion.initRuntimeError(
+            context.vm,
+            context.source_range,
+            "New value passed to _ByteAt:Put: cannot be cast to a byte",
+            .{},
+        ));
     }
 
     values[position] = @intCast(u8, new_value);
-
-    return ExecutionResult.completion(Completion.initNormal(receiver));
+    return ExecutionResult.completion(Completion.initNormal(receiver.asValue()));
 }
 
 /// Copy the byte vector receiver with a new size. Extra space is filled
 /// with the second argument (must be a byte array of length 1).
-pub fn ByteArrayCopySize_FillingExtrasWith(context: PrimitiveContext) !ExecutionResult {
-    var receiver = context.receiver.getValue();
-    const size_value = context.arguments[0];
-    const filler_value = context.arguments[1];
+pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_ByteArrayCopySize:FillingExtrasWith:");
+    var receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
+    const size = try arguments.getInteger(0, .Unsigned);
+    const filler_byte_array = try arguments.getObject(1, .ByteArray);
 
-    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected byte array as receiver of _ByteArrayCopySize:FillingExtrasWith:",
-            .{},
-        ));
-    }
-
-    if (!size_value.isInteger()) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected integer as the first argument to _ByteArrayCopySize:FillingExtrasWith:",
-            .{},
-        ));
-    }
-
-    if (!(filler_value.isObjectReference() and filler_value.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected byte array as the second argument to _ByteArrayCopySize:FillingExtrasWith:",
-            .{},
-        ));
-    }
-
-    const size = size_value.asInteger();
-    if (size < 0) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Size argument to _ByteArrayCopySize:FillingExtrasWith: must be positive",
-            .{},
-        ));
-    }
-
-    const filler_contents = filler_value.asObject().asByteArrayObject().getValues();
+    const filler_contents = filler_byte_array.getValues();
     if (filler_contents.len != 1) {
         return ExecutionResult.completion(try Completion.initRuntimeError(
             context.vm,
@@ -171,9 +100,9 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: PrimitiveContext) !Execution
     );
 
     // Refresh pointers
-    receiver = context.receiver.getValue();
+    receiver = context.receiver.getValue().asObject().asType(.ByteArray).?;
 
-    var values = receiver.asObject().asByteArrayObject().getValues();
+    var values = receiver.getValues();
 
     const new_byte_array = try ByteArray.createUninitialized(context.vm.heap, @intCast(usize, size));
     const bytes_to_copy = @intCast(usize, std.math.min(size, values.len));
@@ -190,50 +119,33 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: PrimitiveContext) !Execution
 /// Return whether the receiver byte array is equal to the argument.
 /// Note that the argument not being a byte array is not an error
 /// and this primitive simply returns false in that case.
-pub fn ByteArrayEq(context: PrimitiveContext) !ExecutionResult {
-    const receiver = context.receiver.getValue();
-    var argument = context.arguments[0];
+pub fn ByteArrayEq(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_ByteArrayEq:");
+    const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
+    const argument = arguments.getValue(0);
 
-    if (!(receiver.isObjectReference() and receiver.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray as _ByteArrayEq: receiver", .{}),
-        );
+    if (argument.isObjectReference()) {
+        if (argument.asObject().asType(.ByteArray)) |byte_array| {
+            return ExecutionResult.completion(Completion.initNormal(
+                if (std.mem.eql(u8, receiver.getValues(), byte_array.getValues()))
+                    context.vm.getTrue()
+                else
+                    context.vm.getFalse(),
+            ));
+        }
     }
 
-    if (!(argument.isObjectReference() and argument.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(Completion.initNormal(context.vm.getFalse()));
-    }
-
-    return ExecutionResult.completion(Completion.initNormal(
-        if (std.mem.eql(u8, receiver.asObject().asByteArrayObject().getValues(), argument.asObject().asByteArrayObject().getValues()))
-            context.vm.getTrue()
-        else
-            context.vm.getFalse(),
-    ));
+    return ExecutionResult.completion(Completion.initNormal(context.vm.getFalse()));
 }
 
-pub fn ByteArrayConcatenate(context: PrimitiveContext) !ExecutionResult {
-    var receiver_value = context.receiver.getValue();
-    var argument_value = context.arguments[0];
-
-    if (!(receiver_value.isObjectReference() and receiver_value.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray as _ByteArrayConcatenate: receiver", .{}),
-        );
-    }
-
-    if (!(argument_value.isObjectReference() and argument_value.asObject().isByteArrayObject())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected ByteArray as _ByteArrayConcatenate: argument", .{}),
-        );
-    }
+pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_ByteArrayConcatenate:");
+    var receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
+    var argument = try arguments.getObject(0, .ByteArray);
 
     // FIXME: A byte array can have free capacity in it if its length is not a
     //        multiple of a machine word. Use this to optimize small
     //        concatenations.
-
-    var receiver = receiver_value.asObject().asByteArrayObject();
-    var argument = argument_value.asObject().asByteArrayObject();
 
     const receiver_size = receiver.getValues().len;
     const argument_size = argument.getValues().len;
@@ -245,8 +157,8 @@ pub fn ByteArrayConcatenate(context: PrimitiveContext) !ExecutionResult {
     );
 
     // Refresh pointers
-    receiver = context.receiver.getValue().asObject().asByteArrayObject();
-    argument = context.arguments[0].asObject().asByteArrayObject();
+    receiver = context.receiver.getValue().asObject().asType(.ByteArray).?;
+    argument = context.arguments[0].asObject().asType(.ByteArray).?;
 
     var new_byte_array = try ByteArray.createUninitialized(context.vm.heap, receiver_size + argument_size);
     std.mem.copy(u8, new_byte_array.getValues()[0..receiver_size], receiver.getValues());

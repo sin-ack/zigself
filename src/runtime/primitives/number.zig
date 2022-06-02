@@ -14,35 +14,17 @@ const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 fn integerOpCommon(
     comptime primitive_name: [*:0]const u8,
-    context: PrimitiveContext,
+    context: *PrimitiveContext,
     operation: fn (context: PrimitiveContext, receiver: i64, term: i64) Allocator.Error!ExecutionResult,
 ) !ExecutionResult {
-    const receiver = context.receiver.getValue();
-    const term = context.arguments[0];
-
-    if (!receiver.isInteger()) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected integer as _" ++ primitive_name ++ ": receiver",
-            .{},
-        ));
-    }
-
-    if (!term.isInteger()) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected integer as _" ++ primitive_name ++ ": argument",
-            .{},
-        ));
-    }
-
-    return operation(context, receiver.asInteger(), term.asInteger());
+    const arguments = context.getArguments("_" ++ primitive_name ++ ":");
+    const receiver = try arguments.getInteger(PrimitiveContext.Receiver, .Signed);
+    const term = try arguments.getInteger(0, .Signed);
+    return operation(context.*, receiver, term);
 }
 
 /// Add two integer numbers. The returned value is an integer.
-pub fn IntAdd(context: PrimitiveContext) !ExecutionResult {
+pub fn IntAdd(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntAdd", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             _ = ctx;
@@ -52,7 +34,7 @@ pub fn IntAdd(context: PrimitiveContext) !ExecutionResult {
 }
 
 /// Subtract the argument from the receiver. The returned value is an integer.
-pub fn IntSub(context: PrimitiveContext) !ExecutionResult {
+pub fn IntSub(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntSub", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             _ = ctx;
@@ -62,7 +44,7 @@ pub fn IntSub(context: PrimitiveContext) !ExecutionResult {
 }
 
 /// Multiply the argument with the receiver. The returned value is an integer.
-pub fn IntMul(context: PrimitiveContext) !ExecutionResult {
+pub fn IntMul(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntMul", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             _ = ctx;
@@ -73,7 +55,7 @@ pub fn IntMul(context: PrimitiveContext) !ExecutionResult {
 
 /// Perform integer division on the receiver with the argument. Fraction is
 /// discarded. The returned value is an integer.
-pub fn IntDiv(context: PrimitiveContext) !ExecutionResult {
+pub fn IntDiv(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntDiv", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             if (term == 0)
@@ -85,7 +67,7 @@ pub fn IntDiv(context: PrimitiveContext) !ExecutionResult {
 
 /// Perform modulo on the receiver with the argument. The returned value is an
 /// integer.
-pub fn IntMod(context: PrimitiveContext) !ExecutionResult {
+pub fn IntMod(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntMod", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             if (term == 0)
@@ -97,7 +79,7 @@ pub fn IntMod(context: PrimitiveContext) !ExecutionResult {
 
 /// Perform a left shift on the receiver with the argument. The returned value
 /// is an integer.
-pub fn IntShl(context: PrimitiveContext) !ExecutionResult {
+pub fn IntShl(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntShl", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             if (term < 0 or term > 62)
@@ -120,7 +102,7 @@ pub fn IntShl(context: PrimitiveContext) !ExecutionResult {
 
 /// Perform a right shift on the receiver with the argument. The returned value
 /// is an integer.
-pub fn IntShr(context: PrimitiveContext) !ExecutionResult {
+pub fn IntShr(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntShr", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             if (term < 0 or term > 62)
@@ -143,7 +125,7 @@ pub fn IntShr(context: PrimitiveContext) !ExecutionResult {
 
 /// Perform a bitwise XOR on the receiver with the argument. The returned value
 /// is an integer.
-pub fn IntXor(context: PrimitiveContext) !ExecutionResult {
+pub fn IntXor(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntXor", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             _ = ctx;
@@ -154,7 +136,7 @@ pub fn IntXor(context: PrimitiveContext) !ExecutionResult {
 
 /// Perform a bitwise AND on the receiver with the argument. The returned value
 /// is an integer.
-pub fn IntAnd(context: PrimitiveContext) !ExecutionResult {
+pub fn IntAnd(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntAnd", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             _ = ctx;
@@ -165,7 +147,7 @@ pub fn IntAnd(context: PrimitiveContext) !ExecutionResult {
 
 /// Perform a bitwise OR on the receiver with the argument. The returned value
 /// is an integer.
-pub fn IntOr(context: PrimitiveContext) !ExecutionResult {
+pub fn IntOr(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntOr", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             _ = ctx;
@@ -176,7 +158,7 @@ pub fn IntOr(context: PrimitiveContext) !ExecutionResult {
 
 /// Return whether the receiver is less than its argument. The return value is
 /// either "true" or "false".
-pub fn IntLT(context: PrimitiveContext) !ExecutionResult {
+pub fn IntLT(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntLT", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             return ExecutionResult.completion(Completion.initNormal(
@@ -191,7 +173,7 @@ pub fn IntLT(context: PrimitiveContext) !ExecutionResult {
 
 /// Return whether the receiver is greater than its argument. The return value
 /// is either "true" or "false".
-pub fn IntGT(context: PrimitiveContext) !ExecutionResult {
+pub fn IntGT(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntGT", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             return ExecutionResult.completion(Completion.initNormal(
@@ -207,25 +189,17 @@ pub fn IntGT(context: PrimitiveContext) !ExecutionResult {
 /// Return whether the receiver is equal to its argument. The return value is
 /// either "true" or "false". Note that passing a non-integer term is not an
 /// error and simply returns false.
-pub fn IntEq(context: PrimitiveContext) !ExecutionResult {
-    const receiver = context.receiver.getValue();
-    const term = context.arguments[0];
-
-    if (!receiver.isInteger()) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "Expected integer as _IntEq: receiver",
-            .{},
-        ));
-    }
+pub fn IntEq(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_IntEq:");
+    const receiver = try arguments.getInteger(PrimitiveContext.Receiver, .Signed);
+    const term = arguments.getValue(0);
 
     if (!term.isInteger()) {
         return ExecutionResult.completion(Completion.initNormal(context.vm.getFalse()));
     }
 
     return ExecutionResult.completion(Completion.initNormal(
-        if (receiver.asInteger() == term.asInteger())
+        if (receiver == term.asInteger())
             context.vm.getTrue()
         else
             context.vm.getFalse(),
