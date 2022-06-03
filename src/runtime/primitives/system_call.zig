@@ -264,7 +264,7 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
         };
     }
 
-    const rc = std.os.system.poll(poll_fds.ptr, fds.getSize(), @intCast(i32, timeout_ms));
+    const rc = std.os.system.poll(poll_fds.ptr, @intCast(u32, fds.getSize()), @intCast(i32, timeout_ms));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
         for (poll_fds) |pollfd, i| {
