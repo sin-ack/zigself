@@ -33,54 +33,10 @@ That's it! If you want to build a release version, you can build one with
 
 There is an (experimental) REPL that you can run with `zig build run -- repl.self`.
 
-## Current status of zigSelf
+## Contributing
 
-- [x] Lexer
-- [x] **Milestone 1:** Parser
-- [ ] Initial VM and runtime
-  - [x] Values
-  - [x] Objects
-    - [x] Slots objects
-    - [x] Method objects
-    - [x] Block objects
-    - [x] Byte vector objects
-    - [x] Activation objects
-    - [x] Vector objects
-  - [x] Value lookups on objects
-  - [x] Assignments to mutable slots
-  - [ ] Primitives
-    - [x] Basic primitives
-    - [x] Integer primitives
-    - [x] Byte vector primitives
-    - [x] Vector primitives
-    - [ ] Object primitives
-      - [x] `_AddSlots:`
-      - [x] `_Eq:`
-      - [x] `_Inspect:`
-      - [ ] `_RemoveSlot:IfFail:`
-  - [x] Heap and object allocation
-  - [x] Generational scavenging garbage collection
-    - [x] Basic implementation
-    - [x] Old space -> new space tracking
-    - [x] New space -> old space tracking
-    - [x] VM tracking of values in primitives and interpreter
-- [x] Test harness
-- [ ] Standard library
-  - [x] Move to std namespace
-  - [x] String operations and text processing
-  - [ ] Integer operations
-  - [ ] Math
-  - [ ] System calls
-  - [ ] Low-level I/O (fd based)
-  - and more...
-- [x] **Milestone 2:** A REPL
-- [ ] World building script
-- [ ] Transporter (Self modules)
-- [ ] Overlay system for Transporter (more on this later)
-- [ ] Foreign Function Interface, to use libraries from other languages like C
-- [ ] **Milestone 3:** Initial GUI support via xcb
-- [ ] An implementation of Morphic
-- [ ] **Milestone 4:** Self programming environment, based on Seity
+All contributions are welcome! Please follow [the contribution
+guidelines](CONTRIBUTING.md) for details.
 
 ## License
 
