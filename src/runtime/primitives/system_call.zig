@@ -44,7 +44,8 @@ pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
     // FIXME: Handle this error
     const null_terminated_path = std.os.toPosixPath(file_path.getValues()) catch unreachable;
 
-    const rc = std.os.system.open(&null_terminated_path, @intCast(u32, flags), 0);
+    // FIXME: Allow the user to pass permissions via the primitive.
+    const rc = std.os.system.open(&null_terminated_path, @intCast(u32, flags), @intCast(u32, 0));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
         var fd = FileDescriptor.adopt(@intCast(std.os.fd_t, rc));
