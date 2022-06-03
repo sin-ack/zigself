@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("./Heap.zig");
+const Slot = @import("./slot.zig").Slot;
 const Actor = @import("./Actor.zig");
 const Value = @import("./value.zig").Value;
 const Range = @import("../language/Range.zig");
@@ -13,6 +14,7 @@ const Object = @import("./Object.zig");
 const Script = @import("../language/script.zig");
 const AstGen = @import("./AstGen.zig");
 const CodeGen = @import("./CodeGen.zig");
+const MapBuilder = @import("./object/map_builder.zig").MapBuilder;
 const ByteArray = @import("./ByteArray.zig");
 const runtime_error = @import("./error.zig");
 const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
@@ -48,6 +50,10 @@ block_traits: Heap.Tracked = undefined,
 float_traits: Heap.Tracked = undefined,
 string_traits: Heap.Tracked = undefined,
 integer_traits: Heap.Tracked = undefined,
+
+// --- Prototypes used by primitives ---
+
+addrinfo_prototype: Heap.Tracked = undefined,
 
 // --- Settings ---
 
@@ -107,10 +113,36 @@ pub fn create(allocator: Allocator) !*Self {
     self.string_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
     self.integer_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
 
+    try self.buildAddrInfoPrototype(heap);
+
     self.global_actor = try Actor.create(self, self.lobby_object.getValue());
     self.current_actor = self.global_actor;
 
     return self;
+}
+
+// FIXME: There should be a better way of creating prototype objects for
+//        primitives. We can't keep adding every prototype here like this.
+const addrinfo_slots = &[_][]const u8{
+    "flags",
+    "family",
+    "socketType",
+    "protocol",
+    "sockaddrBytes",
+};
+
+fn buildAddrInfoPrototype(self: *Self, heap: *Heap) !void {
+    const map = try Object.Map.Slots.create(heap, addrinfo_slots.len);
+    var map_builder = try map.getMapBuilder(heap);
+    defer map_builder.deinit();
+
+    for (addrinfo_slots) |slot_name| {
+        const slot_name_byte_array = try ByteArray.createFromString(heap, slot_name);
+        try map_builder.addSlot(Slot.initAssignable(slot_name_byte_array, .NotParent, self.nil()));
+    }
+
+    const object = try map_builder.createObject();
+    self.addrinfo_prototype = try heap.track(object.asValue());
 }
 
 pub fn destroy(self: *Self) void {
@@ -128,6 +160,7 @@ pub fn destroy(self: *Self) void {
     self.float_traits.untrack(self.heap);
     self.string_traits.untrack(self.heap);
     self.integer_traits.untrack(self.heap);
+    self.addrinfo_prototype.untrack(self.heap);
 
     {
         var it = self.block_message_names.iterator();

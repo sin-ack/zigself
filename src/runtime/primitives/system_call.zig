@@ -7,6 +7,7 @@ const std = @import("std");
 const Heap = @import("../Heap.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../Object.zig");
+const ByteArray = @import("../ByteArray.zig");
 const Completion = @import("../Completion.zig");
 const ManagedObject = @import("../object/managed.zig");
 const FileDescriptor = ManagedObject.FileDescriptor;
@@ -273,4 +274,118 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
     }
 
     return try callFailureBlock(context, errno, failure_block);
+}
+
+/// Perform the getaddrinfo system call and return an array of getaddrinfo
+/// objects.
+pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_GetAddrInfoForHost:Port:Family:SocketType:Protocol:Flags:IfFail:");
+    const host = try arguments.getObject(0, .ByteArray);
+    const port = try arguments.getInteger(1, .Unsigned);
+    const family = try arguments.getInteger(2, .Signed);
+    const socket_type = try arguments.getInteger(3, .Signed);
+    const protocol = try arguments.getInteger(4, .Signed);
+    const flags = try arguments.getInteger(5, .Signed);
+    const failure_block = arguments.getValue(6);
+
+    // FIXME: Do not directly intCast here
+    const hints = std.os.addrinfo{
+        .family = @intCast(i32, family),
+        .socktype = @intCast(i32, socket_type),
+        .protocol = @intCast(i32, protocol),
+        .flags = std.c.AI.NUMERICSERV | @intCast(i32, flags),
+
+        .addrlen = 0,
+        .addr = null,
+        .canonname = null,
+        .next = null,
+    };
+
+    const node_c = try std.cstr.addNullByte(context.vm.allocator, host.getValues());
+    defer context.vm.allocator.free(node_c);
+
+    const service_c = try std.fmt.allocPrintZ(context.vm.allocator, "{}", .{port});
+    defer context.vm.allocator.free(service_c);
+
+    var result_ptr: *std.os.addrinfo = undefined;
+    const rc = std.os.system.getaddrinfo(node_c, service_c, &hints, &result_ptr);
+    switch (rc) {
+        @intToEnum(std.os.system.EAI, 0) => {},
+
+        // FIXME: Handle errors
+        .ADDRFAMILY,
+        .AGAIN,
+        .BADFLAGS,
+        .FAIL,
+        .FAMILY,
+        .MEMORY,
+        .NODATA,
+        .NONAME,
+        .SERVICE,
+        .SOCKTYPE,
+        .SYSTEM,
+        => unreachable,
+
+        else => unreachable,
+    }
+    _ = failure_block;
+
+    defer std.os.system.freeaddrinfo(result_ptr);
+
+    var required_memory: usize = 0;
+    var result_count: usize = 0;
+    var addrinfo_prototype = context.vm.addrinfo_prototype.getValue().asObject().asType(.Slots).?;
+    {
+        var it: ?*std.os.addrinfo = result_ptr;
+        while (it) |result| : (it = result.next) {
+            required_memory += addrinfo_prototype.getSizeInMemory();
+            required_memory += Object.Map.ByteArray.requiredSizeForAllocation();
+            required_memory += Object.ByteArray.requiredSizeForAllocation();
+            required_memory += ByteArray.requiredSizeForAllocation(result.addrlen);
+            result_count += 1;
+        }
+    }
+
+    required_memory += Object.Map.Array.requiredSizeForAllocation();
+    required_memory += Object.Array.requiredSizeForAllocation(result_count);
+
+    try context.vm.heap.ensureSpaceInEden(required_memory);
+
+    // Refresh pointers
+    addrinfo_prototype = context.vm.addrinfo_prototype.getValue().asObject().asType(.Slots).?;
+
+    const result_array_map = try Object.Map.Array.create(context.vm.heap, result_count);
+    const result_array = try Object.Array.createWithValues(context.vm.heap, result_array_map, &.{}, context.vm.nil());
+
+    const result_values = result_array.getValues();
+    {
+        var it: ?*std.os.addrinfo = result_ptr;
+        var i: usize = 0;
+        while (it) |result| : ({
+            it = result.next;
+            i += 1;
+        }) {
+            const sockaddr_memory = @ptrCast([*]u8, result.addr.?);
+            const sockaddr_byte_array = try ByteArray.createFromString(context.vm.heap, sockaddr_memory[0..result.addrlen]);
+
+            // FIXME: We need to avoid creating a separate map altogether.
+            const sockaddr_bytes_map = try Object.Map.ByteArray.create(context.vm.heap, sockaddr_byte_array);
+            const sockaddr_bytes_object = try Object.ByteArray.create(context.vm.heap, sockaddr_bytes_map);
+
+            const addrinfo_copy: *Object.Slots = try addrinfo_prototype.clone(context.vm.heap);
+            const addrinfo_value = addrinfo_copy.asValue();
+
+            // FIXME: VM-generated structs already know where each slot is.
+            //        Instead of doing a manual lookup, be smarter here.
+            addrinfo_value.lookup(context.vm, "family:").Assignment.value_ptr.* = Value.fromInteger(result.family);
+            addrinfo_value.lookup(context.vm, "socketType:").Assignment.value_ptr.* = Value.fromInteger(result.socktype);
+            addrinfo_value.lookup(context.vm, "protocol:").Assignment.value_ptr.* = Value.fromInteger(result.protocol);
+            addrinfo_value.lookup(context.vm, "flags:").Assignment.value_ptr.* = Value.fromInteger(result.flags);
+            addrinfo_value.lookup(context.vm, "sockaddrBytes:").Assignment.value_ptr.* = sockaddr_bytes_object.asValue();
+
+            result_values[i] = addrinfo_value;
+        }
+    }
+
+    return ExecutionResult.completion(Completion.initNormal(result_array.asValue()));
 }
