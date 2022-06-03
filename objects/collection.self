@@ -38,6 +38,12 @@ std mixins _AddSlots: (|
         each: blk = (
             firstKey through: lastKey Do: [| :i | blk value: (at: i) With: i ].
         ).
+
+        copyReverse = (| c |
+            c: copy.
+            each: [| :v. :i | c at: (size - 1) - i Put: v ].
+            c
+        ).
     |).
 
     "Adds behavior for a collection that can have slots removed from it.
