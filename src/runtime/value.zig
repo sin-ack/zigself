@@ -282,5 +282,6 @@ pub fn ObjectValue(comptime ObjectT: type, comptime is_fn: []const u8) type {
 
 pub const ActorValue = ObjectValue(Object.Actor, "isActorObject");
 pub const MethodValue = ObjectValue(Object.Method, "isMethodObject");
+pub const ManagedValue = ObjectValue(Object.Managed, "isManagedObject");
 pub const ByteArrayValue = ObjectValue(Object.ByteArray, "isByteArrayObject");
 pub const ActivationValue = ObjectValue(Object.Activation, "isActivationObject");

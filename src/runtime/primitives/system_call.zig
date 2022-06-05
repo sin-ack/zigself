@@ -216,14 +216,19 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
     }
 
     for (fds.getValues()) |fd| {
-        if (!fd.isInteger()) {
-            return ExecutionResult.completion(try Completion.initRuntimeError(
-                context.vm,
-                context.source_range,
-                "Argument 1 of _PollFDs:Events:WaitingForMS: must be an array of integers",
-                .{},
-            ));
+        if (fd.isObjectReference()) {
+            if (fd.asObject().asType(.Managed)) |managed_fd| {
+                if (managed_fd.getManagedType() == .FileDescriptor)
+                    continue;
+            }
         }
+
+        return ExecutionResult.completion(try Completion.initRuntimeError(
+            context.vm,
+            context.source_range,
+            "Argument 1 of _PollFDs:Events:WaitingForMS: must be an array of file descriptors",
+            .{},
+        ));
     }
 
     for (events.getValues()) |event_flags| {
@@ -255,10 +260,12 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
     const fd_values = fds.getValues();
     const event_values = events.getValues();
     for (fd_values) |fd, i| {
+        const managed_fd = fd.asObject().asType(.Managed).?;
+        const fd_value = FileDescriptor.fromValue(managed_fd.value);
         const event_flags = event_values[i];
 
         poll_fds[i] = .{
-            .fd = @intCast(i32, fd.asInteger()),
+            .fd = fd_value.fd,
             .events = @intCast(i16, event_flags.asInteger()),
             .revents = 0,
         };

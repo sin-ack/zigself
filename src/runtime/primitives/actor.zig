@@ -389,3 +389,25 @@ pub fn ActorSender(context: *PrimitiveContext) !ExecutionResult {
 
     return ExecutionResult.completion(Completion.initNormal(actor_proxy.asValue()));
 }
+
+/// Return the managed file descriptor object that the actor is blocked on.
+/// If the actor's yield reason isn't Blocked, then raise a runtime error.
+pub fn ActorBlockedFD(context: *PrimitiveContext) !ExecutionResult {
+    if (!context.vm.isInGenesisActor()) {
+        return ExecutionResult.completion(
+            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorBlockedFD sent outside of the genesis actor", .{}),
+        );
+    }
+
+    const arguments = context.getArguments("_ActorBlockedFD");
+    const actor_object = try arguments.getObject(PrimitiveContext.Receiver, .Actor);
+    const actor = actor_object.getActor();
+
+    if (actor.yield_reason != .Blocked) {
+        return ExecutionResult.completion(
+            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorBlockedFD sent to an actor that wasn't blocked", .{}),
+        );
+    }
+
+    return ExecutionResult.completion(Completion.initNormal(actor.blocked_fd.?.value));
+}

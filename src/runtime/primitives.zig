@@ -242,6 +242,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "ActorYieldReason", .arity = 0, .function = actor_primitives.ActorYieldReason },
     .{ .name = "ActorYield", .arity = 0, .function = actor_primitives.ActorYield },
     .{ .name = "ActorSender", .arity = 0, .function = actor_primitives.ActorSender },
+    .{ .name = "ActorBlockedFD", .arity = 0, .function = actor_primitives.ActorBlockedFD },
 };
 
 // FIXME: This is very naive! We shouldn't need to linear search every single

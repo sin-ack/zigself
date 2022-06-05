@@ -19,6 +19,7 @@ const MethodValue = value_import.MethodValue;
 const interpreter = @import("./interpreter.zig");
 const SourceRange = @import("./SourceRange.zig");
 const value_import = @import("./value.zig");
+const ManagedValue = value_import.ManagedValue;
 const RegisterFile = @import("./lowcode/RegisterFile.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const ByteArrayValue = value_import.ByteArrayValue;
@@ -36,6 +37,8 @@ actor_object: ActorValue,
 entrypoint_selector: ?ByteArrayValue = null,
 /// The reason this actor has yielded.
 yield_reason: YieldReason = .None,
+/// The file descriptor managed object that this actor was blocked on, if any.
+blocked_fd: ?ManagedValue = null,
 /// The activation stack stores the list of activations that are currently on
 /// this actor. When an activation is exited, execution flow returns to the
 /// previous activation on the stack. If a non-local return happens, however,
@@ -231,6 +234,8 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
     self.message_sender = null;
     self.clearMailbox(vm.allocator);
 
+    self.blocked_fd = null;
+
     // Execute the activation stack of this actor normally.
     return try self.executeUntil(vm, null);
 }
@@ -371,6 +376,9 @@ pub fn visitValues(
     try self.register_file.visitValues(context, visitor);
 
     if (self.entrypoint_selector) |*value|
+        try visitor(context, &value.value);
+
+    if (self.blocked_fd) |*value|
         try visitor(context, &value.value);
 
     if (self.message_sender) |*value|
