@@ -35,8 +35,8 @@ std traits _AddSlots: (|
             events: fds copy.
             blockedQueue each: [| :blocked. :index |
                 fds at: index Put: blocked fd.
-                "FIXME: Switch to std os pollIn || std os pollOut"
-                events at: index Put: 5.
+                "FIXME: Switch to std os pollIn"
+                events at: index Put: 1.
             ].
 
             std os tryWhileInterrupted: [| :failBlock |
@@ -82,9 +82,11 @@ std traits _AddSlots: (|
                 yieldReason: nextAvailableActor _ActorYieldReason.
 
                 yieldReason = std actor yieldReason blocked ifTrue: [| blocked |
-                    blocked: blockedActor copy
-                             ; fd: nextAvailableActor _ActorBlockedFD
-                             ; actor: nextAvailableActor.
+                    blocked: (
+                        blockedActor copy
+                        ; fd: nextAvailableActor _ActorBlockedFD
+                        ; actor: nextAvailableActor
+                    ).
                     blockedQueue add: blocked.
                 ] False: [yieldReason = std actor yieldReason yielded ifTrue: [
                     readyQueue add: nextAvailableActor.
