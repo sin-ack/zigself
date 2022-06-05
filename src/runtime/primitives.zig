@@ -236,6 +236,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "GetAddrInfoForHost:Port:Family:SocketType:Protocol:Flags:IfFail:", .arity = 7, .function = system_call_primitives.GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail },
     .{ .name = "SocketWithFamily:Type:Protocol:IfFail:", .arity = 4, .function = system_call_primitives.SocketWithFamily_Type_Protocol_IfFail },
     .{ .name = "BindFD:ToSockaddrBytes:IfFail:", .arity = 3, .function = system_call_primitives.BindFD_ToSockaddrBytes_IfFail },
+    .{ .name = "ListenOnFD:WithBacklog:IfFail:", .arity = 3, .function = system_call_primitives.ListenOnFD_WithBacklog_IfFail },
     // Actor primitives
     .{ .name = "Genesis:", .arity = 1, .function = actor_primitives.Genesis },
     .{ .name = "ActorSpawn:", .arity = 1, .function = actor_primitives.ActorSpawn },

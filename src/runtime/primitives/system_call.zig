@@ -485,3 +485,30 @@ pub fn BindFD_ToSockaddrBytes_IfFail(context: *PrimitiveContext) !ExecutionResul
 
     return try callFailureBlock(context, errno, failure_block);
 }
+
+/// Set the given fd as a passive socket with the given backlog.
+pub fn ListenOnFD_WithBacklog_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_ListenOnFD:WithBacklog:IfFail:");
+    const fd_object = try arguments.getObject(0, .Managed);
+    const backlog = try arguments.getInteger(1, .Signed);
+    const failure_block = arguments.getValue(2);
+
+    if (fd_object.getManagedType() != .FileDescriptor) {
+        return ExecutionResult.completion(try Completion.initRuntimeError(
+            context.vm,
+            context.source_range,
+            "Expected file descriptor as argument 1 of _BindFD:ToSockaddrBytes:IfFail:",
+            .{},
+        ));
+    }
+
+    // FIXME: Check before casting
+    const fd = FileDescriptor.fromValue(fd_object.value);
+    const rc = std.os.system.listen(fd.fd, @intCast(c_uint, backlog));
+    const errno = std.os.system.getErrno(rc);
+    if (errno == .SUCCESS) {
+        return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
+    }
+
+    return try callFailureBlock(context, errno, failure_block);
+}
