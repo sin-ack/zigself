@@ -426,3 +426,32 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
 
     return ExecutionResult.completion(Completion.initNormal(result_array.asValue()));
 }
+
+/// Create a new socket with the given family, type and protocol.
+pub fn SocketWithFamily_Type_Protocol_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_SocketWithFamily:Type:Protocol:IfFail:");
+    const family = try arguments.getInteger(0, .Unsigned);
+    const socket_type = try arguments.getInteger(1, .Unsigned);
+    const protocol = try arguments.getInteger(2, .Unsigned);
+    const failure_block = arguments.getValue(3);
+
+    // FIXME: Check before casting
+    // FIXME: SOCK_NONBLOCK and SOCK_CLOEXEC only works on Linux! Make a fallback.
+    var full_socket_type = @intCast(c_uint, socket_type) | std.os.SOCK.CLOEXEC;
+
+    if (context.vm.isInRegularActor()) {
+        full_socket_type |= std.os.SOCK.NONBLOCK;
+    }
+
+    const rc = std.os.system.socket(@intCast(c_uint, family), full_socket_type, @intCast(c_uint, protocol));
+    const errno = std.os.system.getErrno(rc);
+    if (errno == .SUCCESS) {
+        var fd = FileDescriptor.adopt(@intCast(std.os.fd_t, rc));
+        errdefer fd.close();
+
+        const managed_fd = try Object.Managed.create(context.vm.heap, .FileDescriptor, fd.toValue());
+        return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
+    }
+
+    return try callFailureBlock(context, errno, failure_block);
+}
