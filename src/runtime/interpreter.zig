@@ -93,7 +93,12 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
                 const argument_slice = actor.argument_stack.lastNItems(primitive.arity);
 
                 const primitive_result = try primitive.call(vm, actor, tracked_receiver, argument_slice, inst.target, source_range);
-                actor.argument_stack.popNItems(primitive.arity);
+                if (!(primitive_result == .ActorSwitch and actor.yield_reason == .Blocked)) {
+                    // NOTE: If the actor got blocked, it will retry the same
+                    //       primitive call when it gets unblocked, so we
+                    //       shouldn't pop values off its stack.
+                    actor.argument_stack.popNItems(primitive.arity);
+                }
 
                 switch (primitive_result) {
                     .ActorSwitch, .ActivationChange, .Success => return primitive_result,
@@ -142,7 +147,12 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
                 const argument_slice = actor.argument_stack.lastNItems(primitive.arity);
 
                 const primitive_result = try primitive.call(vm, actor, tracked_receiver, argument_slice, inst.target, source_range);
-                actor.argument_stack.popNItems(primitive.arity);
+                if (!(primitive_result == .ActorSwitch and actor.yield_reason == .Blocked)) {
+                    // NOTE: If the actor got blocked, it will retry the same
+                    //       primitive call when it gets unblocked, so we
+                    //       shouldn't pop values off its stack.
+                    actor.argument_stack.popNItems(primitive.arity);
+                }
 
                 switch (primitive_result) {
                     .ActorSwitch, .ActivationChange, .Success => return primitive_result,
