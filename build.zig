@@ -42,6 +42,7 @@ pub fn build(b: *std.build.Builder) void {
         .name = "zigself",
         .source = .{ .path = "src/package.zig" },
     });
+    test_harness_exe.linkLibC();
 
     const test_harness_run_cmd = test_harness_exe.run();
     if (b.args) |args| {
