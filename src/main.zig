@@ -41,6 +41,11 @@ fn printUsage() !void {
 }
 
 pub fn main() !u8 {
+    // HACK: Block SIGPIPE for now
+    var set: std.os.sigset_t = std.os.empty_sigset;
+    std.os.linux.sigaddset(&set, std.os.SIG.PIPE);
+    _ = std.os.system.sigprocmask(std.os.SIG.BLOCK, &set, null);
+
     var general_purpose_allocator = Allocator{};
     defer _ = general_purpose_allocator.deinit();
     var allocator = general_purpose_allocator.allocator();
