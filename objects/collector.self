@@ -63,6 +63,33 @@ std traits _AddSlots: (|
             array
         ).
 
+        flattenIntoString = (| stringSize. newString. current. stringIndex |
+            stringSize: 0.
+            current: self.
+            [nil == current] whileFalse: [| value |
+                value: current value asString.
+                stringSize: stringSize + value size.
+                current value: value.
+                current: current previous.
+            ].
+
+            stringIndex: stringSize prec.
+            newString: std string copySize: stringSize.
+            current: self.
+            [nil == current] whileFalse: [| value |
+                value: current value.
+                value each: [| :byte. :byteIndex |
+                    newString at: (stringIndex - (value size - 1)) + byteIndex
+                             Put: byte.
+                ].
+
+                stringIndex: stringIndex - value size.
+                current: current previous.
+            ].
+
+            newString
+        ).
+
         size = (| current |
             nil == cachedSize ifFalse: [ ^ cachedSize ].
 
