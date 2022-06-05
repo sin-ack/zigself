@@ -128,6 +128,7 @@ std traits string _AddSlots: (|
         copyFrom: start Size: (end - start).
     ).
 
+    copyFrom: start = (copyFrom: start Size: size prec).
     copyFrom: start Size: size = (| targetBuffer |
         targetBuffer: copySize: size.
 
