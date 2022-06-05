@@ -455,3 +455,33 @@ pub fn SocketWithFamily_Type_Protocol_IfFail(context: *PrimitiveContext) !Execut
 
     return try callFailureBlock(context, errno, failure_block);
 }
+
+/// Bind the given fd to the address defined in the given sockaddr structure.
+pub fn BindFD_ToSockaddrBytes_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_BindFD:ToSockaddrBytes:IfFail:");
+    const fd_object = try arguments.getObject(0, .Managed);
+    const sockaddr_object = try arguments.getObject(1, .ByteArray);
+    const failure_block = arguments.getValue(2);
+
+    if (fd_object.getManagedType() != .FileDescriptor) {
+        return ExecutionResult.completion(try Completion.initRuntimeError(
+            context.vm,
+            context.source_range,
+            "Expected file descriptor as argument 1 of _BindFD:ToSockaddrBytes:IfFail:",
+            .{},
+        ));
+    }
+
+    const fd = FileDescriptor.fromValue(fd_object.value);
+    const sockaddr_bytes: []const u8 = sockaddr_object.getValues();
+
+    // FIXME: Check before casting
+    const sockaddr = std.os.system.sockaddr;
+    const rc = std.os.system.bind(fd.fd, @ptrCast(*const sockaddr, @alignCast(@alignOf(sockaddr), sockaddr_bytes.ptr)), @intCast(u32, sockaddr_bytes.len));
+    const errno = std.os.system.getErrno(rc);
+    if (errno == .SUCCESS) {
+        return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
+    }
+
+    return try callFailureBlock(context, errno, failure_block);
+}
