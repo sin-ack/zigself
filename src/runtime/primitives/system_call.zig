@@ -5,10 +5,12 @@
 const std = @import("std");
 
 const Heap = @import("../Heap.zig");
-const Value = @import("../value.zig").Value;
+const Value = value_import.Value;
 const Object = @import("../Object.zig");
 const ByteArray = @import("../ByteArray.zig");
 const Completion = @import("../Completion.zig");
+const value_import = @import("../value.zig");
+const ManagedValue = value_import.ManagedValue;
 const ManagedObject = @import("../object/managed.zig");
 const FileDescriptor = ManagedObject.FileDescriptor;
 const value_inspector = @import("../value_inspector.zig");
@@ -102,11 +104,21 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: *PrimitiveContext) !Executio
     const rc = std.os.system.read(fd_value, byte_array.getValues().ptr + @intCast(usize, offset), @intCast(usize, bytes_to_read));
 
     const errno = std.os.system.getErrno(rc);
-    if (errno == .SUCCESS) {
-        return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intCast(usize, rc))));
-    }
+    return switch (errno) {
+        .SUCCESS => ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intCast(usize, rc)))),
+        .AGAIN => blk: {
+            if (context.vm.isInRegularActor()) {
+                context.actor.yield_reason = .Blocked;
+                context.actor.blocked_fd = ManagedValue.init(fd);
 
-    return try callFailureBlock(context, errno, failure_block);
+                context.vm.switchToActor(context.vm.genesis_actor.?);
+                break :blk ExecutionResult.actorSwitch();
+            }
+
+            break :blk try callFailureBlock(context, errno, failure_block);
+        },
+        else => try callFailureBlock(context, errno, failure_block),
+    };
 }
 
 /// Write the given amount of bytes from the given byte array at the given offset
