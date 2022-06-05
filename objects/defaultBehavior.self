@@ -45,7 +45,7 @@ _AddSlots: (|
         "Convenient failure block for when you want the error to be fatal."
         raiseError = (|
             value = ( _Error: 'Error raised' ).
-            value: err = ( _Error: 'Error raised (FIXME: Print the error)' ).
+            value: err = ( _Error: 'Error raised: ', err asString ).
         |).
 
         "When sent, raises an error which tells the user that this slot needs
