@@ -512,3 +512,53 @@ pub fn ListenOnFD_WithBacklog_IfFail(context: *PrimitiveContext) !ExecutionResul
 
     return try callFailureBlock(context, errno, failure_block);
 }
+
+/// Accept a connection from the given fd, returning the new fd.
+pub fn AcceptFromFD_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    // TODO: Return the struct sockaddr with the connection details
+    const arguments = context.getArguments("_AcceptFromFD:IfFail:");
+    const fd_object = try arguments.getObject(0, .Managed);
+    const failure_block = arguments.getValue(1);
+
+    if (fd_object.getManagedType() != .FileDescriptor) {
+        return ExecutionResult.completion(try Completion.initRuntimeError(
+            context.vm,
+            context.source_range,
+            "Expected file descriptor as argument 1 of _AcceptFromFD:IfFail:",
+            .{},
+        ));
+    }
+
+    const fd = FileDescriptor.fromValue(fd_object.value);
+
+    const rc = std.os.system.accept(fd.fd, null, null);
+    const errno = std.os.system.getErrno(rc);
+    return switch (errno) {
+        .SUCCESS => {
+            const new_fd_value = @intCast(std.os.fd_t, rc);
+            _ = std.os.fcntl(new_fd_value, std.os.F.SETFD, std.os.FD_CLOEXEC) catch unreachable;
+
+            if (context.vm.isInRegularActor()) {
+                _ = std.os.fcntl(new_fd_value, std.os.F.SETFL, std.os.O.NONBLOCK) catch unreachable;
+            }
+
+            var new_fd = FileDescriptor.adopt(new_fd_value);
+            errdefer new_fd.close();
+
+            const managed_new_fd = try Object.Managed.create(context.vm.heap, .FileDescriptor, new_fd.toValue());
+            return ExecutionResult.completion(Completion.initNormal(managed_new_fd.asValue()));
+        },
+        .AGAIN => blk: {
+            if (context.vm.isInRegularActor()) {
+                context.actor.yield_reason = .Blocked;
+                context.actor.blocked_fd = ManagedValue.init(fd_object);
+
+                context.vm.switchToActor(context.vm.genesis_actor.?);
+                break :blk ExecutionResult.actorSwitch();
+            }
+
+            break :blk callFailureBlock(context, errno, failure_block);
+        },
+        else => try callFailureBlock(context, errno, failure_block),
+    };
+}
