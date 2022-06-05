@@ -317,7 +317,7 @@ pub fn ActorResume(context: *PrimitiveContext) !ExecutionResult {
     context.actor.writeRegister(context.target_location, context.vm.nil());
 
     switch (actor.yield_reason) {
-        .None, .Yielded, .ActorSpawned => {
+        .None, .Yielded, .Blocked, .ActorSpawned => {
             context.vm.switchToActor(actor);
             return ExecutionResult.actorSwitch();
         },
@@ -331,7 +331,6 @@ pub fn ActorResume(context: *PrimitiveContext) !ExecutionResult {
                 try Completion.initRuntimeError(context.vm, context.source_range, "Attempting to resume dead actor", .{}),
             );
         },
-        .Blocked => @panic("TODO handle YieldReason.Blocked"),
     }
 }
 
