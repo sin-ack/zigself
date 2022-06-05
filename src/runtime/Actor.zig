@@ -194,7 +194,6 @@ fn deinit(self: *Self, allocator: Allocator) void {
 }
 
 pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
-    const actor_context = self.actor_object.get().context;
     const current_activation_ref = self.activation_stack.getCurrent().takeRef(self.activation_stack);
 
     // Go through the mailbox and activate all the messages that have been sent
@@ -204,6 +203,9 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
         while (it) |node| : (it = node.next) {
             const method = node.data.method.get();
 
+            try vm.heap.ensureSpaceInEden(method.requiredSizeForActivation());
+
+            const actor_context = self.actor_object.get().context;
             const new_activation = try self.activation_stack.getNewActivationSlot(vm.allocator);
             try method.activateMethod(vm, actor_context, node.data.arguments, .zero, node.data.source_range, new_activation);
 

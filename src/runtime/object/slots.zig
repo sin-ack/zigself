@@ -449,6 +449,10 @@ pub const Method = packed struct {
         const activation_object = try Activation.create(vm.heap, .Method, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
         try out_activation.initInPlace(ActivationValue.init(activation_object), target_location, vm.takeStackSnapshot(), self.getMap().method_name, created_from);
     }
+
+    pub fn requiredSizeForActivation(self: *Method) usize {
+        return Activation.requiredSizeForAllocation(self.getArgumentSlotCount(), self.getAssignableSlotCount());
+    }
 };
 
 /// A block object. A block object is a slots object with a block map as its
