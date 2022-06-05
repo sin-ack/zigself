@@ -298,8 +298,9 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
 /// Perform the getaddrinfo system call and return an array of getaddrinfo
 /// objects.
 pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: *PrimitiveContext) !ExecutionResult {
-    const arguments = context.getArguments("_GetAddrInfoForHost:Port:Family:SocketType:Protocol:Flags:IfFail:");
-    const host = try arguments.getObject(0, .ByteArray);
+    const primitive_name = "_GetAddrInfoForHost:Port:Family:SocketType:Protocol:Flags:IfFail:";
+    const arguments = context.getArguments(primitive_name);
+    const host = arguments.getValue(0);
     const port = try arguments.getInteger(1, .Unsigned);
     const family = try arguments.getInteger(2, .Signed);
     const socket_type = try arguments.getInteger(3, .Signed);
@@ -320,14 +321,31 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
         .next = null,
     };
 
-    const node_c = try std.cstr.addNullByte(context.vm.allocator, host.getValues());
-    defer context.vm.allocator.free(node_c);
+    const node_c: ?[:0]const u8 = node_c: {
+        if (host.data == context.vm.nil().data) {
+            break :node_c null;
+        }
+
+        if (host.isObjectReference()) {
+            if (host.asObject().asType(.ByteArray)) |host_byte_array| {
+                break :node_c try std.cstr.addNullByte(context.vm.allocator, host_byte_array.getValues());
+            }
+        }
+
+        return ExecutionResult.completion(try Completion.initRuntimeError(
+            context.vm,
+            context.source_range,
+            "Expected nil or byte array object for argument 1 of " ++ primitive_name,
+            .{},
+        ));
+    };
+    defer if (node_c) |str| context.vm.allocator.free(str);
 
     const service_c = try std.fmt.allocPrintZ(context.vm.allocator, "{}", .{port});
     defer context.vm.allocator.free(service_c);
 
     var result_ptr: *std.os.addrinfo = undefined;
-    const rc = std.os.system.getaddrinfo(node_c, service_c, &hints, &result_ptr);
+    const rc = std.os.system.getaddrinfo(if (node_c) |s| s.ptr else null, service_c, &hints, &result_ptr);
     switch (rc) {
         @intToEnum(std.os.system.EAI, 0) => {},
 
