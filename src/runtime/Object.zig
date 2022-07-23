@@ -104,17 +104,17 @@ pub fn asValue(self: Self) Value {
     return Value.fromObjectAddress(self.getAddress());
 }
 
-pub fn clone(self: Self, heap: *Heap) !Self {
+pub fn clone(self: Self, heap: *Heap, actor_id: u31) !Self {
     return switch (self.header.getObjectType()) {
         .ForwardingReference, .Activation, .Method, .Map => unreachable,
-        .Slots => fromAddress((try self.asSlotsObject().clone(heap)).asObjectAddress()),
-        .Block => fromAddress((try self.asBlockObject().clone(heap)).asObjectAddress()),
-        .ByteArray => fromAddress((try self.asByteArrayObject().clone(heap)).asObjectAddress()),
-        .Array => fromAddress((try self.asArrayObject().clone(heap)).asObjectAddress()),
+        .Slots => fromAddress((try self.asSlotsObject().clone(heap, actor_id)).asObjectAddress()),
+        .Block => fromAddress((try self.asBlockObject().clone(heap, actor_id)).asObjectAddress()),
+        .ByteArray => fromAddress((try self.asByteArrayObject().clone(heap, actor_id)).asObjectAddress()),
+        .Array => fromAddress((try self.asArrayObject().clone(heap, actor_id)).asObjectAddress()),
         // Managed values are not clonable. Instead we return the same (immutable) reference.
         .Managed => self,
         .Actor => @panic("TODO Handle cloning of actor object"),
-        .ActorProxy => fromAddress((try self.asActorProxyObject().clone(heap)).asObjectAddress()),
+        .ActorProxy => fromAddress((try self.asActorProxyObject().clone(heap, actor_id)).asObjectAddress()),
     };
 }
 
@@ -363,12 +363,19 @@ pub fn setForwardAddress(self: Self, address: [*]u64) void {
 }
 
 pub const Header = packed struct {
+    // FIXME: Turn this into a packed struct once Zig's packed structs start
+    //        making sense.
     object_information: u64,
     map_pointer: Value,
 
-    pub fn init(self: *Header, object_type: ObjectType, map: Value) void {
+    const actor_id_shift = 32;
+    const actor_id_bits = 31;
+    const actor_id_mask: u64 = ((1 << actor_id_bits) - 1) << actor_id_shift;
+
+    pub fn init(self: *Header, object_type: ObjectType, actor_id: u31, map: Value) void {
         self.object_information = @enumToInt(Value.ValueType.ObjectMarker);
         self.setObjectType(object_type);
+        self.setActorID(actor_id);
 
         self.map_pointer = map;
     }
@@ -381,6 +388,14 @@ pub const Header = packed struct {
         // FIXME: Check whether the current object type is a valid one, and
         //        don't let Zig crash us here if it's not.
         return @intToEnum(ObjectType, self.object_information & ObjectTypeMask);
+    }
+
+    pub fn setActorID(self: *Header, actor_id: u31) void {
+        self.object_information = (self.object_information & ~actor_id_mask) | (@as(u64, actor_id) << actor_id_shift);
+    }
+
+    pub fn getActorID(self: *Header) u31 {
+        return @intCast(u31, (self.object_information & actor_id_mask) >> actor_id_shift);
     }
 
     pub fn getMap(self: *Header) *Map {

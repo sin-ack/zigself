@@ -67,7 +67,7 @@ pub fn pushSubEntrypointActivation(self: *Executable, vm: *VirtualMachine, execu
 
     const toplevel_context_method = try Object.Method.createTopLevelContextForExecutable(vm, Ref{ .value = self }, self.entrypointBlock());
     const activation_slot = try activation_stack.getNewActivationSlot(vm.allocator);
-    try toplevel_context_method.activateMethod(vm, vm.lobby(), &.{}, target_location, source_range, activation_slot);
+    try toplevel_context_method.activateMethod(vm, vm.current_actor.id, vm.lobby(), &.{}, target_location, source_range, activation_slot);
 }
 
 pub fn makeBlock(self: *Executable) !u32 {

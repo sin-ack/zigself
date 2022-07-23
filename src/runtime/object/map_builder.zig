@@ -8,6 +8,7 @@ const Heap = @import("../Heap.zig");
 const AstGen = @import("../AstGen.zig");
 const Slot = @import("../slot.zig").Slot;
 const Value = @import("../value.zig").Value;
+const VirtualMachine = @import("../VirtualMachine.zig");
 
 pub const AssignableSlotValues = std.BoundedArray(Heap.Tracked, AstGen.MaximumAssignableSlots);
 
@@ -70,7 +71,7 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
             map.setAssignableSlotCount(@intCast(u8, self.assignable_slot_index));
         }
 
-        pub fn createObject(self: *Self) !*ObjectType {
+        pub fn createObject(self: *Self, current_actor_id: u31) !*ObjectType {
             try self.heap.ensureSpaceInEden(
                 ObjectType.requiredSizeForAllocation(@intCast(u8, self.assignable_slot_index)),
             );
@@ -81,6 +82,7 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
 
             return try ObjectType.create(
                 self.heap,
+                current_actor_id,
                 @ptrCast(*MapType, self.map.getValue().asObjectAddress()),
                 slot_values_slice,
             );

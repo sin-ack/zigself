@@ -12,18 +12,18 @@ const ByteArray = @import("../ByteArray.zig");
 pub const ByteArrayObject = packed struct {
     header: Object.Header,
 
-    pub fn create(heap: *Heap, map: *Object.Map.ByteArray) !*ByteArrayObject {
+    pub fn create(heap: *Heap, actor_id: u31, map: *Object.Map.ByteArray) !*ByteArrayObject {
         const size = requiredSizeForAllocation();
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*ByteArrayObject, memory_area);
-        self.init(map.asValue());
+        self.init(actor_id, map.asValue());
 
         return self;
     }
 
-    fn init(self: *ByteArrayObject, map: Value) void {
-        self.header.init(.ByteArray, map);
+    fn init(self: *ByteArrayObject, actor_id: u31, map: Value) void {
+        self.header.init(.ByteArray, actor_id, map);
     }
 
     pub fn asObjectAddress(self: *ByteArrayObject) [*]u64 {
@@ -46,8 +46,8 @@ pub const ByteArrayObject = packed struct {
         return self.getMap().getByteArray();
     }
 
-    pub fn clone(self: *ByteArrayObject, heap: *Heap) !*ByteArrayObject {
-        return create(heap, self.getMap());
+    pub fn clone(self: *ByteArrayObject, heap: *Heap, actor_id: u31) !*ByteArrayObject {
+        return create(heap, actor_id, self.getMap());
     }
 
     pub fn getSizeInMemory(self: *ByteArrayObject) usize {

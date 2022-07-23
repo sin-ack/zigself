@@ -84,19 +84,19 @@ pub const ManagedObject = packed struct {
     header: Object.Header,
     value: Value,
 
-    pub fn create(heap: *Heap, managed_type: ManagedType, value: Value) !*ManagedObject {
+    pub fn create(heap: *Heap, actor_id: u31, managed_type: ManagedType, value: Value) !*ManagedObject {
         const managed_map = try getOrCreateManagedMap(heap);
 
         const memory_area = try heap.allocateInObjectSegment(requiredSizeForAllocation());
         const self = @ptrCast(*ManagedObject, memory_area);
-        self.init(managed_map, managed_type, value);
+        self.init(actor_id, managed_map, managed_type, value);
 
         try heap.markAddressAsNeedingFinalization(memory_area);
         return self;
     }
 
-    fn init(self: *ManagedObject, map: Value, managed_type: ManagedType, value: Value) void {
-        self.header.init(.Managed, map);
+    fn init(self: *ManagedObject, actor_id: u31, map: Value, managed_type: ManagedType, value: Value) void {
+        self.header.init(.Managed, actor_id, map);
         self.setManagedType(managed_type);
         self.value = value;
     }

@@ -41,19 +41,19 @@ pub const ActorObject = packed struct {
     /// returns.
     context: Value,
 
-    pub fn create(heap: *Heap, actor: *Actor, context: Value) !*ActorObject {
+    pub fn create(heap: *Heap, genesis_actor_id: u31, actor: *Actor, context: Value) !*ActorObject {
         const actor_map = try getOrCreateActorMap(heap);
 
         const memory_area = try heap.allocateInObjectSegment(requiredSizeForAllocation());
         const self = @ptrCast(*ActorObject, memory_area);
-        self.init(actor_map, actor, context);
+        self.init(genesis_actor_id, actor_map, actor, context);
 
         try heap.markAddressAsNeedingFinalization(memory_area);
         return self;
     }
 
-    fn init(self: *ActorObject, actor_map: Value, actor: *Actor, context: Value) void {
-        self.header.init(.Actor, actor_map);
+    fn init(self: *ActorObject, genesis_actor_id: u31, actor_map: Value, actor: *Actor, context: Value) void {
+        self.header.init(.Actor, genesis_actor_id, actor_map);
         self.actor = PointerValue(Actor).init(actor);
         self.context = context;
     }
@@ -97,17 +97,17 @@ pub const ActorProxyObject = packed struct {
     actor_object: ActorValue,
 
     /// Create the Actor object without sending a message to it.
-    pub fn create(heap: *Heap, actor_object: *ActorObject) !*ActorProxyObject {
+    pub fn create(heap: *Heap, current_actor_id: u31, actor_object: *ActorObject) !*ActorProxyObject {
         const actor_map = try getOrCreateActorMap(heap);
 
         const memory_area = try heap.allocateInObjectSegment(requiredSizeForAllocation());
         const self = @ptrCast(*ActorProxyObject, memory_area);
-        self.init(actor_map, actor_object);
+        self.init(current_actor_id, actor_map, actor_object);
         return self;
     }
 
-    fn init(self: *ActorProxyObject, actor_map: Value, actor_object: *ActorObject) void {
-        self.header.init(.ActorProxy, actor_map);
+    fn init(self: *ActorProxyObject, current_actor_id: u31, actor_map: Value, actor_object: *ActorObject) void {
+        self.header.init(.ActorProxy, current_actor_id, actor_map);
         self.actor_object = ActorValue.init(actor_object);
     }
 
@@ -123,8 +123,8 @@ pub const ActorProxyObject = packed struct {
         return self.actor_object.get();
     }
 
-    pub fn clone(self: *ActorProxyObject, heap: *Heap) !*ActorProxyObject {
-        return try create(heap, self.getActorObject());
+    pub fn clone(self: *ActorProxyObject, heap: *Heap, actor_id: u31) !*ActorProxyObject {
+        return try create(heap, actor_id, self.getActorObject());
     }
 
     pub fn getSizeInMemory(self: *ActorProxyObject) usize {

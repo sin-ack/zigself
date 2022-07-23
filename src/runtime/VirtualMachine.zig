@@ -100,23 +100,28 @@ pub fn create(allocator: Allocator) !*Self {
 
     const empty_map = try Object.Map.Slots.create(heap, 0);
 
-    self.lobby_object = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
+    // NOTE: These objects will always belong to the global actor, so we hardcode the actor ID 0 to them.
+    //       Otherwise we would hit a chicken-and-egg situation where the global actor needs the lobby
+    //       and the lobby needs the global actor.
+    const GlobalActorID = 0;
 
-    self.global_nil = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
-    self.global_true = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
-    self.global_false = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
+    self.lobby_object = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
 
-    self.actor_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
-    self.array_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
-    self.block_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
-    self.float_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
-    self.string_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
-    self.integer_traits = try heap.track((try Object.Slots.create(heap, empty_map, &.{})).asValue());
+    self.global_nil = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
+    self.global_true = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
+    self.global_false = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
 
-    try self.buildAddrInfoPrototype(heap);
+    self.actor_traits = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
+    self.array_traits = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
+    self.block_traits = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
+    self.float_traits = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
+    self.string_traits = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
+    self.integer_traits = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
 
     self.global_actor = try Actor.create(self, self.lobby_object.getValue());
     self.current_actor = self.global_actor;
+
+    try self.buildAddrInfoPrototype(heap);
 
     return self;
 }
@@ -141,7 +146,7 @@ fn buildAddrInfoPrototype(self: *Self, heap: *Heap) !void {
         try map_builder.addSlot(Slot.initAssignable(slot_name_byte_array, .NotParent, self.nil()));
     }
 
-    const object = try map_builder.createObject();
+    const object = try map_builder.createObject(self.current_actor.id);
     self.addrinfo_prototype = try heap.track(object.asValue());
 }
 

@@ -27,14 +27,14 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
 
     if (size == 0) {
         const array_map = try Object.Map.Array.create(context.vm.heap, 0);
-        const array = try Object.Array.createWithValues(context.vm.heap, array_map, &[_]Value{}, null);
+        const array = try Object.Array.createWithValues(context.vm.heap, context.actor.id, array_map, &[_]Value{}, null);
         return ExecutionResult.completion(Completion.initNormal(array.asValue()));
     } else {
         const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
         const filler = arguments.getValue(1);
 
         const new_array_map = try Object.Map.Array.create(context.vm.heap, @intCast(u64, size));
-        const new_array = try Object.Array.createWithValues(context.vm.heap, new_array_map, receiver.getValues(), filler);
+        const new_array = try Object.Array.createWithValues(context.vm.heap, context.actor.id, new_array_map, receiver.getValues(), filler);
         return ExecutionResult.completion(Completion.initNormal(new_array.asValue()));
     }
 }

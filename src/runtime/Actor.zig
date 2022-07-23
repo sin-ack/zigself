@@ -67,6 +67,10 @@ next_method_is_inline: bool = false,
 /// instruction.
 range: Range = .{ .start = 0, .end = 0 },
 
+/// The ID of this actor, which determines the ownership of each object in the
+/// system.
+id: u31,
+
 const Self = @This();
 const Mailbox = std.TailQueue(Message);
 
@@ -155,7 +159,7 @@ pub fn spawn(
     errdefer self.destroy(vm.allocator);
 
     const new_activation = try self.activation_stack.getNewActivationSlot(vm.allocator);
-    try method.activateMethod(vm, actor_context, &.{}, target_location, source_range, new_activation);
+    try method.activateMethod(vm, self.id, actor_context, &.{}, target_location, source_range, new_activation);
 
     return self;
 }
@@ -164,7 +168,11 @@ pub fn create(vm: *VirtualMachine, actor_context: Value) !*Self {
     const self = try vm.allocator.create(Self);
     errdefer vm.allocator.destroy(self);
 
-    const actor_object = try Object.Actor.create(vm.heap, self, actor_context);
+    // NOTE: If we're not in actor mode, then we belong to the global actor (which is this actor for the
+    //       first call to create); otherwise, we are always owned by the genesis actor.
+    const owning_actor_id = if (vm.isInActorMode()) vm.genesis_actor.?.id else 0;
+
+    const actor_object = try Object.Actor.create(vm.heap, owning_actor_id, self, actor_context);
 
     self.init(actor_object);
     return self;
@@ -177,6 +185,7 @@ pub fn destroy(self: *Self, allocator: Allocator) void {
 
 fn init(self: *Self, actor_object: *Object.Actor) void {
     self.* = .{
+        .id = newActorID(),
         .actor_object = ActorValue.init(actor_object),
     };
 
@@ -210,7 +219,7 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
 
             const actor_context = self.actor_object.get().context;
             const new_activation = try self.activation_stack.getNewActivationSlot(vm.allocator);
-            try method.activateMethod(vm, actor_context, node.data.arguments, .zero, node.data.source_range, new_activation);
+            try method.activateMethod(vm, self.id, actor_context, node.data.arguments, .zero, node.data.source_range, new_activation);
 
             self.message_sender = node.data.sender;
 
@@ -468,4 +477,13 @@ pub fn clearMailbox(self: *Self, allocator: Allocator) void {
     }
 
     self.mailbox = .{};
+}
+
+// FIXME: This isn't thread safe!
+var next_actor_id: u31 = 0;
+
+pub fn newActorID() u31 {
+    const this_id = next_actor_id;
+    next_actor_id += 1;
+    return this_id;
 }

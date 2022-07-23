@@ -54,7 +54,7 @@ pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
         var fd = FileDescriptor.adopt(@intCast(std.os.fd_t, rc));
         errdefer fd.close();
 
-        const managed_fd = try Object.Managed.create(context.vm.heap, .FileDescriptor, fd.toValue());
+        const managed_fd = try Object.Managed.create(context.vm.heap, context.actor.id, .FileDescriptor, fd.toValue());
         return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
     }
 
@@ -392,7 +392,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     addrinfo_prototype = context.vm.addrinfo_prototype.getValue().asObject().asType(.Slots).?;
 
     const result_array_map = try Object.Map.Array.create(context.vm.heap, result_count);
-    const result_array = try Object.Array.createWithValues(context.vm.heap, result_array_map, &.{}, context.vm.nil());
+    const result_array = try Object.Array.createWithValues(context.vm.heap, context.actor.id, result_array_map, &.{}, context.vm.nil());
 
     const result_values = result_array.getValues();
     {
@@ -407,9 +407,9 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
 
             // FIXME: We need to avoid creating a separate map altogether.
             const sockaddr_bytes_map = try Object.Map.ByteArray.create(context.vm.heap, sockaddr_byte_array);
-            const sockaddr_bytes_object = try Object.ByteArray.create(context.vm.heap, sockaddr_bytes_map);
+            const sockaddr_bytes_object = try Object.ByteArray.create(context.vm.heap, context.actor.id, sockaddr_bytes_map);
 
-            const addrinfo_copy: *Object.Slots = try addrinfo_prototype.clone(context.vm.heap);
+            const addrinfo_copy: *Object.Slots = try addrinfo_prototype.clone(context.vm.heap, context.actor.id);
             const addrinfo_value = addrinfo_copy.asValue();
 
             // FIXME: VM-generated structs already know where each slot is.
@@ -449,7 +449,7 @@ pub fn SocketWithFamily_Type_Protocol_IfFail(context: *PrimitiveContext) !Execut
         var fd = FileDescriptor.adopt(@intCast(std.os.fd_t, rc));
         errdefer fd.close();
 
-        const managed_fd = try Object.Managed.create(context.vm.heap, .FileDescriptor, fd.toValue());
+        const managed_fd = try Object.Managed.create(context.vm.heap, context.actor.id, .FileDescriptor, fd.toValue());
         return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
     }
 
@@ -545,7 +545,7 @@ pub fn AcceptFromFD_IfFail(context: *PrimitiveContext) !ExecutionResult {
             var new_fd = FileDescriptor.adopt(new_fd_value);
             errdefer new_fd.close();
 
-            const managed_new_fd = try Object.Managed.create(context.vm.heap, .FileDescriptor, new_fd.toValue());
+            const managed_new_fd = try Object.Managed.create(context.vm.heap, context.actor.id, .FileDescriptor, new_fd.toValue());
             return ExecutionResult.completion(Completion.initNormal(managed_new_fd.asValue()));
         },
         .AGAIN => blk: {

@@ -99,8 +99,8 @@ fn AssignableSlotsMixin(comptime ObjectT: type) type {
         }
 
         /// Return a shallow copy of this object.
-        pub fn clone(self: *ObjectT, heap: *Heap) !*ObjectT {
-            return ObjectT.create(heap, self.getMap(), getAssignableSlots(self));
+        pub fn clone(self: *ObjectT, heap: *Heap, actor_id: u31) !*ObjectT {
+            return ObjectT.create(heap, actor_id, self.getMap(), getAssignableSlots(self));
         }
     };
 }
@@ -115,7 +115,7 @@ pub const Slots = packed struct {
     pub usingnamespace SlotsLikeObjectBase(Slots);
     pub usingnamespace AssignableSlotsMixin(Slots);
 
-    pub fn create(heap: *Heap, map: *Map.Slots, assignable_slot_values: []const Value) !*Slots {
+    pub fn create(heap: *Heap, actor_id: u31, map: *Map.Slots, assignable_slot_values: []const Value) !*Slots {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -127,14 +127,14 @@ pub const Slots = packed struct {
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*Slots, memory_area);
-        self.init(map.asValue());
+        self.init(actor_id, map.asValue());
         std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
 
         return self;
     }
 
-    fn init(self: *Slots, map: Value) void {
-        self.header.init(.Slots, map);
+    fn init(self: *Slots, actor_id: u31, map: Value) void {
+        self.header.init(.Slots, actor_id, map);
     }
 
     pub fn getMap(self: *Slots) *Map.Slots {
@@ -224,7 +224,7 @@ pub const Slots = packed struct {
     /// move of this object if the number of assignable slots changes. A pointer
     /// to the new location of the slots object is returned in this case.
     /// Otherwise, the original location is returned as a pointer.
-    pub fn addSlotsFrom(self: *Slots, source_object: *Slots, allocator: Allocator, heap: *Heap) !*Slots {
+    pub fn addSlotsFrom(self: *Slots, source_object: *Slots, allocator: Allocator, heap: *Heap, current_actor_id: u31) !*Slots {
         const merge_info = try self.calculateMergeOf(source_object, allocator);
 
         // If there is anything that could change any of the slots, then we need
@@ -263,7 +263,7 @@ pub const Slots = packed struct {
         if (object_needs_change) {
             // We do need to create a new object, and then update all the heap
             // references to it.
-            const new_object = try map_builder.createObject();
+            const new_object = try map_builder.createObject(current_actor_id);
             try heap.updateAllReferencesTo(self.asValue(), new_object.asValue());
             return new_object;
         }
@@ -366,7 +366,7 @@ pub const Method = packed struct {
     pub usingnamespace SlotsLikeObjectBase(Method);
     pub usingnamespace AssignableSlotsMixin(Method);
 
-    pub fn create(heap: *Heap, map: *Map.Method, assignable_slot_values: []const Value) !*Method {
+    pub fn create(heap: *Heap, actor_id: u31, map: *Map.Method, assignable_slot_values: []const Value) !*Method {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -378,14 +378,14 @@ pub const Method = packed struct {
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*Method, memory_area);
-        self.init(map.asValue());
+        self.init(actor_id, map.asValue());
         std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
 
         return self;
     }
 
-    fn init(self: *Method, map: Value) void {
-        self.slots.header.init(.Method, map);
+    fn init(self: *Method, actor_id: u31, map: Value) void {
+        self.slots.header.init(.Method, actor_id, map);
     }
 
     pub fn getMap(self: *Method) *Map.Method {
@@ -414,7 +414,7 @@ pub const Method = packed struct {
             const toplevel_context_name = try ByteArray.createFromString(vm.heap, toplevel_context_string);
             break :blk try Map.Method.create(vm.heap, 0, 0, false, toplevel_context_name, block, executable);
         };
-        return try create(vm.heap, toplevel_context_method_map, &.{});
+        return try create(vm.heap, vm.current_actor.id, toplevel_context_method_map, &.{});
     }
 
     // --- Map forwarding ---
@@ -440,13 +440,14 @@ pub const Method = packed struct {
     pub fn activateMethod(
         self: *Method,
         vm: *VirtualMachine,
+        actor_id: u31,
         receiver: Value,
         arguments: []const Value,
         target_location: RegisterLocation,
         created_from: SourceRange,
         out_activation: *RuntimeActivation,
     ) !void {
-        const activation_object = try Activation.create(vm.heap, .Method, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
+        const activation_object = try Activation.create(vm.heap, actor_id, .Method, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
         try out_activation.initInPlace(ActivationValue.init(activation_object), target_location, vm.takeStackSnapshot(), self.getMap().method_name, created_from);
     }
 
@@ -463,7 +464,7 @@ pub const Block = packed struct {
     pub usingnamespace SlotsLikeObjectBase(Block);
     pub usingnamespace AssignableSlotsMixin(Block);
 
-    pub fn create(heap: *Heap, map: *Map.Block, assignable_slot_values: []const Value) !*Block {
+    pub fn create(heap: *Heap, actor_id: u31, map: *Map.Block, assignable_slot_values: []const Value) !*Block {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -475,14 +476,14 @@ pub const Block = packed struct {
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*Block, memory_area);
-        self.init(map.asValue());
+        self.init(actor_id, map.asValue());
         std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
 
         return self;
     }
 
-    fn init(self: *Block, map: Value) void {
-        self.slots.header.init(.Block, map);
+    fn init(self: *Block, actor_id: u31, map: Value) void {
+        self.slots.header.init(.Block, actor_id, map);
     }
 
     pub fn getMap(self: *Block) *Map.Block {
@@ -549,7 +550,7 @@ pub const Block = packed struct {
         created_from: SourceRange,
         out_activation: *RuntimeActivation,
     ) !void {
-        const activation_object = try Activation.create(vm.heap, .Block, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
+        const activation_object = try Activation.create(vm.heap, vm.current_actor.id, .Block, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
 
         try out_activation.initInPlace(ActivationValue.init(activation_object), target_location, vm.takeStackSnapshot(), creator_message, created_from);
         out_activation.parent_activation = self.getMap().parent_activation;
@@ -568,6 +569,7 @@ pub const Activation = packed struct {
     /// Borrows a ref from `message_script`.
     pub fn create(
         heap: *Heap,
+        actor_id: u31,
         comptime map_type: MapType,
         map: *Map,
         arguments: []const Value,
@@ -603,7 +605,7 @@ pub const Activation = packed struct {
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*Activation, memory_area);
-        self.init(map_type, map.asValue(), receiver);
+        self.init(map_type, actor_id, map.asValue(), receiver);
         std.mem.copy(Value, self.getArgumentSlots(), arguments);
         std.mem.copy(Value, self.getNonargumentSlots(), assignable_slot_values);
 
@@ -613,10 +615,11 @@ pub const Activation = packed struct {
     fn init(
         self: *Activation,
         comptime map_type: MapType,
+        actor_id: u31,
         map: Value,
         receiver: Value,
     ) void {
-        self.slots.header.init(.Activation, map);
+        self.slots.header.init(.Activation, actor_id, map);
         self.setActivationType(if (map_type == .Block) ActivationType.Block else ActivationType.Method);
 
         self.receiver = receiver;

@@ -105,7 +105,8 @@ pub const Map = packed struct {
     pub const Array = ArrayMap;
 
     fn init(self: *Map, map_type: MapType, map_map: Value) void {
-        self.header.init(.Map, map_map);
+        // NOTE: Maps are immutable, so it's fine to consider all of them as being owned by the global actor.
+        self.header.init(.Map, 0, map_map);
         self.setMapType(map_type);
     }
 

@@ -245,6 +245,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     const new_activation = try new_actor.activation_stack.getNewActivationSlot(context.vm.allocator);
     try entrypoint_method.activateMethod(
         context.vm,
+        new_actor.id,
         actor_object.context,
         &.{},
         context.target_location,
@@ -256,7 +257,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     // actor who spawned it, if it wasn't the genesis actor that spawned the
     // new actor.
     if (context.actor != genesis_actor) {
-        const new_actor_proxy = try Object.ActorProxy.create(context.vm.heap, actor_object);
+        const new_actor_proxy = try Object.ActorProxy.create(context.vm.heap, context.actor.id, actor_object);
         context.actor.writeRegister(context.target_location, new_actor_proxy.asValue());
         context.actor.yield_reason = .ActorSpawned;
     }
@@ -385,7 +386,7 @@ pub fn ActorSender(context: *PrimitiveContext) !ExecutionResult {
     );
 
     const actor_object = context.actor.message_sender.?.get();
-    const actor_proxy = try Object.ActorProxy.create(context.vm.heap, actor_object);
+    const actor_proxy = try Object.ActorProxy.create(context.vm.heap, context.actor.id, actor_object);
 
     return ExecutionResult.completion(Completion.initNormal(actor_proxy.asValue()));
 }

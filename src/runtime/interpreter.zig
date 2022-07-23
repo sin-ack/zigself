@@ -232,7 +232,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
                 try map_builder.addSlot(slot);
             }
 
-            const slots_object = try map_builder.createObject();
+            const slots_object = try map_builder.createObject(actor.id);
             vm.writeRegister(inst.target, slots_object.asValue());
             actor.slot_stack.popNItems(payload.slot_count);
             return success;
@@ -273,7 +273,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
                 try map_builder.addSlot(slot);
             }
 
-            const method_object = try map_builder.createObject();
+            const method_object = try map_builder.createObject(actor.id);
             vm.writeRegister(inst.target, method_object.asValue());
             actor.slot_stack.popNItems(payload.slot_count);
             return success;
@@ -327,7 +327,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
                 try map_builder.addSlot(slot);
             }
 
-            const block_object = try map_builder.createObject();
+            const block_object = try map_builder.createObject(actor.id);
             vm.writeRegister(inst.target, block_object.asValue());
             actor.slot_stack.popNItems(payload.slot_count);
             return success;
@@ -344,7 +344,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
 
             const byte_array = try ByteArray.createFromString(vm.heap, string);
             const byte_array_map = try Object.Map.ByteArray.create(vm.heap, byte_array);
-            const byte_array_object = try Object.ByteArray.create(vm.heap, byte_array_map);
+            const byte_array_object = try Object.ByteArray.create(vm.heap, actor.id, byte_array_map);
 
             vm.writeRegister(inst.target, byte_array_object.asValue());
             return success;
@@ -615,5 +615,5 @@ fn executeMethod(
     }
 
     const activation_slot = try actor.activation_stack.getNewActivationSlot(vm.allocator);
-    try method.activateMethod(vm, receiver_of_method, arguments, target_location, source_range, activation_slot);
+    try method.activateMethod(vm, actor.id, receiver_of_method, arguments, target_location, source_range, activation_slot);
 }

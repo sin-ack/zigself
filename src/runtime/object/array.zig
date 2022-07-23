@@ -15,7 +15,7 @@ pub const ArrayObject = packed struct {
     /// the filler value. If filler value is null, expects values to be at least
     /// as long as the size described in the map. If values is longer than the
     /// size N specified in the map, copies the first N items.
-    pub fn createWithValues(heap: *Heap, map: *Object.Map.Array, values: []Value, filler: ?Value) !*ArrayObject {
+    pub fn createWithValues(heap: *Heap, actor_id: u31, map: *Object.Map.Array, values: []Value, filler: ?Value) !*ArrayObject {
         if (filler == null and values.len < map.getSize()) {
             std.debug.panic(
                 "!!! Array.createWithValues given values slice that's too short, and no filler was given!",
@@ -27,13 +27,13 @@ pub const ArrayObject = packed struct {
 
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*ArrayObject, memory_area);
-        self.init(map, values, filler);
+        self.init(actor_id, map, values, filler);
 
         return self;
     }
 
-    fn init(self: *ArrayObject, map: *Object.Map.Array, values: []Value, filler: ?Value) void {
-        self.header.init(.Array, map.asValue());
+    fn init(self: *ArrayObject, actor_id: u31, map: *Object.Map.Array, values: []Value, filler: ?Value) void {
+        self.header.init(.Array, actor_id, map.asValue());
 
         const values_to_copy = values[0..std.math.min(values.len, map.getSize())];
         std.mem.copy(Value, self.getValues(), values_to_copy);
@@ -66,8 +66,8 @@ pub const ArrayObject = packed struct {
         return std.mem.bytesAsSlice(Value, start_of_items[0 .. self.getSize() * @sizeOf(Value)]);
     }
 
-    pub fn clone(self: *ArrayObject, heap: *Heap) !*ArrayObject {
-        return createWithValues(heap, self.getMap(), self.getValues(), null);
+    pub fn clone(self: *ArrayObject, heap: *Heap, actor_id: u31) !*ArrayObject {
+        return createWithValues(heap, actor_id, self.getMap(), self.getValues(), null);
     }
 
     pub fn getSizeInMemory(self: *ArrayObject) usize {

@@ -27,7 +27,7 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
     receiver = context.receiver.getValue().asObject().asType(.Slots).?;
     argument = context.arguments[0].asObject().asType(.Slots).?;
 
-    const new_object = try receiver.addSlotsFrom(argument, context.vm.allocator, context.vm.heap);
+    const new_object = try receiver.addSlotsFrom(argument, context.vm.allocator, context.vm.heap, context.actor.id);
     return ExecutionResult.completion(Completion.initNormal(new_object.asValue()));
 }
 
@@ -87,7 +87,7 @@ pub fn Inspect(context: *PrimitiveContext) !ExecutionResult {
 /// Make an identical shallow copy of the receiver and return it.
 pub fn Clone(context: *PrimitiveContext) !ExecutionResult {
     const receiver = context.receiver.getValue();
-    return ExecutionResult.completion(Completion.initNormal(try receiver.clone(context.vm.heap)));
+    return ExecutionResult.completion(Completion.initNormal(try receiver.clone(context.vm.heap, context.actor.id)));
 }
 
 /// Return whether the receiver and argument are identical. Returns either
