@@ -39,8 +39,7 @@ const Test = struct {
     }
 };
 
-/// Expects an iterable directory.
-fn collectTests(allocator: Allocator, directory: std.fs.Dir) !std.ArrayList(Test) {
+fn collectTests(allocator: Allocator, directory: std.fs.IterableDir) !std.ArrayList(Test) {
     var tests = std.ArrayList(Test).init(allocator);
     errdefer {
         for (tests.items) |*the_test| {
@@ -235,11 +234,11 @@ pub fn main() !u8 {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var directory: std.fs.Dir = blk: {
+    var directory: std.fs.IterableDir = blk: {
         const cwd = std.fs.cwd();
         const source_file = @src().file;
 
-        break :blk try cwd.openDir(std.fs.path.dirname(source_file) orelse ".", .{ .iterate = true });
+        break :blk try cwd.openIterableDir(std.fs.path.dirname(source_file) orelse ".", .{});
     };
     defer directory.close();
 
