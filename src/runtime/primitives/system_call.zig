@@ -376,9 +376,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
         var it: ?*std.os.addrinfo = result_ptr;
         while (it) |result| : (it = result.next) {
             required_memory += addrinfo_prototype.getSizeInMemory();
-            required_memory += Object.Map.ByteArray.requiredSizeForAllocation();
-            required_memory += Object.ByteArray.requiredSizeForAllocation();
-            required_memory += ByteArray.requiredSizeForAllocation(result.addrlen);
+            required_memory += Object.ByteArray.requiredSizeForAllocation(result.addrlen);
             result_count += 1;
         }
     }
@@ -403,11 +401,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
             i += 1;
         }) {
             const sockaddr_memory = @ptrCast([*]u8, result.addr.?);
-            const sockaddr_byte_array = try ByteArray.createFromString(context.vm.heap, sockaddr_memory[0..result.addrlen]);
-
-            // FIXME: We need to avoid creating a separate map altogether.
-            const sockaddr_bytes_map = try Object.Map.ByteArray.create(context.vm.heap, sockaddr_byte_array);
-            const sockaddr_bytes_object = try Object.ByteArray.create(context.vm.heap, context.actor.id, sockaddr_bytes_map);
+            const sockaddr_bytes_object = try Object.ByteArray.createWithValues(context.vm.heap, context.actor.id, sockaddr_memory[0..result.addrlen]);
 
             const addrinfo_copy: *Object.Slots = try addrinfo_prototype.clone(context.vm.heap, context.actor.id);
             const addrinfo_value = addrinfo_copy.asValue();

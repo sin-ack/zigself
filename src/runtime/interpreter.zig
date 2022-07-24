@@ -336,17 +336,10 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
             const payload = inst.payload(.CreateByteArray);
             const string = payload.string;
 
-            try vm.heap.ensureSpaceInEden(
-                ByteArray.requiredSizeForAllocation(string.len) +
-                    Object.Map.ByteArray.requiredSizeForAllocation() +
-                    Object.ByteArray.requiredSizeForAllocation(),
-            );
+            try vm.heap.ensureSpaceInEden(Object.ByteArray.requiredSizeForAllocation(string.len));
 
-            const byte_array = try ByteArray.createFromString(vm.heap, string);
-            const byte_array_map = try Object.Map.ByteArray.create(vm.heap, byte_array);
-            const byte_array_object = try Object.ByteArray.create(vm.heap, actor.id, byte_array_map);
-
-            vm.writeRegister(inst.target, byte_array_object.asValue());
+            const byte_array = try Object.ByteArray.createWithValues(vm.heap, actor.id, string);
+            vm.writeRegister(inst.target, byte_array.asValue());
             return success;
         },
         .SetMethodInline => {

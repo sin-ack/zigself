@@ -94,9 +94,7 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
     const filler = filler_contents[0];
 
     try context.vm.heap.ensureSpaceInEden(
-        ByteArray.requiredSizeForAllocation(@intCast(u64, size)) +
-            Object.Map.ByteArray.requiredSizeForAllocation() +
-            Object.ByteArray.requiredSizeForAllocation(),
+        Object.ByteArray.requiredSizeForAllocation(@intCast(u64, size)),
     );
 
     // Refresh pointers
@@ -112,8 +110,8 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
         std.mem.set(u8, new_byte_array.getValues()[bytes_to_copy..], filler);
     }
 
-    const byte_array_map = try Object.Map.ByteArray.create(context.vm.heap, new_byte_array);
-    return ExecutionResult.completion(Completion.initNormal((try Object.ByteArray.create(context.vm.heap, context.actor.id, byte_array_map)).asValue()));
+    const byte_array_object = try Object.ByteArray.create(context.vm.heap, context.actor.id, new_byte_array);
+    return ExecutionResult.completion(Completion.initNormal(byte_array_object.asValue()));
 }
 
 /// Return whether the receiver byte array is equal to the argument.
@@ -151,9 +149,7 @@ pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
     const argument_size = argument.getValues().len;
 
     try context.vm.heap.ensureSpaceInEden(
-        ByteArray.requiredSizeForAllocation(receiver_size + argument_size) +
-            Object.Map.ByteArray.requiredSizeForAllocation() +
-            Object.ByteArray.requiredSizeForAllocation(),
+        Object.ByteArray.requiredSizeForAllocation(receiver_size + argument_size),
     );
 
     // Refresh pointers
@@ -164,6 +160,6 @@ pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
     std.mem.copy(u8, new_byte_array.getValues()[0..receiver_size], receiver.getValues());
     std.mem.copy(u8, new_byte_array.getValues()[receiver_size..], argument.getValues());
 
-    const byte_array_map = try Object.Map.ByteArray.create(context.vm.heap, new_byte_array);
-    return ExecutionResult.completion(Completion.initNormal((try Object.ByteArray.create(context.vm.heap, context.actor.id, byte_array_map)).asValue()));
+    const byte_array_object = try Object.ByteArray.create(context.vm.heap, context.actor.id, new_byte_array);
+    return ExecutionResult.completion(Completion.initNormal(byte_array_object.asValue()));
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -9,21 +9,53 @@ const Value = @import("../value.zig").Value;
 const Object = @import("../Object.zig");
 const ByteArray = @import("../ByteArray.zig");
 
+// FIXME: This isn't thread safe!
+var singleton_byte_array_map: ?Heap.Tracked = null;
+
+fn getOrCreateByteArrayMap(heap: *Heap) !Value {
+    if (singleton_byte_array_map) |map| return map.getValue();
+
+    const map = try Object.Map.Slots.create(heap, 0);
+    singleton_byte_array_map = try heap.track(map.asValue());
+    return map.asValue();
+}
+
+fn requiredSizeForByteArrayMap() usize {
+    return if (singleton_byte_array_map != null) 0 else Object.Map.Slots.requiredSizeForAllocation(0);
+}
+
 pub const ByteArrayObject = packed struct {
     header: Object.Header,
+    byte_array: Value,
 
-    pub fn create(heap: *Heap, actor_id: u31, map: *Object.Map.ByteArray) !*ByteArrayObject {
-        const size = requiredSizeForAllocation();
+    /// Create an initialized byte array object from the given values.
+    pub fn createWithValues(heap: *Heap, actor_id: u31, values: []const u8) !*ByteArrayObject {
+        const self = try createUninitialized(heap, actor_id, values.len);
+        std.mem.copy(u8, self.getValues(), values);
+        return self;
+    }
 
+    /// Create an uninitialized byte array object with the given size.
+    pub fn createUninitialized(heap: *Heap, actor_id: u31, size: usize) !*ByteArrayObject {
+        const byte_array = try ByteArray.createUninitialized(heap, size);
+        return try create(heap, actor_id, byte_array);
+    }
+
+    /// Create a byte array object with an existing byte array.
+    pub fn create(heap: *Heap, actor_id: u31, byte_array: ByteArray) !*ByteArrayObject {
+        const byte_array_map = try getOrCreateByteArrayMap(heap);
+
+        const size = requiredSizeForAllocation(null);
         var memory_area = try heap.allocateInObjectSegment(size);
         var self = @ptrCast(*ByteArrayObject, memory_area);
-        self.init(actor_id, map.asValue());
+        self.init(actor_id, byte_array_map, byte_array);
 
         return self;
     }
 
-    fn init(self: *ByteArrayObject, actor_id: u31, map: Value) void {
+    fn init(self: *ByteArrayObject, actor_id: u31, map: Value, byte_array: ByteArray) void {
         self.header.init(.ByteArray, actor_id, map);
+        self.byte_array = byte_array.asValue();
     }
 
     pub fn asObjectAddress(self: *ByteArrayObject) [*]u64 {
@@ -34,28 +66,35 @@ pub const ByteArrayObject = packed struct {
         return Value.fromObjectAddress(self.asObjectAddress());
     }
 
-    pub fn getMap(self: *ByteArrayObject) *Object.Map.ByteArray {
-        return self.header.getMap().asByteArrayMap();
+    pub fn getValues(self: *ByteArrayObject) []u8 {
+        return self.getByteArray().getValues();
     }
 
-    pub fn getValues(self: *ByteArrayObject) []u8 {
-        return self.header.getMap().asByteArrayMap().getValues();
+    pub fn getLength(self: *ByteArrayObject) u64 {
+        return self.getByteArray().header.length.get();
     }
 
     pub fn getByteArray(self: *ByteArrayObject) ByteArray {
-        return self.getMap().getByteArray();
+        return self.byte_array.asByteArray();
     }
 
     pub fn clone(self: *ByteArrayObject, heap: *Heap, actor_id: u31) !*ByteArrayObject {
-        return create(heap, actor_id, self.getMap());
+        return createWithValues(heap, actor_id, self.getValues());
     }
 
     pub fn getSizeInMemory(self: *ByteArrayObject) usize {
         _ = self;
-        return requiredSizeForAllocation();
+        return requiredSizeForAllocation(self.getLength());
     }
 
-    pub fn requiredSizeForAllocation() usize {
-        return @sizeOf(ByteArrayObject);
+    /// Call with null if the byte array object has already been allocated.
+    pub fn requiredSizeForAllocation(length: ?usize) usize {
+        const required_size = requiredSizeForByteArrayMap() + @sizeOf(ByteArrayObject);
+
+        if (length) |l| {
+            return required_size + ByteArray.requiredSizeForAllocation(l);
+        }
+
+        return required_size;
     }
 };

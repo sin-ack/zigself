@@ -20,7 +20,7 @@ const value_import = @import("../value.zig");
 const BytecodeBlock = @import("../lowcode/Block.zig");
 const RefCountedValue = value_import.RefCountedValue;
 // Zig's shadowing rules are annoying.
-const ByteArrayTheFirst = @import("../ByteArray.zig");
+const ByteArray = @import("../ByteArray.zig");
 const BytecodeExecutable = @import("../lowcode/Executable.zig");
 
 var static_map_map: ?Value = null;
@@ -54,7 +54,6 @@ pub const MapType = enum(u64) {
     Slots = 0b000 << MapTypeShift,
     Method = 0b001 << MapTypeShift,
     Block = 0b010 << MapTypeShift,
-    ByteArray = 0b011 << MapTypeShift,
     Array = 0b100 << MapTypeShift,
 };
 
@@ -101,7 +100,6 @@ pub const Map = packed struct {
     pub const Slots = SlotsMap;
     pub const Method = MethodMap;
     pub const Block = BlockMap;
-    pub const ByteArray = ByteArrayMap;
     pub const Array = ArrayMap;
 
     fn init(self: *Map, map_type: MapType, map_map: Value) void {
@@ -130,14 +128,14 @@ pub const Map = packed struct {
 
     pub fn shouldFinalize(self: *Map) bool {
         return switch (self.getMapType()) {
-            .Slots, .Array, .ByteArray => false,
+            .Slots, .Array => false,
             .Method, .Block => true,
         };
     }
 
     pub fn finalize(self: *Map, allocator: Allocator) void {
         switch (self.getMapType()) {
-            .Slots, .Array, .ByteArray => unreachable,
+            .Slots, .Array => unreachable,
             .Method => self.asMethodMap().finalize(allocator),
             .Block => self.asBlockMap().finalize(allocator),
         }
@@ -148,7 +146,6 @@ pub const Map = packed struct {
             .Slots => self.asSlotsMap().getSizeInMemory(),
             .Method => self.asMethodMap().getSizeInMemory(),
             .Block => self.asBlockMap().getSizeInMemory(),
-            .ByteArray => self.asByteArrayMap().getSizeInMemory(),
             .Array => self.asArrayMap().getSizeInMemory(),
         };
     }
@@ -156,19 +153,16 @@ pub const Map = packed struct {
     pub const isSlotsMap = generateIsMap(Map, .Slots);
     pub const isMethodMap = generateIsMap(Map, .Method);
     pub const isBlockMap = generateIsMap(Map, .Block);
-    pub const isByteArrayMap = generateIsMap(Map, .ByteArray);
     pub const isArrayMap = generateIsMap(Map, .Array);
 
     pub const mustBeSlotsMap = generateMustBeMap(Map, "Slots", "a slots map");
     pub const mustBeMethodMap = generateMustBeMap(Map, "Method", "a method map");
     pub const mustBeBlockMap = generateMustBeMap(Map, "Block", "a block map");
-    pub const mustBeByteArrayMap = generateMustBeMap(Map, "ByteArray", "a byte array map");
     pub const mustBeArrayMap = generateMustBeMap(Map, "Array", "an array map");
 
     pub const asSlotsMap = generateAsMap(Map, Slots, "Slots");
     pub const asMethodMap = generateAsMap(Map, Method, "Method");
     pub const asBlockMap = generateAsMap(Map, Block, "Block");
-    pub const asByteArrayMap = generateAsMap(Map, ByteArray, "ByteArray");
     pub const asArrayMap = generateAsMap(Map, Array, "Array");
 };
 
@@ -327,7 +321,7 @@ const MethodMap = packed struct {
         argument_slot_count: u8,
         total_slot_count: u32,
         is_inline_method: bool,
-        method_name: ByteArrayTheFirst,
+        method_name: ByteArray,
         block: *BytecodeBlock,
         executable: BytecodeExecutable.Ref,
     ) !*MethodMap {
@@ -348,7 +342,7 @@ const MethodMap = packed struct {
         argument_slot_count: u8,
         total_slot_count: u32,
         is_inline_method: bool,
-        method_name: ByteArrayTheFirst,
+        method_name: ByteArray,
         block: *BytecodeBlock,
         executable: BytecodeExecutable.Ref,
     ) void {
@@ -446,50 +440,6 @@ const BlockMap = packed struct {
 
     pub fn getArgumentSlotCount(self: *BlockMap) u8 {
         return self.base_map.getArgumentSlotCount();
-    }
-};
-
-// A byte array map. A simple map holding a reference to the byte array.
-const ByteArrayMap = packed struct {
-    map: Map,
-    /// A reference to the byte array in question.
-    byte_array: Value,
-
-    pub fn create(heap: *Heap, byte_array: ByteArrayTheFirst) !*ByteArrayMap {
-        const size = requiredSizeForAllocation();
-        const map_map = try getMapMap(heap);
-
-        var memory_area = try heap.allocateInObjectSegment(size);
-        var self = @ptrCast(*ByteArrayMap, memory_area);
-        self.init(map_map, byte_array);
-
-        return self;
-    }
-
-    fn init(self: *ByteArrayMap, map_map: Value, byte_array: ByteArrayTheFirst) void {
-        self.map.init(.ByteArray, map_map);
-        self.byte_array = byte_array.asValue();
-    }
-
-    pub fn asValue(self: *ByteArrayMap) Value {
-        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
-    }
-
-    pub fn getByteArray(self: *ByteArrayMap) ByteArrayTheFirst {
-        return ByteArrayTheFirst.fromAddress(self.byte_array.asObjectAddress());
-    }
-
-    pub fn getValues(self: *ByteArrayMap) []u8 {
-        return self.getByteArray().getValues();
-    }
-
-    pub fn getSizeInMemory(self: *ByteArrayMap) usize {
-        _ = self;
-        return requiredSizeForAllocation();
-    }
-
-    pub fn requiredSizeForAllocation() usize {
-        return @sizeOf(ByteArrayMap);
     }
 };
 
