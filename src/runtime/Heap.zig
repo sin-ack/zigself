@@ -811,7 +811,7 @@ const Space = struct {
 
     /// Adds the given tracked value into the tracked set of this space.
     pub fn addToTrackedSet(self: *Space, allocator: Allocator, handle: *[*]u64) !void {
-        try self.tracked_set.put(allocator, handle, .{});
+        try self.tracked_set.put(allocator, handle, {});
     }
 
     /// Returns whether the tracked set contains the given tracked value.
