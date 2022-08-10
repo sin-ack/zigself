@@ -99,8 +99,8 @@ fn AssignableSlotsMixin(comptime ObjectT: type) type {
         }
 
         /// Return a shallow copy of this object.
-        pub fn clone(self: *ObjectT, heap: *Heap, actor_id: u31) !*ObjectT {
-            return ObjectT.create(heap, actor_id, self.getMap(), getAssignableSlots(self));
+        pub fn clone(self: *ObjectT, token: *Heap.AllocationToken, actor_id: u31) *ObjectT {
+            return ObjectT.create(token, actor_id, self.getMap(), getAssignableSlots(self));
         }
     };
 }
@@ -115,7 +115,7 @@ pub const Slots = packed struct {
     pub usingnamespace SlotsLikeObjectBase(Slots);
     pub usingnamespace AssignableSlotsMixin(Slots);
 
-    pub fn create(heap: *Heap, actor_id: u31, map: *Map.Slots, assignable_slot_values: []const Value) !*Slots {
+    pub fn create(token: *Heap.AllocationToken, actor_id: u31, map: *Map.Slots, assignable_slot_values: []const Value) *Slots {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -125,7 +125,7 @@ pub const Slots = packed struct {
 
         const size = Slots.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len));
 
-        var memory_area = try heap.allocateInObjectSegment(size);
+        var memory_area = token.allocate(.Object, size);
         var self = @ptrCast(*Slots, memory_area);
         self.init(actor_id, map.asValue());
         std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
@@ -217,14 +217,14 @@ pub const Slots = packed struct {
         }.outerCallback);
     }
 
-    /// Returns a slice of `Value`s for the assignable slots that are after the
-    /// given object offset. Should not be called from the outside, it's only
-    /// intended for Slots and its "subclasses".
     /// Add the source slots into the target object. This operation may cause a
     /// move of this object if the number of assignable slots changes. A pointer
     /// to the new location of the slots object is returned in this case.
     /// Otherwise, the original location is returned as a pointer.
-    pub fn addSlotsFrom(self: *Slots, source_object: *Slots, allocator: Allocator, heap: *Heap, current_actor_id: u31) !*Slots {
+    ///
+    /// The token must have at least `self.requiredSizeForMerging(source_object)`
+    /// bytes available.
+    pub fn addSlotsFrom(self: *Slots, source_object: *Slots, allocator: Allocator, token: *Heap.AllocationToken, current_actor_id: u31) !*Slots {
         const merge_info = try self.calculateMergeOf(source_object, allocator);
 
         // If there is anything that could change any of the slots, then we need
@@ -241,19 +241,16 @@ pub const Slots = packed struct {
         }
 
         // Let's allocate a new map with the target slot count.
-        var new_map = try Object.Map.Slots.create(heap, @intCast(u32, merge_info.slots));
-
-        var map_builder = try new_map.getMapBuilder(heap);
-        defer map_builder.deinit();
+        var new_map = Object.Map.Slots.create(token, @intCast(u32, merge_info.slots));
+        var map_builder = new_map.getMapBuilder(token);
 
         const CallbackContext = struct { map_builder: *MapBuilder(Map.Slots, Slots) };
-
-        try forSlotsInMergeOrderWithInheritedFirst(self, source_object, CallbackContext{ .map_builder = &map_builder }, struct {
+        forSlotsInMergeOrderWithInheritedFirst(self, source_object, CallbackContext{ .map_builder = &map_builder }, struct {
             fn callback(context: CallbackContext, object: *Slots, slot: Slot) !void {
                 const slot_copy = slot.copy(object);
-                try context.map_builder.addSlot(slot_copy);
+                context.map_builder.addSlot(slot_copy);
             }
-        }.callback);
+        }.callback) catch unreachable;
 
         // At this point, we have a map builder which has initialized our new
         // map with all the constant slots.
@@ -263,15 +260,15 @@ pub const Slots = packed struct {
         if (object_needs_change) {
             // We do need to create a new object, and then update all the heap
             // references to it.
-            const new_object = try map_builder.createObject(current_actor_id);
-            try heap.updateAllReferencesTo(self.asValue(), new_object.asValue());
+            const new_object = map_builder.createObject(current_actor_id);
+            try token.heap.updateAllReferencesTo(self.asValue(), new_object.asValue());
             return new_object;
         }
 
         // We can simply update the assignable slots and map pointer of the
         // object.
-        self.header.map_pointer = map_builder.map.getValue();
-        try heap.rememberObjectReference(self.asValue(), self.header.map_pointer);
+        self.header.map_pointer = map_builder.map.asValue();
+        try token.heap.rememberObjectReference(self.asValue(), self.header.map_pointer);
         var assignable_values = self.getAssignableSlots();
         map_builder.writeAssignableSlotValuesTo(assignable_values);
         return self;
@@ -366,7 +363,7 @@ pub const Method = packed struct {
     pub usingnamespace SlotsLikeObjectBase(Method);
     pub usingnamespace AssignableSlotsMixin(Method);
 
-    pub fn create(heap: *Heap, actor_id: u31, map: *Map.Method, assignable_slot_values: []const Value) !*Method {
+    pub fn create(token: *Heap.AllocationToken, actor_id: u31, map: *Map.Method, assignable_slot_values: []const Value) *Method {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -376,7 +373,7 @@ pub const Method = packed struct {
 
         const size = Method.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len));
 
-        var memory_area = try heap.allocateInObjectSegment(size);
+        var memory_area = token.allocate(.Object, size);
         var self = @ptrCast(*Method, memory_area);
         self.init(actor_id, map.asValue());
         std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
@@ -401,20 +398,21 @@ pub const Method = packed struct {
     const toplevel_context_string = "<top level>";
     pub fn createTopLevelContextForExecutable(
         vm: *VirtualMachine,
+        token: *Heap.AllocationToken,
         executable: BytecodeExecutable.Ref,
         block: *BytecodeBlock,
     ) !*Method {
-        try vm.heap.ensureSpaceInEden(
-            ByteArray.requiredSizeForAllocation(toplevel_context_string.len) +
-                Map.Method.requiredSizeForAllocation(0) +
-                Method.requiredSizeForAllocation(0),
-        );
-
         const toplevel_context_method_map = blk: {
-            const toplevel_context_name = try ByteArray.createFromString(vm.heap, toplevel_context_string);
-            break :blk try Map.Method.create(vm.heap, 0, 0, false, toplevel_context_name, block, executable);
+            const toplevel_context_name = ByteArray.createFromString(token, toplevel_context_string);
+            break :blk try Map.Method.create(token, 0, 0, false, toplevel_context_name, block, executable);
         };
-        return try create(vm.heap, vm.current_actor.id, toplevel_context_method_map, &.{});
+        return create(token, vm.current_actor.id, toplevel_context_method_map, &.{});
+    }
+
+    pub fn requiredSizeForCreatingTopLevelContext() usize {
+        return ByteArray.requiredSizeForAllocation(toplevel_context_string.len) +
+            Map.Method.requiredSizeForAllocation(0) +
+            Method.requiredSizeForAllocation(0);
     }
 
     // --- Map forwarding ---
@@ -440,15 +438,16 @@ pub const Method = packed struct {
     pub fn activateMethod(
         self: *Method,
         vm: *VirtualMachine,
+        token: *Heap.AllocationToken,
         actor_id: u31,
         receiver: Value,
         arguments: []const Value,
         target_location: RegisterLocation,
         created_from: SourceRange,
         out_activation: *RuntimeActivation,
-    ) !void {
-        const activation_object = try Activation.create(vm.heap, actor_id, .Method, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
-        try out_activation.initInPlace(ActivationValue.init(activation_object), target_location, vm.takeStackSnapshot(), self.getMap().method_name, created_from);
+    ) void {
+        const activation_object = Activation.create(token, actor_id, .Method, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
+        out_activation.initInPlace(ActivationValue.init(activation_object), target_location, vm.takeStackSnapshot(), self.getMap().method_name, created_from);
     }
 
     pub fn requiredSizeForActivation(self: *Method) usize {
@@ -464,7 +463,7 @@ pub const Block = packed struct {
     pub usingnamespace SlotsLikeObjectBase(Block);
     pub usingnamespace AssignableSlotsMixin(Block);
 
-    pub fn create(heap: *Heap, actor_id: u31, map: *Map.Block, assignable_slot_values: []const Value) !*Block {
+    pub fn create(token: *Heap.AllocationToken, actor_id: u31, map: *Map.Block, assignable_slot_values: []const Value) *Block {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -474,7 +473,7 @@ pub const Block = packed struct {
 
         const size = Block.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len));
 
-        var memory_area = try heap.allocateInObjectSegment(size);
+        var memory_area = token.allocate(.Object, size);
         var self = @ptrCast(*Block, memory_area);
         self.init(actor_id, map.asValue());
         std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
@@ -543,16 +542,17 @@ pub const Block = packed struct {
     pub fn activateBlock(
         self: *Block,
         vm: *VirtualMachine,
+        token: *Heap.AllocationToken,
         receiver: Value,
         arguments: []const Value,
         target_location: RegisterLocation,
         creator_message: Value,
         created_from: SourceRange,
         out_activation: *RuntimeActivation,
-    ) !void {
-        const activation_object = try Activation.create(vm.heap, vm.current_actor.id, .Block, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
+    ) void {
+        const activation_object = Activation.create(token, vm.current_actor.id, .Block, self.slots.header.getMap(), arguments, self.getAssignableSlots(), receiver);
 
-        try out_activation.initInPlace(ActivationValue.init(activation_object), target_location, vm.takeStackSnapshot(), creator_message, created_from);
+        out_activation.initInPlace(ActivationValue.init(activation_object), target_location, vm.takeStackSnapshot(), creator_message, created_from);
         out_activation.parent_activation = self.getMap().parent_activation;
         out_activation.nonlocal_return_target_activation = self.getMap().nonlocal_return_target_activation;
     }
@@ -568,14 +568,14 @@ pub const Activation = packed struct {
 
     /// Borrows a ref from `message_script`.
     pub fn create(
-        heap: *Heap,
+        token: *Heap.AllocationToken,
         actor_id: u31,
         comptime map_type: MapType,
         map: *Map,
         arguments: []const Value,
         assignable_slot_values: []Value,
         receiver: Value,
-    ) !*Activation {
+    ) *Activation {
         const assignable_slot_count = switch (map_type) {
             .Block => map.asBlockMap().getAssignableSlotCount(),
             .Method => map.asMethodMap().getAssignableSlotCount(),
@@ -603,7 +603,7 @@ pub const Activation = packed struct {
 
         const size = requiredSizeForAllocation(argument_slot_count, assignable_slot_count);
 
-        var memory_area = try heap.allocateInObjectSegment(size);
+        var memory_area = token.allocate(.Object, size);
         var self = @ptrCast(*Activation, memory_area);
         self.init(map_type, actor_id, map.asValue(), receiver);
         std.mem.copy(Value, self.getArgumentSlots(), arguments);

@@ -219,20 +219,26 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
 
             const slots = actor.slot_stack.lastNItems(payload.slot_count);
             var total_slot_count: u32 = 0;
+            var total_assignable_slot_count: u8 = 0;
             for (slots) |slot, i| {
                 total_slot_count += slot.requiredSlotSpace(slots[0..i]);
+                total_assignable_slot_count += @intCast(u8, slot.requiredAssignableSlotValueSpace(slots[0..i]));
             }
 
-            var slots_map = try Object.Map.Slots.create(vm.heap, total_slot_count);
+            var token = try vm.heap.getAllocation(
+                Object.Map.Slots.requiredSizeForAllocation(total_slot_count) +
+                    Object.Slots.requiredSizeForAllocation(total_assignable_slot_count),
+            );
 
-            var map_builder = try slots_map.getMapBuilder(vm.heap);
-            defer map_builder.deinit();
+            var slots_map = Object.Map.Slots.create(&token, total_slot_count);
+
+            var map_builder = slots_map.getMapBuilder(&token);
 
             for (slots) |slot| {
-                try map_builder.addSlot(slot);
+                map_builder.addSlot(slot);
             }
 
-            const slots_object = try map_builder.createObject(actor.id);
+            const slots_object = map_builder.createObject(actor.id);
             vm.writeRegister(inst.target, slots_object.asValue());
             actor.slot_stack.popNItems(payload.slot_count);
             return success;
@@ -244,9 +250,11 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
 
             const slots = actor.slot_stack.lastNItems(payload.slot_count);
             var total_slot_count: u32 = 0;
+            var total_assignable_slot_count: u8 = 0;
             var argument_slot_count: u8 = 0;
             for (slots) |slot, i| {
                 total_slot_count += slot.requiredSlotSpace(slots[0..i]);
+                total_assignable_slot_count += @intCast(u8, slot.requiredAssignableSlotValueSpace(slots[0..i]));
 
                 // FIXME: This makes the assumption that argument slots are
                 //        never overwritten.
@@ -254,10 +262,15 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
                     argument_slot_count += 1;
             }
 
+            var token = try vm.heap.getAllocation(
+                Object.Map.Method.requiredSizeForAllocation(total_slot_count) +
+                    Object.Method.requiredSizeForAllocation(total_assignable_slot_count),
+            );
+
             const method_name_as_object = vm.readRegister(payload.method_name_location).asObject().asByteArrayObject();
             const block = executable.value.getBlock(payload.block_index);
             var method_map = try Object.Map.Method.create(
-                vm.heap,
+                &token,
                 argument_slot_count,
                 total_slot_count,
                 actor.next_method_is_inline,
@@ -266,14 +279,13 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
                 executable,
             );
 
-            var map_builder = try method_map.getMapBuilder(vm.heap);
-            defer map_builder.deinit();
+            var map_builder = method_map.getMapBuilder(&token);
 
             for (slots) |slot| {
-                try map_builder.addSlot(slot);
+                map_builder.addSlot(slot);
             }
 
-            const method_object = try map_builder.createObject(actor.id);
+            const method_object = map_builder.createObject(actor.id);
             vm.writeRegister(inst.target, method_object.asValue());
             actor.slot_stack.popNItems(payload.slot_count);
             return success;
@@ -283,9 +295,11 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
 
             const slots = actor.slot_stack.lastNItems(payload.slot_count);
             var total_slot_count: u32 = 0;
+            var total_assignable_slot_count: u8 = 0;
             var argument_slot_count: u8 = 0;
             for (slots) |slot, i| {
                 total_slot_count += slot.requiredSlotSpace(slots[0..i]);
+                total_assignable_slot_count += @intCast(u8, slot.requiredAssignableSlotValueSpace(slots[0..i]));
 
                 // FIXME: This makes the assumption that argument slots are
                 //        never overwritten.
@@ -310,8 +324,13 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
                 parent_activation.takeRef(actor.activation_stack);
             std.debug.assert(nonlocal_return_target_activation.get(actor.activation_stack).?.nonlocal_return_target_activation == null);
 
+            var token = try vm.heap.getAllocation(
+                Object.Map.Block.requiredSizeForAllocation(total_slot_count) +
+                    Object.Block.requiredSizeForAllocation(total_assignable_slot_count),
+            );
+
             var block_map = try Object.Map.Block.create(
-                vm.heap,
+                &token,
                 argument_slot_count,
                 total_slot_count,
                 parent_activation.takeRef(actor.activation_stack),
@@ -320,14 +339,13 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
                 executable,
             );
 
-            var map_builder = try block_map.getMapBuilder(vm.heap);
-            defer map_builder.deinit();
+            var map_builder = block_map.getMapBuilder(&token);
 
             for (slots) |slot| {
-                try map_builder.addSlot(slot);
+                map_builder.addSlot(slot);
             }
 
-            const block_object = try map_builder.createObject(actor.id);
+            const block_object = map_builder.createObject(actor.id);
             vm.writeRegister(inst.target, block_object.asValue());
             actor.slot_stack.popNItems(payload.slot_count);
             return success;
@@ -336,9 +354,9 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
             const payload = inst.payload(.CreateByteArray);
             const string = payload.string;
 
-            try vm.heap.ensureSpaceInEden(Object.ByteArray.requiredSizeForAllocation(string.len));
+            var token = try vm.heap.getAllocation(Object.ByteArray.requiredSizeForAllocation(string.len));
 
-            const byte_array = try Object.ByteArray.createWithValues(vm.heap, actor.id, string);
+            const byte_array = try Object.ByteArray.createWithValues(&token, actor.id, string);
             vm.writeRegister(inst.target, byte_array.asValue());
             return success;
         },
@@ -538,30 +556,34 @@ fn executeBlock(
     const tracked_block = try vm.heap.track(block_receiver.asValue());
     var block = block_receiver;
 
-    {
+    const message_name = try vm.getOrCreateBlockMessageName(@intCast(u8, arguments.len));
+    var token = token: {
         defer tracked_block.untrack(vm.heap);
 
-        // Ensure that we won't GC by creating an activation.
-        try vm.heap.ensureSpaceInEden(
-            Object.Activation.requiredSizeForAllocation(
-                block.getArgumentSlotCount(),
-                block.getAssignableSlotCount(),
-            ),
+        var required_memory = Object.Activation.requiredSizeForAllocation(
+            block.getArgumentSlotCount(),
+            block.getAssignableSlotCount(),
         );
+        if (!message_name.exists) required_memory += message_name.requiredSize();
+
+        // Ensure that we won't GC by creating an activation.
+        var token = try vm.heap.getAllocation(required_memory);
 
         // Refresh the pointer to the block.
         block = tracked_block.getValue().asObject().asBlockObject();
-    }
+
+        break :token token;
+    };
 
     const parent_activation_object = block.getMap().parent_activation.get(actor.activation_stack).?.activation_object;
     const activation_slot = try actor.activation_stack.getNewActivationSlot(vm.allocator);
-    const tracked_message_name = try vm.getOrCreateBlockMessageName(@intCast(u8, arguments.len));
-    try block.activateBlock(
+    block.activateBlock(
         vm,
+        &token,
         parent_activation_object.value,
         arguments,
         target_location,
-        tracked_message_name.getValue(),
+        try message_name.get(&token),
         source_range,
         activation_slot,
     );
@@ -578,14 +600,15 @@ fn executeMethod(
 ) !void {
     const tracked_receiver = try vm.heap.track(const_receiver);
     const tracked_method = try vm.heap.track(method_object.asValue());
+    var receiver_of_method = const_receiver;
     var method = method_object;
 
-    {
+    var token = token: {
         defer tracked_receiver.untrack(vm.heap);
         defer tracked_method.untrack(vm.heap);
 
-        // Ensure that we won't GC by creating an activation.
-        try vm.heap.ensureSpaceInEden(
+        // Get the allocation token for the method
+        var token = try vm.heap.getAllocation(
             Object.Activation.requiredSizeForAllocation(
                 method.getArgumentSlotCount(),
                 method.getAssignableSlotCount(),
@@ -593,13 +616,15 @@ fn executeMethod(
         );
 
         // Refresh the pointers to the method and its receiver.
+        receiver_of_method = tracked_receiver.getValue();
         method = tracked_method.getValue().asObject().asMethodObject();
-    }
+
+        break :token token;
+    };
 
     // NOTE: The receiver of a method activation must never be an activation
     //       object (unless it explicitly wants that), as that would allow
     //       us to access the slots of upper scopes.
-    var receiver_of_method = tracked_receiver.getValue();
     if (!method.expectsActivationObjectAsReceiver() and
         receiver_of_method.isObjectReference() and
         receiver_of_method.asObject().isActivationObject())
@@ -608,5 +633,5 @@ fn executeMethod(
     }
 
     const activation_slot = try actor.activation_stack.getNewActivationSlot(vm.allocator);
-    try method.activateMethod(vm, actor.id, receiver_of_method, arguments, target_location, source_range, activation_slot);
+    method.activateMethod(vm, &token, actor.id, receiver_of_method, arguments, target_location, source_range, activation_slot);
 }

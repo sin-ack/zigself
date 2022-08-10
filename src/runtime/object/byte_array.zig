@@ -12,11 +12,11 @@ const ByteArray = @import("../ByteArray.zig");
 // FIXME: This isn't thread safe!
 var singleton_byte_array_map: ?Heap.Tracked = null;
 
-fn getOrCreateByteArrayMap(heap: *Heap) !Value {
+fn getOrCreateByteArrayMap(token: *Heap.AllocationToken) !Value {
     if (singleton_byte_array_map) |map| return map.getValue();
 
-    const map = try Object.Map.Slots.create(heap, 0);
-    singleton_byte_array_map = try heap.track(map.asValue());
+    const map = Object.Map.Slots.create(token, 0);
+    singleton_byte_array_map = try token.heap.track(map.asValue());
     return map.asValue();
 }
 
@@ -29,24 +29,24 @@ pub const ByteArrayObject = packed struct {
     byte_array: Value,
 
     /// Create an initialized byte array object from the given values.
-    pub fn createWithValues(heap: *Heap, actor_id: u31, values: []const u8) !*ByteArrayObject {
-        const self = try createUninitialized(heap, actor_id, values.len);
+    pub fn createWithValues(token: *Heap.AllocationToken, actor_id: u31, values: []const u8) !*ByteArrayObject {
+        const self = try createUninitialized(token, actor_id, values.len);
         std.mem.copy(u8, self.getValues(), values);
         return self;
     }
 
     /// Create an uninitialized byte array object with the given size.
-    pub fn createUninitialized(heap: *Heap, actor_id: u31, size: usize) !*ByteArrayObject {
-        const byte_array = try ByteArray.createUninitialized(heap, size);
-        return try create(heap, actor_id, byte_array);
+    pub fn createUninitialized(token: *Heap.AllocationToken, actor_id: u31, size: usize) !*ByteArrayObject {
+        const byte_array = ByteArray.createUninitialized(token, size);
+        return try create(token, actor_id, byte_array);
     }
 
     /// Create a byte array object with an existing byte array.
-    pub fn create(heap: *Heap, actor_id: u31, byte_array: ByteArray) !*ByteArrayObject {
-        const byte_array_map = try getOrCreateByteArrayMap(heap);
+    pub fn create(token: *Heap.AllocationToken, actor_id: u31, byte_array: ByteArray) !*ByteArrayObject {
+        const byte_array_map = try getOrCreateByteArrayMap(token);
 
         const size = requiredSizeForAllocation(null);
-        var memory_area = try heap.allocateInObjectSegment(size);
+        var memory_area = token.allocate(.Object, size);
         var self = @ptrCast(*ByteArrayObject, memory_area);
         self.init(actor_id, byte_array_map, byte_array);
 
@@ -78,8 +78,11 @@ pub const ByteArrayObject = packed struct {
         return self.byte_array.asByteArray();
     }
 
-    pub fn clone(self: *ByteArrayObject, heap: *Heap, actor_id: u31) !*ByteArrayObject {
-        return createWithValues(heap, actor_id, self.getValues());
+    pub fn clone(self: *ByteArrayObject, token: *Heap.AllocationToken, actor_id: u31) *ByteArrayObject {
+        // NOTE: By the time we reach here the byte array map will have been
+        //       allocated already, so there's no path in which we can error
+        //       without a panic.
+        return createWithValues(token, actor_id, self.getValues()) catch unreachable;
     }
 
     pub fn getSizeInMemory(self: *ByteArrayObject) usize {

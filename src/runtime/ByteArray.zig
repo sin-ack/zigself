@@ -13,14 +13,14 @@ const Self = @This();
 
 header: *align(@alignOf(u64)) Header,
 
-pub fn createFromString(heap: *Heap, string: []const u8) !Self {
-    var self = try createUninitialized(heap, string.len);
+pub fn createFromString(token: *Heap.AllocationToken, string: []const u8) Self {
+    var self = createUninitialized(token, string.len);
     std.mem.copy(u8, self.getValues(), string);
     return self;
 }
 
-pub fn createUninitialized(heap: *Heap, size: usize) !Self {
-    var memory_area = try heap.allocateInByteVectorSegment(requiredSizeForAllocation(size));
+pub fn createUninitialized(token: *Heap.AllocationToken, size: usize) Self {
+    var memory_area = token.allocate(.ByteArray, requiredSizeForAllocation(size));
     var header = @ptrCast(*Header, memory_area);
 
     header.init(size);

@@ -10,7 +10,7 @@ const Slot = @import("../slot.zig").Slot;
 const Value = @import("../value.zig").Value;
 const VirtualMachine = @import("../VirtualMachine.zig");
 
-pub const AssignableSlotValues = std.BoundedArray(Heap.Tracked, AstGen.MaximumAssignableSlots);
+pub const AssignableSlotValues = std.BoundedArray(Value, AstGen.MaximumAssignableSlots);
 
 /// This struct allows one to build out a map's slots and eventually construct
 /// an object using it. It holds the assignable slot values and assigns an index
@@ -24,8 +24,8 @@ pub const AssignableSlotValues = std.BoundedArray(Heap.Tracked, AstGen.MaximumAs
 /// to it using createObject().
 pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
     return struct {
-        heap: *Heap,
-        map: Heap.Tracked,
+        token: *Heap.AllocationToken,
+        map: *MapType,
         assignable_slot_values: AssignableSlotValues,
 
         slot_index: usize = 0,
@@ -37,28 +37,18 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
         // Marker for typechecking.
         pub const is_map_builder = true;
 
-        pub fn init(heap: *Heap, map: *MapType) !Self {
-            const tracked_map = try heap.track(map.asValue());
-
+        pub fn init(token: *Heap.AllocationToken, map: *MapType) Self {
             return Self{
-                .heap = heap,
-                .map = tracked_map,
+                .token = token,
+                .map = map,
                 .assignable_slot_values = AssignableSlotValues.init(0) catch unreachable,
             };
         }
 
-        pub fn deinit(self: Self) void {
-            for (self.assignable_slot_values.slice()) |value| {
-                value.untrack(self.heap);
-            }
-            self.map.untrack(self.heap);
-        }
-
-        pub fn addSlot(self: *Self, slot: Slot) !void {
-            const map = @ptrCast(*MapType, self.map.getValue().asObjectAddress());
-            try slot.writeContentsTo(
-                self.heap,
-                map.getSlots(),
+        pub fn addSlot(self: *Self, slot: Slot) void {
+            slot.writeContentsTo(
+                self.token.heap,
+                self.map.getSlots(),
                 &self.assignable_slot_values,
                 &self.slot_index,
                 &self.assignable_slot_index,
@@ -68,22 +58,18 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
             // NOTE: Method and block maps do not count the argument slot count
             //       towards their assignable slot counts, because the argument
             //       slot values don't exist on the method and block objects.
-            map.setAssignableSlotCount(@intCast(u8, self.assignable_slot_index));
+            self.map.setAssignableSlotCount(@intCast(u8, self.assignable_slot_index));
         }
 
-        pub fn createObject(self: *Self, current_actor_id: u31) !*ObjectType {
-            try self.heap.ensureSpaceInEden(
-                ObjectType.requiredSizeForAllocation(@intCast(u8, self.assignable_slot_index)),
-            );
-
+        pub fn createObject(self: *Self, current_actor_id: u31) *ObjectType {
             var slot_values: [AstGen.MaximumAssignableSlots]Value = undefined;
             const slot_values_slice = slot_values[0..self.assignable_slot_index];
             self.writeAssignableSlotValuesTo(slot_values_slice);
 
-            return try ObjectType.create(
-                self.heap,
+            return ObjectType.create(
+                self.token,
                 current_actor_id,
-                @ptrCast(*MapType, self.map.getValue().asObjectAddress()),
+                self.map,
                 slot_values_slice,
             );
         }
@@ -92,8 +78,7 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
         /// Assumes that a garbage collection will not happen before the values'
         /// use.
         pub fn writeAssignableSlotValuesTo(self: *Self, slot_values: []Value) void {
-            for (self.assignable_slot_values.constSlice()) |tracked_value, i|
-                slot_values[i] = tracked_value.getValue();
+            std.mem.copy(Value, slot_values, self.assignable_slot_values.constSlice());
         }
     };
 }

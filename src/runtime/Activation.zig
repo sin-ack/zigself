@@ -63,7 +63,7 @@ pub fn initInPlace(
     stack_snapshot: Actor.StackSnapshot,
     creator_message: Value,
     created_from: SourceRange,
-) !void {
+) void {
     self.* = .{
         .activation_id = newActivationID(),
         .activation_object = activation_object,

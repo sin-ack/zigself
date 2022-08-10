@@ -368,7 +368,7 @@ pub const Slot = packed struct {
         slot_index: *usize,
         assignable_slot_index: *usize,
         argument_slot_index: *usize,
-    ) Allocator.Error!void {
+    ) void {
         var previous_slots = target_slots[0..slot_index.*];
         var current_slot_ptr: *Slot = undefined;
 
@@ -385,7 +385,7 @@ pub const Slot = packed struct {
 
             if (previous_slot.isAssignable()) {
                 const overwritten_assignable_slot_index = previous_slot.value.asUnsignedInteger();
-                assignable_slot_values.orderedRemove(overwritten_assignable_slot_index).untrack(heap);
+                _ = assignable_slot_values.orderedRemove(overwritten_assignable_slot_index);
 
                 // Go through all the previous slots, and subtract 1 from all
                 // the slots which have assignable slot indices larger than the
@@ -420,7 +420,7 @@ pub const Slot = packed struct {
                 // into the slot.
                 var inherited_slot_copy = inherited_slot.copy(inherited_object);
                 inherited_slot_copy.properties.setInheritedChild();
-                try inherited_slot_copy.writeContentsTo(
+                inherited_slot_copy.writeContentsTo(
                     heap,
                     target_slots,
                     assignable_slot_values,
@@ -439,7 +439,7 @@ pub const Slot = packed struct {
             std.debug.assert(assignable_slot_index.* + argument_slot_index.* < AstGen.MaximumAssignableSlots);
 
             const value = current_slot_ptr.assignIndex(@intCast(u8, assignable_slot_index.*));
-            assignable_slot_values.appendAssumeCapacity(try heap.track(value));
+            assignable_slot_values.appendAssumeCapacity(value);
             assignable_slot_index.* += 1;
         }
     }

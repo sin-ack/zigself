@@ -15,20 +15,16 @@ const VirtualMachine = @import("../VirtualMachine.zig");
 const ExecutionResult = @import("../interpreter.zig").ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
-/// Find the given selector as a method suitable for spawning an actor, and
-/// refresh the pointers for the method and its receiver after ensuring that
-/// there is enough space in eden to activate this method (+ any extra requested
-/// by the user).
+/// Find the given selector as a method suitable for spawning an actor.
 ///
 /// Returns an Completion if something other than a method is found (not
 /// necessarily an error). Writes the method to out_method on success.
-fn findMethodForActorSpawnAndReserveMemoryForActivation(
+fn findActorMethod(
     vm: *VirtualMachine,
     source_range: SourceRange,
-    receiver: *Value,
+    receiver: Value,
     selector: []const u8,
     out_method: **Object.Method,
-    extra_memory: usize,
 ) !?Completion {
     const method = method: {
         switch (receiver.lookup(vm, selector)) {
@@ -56,17 +52,7 @@ fn findMethodForActorSpawnAndReserveMemoryForActivation(
         }
     };
 
-    const tracked_receiver = try vm.heap.track(receiver.*);
-    defer tracked_receiver.untrack(vm.heap);
-    const tracked_method = try vm.heap.track(method.asValue());
-    defer tracked_method.untrack(vm.heap);
-
-    try vm.heap.ensureSpaceInEden(
-        Object.Activation.requiredSizeForAllocation(method.getArgumentSlotCount(), method.getAssignableSlotCount()) + extra_memory,
-    );
-
-    receiver.* = tracked_receiver.getValue();
-    out_method.* = tracked_method.getValue().asObject().asMethodObject();
+    out_method.* = method;
     return null;
 }
 
@@ -91,21 +77,36 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
     }
 
     var method: *Object.Method = undefined;
-    if (try findMethodForActorSpawnAndReserveMemoryForActivation(
+    if (try findActorMethod(
         context.vm,
         context.source_range,
-        &receiver,
+        receiver,
         selector,
         &method,
-        Object.Actor.requiredSizeForAllocation(),
     )) |completion| {
         return ExecutionResult.completion(completion);
     }
 
+    var token = token: {
+        var tracked_method = try context.vm.heap.track(method.asValue());
+        defer tracked_method.untrack(context.vm.heap);
+
+        var token = try context.vm.heap.getAllocation(
+            method.requiredSizeForActivation() +
+                Object.Actor.requiredSizeForAllocation(),
+        );
+
+        method = tracked_method.getValue().asObject().asMethodObject();
+        receiver = context.receiver.getValue();
+
+        break :token token;
+    };
+
     // NOTE: Need to advance the global actor to the next instruction to be returned to after the genesis actor exits.
     context.vm.current_actor.activation_stack.getCurrent().advanceInstruction();
 
-    const genesis_actor = try Actor.spawn(context.vm, receiver, method, context.source_range, context.target_location);
+    const genesis_actor = try Actor.create(context.vm, &token, receiver);
+    try genesis_actor.activateMethod(context.vm, &token, method, context.target_location, context.source_range);
     context.vm.setGenesisActor(genesis_actor);
     context.vm.switchToActor(genesis_actor);
 
@@ -141,13 +142,12 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     context.vm.current_actor.activation_stack.getCurrent().advanceInstruction();
 
     var spawn_method: *Object.Method = undefined;
-    if (try findMethodForActorSpawnAndReserveMemoryForActivation(
+    if (try findActorMethod(
         context.vm,
         context.source_range,
-        &receiver,
+        receiver,
         spawn_selector,
         &spawn_method,
-        Object.Actor.requiredSizeForAllocation(),
     )) |completion| {
         switch (completion.data) {
             .Normal => {
@@ -165,8 +165,24 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         }
     }
 
+    var token = token: {
+        var tracked_method = try context.vm.heap.track(spawn_method.asValue());
+        defer tracked_method.untrack(context.vm.heap);
+
+        var token = try context.vm.heap.getAllocation(
+            spawn_method.requiredSizeForActivation() +
+                Object.Actor.requiredSizeForAllocation(),
+        );
+
+        spawn_method = tracked_method.getValue().asObject().asMethodObject();
+        receiver = context.receiver.getValue();
+
+        break :token token;
+    };
+
     // Create the new actor by sending the message to the receiver.
-    const new_actor = try Actor.spawn(context.vm, receiver, spawn_method, context.source_range, context.target_location);
+    const new_actor = try Actor.create(context.vm, &token, receiver);
+    try new_actor.activateMethod(context.vm, &token, spawn_method, context.target_location, context.source_range);
     try context.vm.registerRegularActor(new_actor);
     context.vm.switchToActor(new_actor);
 
@@ -222,42 +238,41 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
     var entrypoint_method: *Object.Method = undefined;
 
-    var extra_memory: usize = 0;
-    if (context.actor != genesis_actor)
-        extra_memory = Object.ActorProxy.requiredSizeForAllocation();
-
-    if (try findMethodForActorSpawnAndReserveMemoryForActivation(
+    if (try findActorMethod(
         context.vm,
         context.source_range,
-        &receiver,
+        receiver,
         entrypoint_selector,
         &entrypoint_method,
-        extra_memory,
     )) |completion| {
         if (!context.vm.unregisterRegularActor(new_actor))
             @panic("!!! Somehow the actor unregistered itself?!");
         return ExecutionResult.completion(completion);
     }
 
-    const actor_object = new_actor.actor_object.get();
+    token = token: {
+        var tracked_method = try context.vm.heap.track(entrypoint_method.asValue());
+        defer tracked_method.untrack(context.vm.heap);
 
-    // FIXME: Make this nicer by providing a "actor.activateMethod" or something.
-    const new_activation = try new_actor.activation_stack.getNewActivationSlot(context.vm.allocator);
-    try entrypoint_method.activateMethod(
-        context.vm,
-        new_actor.id,
-        actor_object.context,
-        &.{},
-        context.target_location,
-        context.source_range,
-        new_activation,
-    );
+        var required_memory = entrypoint_method.requiredSizeForActivation();
+        if (context.actor != genesis_actor)
+            required_memory += Object.ActorProxy.requiredSizeForAllocation();
+
+        var inner_token = try context.vm.heap.getAllocation(required_memory);
+
+        entrypoint_method = tracked_method.getValue().asObject().asMethodObject();
+        receiver = context.receiver.getValue();
+
+        break :token inner_token;
+    };
+
+    try new_actor.activateMethod(context.vm, &token, entrypoint_method, context.target_location, context.source_range);
 
     // Create a new ActorProxy object and write it to the result location of the
     // actor who spawned it, if it wasn't the genesis actor that spawned the
     // new actor.
     if (context.actor != genesis_actor) {
-        const new_actor_proxy = try Object.ActorProxy.create(context.vm.heap, context.actor.id, actor_object);
+        const new_actor_proxy = try Object.ActorProxy.create(&token, context.actor.id, new_actor.actor_object.get());
         context.actor.writeRegister(context.target_location, new_actor_proxy.asValue());
         context.actor.yield_reason = .ActorSpawned;
     }
@@ -381,12 +396,12 @@ pub fn ActorSender(context: *PrimitiveContext) !ExecutionResult {
 
     // FIXME: It would be nice to use a single actor proxy instead of spawning
     //        them on demand, as replying to senders is a common operation.
-    try context.vm.heap.ensureSpaceInEden(
+    var token = try context.vm.heap.getAllocation(
         Object.ActorProxy.requiredSizeForAllocation(),
     );
 
     const actor_object = context.actor.message_sender.?.get();
-    const actor_proxy = try Object.ActorProxy.create(context.vm.heap, context.actor.id, actor_object);
+    const actor_proxy = try Object.ActorProxy.create(&token, context.actor.id, actor_object);
 
     return ExecutionResult.completion(Completion.initNormal(actor_proxy.asValue()));
 }

@@ -98,30 +98,40 @@ pub fn create(allocator: Allocator) !*Self {
         .block_message_names = .{},
     };
 
-    const empty_map = try Object.Map.Slots.create(heap, 0);
+    var token = try heap.getAllocation(
+        // Global objects
+        Object.Map.Slots.requiredSizeForAllocation(0) +
+            (10 * Object.Slots.requiredSizeForAllocation(0)) +
+            // Global actor
+            Object.Actor.requiredSizeForAllocation() +
+            // addrinfo prototype
+            requiredSizeForAddrInfoPrototypeAllocation(),
+    );
+
+    const empty_map = Object.Map.Slots.create(&token, 0);
 
     // NOTE: These objects will always belong to the global actor, so we hardcode the actor ID 0 to them.
     //       Otherwise we would hit a chicken-and-egg situation where the global actor needs the lobby
     //       and the lobby needs the global actor.
     const GlobalActorID = 0;
 
-    self.lobby_object = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
+    self.lobby_object = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
 
-    self.global_nil = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
-    self.global_true = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
-    self.global_false = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
+    self.global_nil = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
+    self.global_true = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
+    self.global_false = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
 
-    self.actor_traits = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
-    self.array_traits = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
-    self.block_traits = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
-    self.float_traits = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
-    self.string_traits = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
-    self.integer_traits = try heap.track((try Object.Slots.create(heap, GlobalActorID, empty_map, &.{})).asValue());
+    self.actor_traits = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
+    self.array_traits = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
+    self.block_traits = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
+    self.float_traits = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
+    self.string_traits = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
+    self.integer_traits = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
 
-    self.global_actor = try Actor.create(self, self.lobby_object.getValue());
+    self.global_actor = try Actor.create(self, &token, self.lobby_object.getValue());
     self.current_actor = self.global_actor;
 
-    try self.buildAddrInfoPrototype(heap);
+    try self.buildAddrInfoPrototype(&token);
 
     return self;
 }
@@ -136,18 +146,26 @@ const addrinfo_slots = &[_][]const u8{
     "sockaddrBytes",
 };
 
-fn buildAddrInfoPrototype(self: *Self, heap: *Heap) !void {
-    const map = try Object.Map.Slots.create(heap, addrinfo_slots.len);
-    var map_builder = try map.getMapBuilder(heap);
-    defer map_builder.deinit();
+fn requiredSizeForAddrInfoPrototypeAllocation() usize {
+    var required_size = Object.Map.Slots.requiredSizeForAllocation(addrinfo_slots.len) +
+        Object.Slots.requiredSizeForAllocation(addrinfo_slots.len);
+    for (addrinfo_slots) |slot_name| {
+        required_size += ByteArray.requiredSizeForAllocation(slot_name.len);
+    }
+    return required_size;
+}
+
+fn buildAddrInfoPrototype(self: *Self, token: *Heap.AllocationToken) !void {
+    const map = Object.Map.Slots.create(token, addrinfo_slots.len);
+    var map_builder = map.getMapBuilder(token);
 
     for (addrinfo_slots) |slot_name| {
-        const slot_name_byte_array = try ByteArray.createFromString(heap, slot_name);
-        try map_builder.addSlot(Slot.initAssignable(slot_name_byte_array, .NotParent, self.nil()));
+        const slot_name_byte_array = ByteArray.createFromString(token, slot_name);
+        map_builder.addSlot(Slot.initAssignable(slot_name_byte_array, .NotParent, self.nil()));
     }
 
-    const object = try map_builder.createObject(self.current_actor.id);
-    self.addrinfo_prototype = try heap.track(object.asValue());
+    const object = map_builder.createObject(self.current_actor.id);
+    self.addrinfo_prototype = try self.heap.track(object.asValue());
 }
 
 pub fn destroy(self: *Self) void {
@@ -195,26 +213,38 @@ pub fn lobby(self: Self) Value {
     return self.lobby_object.getValue();
 }
 
+const BlockMessageNameContext = struct {
+    exists: bool,
+    value_ptr: *Heap.Tracked,
+    argument_count: u8,
+
+    pub fn requiredSize(self: @This()) usize {
+        return ByteArray.requiredSizeForAllocation(blockMessageNameLength(self.argument_count));
+    }
+
+    pub fn get(self: @This(), token: *Heap.AllocationToken) !Value {
+        if (self.exists) return self.value_ptr.getValue();
+
+        const byte_array = ByteArray.createUninitialized(token, blockMessageNameLength(self.argument_count));
+        writeBlockMessageName(byte_array.getValues(), self.argument_count);
+
+        const tracked_value = try token.heap.track(byte_array.asValue());
+        self.value_ptr.* = tracked_value;
+        return tracked_value.getValue();
+    }
+};
+
 /// Return a block message name with the given argument count, creating it
 /// if it does not exist.
 ///
 /// A block message name looks like: `value:With:With:With:...`.
-pub fn getOrCreateBlockMessageName(self: *Self, argument_count: u8) !Heap.Tracked {
+pub fn getOrCreateBlockMessageName(self: *Self, argument_count: u8) !BlockMessageNameContext {
     const result = try self.block_message_names.getOrPut(self.allocator, argument_count);
-    if (result.found_existing) {
-        return result.value_ptr.*;
-    } else {
-        const byte_array = try ByteArray.createUninitialized(self.heap, requiredSizeForBlockMessageName(argument_count));
-        writeBlockMessageName(byte_array.getValues(), argument_count);
-
-        const tracked_value = try self.heap.track(byte_array.asValue());
-        result.value_ptr.* = tracked_value;
-        return tracked_value;
-    }
+    return BlockMessageNameContext{ .exists = result.found_existing, .value_ptr = result.value_ptr, .argument_count = argument_count };
 }
 
 fn writeBlockMessageName(name: []u8, argument_count: u8) void {
-    std.debug.assert(name.len == requiredSizeForBlockMessageName(argument_count));
+    std.debug.assert(name.len == blockMessageNameLength(argument_count));
     std.mem.copy(u8, name, "value");
 
     if (argument_count > 0) {
@@ -228,7 +258,7 @@ fn writeBlockMessageName(name: []u8, argument_count: u8) void {
     }
 }
 
-fn requiredSizeForBlockMessageName(argument_count: u8) usize {
+fn blockMessageNameLength(argument_count: u8) usize {
     var needed_space: usize = 5; // value
     if (argument_count > 0) {
         needed_space += 1; // :

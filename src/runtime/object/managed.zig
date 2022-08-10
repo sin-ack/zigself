@@ -66,11 +66,11 @@ pub const FileDescriptor = struct {
 // FIXME: This isn't thread safe!
 var singleton_managed_map: ?Heap.Tracked = null;
 
-fn getOrCreateManagedMap(heap: *Heap) !Value {
+fn getOrCreateManagedMap(token: *Heap.AllocationToken) !Value {
     if (singleton_managed_map) |map| return map.getValue();
 
-    const map = try Object.Map.Slots.create(heap, 0);
-    singleton_managed_map = try heap.track(map.asValue());
+    const map = Object.Map.Slots.create(token, 0);
+    singleton_managed_map = try token.heap.track(map.asValue());
     return map.asValue();
 }
 
@@ -84,14 +84,14 @@ pub const ManagedObject = packed struct {
     header: Object.Header,
     value: Value,
 
-    pub fn create(heap: *Heap, actor_id: u31, managed_type: ManagedType, value: Value) !*ManagedObject {
-        const managed_map = try getOrCreateManagedMap(heap);
+    pub fn create(token: *Heap.AllocationToken, actor_id: u31, managed_type: ManagedType, value: Value) !*ManagedObject {
+        const managed_map = try getOrCreateManagedMap(token);
 
-        const memory_area = try heap.allocateInObjectSegment(requiredSizeForAllocation());
+        const memory_area = token.allocate(.Object, requiredSizeForAllocation());
         const self = @ptrCast(*ManagedObject, memory_area);
         self.init(actor_id, managed_map, managed_type, value);
 
-        try heap.markAddressAsNeedingFinalization(memory_area);
+        try token.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
     }
 

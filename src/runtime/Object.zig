@@ -104,17 +104,17 @@ pub fn asValue(self: Self) Value {
     return Value.fromObjectAddress(self.getAddress());
 }
 
-pub fn clone(self: Self, heap: *Heap, actor_id: u31) !Self {
+pub fn clone(self: Self, token: *Heap.AllocationToken, actor_id: u31) Self {
     return switch (self.header.getObjectType()) {
         .ForwardingReference, .Activation, .Method, .Map => unreachable,
-        .Slots => fromAddress((try self.asSlotsObject().clone(heap, actor_id)).asObjectAddress()),
-        .Block => fromAddress((try self.asBlockObject().clone(heap, actor_id)).asObjectAddress()),
-        .ByteArray => fromAddress((try self.asByteArrayObject().clone(heap, actor_id)).asObjectAddress()),
-        .Array => fromAddress((try self.asArrayObject().clone(heap, actor_id)).asObjectAddress()),
+        .Slots => fromAddress(self.asSlotsObject().clone(token, actor_id).asObjectAddress()),
+        .Block => fromAddress(self.asBlockObject().clone(token, actor_id).asObjectAddress()),
+        .ByteArray => fromAddress(self.asByteArrayObject().clone(token, actor_id).asObjectAddress()),
+        .Array => fromAddress(self.asArrayObject().clone(token, actor_id).asObjectAddress()),
         // Managed values are not clonable. Instead we return the same (immutable) reference.
         .Managed => self,
         .Actor => @panic("TODO Handle cloning of actor object"),
-        .ActorProxy => fromAddress((try self.asActorProxyObject().clone(heap, actor_id)).asObjectAddress()),
+        .ActorProxy => fromAddress(self.asActorProxyObject().clone(token, actor_id).asObjectAddress()),
     };
 }
 

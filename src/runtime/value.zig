@@ -155,11 +155,11 @@ pub const Value = packed struct {
     }
 
     /// Clones this value and returns a copy of it.
-    pub fn clone(self: Value, heap: *Heap, actor_id: u31) !Value {
+    pub fn clone(self: Value, token: *Heap.AllocationToken, actor_id: u31) Value {
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
             .Integer, .FloatingPoint => Value{ .data = self.data },
-            .ObjectReference => (try self.asObject().clone(heap, actor_id)).asValue(),
+            .ObjectReference => self.asObject().clone(token, actor_id).asValue(),
         };
     }
 };

@@ -19,11 +19,11 @@ const RegisterLocation = @import("../lowcode/register_location.zig").RegisterLoc
 // FIXME: This isn't thread safe!
 var singleton_actor_map: ?Heap.Tracked = null;
 
-fn getOrCreateActorMap(heap: *Heap) !Value {
+fn getOrCreateActorMap(token: *Heap.AllocationToken) !Value {
     if (singleton_actor_map) |map| return map.getValue();
 
-    const map = try Object.Map.Slots.create(heap, 0);
-    singleton_actor_map = try heap.track(map.asValue());
+    const map = Object.Map.Slots.create(token, 0);
+    singleton_actor_map = try token.heap.track(map.asValue());
     return map.asValue();
 }
 
@@ -41,14 +41,14 @@ pub const ActorObject = packed struct {
     /// returns.
     context: Value,
 
-    pub fn create(heap: *Heap, genesis_actor_id: u31, actor: *Actor, context: Value) !*ActorObject {
-        const actor_map = try getOrCreateActorMap(heap);
+    pub fn create(token: *Heap.AllocationToken, genesis_actor_id: u31, actor: *Actor, context: Value) !*ActorObject {
+        const actor_map = try getOrCreateActorMap(token);
 
-        const memory_area = try heap.allocateInObjectSegment(requiredSizeForAllocation());
+        const memory_area = token.allocate(.Object, requiredSizeForAllocation());
         const self = @ptrCast(*ActorObject, memory_area);
         self.init(genesis_actor_id, actor_map, actor, context);
 
-        try heap.markAddressAsNeedingFinalization(memory_area);
+        try token.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
     }
 
@@ -97,10 +97,10 @@ pub const ActorProxyObject = packed struct {
     actor_object: ActorValue,
 
     /// Create the Actor object without sending a message to it.
-    pub fn create(heap: *Heap, current_actor_id: u31, actor_object: *ActorObject) !*ActorProxyObject {
-        const actor_map = try getOrCreateActorMap(heap);
+    pub fn create(token: *Heap.AllocationToken, current_actor_id: u31, actor_object: *ActorObject) !*ActorProxyObject {
+        const actor_map = try getOrCreateActorMap(token);
 
-        const memory_area = try heap.allocateInObjectSegment(requiredSizeForAllocation());
+        const memory_area = token.allocate(.Object, requiredSizeForAllocation());
         const self = @ptrCast(*ActorProxyObject, memory_area);
         self.init(current_actor_id, actor_map, actor_object);
         return self;
@@ -123,8 +123,8 @@ pub const ActorProxyObject = packed struct {
         return self.actor_object.get();
     }
 
-    pub fn clone(self: *ActorProxyObject, heap: *Heap, actor_id: u31) !*ActorProxyObject {
-        return try create(heap, actor_id, self.getActorObject());
+    pub fn clone(self: *ActorProxyObject, token: *Heap.AllocationToken, actor_id: u31) *ActorProxyObject {
+        return create(token, actor_id, self.getActorObject()) catch unreachable;
     }
 
     pub fn getSizeInMemory(self: *ActorProxyObject) usize {

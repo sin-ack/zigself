@@ -12,6 +12,7 @@ const Slot = @import("../slot.zig").Slot;
 const hash = @import("../../utility/hash.zig");
 const Value = value_import.Value;
 const Object = @import("../Object.zig");
+const ByteArray = @import("../ByteArray.zig");
 const Activation = @import("../Activation.zig");
 const MapBuilder = @import("./map_builder.zig").MapBuilder;
 const IntegerValue = value_import.IntegerValue;
@@ -19,16 +20,14 @@ const PointerValue = value_import.PointerValue;
 const value_import = @import("../value.zig");
 const BytecodeBlock = @import("../lowcode/Block.zig");
 const RefCountedValue = value_import.RefCountedValue;
-// Zig's shadowing rules are annoying.
-const ByteArray = @import("../ByteArray.zig");
 const BytecodeExecutable = @import("../lowcode/Executable.zig");
 
 var static_map_map: ?Value = null;
 
-pub fn getMapMap(heap: *Heap) !Value {
+pub fn getMapMap(token: *Heap.AllocationToken) Value {
     if (static_map_map) |m| return m;
 
-    var new_map = try heap.allocateInObjectSegment(@sizeOf(SlotsMap));
+    var new_map = token.allocate(.Object, @sizeOf(SlotsMap));
 
     // FIXME: Clean this up
     var header = @ptrCast(*Object.Header, new_map);
@@ -44,6 +43,10 @@ pub fn getMapMap(heap: *Heap) !Value {
     header.map_pointer = map_value;
     static_map_map = map_value;
     return map_value;
+}
+
+fn requiredSizeForMapMapAllocation() usize {
+    return if (static_map_map == null) @sizeOf(SlotsMap) else 0;
 }
 
 const MapTypeShift = Object.ObjectTypeShift + Object.ObjectTypeBits;
@@ -206,15 +209,15 @@ fn SlotsLikeMapBase(comptime MapT: type) type {
 
         /// Return the size required for the whole map with the given slot count.
         pub fn requiredSizeForAllocation(slot_count: u32) usize {
-            return @sizeOf(MapT) + slot_count * @sizeOf(Slot);
+            return requiredSizeForMapMapAllocation() + @sizeOf(MapT) + slot_count * @sizeOf(Slot);
         }
 
         fn asSlotsMap(self: *MapT) *SlotsMap {
             return @ptrCast(*SlotsMap, self);
         }
 
-        pub fn getMapBuilder(self: *MapT, heap: *Heap) !MapBuilder(MapT, MapT.ObjectType) {
-            return try MapBuilder(MapT, MapT.ObjectType).init(heap, self);
+        pub fn getMapBuilder(self: *MapT, token: *Heap.AllocationToken) MapBuilder(MapT, MapT.ObjectType) {
+            return MapBuilder(MapT, MapT.ObjectType).init(token, self);
         }
     };
 }
@@ -239,11 +242,11 @@ const SlotsMap = packed struct {
     /// Create a new slots map. Takes the amount of slots this object will have.
     ///
     /// IMPORTANT: All slots *must* be initialized right after creation.
-    pub fn create(heap: *Heap, slot_count: u32) !*SlotsMap {
+    pub fn create(token: *Heap.AllocationToken, slot_count: u32) *SlotsMap {
+        const map_map = getMapMap(token);
         const size = SlotsMap.requiredSizeForAllocation(slot_count);
-        const map_map = try getMapMap(heap);
 
-        var memory_area = try heap.allocateInObjectSegment(size);
+        var memory_area = token.allocate(.Object, size);
         var self = @ptrCast(*SlotsMap, memory_area);
         self.init(slot_count, map_map);
 
@@ -317,7 +320,7 @@ const MethodMap = packed struct {
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
-        heap: *Heap,
+        token: *Heap.AllocationToken,
         argument_slot_count: u8,
         total_slot_count: u32,
         is_inline_method: bool,
@@ -325,14 +328,14 @@ const MethodMap = packed struct {
         block: *BytecodeBlock,
         executable: BytecodeExecutable.Ref,
     ) !*MethodMap {
+        const map_map = getMapMap(token);
         const size = MethodMap.requiredSizeForAllocation(total_slot_count);
-        const map_map = try getMapMap(heap);
 
-        var memory_area = try heap.allocateInObjectSegment(size);
+        var memory_area = token.allocate(.Object, size);
         var self = @ptrCast(*MethodMap, memory_area);
         self.init(map_map, argument_slot_count, total_slot_count, is_inline_method, method_name, block, executable);
 
-        try heap.markAddressAsNeedingFinalization(memory_area);
+        try token.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
     }
 
@@ -400,7 +403,7 @@ const BlockMap = packed struct {
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
-        heap: *Heap,
+        token: *Heap.AllocationToken,
         argument_slot_count: u8,
         total_slot_count: u32,
         parent_activation: Activation.ActivationRef,
@@ -408,14 +411,14 @@ const BlockMap = packed struct {
         block: *BytecodeBlock,
         executable: BytecodeExecutable.Ref,
     ) !*BlockMap {
+        const map_map = getMapMap(token);
         const size = BlockMap.requiredSizeForAllocation(total_slot_count);
-        const map_map = try getMapMap(heap);
 
-        var memory_area = try heap.allocateInObjectSegment(size);
+        var memory_area = token.allocate(.Object, size);
         var self = @ptrCast(*BlockMap, memory_area);
         self.init(map_map, argument_slot_count, total_slot_count, parent_activation, nonlocal_return_target_activation, block, executable);
 
-        try heap.markAddressAsNeedingFinalization(memory_area);
+        try token.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
     }
 
@@ -448,11 +451,11 @@ const ArrayMap = packed struct {
     map: Map,
     size: IntegerValue(.Unsigned),
 
-    pub fn create(heap: *Heap, size: usize) !*ArrayMap {
+    pub fn create(token: *Heap.AllocationToken, size: usize) *ArrayMap {
+        const map_map = getMapMap(token);
         const memory_size = requiredSizeForAllocation();
-        const map_map = try getMapMap(heap);
 
-        var memory_area = try heap.allocateInObjectSegment(memory_size);
+        var memory_area = token.allocate(.Object, memory_size);
         var self = @ptrCast(*ArrayMap, memory_area);
         self.init(map_map, size);
 
@@ -478,6 +481,6 @@ const ArrayMap = packed struct {
     }
 
     pub fn requiredSizeForAllocation() usize {
-        return @sizeOf(ArrayMap);
+        return requiredSizeForMapMapAllocation() + @sizeOf(ArrayMap);
     }
 };

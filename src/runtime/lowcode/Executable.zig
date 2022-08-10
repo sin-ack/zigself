@@ -65,9 +65,14 @@ pub fn pushEntrypointActivation(self: *Executable, vm: *VirtualMachine, activati
 pub fn pushSubEntrypointActivation(self: *Executable, vm: *VirtualMachine, executable: Ref, target_location: RegisterLocation, activation_stack: *ActivationStack) !void {
     var source_range = SourceRange.initNoRef(executable, .{ .start = 0, .end = 1 });
 
-    const toplevel_context_method = try Object.Method.createTopLevelContextForExecutable(vm, Ref{ .value = self }, self.entrypointBlock());
+    var token = try vm.heap.getAllocation(
+        Object.Method.requiredSizeForCreatingTopLevelContext() +
+            Object.Activation.requiredSizeForAllocation(0, 0),
+    );
+
+    const toplevel_context_method = try Object.Method.createTopLevelContextForExecutable(vm, &token, Ref{ .value = self }, self.entrypointBlock());
     const activation_slot = try activation_stack.getNewActivationSlot(vm.allocator);
-    try toplevel_context_method.activateMethod(vm, vm.current_actor.id, vm.lobby(), &.{}, target_location, source_range, activation_slot);
+    toplevel_context_method.activateMethod(vm, &token, vm.current_actor.id, vm.lobby(), &.{}, target_location, source_range, activation_slot);
 }
 
 pub fn makeBlock(self: *Executable) !u32 {

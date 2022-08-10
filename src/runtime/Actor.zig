@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Heap = @import("./Heap.zig");
 const Slot = @import("./slot.zig").Slot;
 const debug = @import("../debug.zig");
 const Value = value_import.Value;
@@ -145,26 +146,7 @@ pub const Message = struct {
     }
 };
 
-/// Spawn a new actor, activating the given method on it.
-pub fn spawn(
-    vm: *VirtualMachine,
-    actor_context: Value,
-    method: *Object.Method,
-    source_range: SourceRange,
-    target_location: RegisterLocation,
-) !*Self {
-    std.debug.assert(method.getArgumentSlotCount() == 0);
-
-    const self = try create(vm, actor_context);
-    errdefer self.destroy(vm.allocator);
-
-    const new_activation = try self.activation_stack.getNewActivationSlot(vm.allocator);
-    try method.activateMethod(vm, self.id, actor_context, &.{}, target_location, source_range, new_activation);
-
-    return self;
-}
-
-pub fn create(vm: *VirtualMachine, actor_context: Value) !*Self {
+pub fn create(vm: *VirtualMachine, token: *Heap.AllocationToken, actor_context: Value) !*Self {
     const self = try vm.allocator.create(Self);
     errdefer vm.allocator.destroy(self);
 
@@ -172,7 +154,7 @@ pub fn create(vm: *VirtualMachine, actor_context: Value) !*Self {
     //       first call to create); otherwise, we are always owned by the genesis actor.
     const owning_actor_id = if (vm.isInActorMode()) vm.genesis_actor.?.id else 0;
 
-    const actor_object = try Object.Actor.create(vm.heap, owning_actor_id, self, actor_context);
+    const actor_object = try Object.Actor.create(token, owning_actor_id, self, actor_context);
 
     self.init(actor_object);
     return self;
@@ -205,6 +187,18 @@ fn deinit(self: *Self, allocator: Allocator) void {
     self.activation_stack.deinit(allocator);
 }
 
+pub fn activateMethod(
+    self: *Self,
+    vm: *VirtualMachine,
+    token: *Heap.AllocationToken,
+    method: *Object.Method,
+    target_location: RegisterLocation,
+    source_range: SourceRange,
+) !void {
+    const activation_slot = try self.activation_stack.getNewActivationSlot(vm.allocator);
+    method.activateMethod(vm, token, self.id, self.actor_object.get().context, &.{}, target_location, source_range, activation_slot);
+}
+
 pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
     const current_activation_ref = self.activation_stack.getCurrent().takeRef(self.activation_stack);
 
@@ -213,13 +207,14 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
     {
         var it = self.mailbox.first;
         while (it) |node| : (it = node.next) {
-            const method = node.data.method.get();
+            var method = node.data.method.get();
 
-            try vm.heap.ensureSpaceInEden(method.requiredSizeForActivation());
+            var token = try vm.heap.getAllocation(method.requiredSizeForActivation());
+            method = node.data.method.get();
 
             const actor_context = self.actor_object.get().context;
             const new_activation = try self.activation_stack.getNewActivationSlot(vm.allocator);
-            try method.activateMethod(vm, self.id, actor_context, node.data.arguments, .zero, node.data.source_range, new_activation);
+            method.activateMethod(vm, &token, self.id, actor_context, node.data.arguments, .zero, node.data.source_range, new_activation);
 
             self.message_sender = node.data.sender;
 

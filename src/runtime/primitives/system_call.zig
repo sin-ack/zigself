@@ -54,7 +54,8 @@ pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
         var fd = FileDescriptor.adopt(@intCast(std.os.fd_t, rc));
         errdefer fd.close();
 
-        const managed_fd = try Object.Managed.create(context.vm.heap, context.actor.id, .FileDescriptor, fd.toValue());
+        var token = try context.vm.heap.getAllocation(Object.Managed.requiredSizeForAllocation());
+        const managed_fd = try Object.Managed.create(&token, context.actor.id, .FileDescriptor, fd.toValue());
         return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
     }
 
@@ -384,13 +385,13 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     required_memory += Object.Map.Array.requiredSizeForAllocation();
     required_memory += Object.Array.requiredSizeForAllocation(result_count);
 
-    try context.vm.heap.ensureSpaceInEden(required_memory);
+    var token = try context.vm.heap.getAllocation(required_memory);
 
     // Refresh pointers
     addrinfo_prototype = context.vm.addrinfo_prototype.getValue().asObject().asType(.Slots).?;
 
-    const result_array_map = try Object.Map.Array.create(context.vm.heap, result_count);
-    const result_array = try Object.Array.createWithValues(context.vm.heap, context.actor.id, result_array_map, &.{}, context.vm.nil());
+    const result_array_map = Object.Map.Array.create(&token, result_count);
+    const result_array = Object.Array.createWithValues(&token, context.actor.id, result_array_map, &.{}, context.vm.nil());
 
     const result_values = result_array.getValues();
     {
@@ -401,9 +402,9 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
             i += 1;
         }) {
             const sockaddr_memory = @ptrCast([*]u8, result.addr.?);
-            const sockaddr_bytes_object = try Object.ByteArray.createWithValues(context.vm.heap, context.actor.id, sockaddr_memory[0..result.addrlen]);
+            const sockaddr_bytes_object = try Object.ByteArray.createWithValues(&token, context.actor.id, sockaddr_memory[0..result.addrlen]);
 
-            const addrinfo_copy: *Object.Slots = try addrinfo_prototype.clone(context.vm.heap, context.actor.id);
+            const addrinfo_copy: *Object.Slots = addrinfo_prototype.clone(&token, context.actor.id);
             const addrinfo_value = addrinfo_copy.asValue();
 
             // FIXME: VM-generated structs already know where each slot is.
@@ -443,7 +444,8 @@ pub fn SocketWithFamily_Type_Protocol_IfFail(context: *PrimitiveContext) !Execut
         var fd = FileDescriptor.adopt(@intCast(std.os.fd_t, rc));
         errdefer fd.close();
 
-        const managed_fd = try Object.Managed.create(context.vm.heap, context.actor.id, .FileDescriptor, fd.toValue());
+        var token = try context.vm.heap.getAllocation(Object.Managed.requiredSizeForAllocation());
+        const managed_fd = try Object.Managed.create(&token, context.actor.id, .FileDescriptor, fd.toValue());
         return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
     }
 
@@ -539,7 +541,8 @@ pub fn AcceptFromFD_IfFail(context: *PrimitiveContext) !ExecutionResult {
             var new_fd = FileDescriptor.adopt(new_fd_value);
             errdefer new_fd.close();
 
-            const managed_new_fd = try Object.Managed.create(context.vm.heap, context.actor.id, .FileDescriptor, new_fd.toValue());
+            var token = try context.vm.heap.getAllocation(Object.Managed.requiredSizeForAllocation());
+            const managed_new_fd = try Object.Managed.create(&token, context.actor.id, .FileDescriptor, new_fd.toValue());
             return ExecutionResult.completion(Completion.initNormal(managed_new_fd.asValue()));
         },
         .AGAIN => blk: {

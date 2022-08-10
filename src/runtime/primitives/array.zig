@@ -23,18 +23,18 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
     const size = try arguments.getInteger(0, .Unsigned);
 
     const required_memory = Object.Map.Array.requiredSizeForAllocation() + Object.Array.requiredSizeForAllocation(@intCast(u64, size));
-    try context.vm.heap.ensureSpaceInEden(required_memory);
+    var token = try context.vm.heap.getAllocation(required_memory);
 
     if (size == 0) {
-        const array_map = try Object.Map.Array.create(context.vm.heap, 0);
-        const array = try Object.Array.createWithValues(context.vm.heap, context.actor.id, array_map, &[_]Value{}, null);
+        const array_map = Object.Map.Array.create(&token, 0);
+        const array = Object.Array.createWithValues(&token, context.actor.id, array_map, &[_]Value{}, null);
         return ExecutionResult.completion(Completion.initNormal(array.asValue()));
     } else {
         const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
         const filler = arguments.getValue(1);
 
-        const new_array_map = try Object.Map.Array.create(context.vm.heap, @intCast(u64, size));
-        const new_array = try Object.Array.createWithValues(context.vm.heap, context.actor.id, new_array_map, receiver.getValues(), filler);
+        const new_array_map = Object.Map.Array.create(&token, @intCast(u64, size));
+        const new_array = Object.Array.createWithValues(&token, context.actor.id, new_array_map, receiver.getValues(), filler);
         return ExecutionResult.completion(Completion.initNormal(new_array.asValue()));
     }
 }

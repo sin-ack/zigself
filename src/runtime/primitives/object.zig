@@ -18,8 +18,7 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
     var receiver = try arguments.getObject(PrimitiveContext.Receiver, .Slots);
     var argument = try arguments.getObject(0, .Slots);
 
-    // Avoid any further GCs by reserving the space beforehand
-    try context.vm.heap.ensureSpaceInEden(
+    var token = try context.vm.heap.getAllocation(
         try Object.Slots.requiredSizeForMerging(receiver, argument, context.vm.allocator),
     );
 
@@ -27,7 +26,7 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
     receiver = context.receiver.getValue().asObject().asType(.Slots).?;
     argument = context.arguments[0].asObject().asType(.Slots).?;
 
-    const new_object = try receiver.addSlotsFrom(argument, context.vm.allocator, context.vm.heap, context.actor.id);
+    const new_object = try receiver.addSlotsFrom(argument, context.vm.allocator, &token, context.actor.id);
     return ExecutionResult.completion(Completion.initNormal(new_object.asValue()));
 }
 
@@ -86,8 +85,17 @@ pub fn Inspect(context: *PrimitiveContext) !ExecutionResult {
 
 /// Make an identical shallow copy of the receiver and return it.
 pub fn Clone(context: *PrimitiveContext) !ExecutionResult {
-    const receiver = context.receiver.getValue();
-    return ExecutionResult.completion(Completion.initNormal(try receiver.clone(context.vm.heap, context.actor.id)));
+    var receiver = context.receiver.getValue();
+
+    const required_memory = if (receiver.isObjectReference())
+        receiver.asObject().getSizeInMemory()
+    else
+        0;
+
+    var token = try context.vm.heap.getAllocation(required_memory);
+    receiver = context.receiver.getValue();
+
+    return ExecutionResult.completion(Completion.initNormal(receiver.clone(&token, context.actor.id)));
 }
 
 /// Return whether the receiver and argument are identical. Returns either

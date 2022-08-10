@@ -11,13 +11,14 @@ const hash = @import("../utility/hash.zig");
 const debug = @import("../debug.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./Object.zig");
-const ByteVector = @import("./ByteArray.zig");
+const ByteArray = @import("./ByteArray.zig");
 const Activation = @import("./Activation.zig");
 const HandleArea = @import("./HandleArea.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const ActivationStack = Activation.ActivationStack;
 
 const GC_DEBUG = debug.GC_DEBUG;
+const GC_TOKEN_DEBUG = debug.GC_TOKEN_DEBUG;
 const GC_TRACK_SOURCE_DEBUG = debug.GC_TRACK_SOURCE_DEBUG;
 const REMEMBERED_SET_DEBUG = debug.REMEMBERED_SET_DEBUG;
 
@@ -57,6 +58,27 @@ caller_tracked_mapping: if (GC_TRACK_SOURCE_DEBUG) std.AutoArrayHashMap(*[*]u64,
 const EdenSize = 1 * 1024 * 1024;
 const NewSpaceSize = 4 * 1024 * 1024;
 const InitialOldSpaceSize = 16 * 1024 * 1024;
+
+const Segment = enum { Object, ByteArray };
+pub const AllocationToken = struct {
+    heap: *Self,
+    total_bytes: usize,
+    bytes_left: usize,
+
+    pub fn allocate(self: *@This(), segment: Segment, bytes: usize) [*]u64 {
+        if (self.bytes_left < bytes) {
+            std.debug.panic(
+                "!!! Attempted to allocate {} bytes from {} byte-sized allocation token with {} bytes remaining!",
+                .{ bytes, self.total_bytes, self.bytes_left },
+            );
+        }
+
+        self.bytes_left -= bytes;
+        // NOTE: The only error this can raise is allocation failure during lazy allocation
+        //       which eden does not do.
+        return self.heap.eden.allocateInSegment(self.heap.allocator, segment, bytes) catch unreachable;
+    }
+};
 
 pub fn create(allocator: Allocator, vm: *VirtualMachine) !*Self {
     const self = try allocator.create(Self);
@@ -115,15 +137,14 @@ fn deinit(self: *Self) void {
     }
 }
 
-// Attempts to allocate `size` bytes in the object segment of the eden. If
-// necessary, garbage collection is performed in the process.
-// The given size must be a multiple of `@sizeOf(u64)`.
-pub fn allocateInObjectSegment(self: *Self, size: usize) ![*]u64 {
-    return try self.eden.allocateInObjectSegment(self.allocator, size);
-}
+pub fn getAllocation(self: *Self, bytes: usize) !AllocationToken {
+    if (GC_TOKEN_DEBUG) std.debug.print("Heap.getAllocation: Attempting to get a token of size {}\n", .{bytes});
+    try self.eden.collectGarbage(self.allocator, bytes);
 
-pub fn allocateInByteVectorSegment(self: *Self, size: usize) ![*]u64 {
-    return try self.eden.allocateInByteVectorSegment(self.allocator, size);
+    if (bytes % @sizeOf(u64) != 0)
+        std.debug.panic("!!! Attempted to allocate {} bytes which is not a multiple of @sizeOf(u64)!", .{bytes});
+
+    return AllocationToken{ .heap = self, .total_bytes = bytes, .bytes_left = bytes };
 }
 
 /// Mark the given address within the heap as an object which needs to know when
@@ -172,13 +193,6 @@ pub fn untrack(self: *Self, tracked: Tracked) void {
         _ = self.eden.stopTracking(tracked.value.Object);
         self.handle_area.freeHandle(tracked.value.Object);
     }
-}
-
-/// Ensures that the given amount of bytes are immediately available in eden, so
-/// garbage collection won't happen. Performs a pre-emptive garbage collection
-/// if there isn't enough space.
-pub fn ensureSpaceInEden(self: *Self, required_memory: usize) !void {
-    try self.eden.collectGarbage(self.allocator, required_memory);
 }
 
 /// Go through the whole heap, updating references to the given value with the
@@ -434,15 +448,15 @@ const Space = struct {
         return new_address;
     }
 
-    /// Same as copyObjectTo, but for byte vectors.
-    fn copyByteVectorTo(allocator: Allocator, address: [*]u64, target_space: *Space) [*]u64 {
-        const byte_array = ByteVector.fromAddress(address);
+    /// Same as copyObjectTo, but for byte arrays.
+    fn copyByteArrayTo(allocator: Allocator, address: [*]u64, target_space: *Space) [*]u64 {
+        const byte_array = ByteArray.fromAddress(address);
         const byte_array_size = byte_array.getSizeInMemory();
         std.debug.assert(byte_array_size % @sizeOf(u64) == 0);
 
         const byte_array_size_in_words = byte_array_size / @sizeOf(u64);
         // We must have enough space at this point.
-        const new_address = target_space.allocateInByteVectorSegment(allocator, byte_array_size) catch unreachable;
+        const new_address = target_space.allocateInByteArraySegment(allocator, byte_array_size) catch unreachable;
         std.mem.copy(u64, new_address[0..byte_array_size_in_words], address[0..byte_array_size_in_words]);
 
         return new_address;
@@ -454,7 +468,7 @@ const Space = struct {
         if (self.objectSegmentContains(address)) {
             return self.copyObjectTo(allocator, address, target_space);
         } else if (self.byteArraySegmentContains(address)) {
-            return copyByteVectorTo(allocator, address, target_space);
+            return copyByteArrayTo(allocator, address, target_space);
         } else if (require_copy) {
             std.debug.panic("!!! copyAddress called with an address that's not allocated in this space!", .{});
         }
@@ -568,8 +582,8 @@ const Space = struct {
             .{ target_object_segment_index, target_space.object_segment.len },
         );
 
-        // Try to catch up to the target space's object and byte vector cursors,
-        // copying any other objects/byte vectors that still exist in this
+        // Try to catch up to the target space's object and byte array cursors,
+        // copying any other objects/byte arrays that still exist in this
         // space.
         while (target_object_segment_index < target_space.object_segment.len) : (target_object_segment_index += 1) {
             const word_ptr = &target_space.object_segment[target_object_segment_index];
@@ -581,7 +595,7 @@ const Space = struct {
                 if (self.objectSegmentContains(address)) {
                     word_ptr.* = Value.fromObjectAddress(try self.copyObjectTo(allocator, address, target_space)).data;
                 } else if (self.byteArraySegmentContains(address)) {
-                    word_ptr.* = Value.fromObjectAddress(copyByteVectorTo(allocator, address, target_space)).data;
+                    word_ptr.* = Value.fromObjectAddress(copyByteArrayTo(allocator, address, target_space)).data;
                 }
             }
         }
@@ -753,12 +767,10 @@ const Space = struct {
     }
 
     /// Allocates the requested amount in bytes in the object segment of this
-    /// space, garbage collecting if there is not enough space.
-    pub fn allocateInObjectSegment(self: *Space, allocator: Allocator, size: usize) ![*]u64 {
+    /// space. Panics if there isn't enough memory.
+    fn allocateInObjectSegment(self: *Space, allocator: Allocator, size: usize) ![*]u64 {
         if (self.lazy_allocate)
             try self.allocateMemory(allocator);
-
-        if (self.freeMemory() < size) try self.collectGarbage(allocator, size);
 
         const size_in_words = @divExact(size, @sizeOf(u64));
         const current_object_segment_offset = self.object_segment.len;
@@ -771,13 +783,11 @@ const Space = struct {
         return start_of_object;
     }
 
-    /// Allocates the requested amount in bytes in the byte vector segment of
-    /// this space, garbage collecting if there is not enough space.
-    pub fn allocateInByteVectorSegment(self: *Space, allocator: Allocator, size: usize) ![*]u64 {
+    /// Allocates the requested amount in bytes in the byte array segment of
+    /// this space. Panics if there isn't enough memory.
+    fn allocateInByteArraySegment(self: *Space, allocator: Allocator, size: usize) ![*]u64 {
         if (self.lazy_allocate)
             try self.allocateMemory(allocator);
-
-        if (self.freeMemory() < size) try self.collectGarbage(allocator, size);
 
         const size_in_words = @divExact(size, @sizeOf(u64));
         self.byte_array_segment.ptr -= size_in_words;
@@ -789,6 +799,15 @@ const Space = struct {
         return self.byte_array_segment.ptr;
     }
 
+    pub fn allocateInSegment(self: *Space, allocator: Allocator, segment: Segment, size: usize) Allocator.Error![*]u64 {
+        return switch (segment) {
+            .Object => self.allocateInObjectSegment(allocator, size),
+            .ByteArray => self.allocateInByteArraySegment(allocator, size),
+        };
+    }
+
+    /// Allocates the requested amount of bytes in the appropriate segment of
+    /// this space.
     /// Adds the given address to the finalization set of this space.
     pub fn addToFinalizationSet(self: *Space, allocator: Allocator, address: [*]u64) !void {
         try self.finalization_set.put(allocator, address, {});
@@ -1019,14 +1038,14 @@ test "link an object to another and perform scavenge" {
 
     // The object being referenced
     var referenced_object_map = try Object.Map.Slots.create(heap, 1);
-    var actual_name = try ByteVector.createFromString(heap, "actual");
+    var actual_name = try ByteArray.createFromString(heap, "actual");
     referenced_object_map.getSlots()[0].initConstant(actual_name, .NotParent, Value.fromUnsignedInteger(0xDEADBEEF));
     var referenced_object = try Object.Slots.create(heap, referenced_object_map, &[_]Value{});
 
     // The "activation object", which is how we get a reference to the object in
     // the from space after the tenure is done
     var activation_object_map = try Object.Map.Slots.create(heap, 1);
-    var reference_name = try ByteVector.createFromString(heap, "reference");
+    var reference_name = try ByteArray.createFromString(heap, "reference");
     activation_object_map.getSlots()[0].initMutable(Object.Map.Slots, activation_object_map, reference_name, .NotParent);
     var activation_object = try Object.Slots.create(heap, activation_object_map, &[_]Value{referenced_object.asValue()});
 
@@ -1042,7 +1061,7 @@ test "link an object to another and perform scavenge" {
     var new_activation_object_map = new_activation_object.getMap();
     try std.testing.expect(activation_object_map != new_activation_object_map);
     try std.testing.expect(activation_object_map.getSlots()[0].name.asObjectAddress() != new_activation_object_map.getSlots()[0].name.asObjectAddress());
-    try std.testing.expectEqualStrings("reference", new_activation_object_map.getSlots()[0].name.asByteVector().getValues());
+    try std.testing.expectEqualStrings("reference", new_activation_object_map.getSlots()[0].name.asByteArray().getValues());
 
     // Find the new referenced object
     var new_referenced_object = new_activation_object.getAssignableSlotValueByName("reference").?.asObject().asSlotsObject();
@@ -1050,7 +1069,7 @@ test "link an object to another and perform scavenge" {
     var new_referenced_object_map = new_referenced_object.getMap();
     try std.testing.expect(referenced_object_map != new_referenced_object_map);
     try std.testing.expect(referenced_object_map.getSlots()[0].name.asObjectAddress() != new_referenced_object_map.getSlots()[0].name.asObjectAddress());
-    try std.testing.expectEqualStrings("actual", new_referenced_object_map.getSlots()[0].name.asByteVector().getValues());
+    try std.testing.expectEqualStrings("actual", new_referenced_object_map.getSlots()[0].name.asByteArray().getValues());
 
     // Verify that the map map is shared (aka forwarding addresses work)
     try std.testing.expectEqual(
