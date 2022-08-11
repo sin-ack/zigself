@@ -134,6 +134,6 @@ pub const ActorProxyObject = packed struct {
     }
 
     pub fn requiredSizeForAllocation() usize {
-        return requiredSizeForActorMap() + @sizeOf(ActorProxyObject);
+        return @sizeOf(ActorProxyObject);
     }
 };
