@@ -87,7 +87,7 @@ pub const ByteArrayObject = packed struct {
 
     pub fn getSizeInMemory(self: *ByteArrayObject) usize {
         _ = self;
-        return requiredSizeForAllocation(self.getLength());
+        return requiredSizeForAllocation(null);
     }
 
     /// Call with null if the byte array object has already been allocated.
