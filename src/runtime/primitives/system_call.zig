@@ -55,6 +55,7 @@ pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
         errdefer fd.close();
 
         var token = try context.vm.heap.getAllocation(Object.Managed.requiredSizeForAllocation());
+        defer token.deinit();
         const managed_fd = try Object.Managed.create(&token, context.actor.id, .FileDescriptor, fd.toValue());
         return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
     }
@@ -386,6 +387,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     required_memory += Object.Array.requiredSizeForAllocation(result_count);
 
     var token = try context.vm.heap.getAllocation(required_memory);
+    defer token.deinit();
 
     // Refresh pointers
     addrinfo_prototype = context.vm.addrinfo_prototype.getValue().asObject().asType(.Slots).?;
@@ -445,6 +447,7 @@ pub fn SocketWithFamily_Type_Protocol_IfFail(context: *PrimitiveContext) !Execut
         errdefer fd.close();
 
         var token = try context.vm.heap.getAllocation(Object.Managed.requiredSizeForAllocation());
+        defer token.deinit();
         const managed_fd = try Object.Managed.create(&token, context.actor.id, .FileDescriptor, fd.toValue());
         return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
     }
@@ -542,6 +545,7 @@ pub fn AcceptFromFD_IfFail(context: *PrimitiveContext) !ExecutionResult {
             errdefer new_fd.close();
 
             var token = try context.vm.heap.getAllocation(Object.Managed.requiredSizeForAllocation());
+            defer token.deinit();
             const managed_new_fd = try Object.Managed.create(&token, context.actor.id, .FileDescriptor, new_fd.toValue());
             return ExecutionResult.completion(Completion.initNormal(managed_new_fd.asValue()));
         },

@@ -96,6 +96,7 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
     var token = try context.vm.heap.getAllocation(
         Object.ByteArray.requiredSizeForAllocation(@intCast(u64, size)),
     );
+    defer token.deinit();
 
     // Refresh pointers
     receiver = context.receiver.getValue().asObject().asType(.ByteArray).?;
@@ -151,6 +152,7 @@ pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
     var token = try context.vm.heap.getAllocation(
         Object.ByteArray.requiredSizeForAllocation(receiver_size + argument_size),
     );
+    defer token.deinit();
 
     // Refresh pointers
     receiver = context.receiver.getValue().asObject().asType(.ByteArray).?;

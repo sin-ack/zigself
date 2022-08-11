@@ -21,6 +21,7 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
     var token = try context.vm.heap.getAllocation(
         try Object.Slots.requiredSizeForMerging(receiver, argument, context.vm.allocator),
     );
+    defer token.deinit();
 
     // Refresh the pointers in case that caused a GC
     receiver = context.receiver.getValue().asObject().asType(.Slots).?;
@@ -93,6 +94,8 @@ pub fn Clone(context: *PrimitiveContext) !ExecutionResult {
         0;
 
     var token = try context.vm.heap.getAllocation(required_memory);
+    defer token.deinit();
+
     receiver = context.receiver.getValue();
 
     return ExecutionResult.completion(Completion.initNormal(receiver.clone(&token, context.actor.id)));

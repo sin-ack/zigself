@@ -101,6 +101,7 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
 
         break :token token;
     };
+    defer token.deinit();
 
     // NOTE: Need to advance the global actor to the next instruction to be returned to after the genesis actor exits.
     context.vm.current_actor.activation_stack.getCurrent().advanceInstruction();
@@ -250,6 +251,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         return ExecutionResult.completion(completion);
     }
 
+    token.deinit();
     token = token: {
         var tracked_method = try context.vm.heap.track(entrypoint_method.asValue());
         defer tracked_method.untrack(context.vm.heap);
@@ -265,6 +267,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
         break :token inner_token;
     };
+    defer token.deinit();
 
     try new_actor.activateMethod(context.vm, &token, entrypoint_method, context.target_location, context.source_range);
 
@@ -399,6 +402,7 @@ pub fn ActorSender(context: *PrimitiveContext) !ExecutionResult {
     var token = try context.vm.heap.getAllocation(
         Object.ActorProxy.requiredSizeForAllocation(),
     );
+    defer token.deinit();
 
     const actor_object = context.actor.message_sender.?.get();
     const actor_proxy = try Object.ActorProxy.create(&token, context.actor.id, actor_object);

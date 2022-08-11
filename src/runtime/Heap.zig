@@ -78,6 +78,14 @@ pub const AllocationToken = struct {
         //       which eden does not do.
         return self.heap.eden.allocateInSegment(self.heap.allocator, segment, bytes) catch unreachable;
     }
+
+    pub fn deinit(self: @This()) void {
+        if (std.debug.runtime_safety) {
+            if (self.bytes_left != 0) {
+                std.debug.panic("!!! Only {} out of {} bytes consumed from the allocation token!", .{ self.total_bytes - self.bytes_left, self.total_bytes });
+            }
+        }
+    }
 };
 
 pub fn create(allocator: Allocator, vm: *VirtualMachine) !*Self {

@@ -24,6 +24,7 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
 
     const required_memory = Object.Map.Array.requiredSizeForAllocation() + Object.Array.requiredSizeForAllocation(@intCast(u64, size));
     var token = try context.vm.heap.getAllocation(required_memory);
+    defer token.deinit();
 
     if (size == 0) {
         const array_map = Object.Map.Array.create(&token, 0);

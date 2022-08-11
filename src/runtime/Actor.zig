@@ -210,6 +210,7 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
             var method = node.data.method.get();
 
             var token = try vm.heap.getAllocation(method.requiredSizeForActivation());
+            defer token.deinit();
             method = node.data.method.get();
 
             const actor_context = self.actor_object.get().context;

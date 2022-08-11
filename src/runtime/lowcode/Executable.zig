@@ -69,6 +69,7 @@ pub fn pushSubEntrypointActivation(self: *Executable, vm: *VirtualMachine, execu
         Object.Method.requiredSizeForCreatingTopLevelContext() +
             Object.Activation.requiredSizeForAllocation(0, 0),
     );
+    defer token.deinit();
 
     const toplevel_context_method = try Object.Method.createTopLevelContextForExecutable(vm, &token, Ref{ .value = self }, self.entrypointBlock());
     const activation_slot = try activation_stack.getNewActivationSlot(vm.allocator);

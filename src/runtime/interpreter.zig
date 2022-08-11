@@ -229,6 +229,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
                 Object.Map.Slots.requiredSizeForAllocation(total_slot_count) +
                     Object.Slots.requiredSizeForAllocation(total_assignable_slot_count),
             );
+            defer token.deinit();
 
             var slots_map = Object.Map.Slots.create(&token, total_slot_count);
 
@@ -266,6 +267,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
                 Object.Map.Method.requiredSizeForAllocation(total_slot_count) +
                     Object.Method.requiredSizeForAllocation(total_assignable_slot_count),
             );
+            defer token.deinit();
 
             const method_name_as_object = vm.readRegister(payload.method_name_location).asObject().asByteArrayObject();
             const block = executable.value.getBlock(payload.block_index);
@@ -328,6 +330,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
                 Object.Map.Block.requiredSizeForAllocation(total_slot_count) +
                     Object.Block.requiredSizeForAllocation(total_assignable_slot_count),
             );
+            defer token.deinit();
 
             var block_map = try Object.Map.Block.create(
                 &token,
@@ -355,6 +358,7 @@ pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activat
             const string = payload.string;
 
             var token = try vm.heap.getAllocation(Object.ByteArray.requiredSizeForAllocation(string.len));
+            defer token.deinit();
 
             const byte_array = try Object.ByteArray.createWithValues(&token, actor.id, string);
             vm.writeRegister(inst.target, byte_array.asValue());
@@ -574,6 +578,7 @@ fn executeBlock(
 
         break :token token;
     };
+    defer token.deinit();
 
     const parent_activation_object = block.getMap().parent_activation.get(actor.activation_stack).?.activation_object;
     const activation_slot = try actor.activation_stack.getNewActivationSlot(vm.allocator);
@@ -621,6 +626,7 @@ fn executeMethod(
 
         break :token token;
     };
+    defer token.deinit();
 
     // NOTE: The receiver of a method activation must never be an activation
     //       object (unless it explicitly wants that), as that would allow

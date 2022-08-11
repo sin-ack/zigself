@@ -45,10 +45,6 @@ pub fn getMapMap(token: *Heap.AllocationToken) Value {
     return map_value;
 }
 
-fn requiredSizeForMapMapAllocation() usize {
-    return if (static_map_map == null) @sizeOf(SlotsMap) else 0;
-}
-
 const MapTypeShift = Object.ObjectTypeShift + Object.ObjectTypeBits;
 const MapTypeBits = 3;
 const MapTypeMask: u64 = ((1 << MapTypeBits) - 1) << MapTypeShift;
@@ -209,7 +205,7 @@ fn SlotsLikeMapBase(comptime MapT: type) type {
 
         /// Return the size required for the whole map with the given slot count.
         pub fn requiredSizeForAllocation(slot_count: u32) usize {
-            return requiredSizeForMapMapAllocation() + @sizeOf(MapT) + slot_count * @sizeOf(Slot);
+            return @sizeOf(MapT) + slot_count * @sizeOf(Slot);
         }
 
         fn asSlotsMap(self: *MapT) *SlotsMap {
@@ -481,6 +477,6 @@ const ArrayMap = packed struct {
     }
 
     pub fn requiredSizeForAllocation() usize {
-        return requiredSizeForMapMapAllocation() + @sizeOf(ArrayMap);
+        return @sizeOf(ArrayMap);
     }
 };

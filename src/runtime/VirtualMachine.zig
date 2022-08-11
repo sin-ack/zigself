@@ -99,14 +99,17 @@ pub fn create(allocator: Allocator) !*Self {
     };
 
     var token = try heap.getAllocation(
-        // Global objects
+        // Map map (special case for first ever map allocation)
         Object.Map.Slots.requiredSizeForAllocation(0) +
+            // Global objects
+            Object.Map.Slots.requiredSizeForAllocation(0) +
             (10 * Object.Slots.requiredSizeForAllocation(0)) +
             // Global actor
             Object.Actor.requiredSizeForAllocation() +
             // addrinfo prototype
             requiredSizeForAddrInfoPrototypeAllocation(),
     );
+    defer token.deinit();
 
     const empty_map = Object.Map.Slots.create(&token, 0);
 
