@@ -8,10 +8,11 @@ const Heap = @import("./Heap.zig");
 const value = @import("./value.zig");
 const Value = value.Value;
 const IntegerValue = value.IntegerValue;
+const stage2_compat = @import("../utility/stage2_compat.zig");
 
 const Self = @This();
 
-header: *align(@alignOf(u64)) Header,
+header: Header.Ptr,
 
 pub fn createFromString(token: *Heap.AllocationToken, string: []const u8) Self {
     var self = createUninitialized(token, string.len);
@@ -21,7 +22,7 @@ pub fn createFromString(token: *Heap.AllocationToken, string: []const u8) Self {
 
 pub fn createUninitialized(token: *Heap.AllocationToken, size: usize) Self {
     var memory_area = token.allocate(.ByteArray, requiredSizeForAllocation(size));
-    var header = @ptrCast(*Header, memory_area);
+    var header = @ptrCast(Header.Ptr, memory_area);
 
     header.init(size);
 
@@ -40,7 +41,7 @@ pub fn getValues(self: Self) []u8 {
 }
 
 pub fn asValue(self: Self) Value {
-    return Value.fromObjectAddress(@ptrCast([*]u64, self.header));
+    return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self.header)));
 }
 
 pub fn getSizeInMemory(self: Self) usize {
@@ -61,11 +62,13 @@ pub const Header = packed struct {
     /// header.
     length: IntegerValue(.Unsigned),
 
-    pub fn init(self: *Header, byte_array_length: u64) void {
+    pub const Ptr = stage2_compat.HeapPtr(Header, .Mutable);
+
+    pub fn init(self: Header.Ptr, byte_array_length: u64) void {
         self.length = IntegerValue(.Unsigned).init(@sizeOf(Header) + byte_array_length);
     }
 
-    pub fn asByteVector(self: *Header) Self {
+    pub fn asByteVector(self: Header.Ptr) Self {
         return .{ .header = @alignCast(@alignOf(u64), self) };
     }
 };

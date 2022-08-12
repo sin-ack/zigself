@@ -19,6 +19,7 @@ const ByteArray = @import("../ByteArray.zig");
 const MapBuilder = @import("./map_builder.zig").MapBuilder;
 const SourceRange = @import("../SourceRange.zig");
 const value_import = @import("../value.zig");
+const stage2_compat = @import("../../utility/stage2_compat.zig");
 const BytecodeBlock = @import("../lowcode/Block.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationValue = value_import.ActivationValue;
@@ -49,13 +50,15 @@ const MergeInfo = struct {
 /// usingnamespace`. Adds common functions expected from slots-like objects.
 fn SlotsLikeObjectBase(comptime ObjectT: type) type {
     return struct {
+        pub const Ptr = stage2_compat.HeapPtr(ObjectT, .Mutable);
+
         /// Return the address of the current object.
-        pub fn asObjectAddress(self: *ObjectT) [*]u64 {
+        pub fn asObjectAddress(self: Ptr) [*]u64 {
             return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
         }
 
         /// Return this object as a value.
-        pub fn asValue(self: *ObjectT) Value {
+        pub fn asValue(self: Ptr) Value {
             return Value.fromObjectAddress(asObjectAddress(self));
         }
     };
@@ -79,7 +82,7 @@ fn AssignableSlotsMixin(comptime ObjectT: type) type {
         /// Return a slice of `Value`s for the assignable slots that are
         /// after the Slots object header. Should not be called from
         /// outside; use getAssignableSlotValue instead.
-        pub fn getAssignableSlots(self: *ObjectT) []Value {
+        pub fn getAssignableSlots(self: ObjectT.Ptr) stage2_compat.HeapSlice(Value, .Mutable) {
             const object_size = @sizeOf(ObjectT);
             const object_memory = @ptrCast([*]u8, self);
             const assignable_slot_count = ObjectT.getMap(self).getAssignableSlotCount();
@@ -91,7 +94,7 @@ fn AssignableSlotsMixin(comptime ObjectT: type) type {
         }
 
         /// Return the assignable slot value for this slot.
-        pub fn getAssignableSlotValue(self: *ObjectT, slot: Slot) *Value {
+        pub fn getAssignableSlotValue(self: ObjectT.Ptr, slot: Slot) stage2_compat.HeapPtr(Value, .Mutable) {
             std.debug.assert(slot.isAssignable());
             std.debug.assert(!slot.isArgument());
 
@@ -99,7 +102,7 @@ fn AssignableSlotsMixin(comptime ObjectT: type) type {
         }
 
         /// Return a shallow copy of this object.
-        pub fn clone(self: *ObjectT, token: *Heap.AllocationToken, actor_id: u31) *ObjectT {
+        pub fn clone(self: ObjectT.Ptr, token: *Heap.AllocationToken, actor_id: u31) ObjectT.Ptr {
             return ObjectT.create(token, actor_id, self.getMap(), getAssignableSlots(self));
         }
     };
@@ -109,13 +112,13 @@ fn AssignableSlotsMixin(comptime ObjectT: type) type {
 /// actually in the object; for that, the map must be consulted. The slot
 /// object begins with a header followed by Values for each of the
 /// assignable slots.
-pub const Slots = packed struct {
+pub const Slots = extern struct {
     header: Object.Header,
 
     pub usingnamespace SlotsLikeObjectBase(Slots);
     pub usingnamespace AssignableSlotsMixin(Slots);
 
-    pub fn create(token: *Heap.AllocationToken, actor_id: u31, map: *Map.Slots, assignable_slot_values: []const Value) *Slots {
+    pub fn create(token: *Heap.AllocationToken, actor_id: u31, map: Map.Slots.Ptr, assignable_slot_values: []const Value) Slots.Ptr {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -126,22 +129,22 @@ pub const Slots = packed struct {
         const size = Slots.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len));
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(*Slots, memory_area);
+        var self = @ptrCast(Slots.Ptr, memory_area);
         self.init(actor_id, map.asValue());
         std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
 
         return self;
     }
 
-    fn init(self: *Slots, actor_id: u31, map: Value) void {
+    fn init(self: Slots.Ptr, actor_id: u31, map: Value) void {
         self.header.init(.Slots, actor_id, map);
     }
 
-    pub fn getMap(self: *Slots) *Map.Slots {
+    pub fn getMap(self: Slots.Ptr) Map.Slots.Ptr {
         return self.header.getMap().asSlotsMap();
     }
 
-    pub fn getSlots(self: *Slots) []Slot {
+    pub fn getSlots(self: Slots.Ptr) Slot.Slice {
         return self.getMap().getSlots();
     }
 
@@ -149,10 +152,10 @@ pub const Slots = packed struct {
 
     /// Calls the given function with each slot in merge order.
     fn forSlotsInMergeOrder(
-        target_object: *Slots,
-        source_object: *Slots,
+        target_object: Slots.Ptr,
+        source_object: Slots.Ptr,
         context: anytype,
-        comptime callback: fn (context: @TypeOf(context), object: *Slots, slot: Slot) Allocator.Error!void,
+        comptime callback: fn (context: @TypeOf(context), object: Slots.Ptr, slot: Slot) Allocator.Error!void,
     ) !void {
         // We go through all of the target object's slots first, seeing if there
         // is any slot that should override ours. Any slot in the source object
@@ -193,15 +196,15 @@ pub const Slots = packed struct {
     /// Like forSlotsInMergeOrder but first calls with only inherited slots,
     /// and then calls with no inherited slots.
     fn forSlotsInMergeOrderWithInheritedFirst(
-        target_object: *Slots,
-        source_object: *Slots,
+        target_object: Slots.Ptr,
+        source_object: Slots.Ptr,
         context: anytype,
-        comptime callback: fn (context: @TypeOf(context), object: *Slots, slot: Slot) Allocator.Error!void,
+        comptime callback: fn (context: @TypeOf(context), object: Slots.Ptr, slot: Slot) Allocator.Error!void,
     ) !void {
         const ContextT = @TypeOf(context);
 
         try forSlotsInMergeOrder(target_object, source_object, context, struct {
-            fn outerCallback(ctx: ContextT, object: *Slots, slot: Slot) !void {
+            fn outerCallback(ctx: ContextT, object: Slots.Ptr, slot: Slot) !void {
                 if (!slot.isInherited())
                     return;
                 try callback(ctx, object, slot);
@@ -209,7 +212,7 @@ pub const Slots = packed struct {
         }.outerCallback);
 
         try forSlotsInMergeOrder(target_object, source_object, context, struct {
-            fn outerCallback(ctx: ContextT, object: *Slots, slot: Slot) !void {
+            fn outerCallback(ctx: ContextT, object: Slots.Ptr, slot: Slot) !void {
                 if (slot.isInherited())
                     return;
                 try callback(ctx, object, slot);
@@ -224,7 +227,7 @@ pub const Slots = packed struct {
     ///
     /// The token must have at least `self.requiredSizeForMerging(source_object)`
     /// bytes available.
-    pub fn addSlotsFrom(self: *Slots, source_object: *Slots, allocator: Allocator, token: *Heap.AllocationToken, current_actor_id: u31) !*Slots {
+    pub fn addSlotsFrom(self: Slots.Ptr, source_object: Slots.Ptr, allocator: Allocator, token: *Heap.AllocationToken, current_actor_id: u31) !Slots.Ptr {
         const merge_info = try self.calculateMergeOf(source_object, allocator);
 
         // If there is anything that could change any of the slots, then we need
@@ -246,7 +249,7 @@ pub const Slots = packed struct {
 
         const CallbackContext = struct { map_builder: *MapBuilder(Map.Slots, Slots) };
         forSlotsInMergeOrderWithInheritedFirst(self, source_object, CallbackContext{ .map_builder = &map_builder }, struct {
-            fn callback(context: CallbackContext, object: *Slots, slot: Slot) !void {
+            fn callback(context: CallbackContext, object: Slots.Ptr, slot: Slot) !void {
                 const slot_copy = slot.copy(object);
                 context.map_builder.addSlot(slot_copy);
             }
@@ -276,7 +279,7 @@ pub const Slots = packed struct {
 
     /// Return the amount of bytes that must be available on the heap in order
     /// to merge `source_object` into `target_object`.
-    pub fn requiredSizeForMerging(target_object: *Slots, source_object: *Slots, allocator: Allocator) !usize {
+    pub fn requiredSizeForMerging(target_object: Slots.Ptr, source_object: Slots.Ptr, allocator: Allocator) !usize {
         const merge_info = try target_object.calculateMergeOf(source_object, allocator);
 
         // If there is anything that could change any of the slots, then we need
@@ -300,7 +303,7 @@ pub const Slots = packed struct {
     /// slots would change from a constant to assignable slot and vice versa.
     ///
     /// Returns a MergeInfo.
-    fn calculateMergeOf(target_object: *Slots, source_object: *Slots, allocator: Allocator) !MergeInfo {
+    fn calculateMergeOf(target_object: Slots.Ptr, source_object: Slots.Ptr, allocator: Allocator) !MergeInfo {
         var slots: usize = 0;
         // usize despite requiredAssignableSlotValueSpace returning isize, as
         // this should never go negative (that'd be a bug).
@@ -324,7 +327,7 @@ pub const Slots = packed struct {
             slots: *usize,
             assignable_slot_values: *usize,
             has_updated_slots: *bool,
-            source_object: *Slots,
+            source_object: Slots.Ptr,
         };
 
         try forSlotsInMergeOrderWithInheritedFirst(target_object, source_object, CallbackContext{
@@ -334,7 +337,7 @@ pub const Slots = packed struct {
             .has_updated_slots = &has_updated_slots,
             .source_object = source_object,
         }, struct {
-            fn callback(context: CallbackContext, object: *Slots, slot: Slot) !void {
+            fn callback(context: CallbackContext, object: Slots.Ptr, slot: Slot) !void {
                 context.slots.* += slot.requiredSlotSpace(context.merged_slots.items);
                 context.assignable_slot_values.* = @intCast(usize, @intCast(isize, context.assignable_slot_values.*) +
                     slot.requiredAssignableSlotValueSpace(context.merged_slots.items));
@@ -357,13 +360,13 @@ pub const Slots = packed struct {
 
 /// A method object. A method object is a slots object with a method map as its
 /// parent.
-pub const Method = packed struct {
+pub const Method = extern struct {
     slots: Slots,
 
     pub usingnamespace SlotsLikeObjectBase(Method);
     pub usingnamespace AssignableSlotsMixin(Method);
 
-    pub fn create(token: *Heap.AllocationToken, actor_id: u31, map: *Map.Method, assignable_slot_values: []const Value) *Method {
+    pub fn create(token: *Heap.AllocationToken, actor_id: u31, map: Map.Method.Ptr, assignable_slot_values: []const Value) Method.Ptr {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -374,22 +377,22 @@ pub const Method = packed struct {
         const size = Method.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len));
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(*Method, memory_area);
+        var self = @ptrCast(Method.Ptr, memory_area);
         self.init(actor_id, map.asValue());
         std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
 
         return self;
     }
 
-    fn init(self: *Method, actor_id: u31, map: Value) void {
+    fn init(self: Method.Ptr, actor_id: u31, map: Value) void {
         self.slots.header.init(.Method, actor_id, map);
     }
 
-    pub fn getMap(self: *Method) *Map.Method {
+    pub fn getMap(self: Method.Ptr) Map.Method.Ptr {
         return self.slots.header.getMap().asMethodMap();
     }
 
-    pub fn getSlots(self: *Method) []Slot {
+    pub fn getSlots(self: Method.Ptr) Slot.Slice {
         return self.getMap().getSlots();
     }
 
@@ -401,7 +404,7 @@ pub const Method = packed struct {
         token: *Heap.AllocationToken,
         executable: BytecodeExecutable.Ref,
         block: *BytecodeBlock,
-    ) !*Method {
+    ) !Method.Ptr {
         const toplevel_context_method_map = blk: {
             const toplevel_context_name = ByteArray.createFromString(token, toplevel_context_string);
             break :blk try Map.Method.create(token, 0, 0, false, toplevel_context_name, block, executable);
@@ -417,17 +420,17 @@ pub const Method = packed struct {
 
     // --- Map forwarding ---
 
-    pub fn expectsActivationObjectAsReceiver(self: *Method) bool {
+    pub fn expectsActivationObjectAsReceiver(self: Method.Ptr) bool {
         return self.getMap().expectsActivationObjectAsReceiver();
     }
 
     // --- Slot counts ---
 
-    pub fn getArgumentSlotCount(self: *Method) u8 {
+    pub fn getArgumentSlotCount(self: Method.Ptr) u8 {
         return self.getMap().getArgumentSlotCount();
     }
 
-    pub fn getAssignableSlotCount(self: *Method) u8 {
+    pub fn getAssignableSlotCount(self: Method.Ptr) u8 {
         return self.getMap().getAssignableSlotCount();
     }
 
@@ -436,7 +439,7 @@ pub const Method = packed struct {
     /// Creates a method activation object for this block and returns it.
     /// Copies `source_range`.
     pub fn activateMethod(
-        self: *Method,
+        self: Method.Ptr,
         vm: *VirtualMachine,
         token: *Heap.AllocationToken,
         actor_id: u31,
@@ -450,20 +453,20 @@ pub const Method = packed struct {
         out_activation.initInPlace(ActivationValue.init(activation_object), target_location, vm.takeStackSnapshot(), self.getMap().method_name, created_from);
     }
 
-    pub fn requiredSizeForActivation(self: *Method) usize {
+    pub fn requiredSizeForActivation(self: Method.Ptr) usize {
         return Activation.requiredSizeForAllocation(self.getArgumentSlotCount(), self.getAssignableSlotCount());
     }
 };
 
 /// A block object. A block object is a slots object with a block map as its
 /// parent.
-pub const Block = packed struct {
+pub const Block = extern struct {
     slots: Slots,
 
     pub usingnamespace SlotsLikeObjectBase(Block);
     pub usingnamespace AssignableSlotsMixin(Block);
 
-    pub fn create(token: *Heap.AllocationToken, actor_id: u31, map: *Map.Block, assignable_slot_values: []const Value) *Block {
+    pub fn create(token: *Heap.AllocationToken, actor_id: u31, map: Map.Block.Ptr, assignable_slot_values: []const Value) Block.Ptr {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -474,32 +477,32 @@ pub const Block = packed struct {
         const size = Block.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len));
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(*Block, memory_area);
+        var self = @ptrCast(Block.Ptr, memory_area);
         self.init(actor_id, map.asValue());
         std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
 
         return self;
     }
 
-    fn init(self: *Block, actor_id: u31, map: Value) void {
+    fn init(self: Block.Ptr, actor_id: u31, map: Value) void {
         self.slots.header.init(.Block, actor_id, map);
     }
 
-    pub fn getMap(self: *Block) *Map.Block {
+    pub fn getMap(self: Block.Ptr) Map.Block.Ptr {
         return self.slots.header.getMap().asBlockMap();
     }
 
-    pub fn getSlots(self: *Block) []Slot {
+    pub fn getSlots(self: Block.Ptr) Slot.Slice {
         return self.getMap().getSlots();
     }
 
     // --- Slot counts ---
 
-    pub fn getArgumentSlotCount(self: *Block) u8 {
+    pub fn getArgumentSlotCount(self: Block.Ptr) u8 {
         return self.getMap().getArgumentSlotCount();
     }
 
-    pub fn getAssignableSlotCount(self: *Block) u8 {
+    pub fn getAssignableSlotCount(self: Block.Ptr) u8 {
         return self.getMap().getAssignableSlotCount();
     }
 
@@ -512,7 +515,7 @@ pub const Block = packed struct {
     /// - For blocks with a single argument, `value:`
     /// - For blocks with more than one argument, `value:With:`, with as many
     ///   `With:`s as needed (number of colons should match number of arguments)
-    pub fn isCorrectMessageForBlockExecution(self: *Block, message: []const u8) bool {
+    pub fn isCorrectMessageForBlockExecution(self: Block.Ptr, message: []const u8) bool {
         if (self.getArgumentSlotCount() == 0) {
             return std.mem.eql(u8, message, "value");
         }
@@ -540,7 +543,7 @@ pub const Block = packed struct {
     /// Creates a block activation object for this block and returns it. Copies
     /// `source_range`.
     pub fn activateBlock(
-        self: *Block,
+        self: Block.Ptr,
         vm: *VirtualMachine,
         token: *Heap.AllocationToken,
         receiver: Value,
@@ -560,7 +563,7 @@ pub const Block = packed struct {
 
 /// An activation object, which is just a slots object but with an extra
 /// "receiver" value that is the actual value on which a message was activated.
-pub const Activation = packed struct {
+pub const Activation = extern struct {
     slots: Slots,
     receiver: Value,
 
@@ -571,11 +574,11 @@ pub const Activation = packed struct {
         token: *Heap.AllocationToken,
         actor_id: u31,
         comptime map_type: MapType,
-        map: *Map,
+        map: Map.Ptr,
         arguments: []const Value,
         assignable_slot_values: []Value,
         receiver: Value,
-    ) *Activation {
+    ) Activation.Ptr {
         const assignable_slot_count = switch (map_type) {
             .Block => map.asBlockMap().getAssignableSlotCount(),
             .Method => map.asMethodMap().getAssignableSlotCount(),
@@ -604,7 +607,7 @@ pub const Activation = packed struct {
         const size = requiredSizeForAllocation(argument_slot_count, assignable_slot_count);
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(*Activation, memory_area);
+        var self = @ptrCast(Activation.Ptr, memory_area);
         self.init(map_type, actor_id, map.asValue(), receiver);
         std.mem.copy(Value, self.getArgumentSlots(), arguments);
         std.mem.copy(Value, self.getNonargumentSlots(), assignable_slot_values);
@@ -613,7 +616,7 @@ pub const Activation = packed struct {
     }
 
     fn init(
-        self: *Activation,
+        self: Activation.Ptr,
         comptime map_type: MapType,
         actor_id: u31,
         map: Value,
@@ -634,34 +637,34 @@ pub const Activation = packed struct {
         Method = 0 << ActivationTypeShift,
         Block = 1 << ActivationTypeShift,
     };
-    pub fn getActivationType(self: *Activation) ActivationType {
+    pub fn getActivationType(self: Activation.Ptr) ActivationType {
         return @intToEnum(ActivationType, self.slots.header.object_information & ActivationTypeBit);
     }
 
-    fn setActivationType(self: *Activation, comptime activation_type: ActivationType) void {
+    fn setActivationType(self: Activation.Ptr, comptime activation_type: ActivationType) void {
         self.slots.header.object_information = (self.slots.header.object_information & ~ActivationTypeBit) | @enumToInt(activation_type);
     }
 
     // --- Slot counts ---
 
-    pub fn getAssignableSlotCount(self: *Activation) u8 {
+    pub fn getAssignableSlotCount(self: Activation.Ptr) u8 {
         return self.dispatch("getAssignableSlotCount");
     }
 
-    pub fn getArgumentSlotCount(self: *Activation) u8 {
+    pub fn getArgumentSlotCount(self: Activation.Ptr) u8 {
         return self.dispatch("getArgumentSlotCount");
     }
 
     // --- Map forwarding ---
 
-    pub fn getDefinitionExecutable(self: *Activation) BytecodeExecutable.Ref {
+    pub fn getDefinitionExecutable(self: Activation.Ptr) BytecodeExecutable.Ref {
         return switch (self.getActivationType()) {
             .Method => self.getMethodMap().base_map.definition_executable_ref.get(),
             .Block => self.getBlockMap().base_map.definition_executable_ref.get(),
         };
     }
 
-    pub fn getBytecodeBlock(self: *Activation) *BytecodeBlock {
+    pub fn getBytecodeBlock(self: Activation.Ptr) *BytecodeBlock {
         return switch (self.getActivationType()) {
             .Method => self.getMethodMap().base_map.block.get(),
             .Block => self.getBlockMap().base_map.block.get(),
@@ -670,13 +673,13 @@ pub const Activation = packed struct {
 
     // --- Slots and slot values ---
 
-    pub fn getSlots(self: *Activation) []Slot {
+    pub fn getSlots(self: Activation.Ptr) Slot.Slice {
         return self.dispatch("getSlots");
     }
 
     /// Return a slice of `Value`s for the assignable slots that are after the
     /// Activation object header.
-    fn getAssignableSlots(self: *Activation) []Value {
+    fn getAssignableSlots(self: Activation.Ptr) []Value {
         const activation_header_size = @sizeOf(Activation);
         const object_memory = @ptrCast([*]u8, self);
 
@@ -686,18 +689,18 @@ pub const Activation = packed struct {
         );
     }
 
-    fn getArgumentSlots(self: *Activation) []Value {
+    fn getArgumentSlots(self: Activation.Ptr) []Value {
         return self.getAssignableSlots()[0..self.getArgumentSlotCount()];
     }
 
-    fn getNonargumentSlots(self: *Activation) []Value {
+    fn getNonargumentSlots(self: Activation.Ptr) []Value {
         const slot_values = self.getAssignableSlots();
         std.debug.assert(slot_values.len - self.getArgumentSlotCount() == self.getAssignableSlotCount());
 
         return slot_values[self.getArgumentSlotCount()..];
     }
 
-    pub fn getAssignableSlotValue(self: *Activation, slot: Slot) *Value {
+    pub fn getAssignableSlotValue(self: Activation.Ptr, slot: Slot) *Value {
         std.debug.assert(slot.isAssignable());
 
         return if (slot.isArgument())
@@ -711,7 +714,7 @@ pub const Activation = packed struct {
     /// Return the object on which the method activation was executed. If the
     /// receiver is also an activation object, then returns its receiver
     /// instead.
-    pub fn findActivationReceiver(self: *Activation) Value {
+    pub fn findActivationReceiver(self: Activation.Ptr) Value {
         var object = self.asValue().asObject();
         while (object.isActivationObject()) {
             const receiver = object.asActivationObject().receiver;
@@ -728,7 +731,7 @@ pub const Activation = packed struct {
 
     // --- Allocation and current size ---
 
-    pub fn getSizeInMemory(self: *Activation) usize {
+    pub fn getSizeInMemory(self: Activation.Ptr) usize {
         return requiredSizeForAllocation(self.getArgumentSlotCount(), self.getAssignableSlotCount());
     }
 
@@ -738,7 +741,7 @@ pub const Activation = packed struct {
 
     // --- Map dispatch ---
 
-    fn getMethodMap(self: *Activation) *Map.Method {
+    fn getMethodMap(self: Activation.Ptr) Map.Method.Ptr {
         if (self.getActivationType() == .Block) {
             std.debug.panic("Attempted to call getMethodMap on a block activation object", .{});
         }
@@ -746,7 +749,7 @@ pub const Activation = packed struct {
         return self.slots.header.getMap().asMethodMap();
     }
 
-    fn getBlockMap(self: *Activation) *Map.Block {
+    fn getBlockMap(self: Activation.Ptr) Map.Block.Ptr {
         if (self.getActivationType() == .Method) {
             std.debug.panic("Attempted to call getBlockMap on a method activation object", .{});
         }
@@ -758,7 +761,7 @@ pub const Activation = packed struct {
         return @typeInfo(@TypeOf(@field(Map.Method, fn_name))).Fn.return_type.?;
     }
 
-    fn dispatch(self: *Activation, comptime fn_name: []const u8) DispatchReturn(fn_name) {
+    fn dispatch(self: Activation.Ptr, comptime fn_name: []const u8) DispatchReturn(fn_name) {
         return switch (self.getActivationType()) {
             .Method => @call(.{}, @field(self.getMethodMap(), fn_name), .{}),
             .Block => @call(.{}, @field(self.getBlockMap(), fn_name), .{}),

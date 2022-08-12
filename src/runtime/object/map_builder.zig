@@ -25,7 +25,7 @@ pub const AssignableSlotValues = std.BoundedArray(Value, AstGen.MaximumAssignabl
 pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
     return struct {
         token: *Heap.AllocationToken,
-        map: *MapType,
+        map: MapType.Ptr,
         assignable_slot_values: AssignableSlotValues,
 
         slot_index: usize = 0,
@@ -37,7 +37,7 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
         // Marker for typechecking.
         pub const is_map_builder = true;
 
-        pub fn init(token: *Heap.AllocationToken, map: *MapType) Self {
+        pub fn init(token: *Heap.AllocationToken, map: MapType.Ptr) Self {
             return Self{
                 .token = token,
                 .map = map,
@@ -61,7 +61,7 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
             self.map.setAssignableSlotCount(@intCast(u8, self.assignable_slot_index));
         }
 
-        pub fn createObject(self: *Self, current_actor_id: u31) *ObjectType {
+        pub fn createObject(self: *Self, current_actor_id: u31) ObjectType.Ptr {
             var slot_values: [AstGen.MaximumAssignableSlots]Value = undefined;
             const slot_values_slice = slot_values[0..self.assignable_slot_index];
             self.writeAssignableSlotValuesTo(slot_values_slice);

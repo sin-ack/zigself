@@ -82,7 +82,7 @@ pub fn lookupByHash(
     return lookupInternal(self, vm, selector_hash, null);
 }
 
-const nothing = LookupResult{ .Nothing = .{} };
+const nothing = LookupResult{ .Nothing = {} };
 fn lookupInternal(
     self: Object,
     vm: *VirtualMachine,

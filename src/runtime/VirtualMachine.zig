@@ -285,7 +285,8 @@ pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
         // written.
         const current_actor_target_location = self.current_actor.activation_stack.getStack()[0].target_location;
 
-        switch (try self.current_actor.execute(self)) {
+        var actor_result = try self.current_actor.execute(self);
+        switch (actor_result) {
             .ActorSwitch => continue,
             .Completion => |*completion| {
                 defer completion.deinit(self);

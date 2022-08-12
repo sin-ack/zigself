@@ -942,7 +942,7 @@ const Space = struct {
                 // old and new address, we'll always be correctly untracking,
                 // so we can simply update the address.
                 if (new_address_space) |new_space| {
-                    try tracked_handles_to_remove.put(allocator, handle, .{});
+                    try tracked_handles_to_remove.put(allocator, handle, {});
                     try new_space.addToTrackedSet(allocator, handle);
                 }
 
@@ -957,7 +957,7 @@ const Space = struct {
         // If the new object is in the current space and should be finalized,
         // then put it in the finalization set.
         if (self.objectSegmentContains(new_address) and new_address_value.asObject().shouldFinalize())
-            try self.finalization_set.put(allocator, new_address, .{});
+            try self.finalization_set.put(allocator, new_address, {});
     }
 
     /// Update all references to the given object in the current space and

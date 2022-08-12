@@ -187,7 +187,8 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     try context.vm.registerRegularActor(new_actor);
     context.vm.switchToActor(new_actor);
 
-    switch (try new_actor.executeUntil(context.vm, null)) {
+    var actor_result = try new_actor.executeUntil(context.vm, null);
+    switch (actor_result) {
         .ActorSwitch => {
             return ExecutionResult.completion(
                 try Completion.initRuntimeError(context.vm, context.source_range, "The actor spawn activation caused an actor switch", .{}),

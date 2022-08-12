@@ -169,7 +169,8 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
 
     const activation_before_script_ref = activation_before_script.takeRef(context.actor.activation_stack);
 
-    switch (try context.actor.executeUntil(context.vm, activation_before_script_ref)) {
+    var actor_result = try context.actor.executeUntil(context.vm, activation_before_script_ref);
+    switch (actor_result) {
         .ActorSwitch => unreachable,
         .Completion => |*completion| {
             switch (completion.data) {

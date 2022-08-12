@@ -49,7 +49,7 @@ pub fn initRuntimeError(vm: *VirtualMachine, source_range: SourceRange, comptime
 
 /// Creates a restart completion.
 pub fn initRestart() Self {
-    return .{ .data = .{ .Restart = .{} } };
+    return .{ .data = .{ .Restart = {} } };
 }
 
 /// Deinitializes values in this completion as necessary.

@@ -14,6 +14,7 @@ const Object = @import("./Object.zig");
 const AstGen = @import("./AstGen.zig");
 const ByteArray = @import("./ByteArray.zig");
 const map_builder = @import("./object/map_builder.zig");
+const stage2_compat = @import("../utility/stage2_compat.zig");
 
 /// The properties of a slot. This is shared by both ProtoSlot and Slot.
 const SlotProperties = packed struct {
@@ -140,6 +141,11 @@ pub const Slot = packed struct {
     /// contain the argument slots).
     value: Value,
 
+    pub const ConstSlice = stage2_compat.HeapSlice(Slot, .Const);
+    pub const Slice = stage2_compat.HeapSlice(Slot, .Mutable);
+    pub const ConstPtr = stage2_compat.HeapPtr(Slot, .Const);
+    pub const Ptr = stage2_compat.HeapPtr(Slot, .Mutable);
+
     pub fn initConstant(name: ByteArray, parent: SlotProperties.ParentFlag, value: Value) Slot {
         return init(name, parent, .Constant, .NotArgument, .NotInherited, value);
     }
@@ -197,7 +203,7 @@ pub const Slot = packed struct {
 
     /// Assign an index to the current slot, and return the value previously
     /// stored in it. Only available for assignable slots.
-    pub fn assignIndex(self: *Slot, index: u8) Value {
+    pub fn assignIndex(self: Slot.Ptr, index: u8) Value {
         if (builtin.mode == .Debug) {
             std.debug.assert(self.isAssignable());
             std.debug.assert(!self.properties.isIndexAssigned());
@@ -249,10 +255,10 @@ pub const Slot = packed struct {
     }
 
     fn GetSlotWithMyNameResult(comptime previous_slots_type: type) type {
-        if (previous_slots_type == []Slot)
-            return ?*Slot;
-        if (previous_slots_type == []const Slot)
-            return ?*const Slot;
+        if (previous_slots_type == Slot.Slice)
+            return ?Slot.Ptr;
+        if (previous_slots_type == Slot.ConstSlice)
+            return ?Slot.ConstPtr;
         @compileError("getSlotWithMyName must receive either []Slot or []const Slot as previous_slots");
     }
 
@@ -284,7 +290,7 @@ pub const Slot = packed struct {
 
     /// Return how many slot spaces this slot needs on the map for its contents.
     /// Takes a slice of slots that come before this slot.
-    pub fn requiredSlotSpace(self: Slot, previous_slots: []const Slot) u32 {
+    pub fn requiredSlotSpace(self: Slot, previous_slots: Slot.ConstSlice) u32 {
         if (self.isInherited()) {
             // FIXME: Turn this into a runtime error instead of a panic.
             if (self.getSlotWithMyName(.Traverse, previous_slots) != null)
@@ -317,7 +323,7 @@ pub const Slot = packed struct {
     /// slot. May return a negative value if this slot overrides a previous
     /// assignable slot and does not consume an assignable slot value space
     /// itself.
-    pub fn requiredAssignableSlotValueSpace(self: Slot, previous_slots: []const Slot) i32 {
+    pub fn requiredAssignableSlotValueSpace(self: Slot, previous_slots: Slot.ConstSlice) i32 {
         if (self.isInherited()) {
             // FIXME: Turn this into a runtime error instead of a panic.
             if (self.getSlotWithMyName(.Traverse, previous_slots) != null)
@@ -363,14 +369,14 @@ pub const Slot = packed struct {
     pub fn writeContentsTo(
         self: Slot,
         heap: *Heap,
-        target_slots: []Slot,
+        target_slots: Slot.Slice,
         assignable_slot_values: *map_builder.AssignableSlotValues,
         slot_index: *usize,
         assignable_slot_index: *usize,
         argument_slot_index: *usize,
     ) void {
         var previous_slots = target_slots[0..slot_index.*];
-        var current_slot_ptr: *Slot = undefined;
+        var current_slot_ptr: Slot.Ptr = undefined;
 
         // If a previous slot with the same name exists then we need to undo the
         // changes from the previous slot.

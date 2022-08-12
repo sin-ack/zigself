@@ -19,6 +19,7 @@ const IntegerValue = value_import.IntegerValue;
 const PointerValue = value_import.PointerValue;
 const value_import = @import("../value.zig");
 const BytecodeBlock = @import("../lowcode/Block.zig");
+const stage2_compat = @import("../../utility/stage2_compat.zig");
 const RefCountedValue = value_import.RefCountedValue;
 const BytecodeExecutable = @import("../lowcode/Executable.zig");
 
@@ -33,7 +34,7 @@ pub fn getMapMap(token: *Heap.AllocationToken) Value {
     var header = @ptrCast(*Object.Header, new_map);
     header.object_information = 0b11;
     header.setObjectType(.Map);
-    var map = @ptrCast(*Map, header);
+    var map = @ptrCast(Map.Ptr, header);
     map.setMapType(.Slots);
     var slots_map = map.asSlotsMap();
     slots_map.properties = 0;
@@ -57,20 +58,20 @@ pub const MapType = enum(u64) {
 };
 
 /// Generates a method for use as an isXMap function.
-fn generateIsMap(comptime MapT: type, comptime map_type: MapType) fn (*MapT) bool {
+fn generateIsMap(comptime MapT: type, comptime map_type: MapType) fn (MapT.Ptr) bool {
     return struct {
-        pub fn func(self: *MapT) bool {
+        pub fn func(self: MapT.Ptr) bool {
             return self.getMapType() == map_type;
         }
     }.func;
 }
 
 /// Generates a method for use as a mustBeXMap function.
-fn generateMustBeMap(comptime MapT: type, comptime map_type_name: [*:0]const u8, comptime human_map_type: [*:0]const u8) fn (*MapT) void {
+fn generateMustBeMap(comptime MapT: type, comptime map_type_name: [*:0]const u8, comptime human_map_type: [*:0]const u8) fn (MapT.Ptr) void {
     const is_map_func_name = "is" ++ map_type_name ++ "Map";
 
     return struct {
-        pub fn func(self: *MapT) void {
+        pub fn func(self: MapT.Ptr) void {
             if (!@call(.{}, @field(self, is_map_func_name), .{})) {
                 std.debug.panic("Expected the object at {*} to be " ++ human_map_type, .{self});
             }
@@ -79,11 +80,11 @@ fn generateMustBeMap(comptime MapT: type, comptime map_type_name: [*:0]const u8,
 }
 
 /// Generates a method for use as an asXMap function.
-fn generateAsMap(comptime MapT: type, comptime SubMapT: type, comptime map_type_name: [*:0]const u8) fn (*MapT) *SubMapT {
+fn generateAsMap(comptime MapT: type, comptime SubMapT: type, comptime map_type_name: [*:0]const u8) fn (MapT.Ptr) SubMapT.Ptr {
     const must_be_map_func_name = "mustBe" ++ map_type_name ++ "Map";
 
     return struct {
-        pub fn func(self: *MapT) *SubMapT {
+        pub fn func(self: MapT.Ptr) SubMapT.Ptr {
             if (builtin.mode == .Debug) {
                 @call(.{}, @field(self, must_be_map_func_name), .{});
             }
@@ -93,7 +94,7 @@ fn generateAsMap(comptime MapT: type, comptime SubMapT: type, comptime map_type_
     }.func;
 }
 
-pub const Map = packed struct {
+pub const Map = extern struct {
     header: Object.Header,
 
     pub const Slots = SlotsMap;
@@ -101,13 +102,15 @@ pub const Map = packed struct {
     pub const Block = BlockMap;
     pub const Array = ArrayMap;
 
-    fn init(self: *Map, map_type: MapType, map_map: Value) void {
+    pub const Ptr = stage2_compat.HeapPtr(Map, .Mutable);
+
+    fn init(self: Map.Ptr, map_type: MapType, map_map: Value) void {
         // NOTE: Maps are immutable, so it's fine to consider all of them as being owned by the global actor.
         self.header.init(.Map, 0, map_map);
         self.setMapType(map_type);
     }
 
-    pub fn getMapType(self: *Map) MapType {
+    pub fn getMapType(self: Map.Ptr) MapType {
         const raw_map_type = self.header.object_information & MapTypeMask;
         return std.meta.intToEnum(MapType, raw_map_type) catch |err| switch (err) {
             std.meta.IntToEnumError.InvalidEnumTag => std.debug.panic(
@@ -117,22 +120,22 @@ pub const Map = packed struct {
         };
     }
 
-    pub fn setMapType(self: *Map, map_type: MapType) void {
+    pub fn setMapType(self: Map.Ptr, map_type: MapType) void {
         self.header.object_information = (self.header.object_information & ~MapTypeMask) | @enumToInt(map_type);
     }
 
-    pub fn asValue(self: *Map) Value {
+    pub fn asValue(self: Map.Ptr) Value {
         return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
     }
 
-    pub fn shouldFinalize(self: *Map) bool {
+    pub fn shouldFinalize(self: Map.Ptr) bool {
         return switch (self.getMapType()) {
             .Slots, .Array => false,
             .Method, .Block => true,
         };
     }
 
-    pub fn finalize(self: *Map, allocator: Allocator) void {
+    pub fn finalize(self: Map.Ptr, allocator: Allocator) void {
         switch (self.getMapType()) {
             .Slots, .Array => unreachable,
             .Method => self.asMethodMap().finalize(allocator),
@@ -140,7 +143,7 @@ pub const Map = packed struct {
         }
     }
 
-    pub fn getSizeInMemory(self: *Map) usize {
+    pub fn getSizeInMemory(self: Map.Ptr) usize {
         return switch (self.getMapType()) {
             .Slots => self.asSlotsMap().getSizeInMemory(),
             .Method => self.asMethodMap().getSizeInMemory(),
@@ -169,37 +172,39 @@ pub const Map = packed struct {
 /// usingnamespace.
 fn SlotsLikeMapBase(comptime MapT: type) type {
     return struct {
-        fn getSlotMemory(self: *MapT) []u8 {
+        pub const Ptr = stage2_compat.HeapPtr(MapT, .Mutable);
+
+        fn getSlotMemory(self: MapT.Ptr) stage2_compat.HeapSlice(u8, .Mutable) {
             const total_object_size = getSizeInMemory(self);
-            const map_memory = @ptrCast([*]u8, self);
+            const map_memory = @ptrCast([*]align(@alignOf(u64)) u8, self);
             return map_memory[@sizeOf(MapT)..total_object_size];
         }
 
-        pub fn getSlots(self: *MapT) []Slot {
+        pub fn getSlots(self: MapT.Ptr) Slot.Slice {
             return std.mem.bytesAsSlice(Slot, getSlotMemory(self));
         }
 
-        pub fn asObjectAddress(self: *MapT) [*]u64 {
-            return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+        pub fn asObjectAddress(self: MapT.Ptr) [*]u64 {
+            return @ptrCast([*]u64, self);
         }
 
-        pub fn asValue(self: *MapT) Value {
+        pub fn asValue(self: MapT.Ptr) Value {
             return Value.fromObjectAddress(asObjectAddress(self));
         }
 
         /// Return the amount of assignable slots that this slot map
         /// contains.
-        pub fn getAssignableSlotCount(self: *MapT) u8 {
+        pub fn getAssignableSlotCount(self: MapT.Ptr) u8 {
             // 255 assignable slots ought to be enough for everybody.
             return @intCast(u8, asSlotsMap(self).properties >> 24);
         }
 
-        pub fn setAssignableSlotCount(self: *MapT, count: u8) void {
+        pub fn setAssignableSlotCount(self: MapT.Ptr, count: u8) void {
             const slots_map = asSlotsMap(self);
             slots_map.properties = (slots_map.properties & @as(u32, 0x00FFFFFF)) | (@as(u32, count) << 24);
         }
 
-        pub fn getSizeInMemory(self: *MapT) usize {
+        pub fn getSizeInMemory(self: MapT.Ptr) usize {
             return requiredSizeForAllocation(asSlotsMap(self).slot_count);
         }
 
@@ -208,11 +213,11 @@ fn SlotsLikeMapBase(comptime MapT: type) type {
             return @sizeOf(MapT) + slot_count * @sizeOf(Slot);
         }
 
-        fn asSlotsMap(self: *MapT) *SlotsMap {
-            return @ptrCast(*SlotsMap, self);
+        fn asSlotsMap(self: MapT.Ptr) SlotsMap.Ptr {
+            return @ptrCast(SlotsMap.Ptr, self);
         }
 
-        pub fn getMapBuilder(self: *MapT, token: *Heap.AllocationToken) MapBuilder(MapT, MapT.ObjectType) {
+        pub fn getMapBuilder(self: MapT.Ptr, token: *Heap.AllocationToken) MapBuilder(MapT, MapT.ObjectType) {
             return MapBuilder(MapT, MapT.ObjectType).init(token, self);
         }
     };
@@ -221,7 +226,7 @@ fn SlotsLikeMapBase(comptime MapT: type) type {
 // NOTE: properties comes *before* the slot count in the struct
 //       definition, but comes *after* the slot count in the actual bit
 //       definitions.
-const SlotsMap = packed struct {
+const SlotsMap = extern struct {
     map: Map,
     /// Slots map properties.
     /// The first byte is the amount of assignable slots the map has.
@@ -238,18 +243,18 @@ const SlotsMap = packed struct {
     /// Create a new slots map. Takes the amount of slots this object will have.
     ///
     /// IMPORTANT: All slots *must* be initialized right after creation.
-    pub fn create(token: *Heap.AllocationToken, slot_count: u32) *SlotsMap {
+    pub fn create(token: *Heap.AllocationToken, slot_count: u32) SlotsMap.Ptr {
         const map_map = getMapMap(token);
         const size = SlotsMap.requiredSizeForAllocation(slot_count);
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(*SlotsMap, memory_area);
+        var self = @ptrCast(SlotsMap.Ptr, memory_area);
         self.init(slot_count, map_map);
 
         return self;
     }
 
-    fn init(self: *SlotsMap, slot_count: u32, map_map: Value) void {
+    fn init(self: SlotsMap.Ptr, slot_count: u32, map_map: Value) void {
         self.map.init(.Slots, map_map);
         self.properties = 0;
         self.slot_count = slot_count;
@@ -257,16 +262,18 @@ const SlotsMap = packed struct {
 };
 
 /// Common code and fields shared between methods and blocks.
-const SlotsAndBytecodeMap = packed struct {
+const SlotsAndBytecodeMap = extern struct {
     slots_map: SlotsMap,
     /// The address of the bytecode block. Owned by definition_executable_ref.
     block: PointerValue(BytecodeBlock),
     /// The executable which this map was created from.
     definition_executable_ref: RefCountedValue(BytecodeExecutable),
 
+    pub const Ptr = stage2_compat.HeapPtr(SlotsAndBytecodeMap, .Mutable);
+
     /// Refs `script`.
     fn init(
-        self: *SlotsAndBytecodeMap,
+        self: SlotsAndBytecodeMap.Ptr,
         comptime map_type: MapType,
         map_map: Value,
         argument_slot_count: u8,
@@ -286,16 +293,16 @@ const SlotsAndBytecodeMap = packed struct {
 
     /// Finalizes this object. All maps that have a SlotsAndBytecodeMap member
     /// must call this function in their finalize.
-    pub fn finalize(self: *SlotsAndBytecodeMap, allocator: Allocator) void {
+    pub fn finalize(self: SlotsAndBytecodeMap.Ptr, allocator: Allocator) void {
         _ = allocator;
         self.definition_executable_ref.deinit();
     }
 
-    pub fn getArgumentSlotCount(self: *SlotsAndBytecodeMap) u8 {
+    pub fn getArgumentSlotCount(self: SlotsAndBytecodeMap.Ptr) u8 {
         return @intCast(u8, (self.slots_map.properties >> 16) & @as(u64, 0xFF));
     }
 
-    fn setArgumentSlotCount(self: *SlotsAndBytecodeMap, count: u8) void {
+    fn setArgumentSlotCount(self: SlotsAndBytecodeMap.Ptr, count: u8) void {
         self.slots_map.properties = (self.slots_map.properties & @as(u32, 0xFF00FFFF)) | (@as(u32, count) << 16);
     }
 };
@@ -305,7 +312,7 @@ const SlotsAndBytecodeMap = packed struct {
 /// respectively. It also contains a pointer to the actual set of statements to
 /// be executed. Finally, some debug info is stored which is then displayed in
 /// stack traces.
-const MethodMap = packed struct {
+const MethodMap = extern struct {
     base_map: SlotsAndBytecodeMap,
     /// What the method is called.
     method_name: Value,
@@ -323,12 +330,12 @@ const MethodMap = packed struct {
         method_name: ByteArray,
         block: *BytecodeBlock,
         executable: BytecodeExecutable.Ref,
-    ) !*MethodMap {
+    ) !MethodMap.Ptr {
         const map_map = getMapMap(token);
         const size = MethodMap.requiredSizeForAllocation(total_slot_count);
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(*MethodMap, memory_area);
+        var self = @ptrCast(MethodMap.Ptr, memory_area);
         self.init(map_map, argument_slot_count, total_slot_count, is_inline_method, method_name, block, executable);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
@@ -336,7 +343,7 @@ const MethodMap = packed struct {
     }
 
     fn init(
-        self: *MethodMap,
+        self: MethodMap.Ptr,
         map_map: Value,
         argument_slot_count: u8,
         total_slot_count: u32,
@@ -353,7 +360,7 @@ const MethodMap = packed struct {
     const InlineShift = MapTypeShift + MapTypeBits;
     const InlineBit: u64 = 1 << InlineShift;
 
-    fn setInlineMethod(self: *MethodMap, is_inline_method: bool) void {
+    fn setInlineMethod(self: MethodMap.Ptr, is_inline_method: bool) void {
         var object_info = self.base_map.slots_map.map.header.object_information;
         if (is_inline_method)
             object_info |= InlineBit
@@ -362,19 +369,19 @@ const MethodMap = packed struct {
         self.base_map.slots_map.map.header.object_information = object_info;
     }
 
-    fn isInlineMethod(self: *MethodMap) bool {
+    fn isInlineMethod(self: MethodMap.Ptr) bool {
         return self.base_map.slots_map.map.header.object_information & InlineBit != 0;
     }
 
-    pub fn expectsActivationObjectAsReceiver(self: *MethodMap) bool {
+    pub fn expectsActivationObjectAsReceiver(self: MethodMap.Ptr) bool {
         return self.isInlineMethod();
     }
 
-    pub fn finalize(self: *MethodMap, allocator: Allocator) void {
+    pub fn finalize(self: MethodMap.Ptr, allocator: Allocator) void {
         self.base_map.finalize(allocator);
     }
 
-    pub fn getArgumentSlotCount(self: *MethodMap) u8 {
+    pub fn getArgumentSlotCount(self: MethodMap.Ptr) u8 {
         return self.base_map.getArgumentSlotCount();
     }
 };
@@ -383,7 +390,7 @@ const MethodMap = packed struct {
 /// which can be defined in a method and then executed later. The block must be
 /// executed while the method in which it is created is still on the activation
 /// stack.
-const BlockMap = packed struct {
+const BlockMap = extern struct {
     base_map: SlotsAndBytecodeMap,
     /// A weak reference to the parent activation of this block. The block must
     /// not be activated if this activation has left the stack.
@@ -406,12 +413,12 @@ const BlockMap = packed struct {
         nonlocal_return_target_activation: Activation.ActivationRef,
         block: *BytecodeBlock,
         executable: BytecodeExecutable.Ref,
-    ) !*BlockMap {
+    ) !BlockMap.Ptr {
         const map_map = getMapMap(token);
         const size = BlockMap.requiredSizeForAllocation(total_slot_count);
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(*BlockMap, memory_area);
+        var self = @ptrCast(BlockMap.Ptr, memory_area);
         self.init(map_map, argument_slot_count, total_slot_count, parent_activation, nonlocal_return_target_activation, block, executable);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
@@ -419,7 +426,7 @@ const BlockMap = packed struct {
     }
 
     fn init(
-        self: *BlockMap,
+        self: BlockMap.Ptr,
         map_map: Value,
         argument_slot_count: u8,
         total_slot_count: u32,
@@ -433,45 +440,47 @@ const BlockMap = packed struct {
         self.nonlocal_return_target_activation = nonlocal_return_target_activation;
     }
 
-    pub fn finalize(self: *BlockMap, allocator: Allocator) void {
+    pub fn finalize(self: BlockMap.Ptr, allocator: Allocator) void {
         self.base_map.finalize(allocator);
     }
 
-    pub fn getArgumentSlotCount(self: *BlockMap) u8 {
+    pub fn getArgumentSlotCount(self: BlockMap.Ptr) u8 {
         return self.base_map.getArgumentSlotCount();
     }
 };
 
 /// A map for an array object.
-const ArrayMap = packed struct {
+const ArrayMap = extern struct {
     map: Map,
     size: IntegerValue(.Unsigned),
 
-    pub fn create(token: *Heap.AllocationToken, size: usize) *ArrayMap {
+    pub const Ptr = stage2_compat.HeapPtr(ArrayMap, .Mutable);
+
+    pub fn create(token: *Heap.AllocationToken, size: usize) ArrayMap.Ptr {
         const map_map = getMapMap(token);
         const memory_size = requiredSizeForAllocation();
 
         var memory_area = token.allocate(.Object, memory_size);
-        var self = @ptrCast(*ArrayMap, memory_area);
+        var self = @ptrCast(ArrayMap.Ptr, memory_area);
         self.init(map_map, size);
 
         return self;
     }
 
-    fn init(self: *ArrayMap, map_map: Value, size: usize) void {
+    fn init(self: ArrayMap.Ptr, map_map: Value, size: usize) void {
         self.map.init(.Array, map_map);
         self.size = IntegerValue(.Unsigned).init(@as(u64, size));
     }
 
-    pub fn asValue(self: *ArrayMap) Value {
+    pub fn asValue(self: ArrayMap.Ptr) Value {
         return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
     }
 
-    pub fn getSize(self: *ArrayMap) usize {
+    pub fn getSize(self: ArrayMap.Ptr) usize {
         return @intCast(usize, self.size.get());
     }
 
-    pub fn getSizeInMemory(self: *ArrayMap) usize {
+    pub fn getSizeInMemory(self: ArrayMap.Ptr) usize {
         _ = self;
         return requiredSizeForAllocation();
     }

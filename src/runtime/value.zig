@@ -264,18 +264,18 @@ pub fn ObjectValue(comptime ObjectT: type, comptime is_fn: []const u8) type {
 
         const Self = @This();
 
-        pub fn init(ptr: *ObjectT) Self {
+        pub fn init(ptr: ObjectT.Ptr) Self {
             return .{ .value = ptr.asValue() };
         }
 
-        pub fn get(self: Self) *ObjectT {
+        pub fn get(self: Self) ObjectT.Ptr {
             if (builtin.mode == .Debug) {
                 if (!(self.value.isObjectReference() and @call(.{}, @field(self.value.asObject(), is_fn), .{}))) {
                     @panic("!!! " ++ is_fn ++ " check failed on object!");
                 }
             }
 
-            return @ptrCast(*ObjectT, self.value.asObjectAddress());
+            return @ptrCast(ObjectT.Ptr, self.value.asObjectAddress());
         }
     };
 }

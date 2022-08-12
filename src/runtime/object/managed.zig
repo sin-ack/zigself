@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const Heap = @import("../Heap.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../Object.zig");
+const stage2_compat = @import("../../utility/stage2_compat.zig");
 
 const ManagedTypeShift = Object.ObjectTypeShift + Object.ObjectTypeBits;
 const ManagedTypeBits = 1;
@@ -80,32 +81,34 @@ fn requiredSizeForManagedMap() usize {
 
 /// An object containing a managed value, and its type. When this object is
 /// finalized, it will perform the associated finalization step.
-pub const ManagedObject = packed struct {
+pub const ManagedObject = extern struct {
     header: Object.Header,
     value: Value,
 
-    pub fn create(token: *Heap.AllocationToken, actor_id: u31, managed_type: ManagedType, value: Value) !*ManagedObject {
+    pub const Ptr = stage2_compat.HeapPtr(ManagedObject, .Mutable);
+
+    pub fn create(token: *Heap.AllocationToken, actor_id: u31, managed_type: ManagedType, value: Value) !ManagedObject.Ptr {
         const managed_map = try getOrCreateManagedMap(token);
 
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
-        const self = @ptrCast(*ManagedObject, memory_area);
+        const self = @ptrCast(ManagedObject.Ptr, memory_area);
         self.init(actor_id, managed_map, managed_type, value);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
     }
 
-    fn init(self: *ManagedObject, actor_id: u31, map: Value, managed_type: ManagedType, value: Value) void {
+    fn init(self: ManagedObject.Ptr, actor_id: u31, map: Value, managed_type: ManagedType, value: Value) void {
         self.header.init(.Managed, actor_id, map);
         self.setManagedType(managed_type);
         self.value = value;
     }
 
-    fn setManagedType(self: *ManagedObject, managed_type: ManagedType) void {
+    fn setManagedType(self: ManagedObject.Ptr, managed_type: ManagedType) void {
         self.header.object_information = (self.header.object_information & ~ManagedTypeMask) | @enumToInt(managed_type);
     }
 
-    pub fn getManagedType(self: *ManagedObject) ManagedType {
+    pub fn getManagedType(self: ManagedObject.Ptr) ManagedType {
         const raw_managed_type = self.header.object_information & ManagedTypeMask;
         return std.meta.intToEnum(ManagedType, raw_managed_type) catch |err| switch (err) {
             std.meta.IntToEnumError.InvalidEnumTag => std.debug.panic(
@@ -115,7 +118,7 @@ pub const ManagedObject = packed struct {
         };
     }
 
-    pub fn finalize(self: *ManagedObject, allocator: Allocator) void {
+    pub fn finalize(self: ManagedObject.Ptr, allocator: Allocator) void {
         _ = allocator;
         switch (self.getManagedType()) {
             .FileDescriptor => {
@@ -125,15 +128,15 @@ pub const ManagedObject = packed struct {
         }
     }
 
-    pub fn asObjectAddress(self: *ManagedObject) [*]u64 {
-        return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+    pub fn asObjectAddress(self: ManagedObject.Ptr) [*]u64 {
+        return @ptrCast([*]u64, self);
     }
 
-    pub fn asValue(self: *ManagedObject) Value {
+    pub fn asValue(self: ManagedObject.Ptr) Value {
         return Value.fromObjectAddress(self.asObjectAddress());
     }
 
-    pub fn getSizeInMemory(self: *ManagedObject) usize {
+    pub fn getSizeInMemory(self: ManagedObject.Ptr) usize {
         _ = self;
         // NOTE: Managed map will have been created at this point.
         return requiredSizeForAllocation();

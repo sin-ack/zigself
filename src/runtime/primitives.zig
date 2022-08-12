@@ -12,6 +12,7 @@ const Object = @import("./Object.zig");
 const Completion = @import("./Completion.zig");
 const SourceRange = @import("./SourceRange.zig");
 const value_import = @import("./value.zig");
+const stage2_compat = @import("../utility/stage2_compat.zig");
 const runtime_error = @import("./error.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const ExecutionResult = @import("./interpreter.zig").ExecutionResult;
@@ -105,7 +106,8 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
             };
         }
 
-        pub inline fn getInteger(self: Self, comptime index: isize, comptime signedness: IntegerValueSignedness) !IntegerType(signedness) {
+        // TODO: Figure out why stage2 explodes with this function being inline
+        pub fn getInteger(self: Self, comptime index: isize, comptime signedness: IntegerValueSignedness) !IntegerType(signedness) {
             const value = self.getValue(index);
 
             if (!value.isInteger()) {
@@ -134,7 +136,8 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
             return @intCast(u64, value_as_integer);
         }
 
-        pub inline fn getObject(self: Self, comptime index: isize, comptime object_type: Object.ObjectType) !*Object.ObjectT(object_type) {
+        // TODO: Figure out why stage2 explodes with this function being inline
+        pub fn getObject(self: Self, comptime index: isize, comptime object_type: Object.ObjectType) !*Object.ObjectT(object_type) {
             const value = self.getValue(index);
 
             if (value.isObjectReference()) {
@@ -153,6 +156,8 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
     };
 }
 
+const PrimitiveFunction = stage2_compat.FnPtr(fn (context: *PrimitiveContext) PrimitiveError!ExecutionResult);
+
 /// A primitive specification. The `name` field specifies the exact selector the
 /// primitive uses (i.e. `DoFoo:WithBar:`, or `StringPrint`), and the `function`
 /// is the function which is called to execute the primitive. The `arity`
@@ -160,7 +165,7 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
 const PrimitiveSpec = struct {
     name: []const u8,
     arity: u8,
-    function: fn (context: *PrimitiveContext) PrimitiveError!ExecutionResult,
+    function: PrimitiveFunction,
 
     pub fn call(
         self: PrimitiveSpec,
@@ -189,64 +194,64 @@ const PrimitiveSpec = struct {
 
 const PrimitiveRegistry = &[_]PrimitiveSpec{
     // basic primitives
-    .{ .name = "Nil", .arity = 0, .function = basic_primitives.Nil },
-    .{ .name = "RunScript", .arity = 0, .function = basic_primitives.RunScript },
-    .{ .name = "EvaluateStringIfFail:", .arity = 1, .function = basic_primitives.EvaluateStringIfFail },
-    .{ .name = "Error:", .arity = 1, .function = basic_primitives.Error },
-    .{ .name = "Restart", .arity = 0, .function = basic_primitives.Restart },
+    .{ .name = "Nil", .arity = 0, .function = stage2_compat.fnPtr(basic_primitives.Nil) },
+    .{ .name = "RunScript", .arity = 0, .function = stage2_compat.fnPtr(basic_primitives.RunScript) },
+    .{ .name = "EvaluateStringIfFail:", .arity = 1, .function = stage2_compat.fnPtr(basic_primitives.EvaluateStringIfFail) },
+    .{ .name = "Error:", .arity = 1, .function = stage2_compat.fnPtr(basic_primitives.Error) },
+    .{ .name = "Restart", .arity = 0, .function = stage2_compat.fnPtr(basic_primitives.Restart) },
     // byte array primitives
-    .{ .name = "ByteArraySize", .arity = 0, .function = byte_array_primitives.ByteArraySize },
-    .{ .name = "ByteAt:", .arity = 1, .function = byte_array_primitives.ByteAt },
-    .{ .name = "ByteAt:Put:", .arity = 2, .function = byte_array_primitives.ByteAt_Put },
-    .{ .name = "ByteArrayCopySize:FillingExtrasWith:", .arity = 2, .function = byte_array_primitives.ByteArrayCopySize_FillingExtrasWith },
-    .{ .name = "ByteArrayEq:", .arity = 1, .function = byte_array_primitives.ByteArrayEq },
-    .{ .name = "ByteArrayConcatenate:", .arity = 1, .function = byte_array_primitives.ByteArrayConcatenate },
+    .{ .name = "ByteArraySize", .arity = 0, .function = stage2_compat.fnPtr(byte_array_primitives.ByteArraySize) },
+    .{ .name = "ByteAt:", .arity = 1, .function = stage2_compat.fnPtr(byte_array_primitives.ByteAt) },
+    .{ .name = "ByteAt:Put:", .arity = 2, .function = stage2_compat.fnPtr(byte_array_primitives.ByteAt_Put) },
+    .{ .name = "ByteArrayCopySize:FillingExtrasWith:", .arity = 2, .function = stage2_compat.fnPtr(byte_array_primitives.ByteArrayCopySize_FillingExtrasWith) },
+    .{ .name = "ByteArrayEq:", .arity = 1, .function = stage2_compat.fnPtr(byte_array_primitives.ByteArrayEq) },
+    .{ .name = "ByteArrayConcatenate:", .arity = 1, .function = stage2_compat.fnPtr(byte_array_primitives.ByteArrayConcatenate) },
     // array primitives
-    .{ .name = "ArrayCopySize:FillingExtrasWith:", .arity = 2, .function = array_primitives.ArrayCopySize_FillingExtrasWith },
-    .{ .name = "ArraySize", .arity = 0, .function = array_primitives.ArraySize },
-    .{ .name = "ArrayAt:", .arity = 1, .function = array_primitives.ArrayAt },
-    .{ .name = "ArrayAt:Put:", .arity = 2, .function = array_primitives.ArrayAt_Put },
+    .{ .name = "ArrayCopySize:FillingExtrasWith:", .arity = 2, .function = stage2_compat.fnPtr(array_primitives.ArrayCopySize_FillingExtrasWith) },
+    .{ .name = "ArraySize", .arity = 0, .function = stage2_compat.fnPtr(array_primitives.ArraySize) },
+    .{ .name = "ArrayAt:", .arity = 1, .function = stage2_compat.fnPtr(array_primitives.ArrayAt) },
+    .{ .name = "ArrayAt:Put:", .arity = 2, .function = stage2_compat.fnPtr(array_primitives.ArrayAt_Put) },
     // number primitives
-    .{ .name = "IntAdd:", .arity = 1, .function = number_primitives.IntAdd },
-    .{ .name = "IntSub:", .arity = 1, .function = number_primitives.IntSub },
-    .{ .name = "IntMul:", .arity = 1, .function = number_primitives.IntMul },
-    .{ .name = "IntDiv:", .arity = 1, .function = number_primitives.IntDiv },
-    .{ .name = "IntMod:", .arity = 1, .function = number_primitives.IntMod },
-    .{ .name = "IntShl:", .arity = 1, .function = number_primitives.IntShl },
-    .{ .name = "IntShr:", .arity = 1, .function = number_primitives.IntShr },
-    .{ .name = "IntXor:", .arity = 1, .function = number_primitives.IntXor },
-    .{ .name = "IntAnd:", .arity = 1, .function = number_primitives.IntAnd },
-    .{ .name = "IntOr:", .arity = 1, .function = number_primitives.IntOr },
-    .{ .name = "IntLT:", .arity = 1, .function = number_primitives.IntLT },
-    .{ .name = "IntEq:", .arity = 1, .function = number_primitives.IntEq },
-    .{ .name = "IntGT:", .arity = 1, .function = number_primitives.IntGT },
+    .{ .name = "IntAdd:", .arity = 1, .function = stage2_compat.fnPtr(number_primitives.IntAdd) },
+    .{ .name = "IntSub:", .arity = 1, .function = stage2_compat.fnPtr(number_primitives.IntSub) },
+    .{ .name = "IntMul:", .arity = 1, .function = stage2_compat.fnPtr(number_primitives.IntMul) },
+    .{ .name = "IntDiv:", .arity = 1, .function = stage2_compat.fnPtr(number_primitives.IntDiv) },
+    .{ .name = "IntMod:", .arity = 1, .function = stage2_compat.fnPtr(number_primitives.IntMod) },
+    .{ .name = "IntShl:", .arity = 1, .function = stage2_compat.fnPtr(number_primitives.IntShl) },
+    .{ .name = "IntShr:", .arity = 1, .function = stage2_compat.fnPtr(number_primitives.IntShr) },
+    .{ .name = "IntXor:", .arity = 1, .function = stage2_compat.fnPtr(number_primitives.IntXor) },
+    .{ .name = "IntAnd:", .arity = 1, .function = stage2_compat.fnPtr(number_primitives.IntAnd) },
+    .{ .name = "IntOr:", .arity = 1, .function = stage2_compat.fnPtr(number_primitives.IntOr) },
+    .{ .name = "IntLT:", .arity = 1, .function = stage2_compat.fnPtr(number_primitives.IntLT) },
+    .{ .name = "IntEq:", .arity = 1, .function = stage2_compat.fnPtr(number_primitives.IntEq) },
+    .{ .name = "IntGT:", .arity = 1, .function = stage2_compat.fnPtr(number_primitives.IntGT) },
     // object primitives
-    .{ .name = "AddSlots:", .arity = 1, .function = object_primitives.AddSlots },
+    .{ .name = "AddSlots:", .arity = 1, .function = stage2_compat.fnPtr(object_primitives.AddSlots) },
     // .{ .name = "_RemoveSlot:IfFail:", .function = object_primitives.RemoveSlot_IfFail },
-    .{ .name = "Inspect", .arity = 0, .function = object_primitives.Inspect },
-    .{ .name = "Clone", .arity = 0, .function = object_primitives.Clone },
-    .{ .name = "Eq:", .arity = 1, .function = object_primitives.Eq },
+    .{ .name = "Inspect", .arity = 0, .function = stage2_compat.fnPtr(object_primitives.Inspect) },
+    .{ .name = "Clone", .arity = 0, .function = stage2_compat.fnPtr(object_primitives.Clone) },
+    .{ .name = "Eq:", .arity = 1, .function = stage2_compat.fnPtr(object_primitives.Eq) },
     // System call primitives
-    .{ .name = "Open:WithFlags:IfFail:", .arity = 3, .function = system_call_primitives.Open_WithFlags_IfFail },
-    .{ .name = "Read:BytesInto:AtOffset:From:IfFail:", .arity = 5, .function = system_call_primitives.Read_BytesInto_AtOffset_From_IfFail },
-    .{ .name = "Write:BytesFrom:AtOffset:Into:IfFail:", .arity = 5, .function = system_call_primitives.Write_BytesFrom_AtOffset_Into_IfFail },
-    .{ .name = "Close:", .arity = 1, .function = system_call_primitives.Close },
-    .{ .name = "Exit:", .arity = 1, .function = system_call_primitives.Exit },
-    .{ .name = "PollFDs:Events:WaitingForMS:IfFail:", .arity = 4, .function = system_call_primitives.PollFDs_Events_WaitingForMS_IfFail },
-    .{ .name = "GetAddrInfoForHost:Port:Family:SocketType:Protocol:Flags:IfFail:", .arity = 7, .function = system_call_primitives.GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail },
-    .{ .name = "SocketWithFamily:Type:Protocol:IfFail:", .arity = 4, .function = system_call_primitives.SocketWithFamily_Type_Protocol_IfFail },
-    .{ .name = "BindFD:ToSockaddrBytes:IfFail:", .arity = 3, .function = system_call_primitives.BindFD_ToSockaddrBytes_IfFail },
-    .{ .name = "ListenOnFD:WithBacklog:IfFail:", .arity = 3, .function = system_call_primitives.ListenOnFD_WithBacklog_IfFail },
-    .{ .name = "AcceptFromFD:IfFail:", .arity = 2, .function = system_call_primitives.AcceptFromFD_IfFail },
+    .{ .name = "Open:WithFlags:IfFail:", .arity = 3, .function = stage2_compat.fnPtr(system_call_primitives.Open_WithFlags_IfFail) },
+    .{ .name = "Read:BytesInto:AtOffset:From:IfFail:", .arity = 5, .function = stage2_compat.fnPtr(system_call_primitives.Read_BytesInto_AtOffset_From_IfFail) },
+    .{ .name = "Write:BytesFrom:AtOffset:Into:IfFail:", .arity = 5, .function = stage2_compat.fnPtr(system_call_primitives.Write_BytesFrom_AtOffset_Into_IfFail) },
+    .{ .name = "Close:", .arity = 1, .function = stage2_compat.fnPtr(system_call_primitives.Close) },
+    .{ .name = "Exit:", .arity = 1, .function = stage2_compat.fnPtr(system_call_primitives.Exit) },
+    .{ .name = "PollFDs:Events:WaitingForMS:IfFail:", .arity = 4, .function = stage2_compat.fnPtr(system_call_primitives.PollFDs_Events_WaitingForMS_IfFail) },
+    .{ .name = "GetAddrInfoForHost:Port:Family:SocketType:Protocol:Flags:IfFail:", .arity = 7, .function = stage2_compat.fnPtr(system_call_primitives.GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail) },
+    .{ .name = "SocketWithFamily:Type:Protocol:IfFail:", .arity = 4, .function = stage2_compat.fnPtr(system_call_primitives.SocketWithFamily_Type_Protocol_IfFail) },
+    .{ .name = "BindFD:ToSockaddrBytes:IfFail:", .arity = 3, .function = stage2_compat.fnPtr(system_call_primitives.BindFD_ToSockaddrBytes_IfFail) },
+    .{ .name = "ListenOnFD:WithBacklog:IfFail:", .arity = 3, .function = stage2_compat.fnPtr(system_call_primitives.ListenOnFD_WithBacklog_IfFail) },
+    .{ .name = "AcceptFromFD:IfFail:", .arity = 2, .function = stage2_compat.fnPtr(system_call_primitives.AcceptFromFD_IfFail) },
     // Actor primitives
-    .{ .name = "Genesis:", .arity = 1, .function = actor_primitives.Genesis },
-    .{ .name = "ActorSpawn:", .arity = 1, .function = actor_primitives.ActorSpawn },
-    .{ .name = "ActorSetEntrypoint:", .arity = 1, .function = actor_primitives.ActorSetEntrypoint },
-    .{ .name = "ActorResume", .arity = 0, .function = actor_primitives.ActorResume },
-    .{ .name = "ActorYieldReason", .arity = 0, .function = actor_primitives.ActorYieldReason },
-    .{ .name = "ActorYield", .arity = 0, .function = actor_primitives.ActorYield },
-    .{ .name = "ActorSender", .arity = 0, .function = actor_primitives.ActorSender },
-    .{ .name = "ActorBlockedFD", .arity = 0, .function = actor_primitives.ActorBlockedFD },
+    .{ .name = "Genesis:", .arity = 1, .function = stage2_compat.fnPtr(actor_primitives.Genesis) },
+    .{ .name = "ActorSpawn:", .arity = 1, .function = stage2_compat.fnPtr(actor_primitives.ActorSpawn) },
+    .{ .name = "ActorSetEntrypoint:", .arity = 1, .function = stage2_compat.fnPtr(actor_primitives.ActorSetEntrypoint) },
+    .{ .name = "ActorResume", .arity = 0, .function = stage2_compat.fnPtr(actor_primitives.ActorResume) },
+    .{ .name = "ActorYieldReason", .arity = 0, .function = stage2_compat.fnPtr(actor_primitives.ActorYieldReason) },
+    .{ .name = "ActorYield", .arity = 0, .function = stage2_compat.fnPtr(actor_primitives.ActorYield) },
+    .{ .name = "ActorSender", .arity = 0, .function = stage2_compat.fnPtr(actor_primitives.ActorSender) },
+    .{ .name = "ActorBlockedFD", .arity = 0, .function = stage2_compat.fnPtr(actor_primitives.ActorBlockedFD) },
 };
 
 // FIXME: This is very naive! We shouldn't need to linear search every single
