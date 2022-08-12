@@ -41,7 +41,7 @@ const MaximumUnusedChunks: usize = 8;
 const MaximumHandlesInChunk = @divExact(ChunkSize - @sizeOf(Chunk), @sizeOf(HandleType));
 
 /// A chunk, starting with the metadata. Each chunk is exactly ChunkSize bytes.
-const Chunk = packed struct {
+const Chunk = extern struct {
     // These members will take up 32 bytes on 32-bit systems, and 40 bytes on
     // 64-bit systems. Either way, they are aligned by 8 bytes.
     magic: u64 = ChunkMagic,
