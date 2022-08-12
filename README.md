@@ -1,5 +1,7 @@
 ## zigSelf
 
+[![Discord](https://img.shields.io/discord/983578577029181440?style=plastic)](https://discord.gg/HJ62kw6yvn)
+
 An implementation of the Self programming language.
 
 ## What is Self?
