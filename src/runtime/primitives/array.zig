@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const Heap = @import("../Heap.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../Object.zig");
+const traversal = @import("../object/traversal.zig");
 const Completion = @import("../Completion.zig");
 const ExecutionResult = @import("../interpreter.zig").ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
@@ -91,6 +92,18 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
     }
 
     array_values[position] = new_value;
+
+    if (receiver.header.isGloballyReachable()) {
+        // Mark the object graph of new_value as globally reachable
+        _ = traversal.traverseNonGloballyReachableObjectGraph(new_value, {}, struct {
+            fn f(c: void, object: Object) error{}!Object {
+                _ = c;
+                object.header.setGloballyReachable(true);
+                return object;
+            }
+        }.f) catch unreachable;
+    }
+
     // Since the array object could potentially be in an older space than the
     // value stored in it, let's add the array object to the remembered set.
     try context.vm.heap.rememberObjectReference(receiver.asValue(), new_value);

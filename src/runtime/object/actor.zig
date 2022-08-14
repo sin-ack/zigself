@@ -24,6 +24,7 @@ fn getOrCreateActorMap(token: *Heap.AllocationToken) !Value {
     if (singleton_actor_map) |map| return map.getValue();
 
     const map = Object.Map.Slots.create(token, 0);
+    map.map.header.setGloballyReachable(true);
     singleton_actor_map = try token.heap.track(map.asValue());
     return map.asValue();
 }

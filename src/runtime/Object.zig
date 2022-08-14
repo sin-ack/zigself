@@ -375,6 +375,10 @@ pub const Header = extern struct {
     const actor_id_bits = 31;
     const actor_id_mask: u64 = ((1 << actor_id_bits) - 1) << actor_id_shift;
 
+    const globally_reachable_shift = 63;
+    const globally_reachable_bits = 1;
+    const globally_reachable_mask: u64 = ((1 << globally_reachable_bits) - 1) << globally_reachable_shift;
+
     pub fn init(self: Header.Ptr, object_type: ObjectType, actor_id: u31, map: Value) void {
         self.object_information = @enumToInt(Value.ValueType.ObjectMarker);
         self.setObjectType(object_type);
@@ -383,22 +387,30 @@ pub const Header = extern struct {
         self.map_pointer = map;
     }
 
-    pub fn setObjectType(self: Header.Ptr, object_type: ObjectType) void {
-        self.object_information = (self.object_information & ~ObjectTypeMask) | @enumToInt(object_type);
-    }
-
     pub fn getObjectType(self: Header.Ptr) ObjectType {
         // FIXME: Check whether the current object type is a valid one, and
         //        don't let Zig crash us here if it's not.
         return @intToEnum(ObjectType, self.object_information & ObjectTypeMask);
     }
 
-    pub fn setActorID(self: Header.Ptr, actor_id: u31) void {
-        self.object_information = (self.object_information & ~actor_id_mask) | (@as(u64, actor_id) << actor_id_shift);
+    pub fn setObjectType(self: Header.Ptr, object_type: ObjectType) void {
+        self.object_information = (self.object_information & ~ObjectTypeMask) | @enumToInt(object_type);
     }
 
     pub fn getActorID(self: Header.Ptr) u31 {
         return @intCast(u31, (self.object_information & actor_id_mask) >> actor_id_shift);
+    }
+
+    pub fn setActorID(self: Header.Ptr, actor_id: u31) void {
+        self.object_information = (self.object_information & ~actor_id_mask) | (@as(u64, actor_id) << actor_id_shift);
+    }
+
+    pub fn isGloballyReachable(self: Header.Ptr) bool {
+        return (self.object_information & globally_reachable_mask) != 0;
+    }
+
+    pub fn setGloballyReachable(self: Header.Ptr, reachable: bool) void {
+        self.object_information = (self.object_information & ~globally_reachable_mask) | (@as(u64, @boolToInt(reachable)) << globally_reachable_shift);
     }
 
     pub fn getMap(self: Header.Ptr) Map.Ptr {

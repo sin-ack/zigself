@@ -19,6 +19,7 @@ const SourceRange = @import("./SourceRange.zig");
 const slot_import = @import("./slot.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
+const traversal = @import("./object/traversal.zig");
 
 const EXECUTION_DEBUG = debug.EXECUTION_DEBUG;
 
@@ -514,6 +515,21 @@ pub fn sendMessage(
 
             const object_that_has_the_assignable_slot = assignment_context.object;
             const value_ptr = assignment_context.value_ptr;
+
+            if (object_that_has_the_assignable_slot.header.isGloballyReachable()) {
+                // Mark every object that's not globally reachable in the
+                // argument's object graph as globally reachable. This will
+                // make the whole object graph part of the global object
+                // hierarchy.
+                _ = traversal.traverseNonGloballyReachableObjectGraph(argument, {}, struct {
+                    fn f(context: void, object: Object) error{}!Object {
+                        _ = context;
+                        object.header.setGloballyReachable(true);
+                        return object;
+                    }
+                }.f) catch unreachable;
+            }
+
             value_ptr.* = argument;
 
             // David will remember that.

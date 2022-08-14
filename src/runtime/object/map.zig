@@ -34,6 +34,7 @@ pub fn getMapMap(token: *Heap.AllocationToken) Value {
     var header = @ptrCast(*Object.Header, new_map);
     header.object_information = 0b11;
     header.setObjectType(.Map);
+    header.setGloballyReachable(true);
     var map = @ptrCast(Map.Ptr, header);
     map.setMapType(.Slots);
     var slots_map = map.asSlotsMap();

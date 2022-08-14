@@ -15,6 +15,7 @@ const Value = value_import.Value;
 const Object = @import("../Object.zig");
 const MapType = @import("./map.zig").MapType;
 const Location = @import("../../language/location.zig");
+const traversal = @import("./traversal.zig");
 const ByteArray = @import("../ByteArray.zig");
 const MapBuilder = @import("./map_builder.zig").MapBuilder;
 const SourceRange = @import("../SourceRange.zig");
@@ -247,11 +248,28 @@ pub const Slots = extern struct {
         var new_map = Object.Map.Slots.create(token, @intCast(u32, merge_info.slots));
         var map_builder = new_map.getMapBuilder(token);
 
-        const CallbackContext = struct { map_builder: *MapBuilder(Map.Slots, Slots) };
-        forSlotsInMergeOrderWithInheritedFirst(self, source_object, CallbackContext{ .map_builder = &map_builder }, struct {
-            fn callback(context: CallbackContext, object: Slots.Ptr, slot: Slot) !void {
+        const the_context = .{
+            .map_builder = &map_builder,
+            .target_object_is_globally_reachable = self.header.isGloballyReachable(),
+        };
+        const Context = @TypeOf(the_context);
+        forSlotsInMergeOrderWithInheritedFirst(self, source_object, the_context, struct {
+            fn callback(context: Context, object: Slots.Ptr, slot: Slot) !void {
                 const slot_copy = slot.copy(object);
                 context.map_builder.addSlot(slot_copy);
+
+                // If the object we're adding slots to is globally reachable
+                // then the objects pointed to in the slots must become globally
+                // reachable as well.
+                if (context.target_object_is_globally_reachable) {
+                    _ = traversal.traverseNonGloballyReachableObjectGraph(slot_copy.value, {}, struct {
+                        fn f(c: void, obj: Object) error{}!Object {
+                            _ = c;
+                            obj.header.setGloballyReachable(true);
+                            return obj;
+                        }
+                    }.f) catch unreachable;
+                }
             }
         }.callback) catch unreachable;
 
@@ -264,6 +282,7 @@ pub const Slots = extern struct {
             // We do need to create a new object, and then update all the heap
             // references to it.
             const new_object = map_builder.createObject(current_actor_id);
+            new_object.header.setGloballyReachable(self.header.isGloballyReachable());
             try token.heap.updateAllReferencesTo(self.asValue(), new_object.asValue());
             return new_object;
         }

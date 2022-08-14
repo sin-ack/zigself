@@ -112,31 +112,40 @@ pub fn create(allocator: Allocator) !*Self {
     defer token.deinit();
 
     const empty_map = Object.Map.Slots.create(&token, 0);
+    empty_map.map.header.setGloballyReachable(true);
 
-    // NOTE: These objects will always belong to the global actor, so we hardcode the actor ID 0 to them.
-    //       Otherwise we would hit a chicken-and-egg situation where the global actor needs the lobby
-    //       and the lobby needs the global actor.
-    const GlobalActorID = 0;
+    self.lobby_object = try makeEmptyGloballyReachableObject(&token, empty_map);
 
-    self.lobby_object = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
+    self.global_nil = try makeEmptyGloballyReachableObject(&token, empty_map);
+    self.global_true = try makeEmptyGloballyReachableObject(&token, empty_map);
+    self.global_false = try makeEmptyGloballyReachableObject(&token, empty_map);
 
-    self.global_nil = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
-    self.global_true = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
-    self.global_false = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
+    self.actor_traits = try makeEmptyGloballyReachableObject(&token, empty_map);
+    self.array_traits = try makeEmptyGloballyReachableObject(&token, empty_map);
+    self.block_traits = try makeEmptyGloballyReachableObject(&token, empty_map);
+    self.float_traits = try makeEmptyGloballyReachableObject(&token, empty_map);
+    self.string_traits = try makeEmptyGloballyReachableObject(&token, empty_map);
+    self.integer_traits = try makeEmptyGloballyReachableObject(&token, empty_map);
 
-    self.actor_traits = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
-    self.array_traits = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
-    self.block_traits = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
-    self.float_traits = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
-    self.string_traits = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
-    self.integer_traits = try heap.track(Object.Slots.create(&token, GlobalActorID, empty_map, &.{}).asValue());
-
+    // NOTE: The actor object of the global actor should never be reachable in the first place,
+    //       so the global reachability bit does not matter here.
     self.global_actor = try Actor.create(self, &token, self.lobby_object.getValue());
     self.current_actor = self.global_actor;
 
     try self.buildAddrInfoPrototype(&token);
 
     return self;
+}
+
+fn makeEmptyGloballyReachableObject(token: *Heap.AllocationToken, map: Object.Map.Slots.Ptr) !Heap.Tracked {
+    // NOTE: These objects will always belong to the global actor, so we hardcode the actor ID 0 to them.
+    //       Otherwise we would hit a chicken-and-egg situation where the global actor needs the lobby
+    //       and the lobby needs the global actor.
+    const GlobalActorID = 0;
+
+    const slots = Object.Slots.create(token, GlobalActorID, map, &.{});
+    slots.header.setGloballyReachable(true);
+    return try token.heap.track(slots.asValue());
 }
 
 // FIXME: There should be a better way of creating prototype objects for
@@ -160,6 +169,7 @@ fn requiredSizeForAddrInfoPrototypeAllocation() usize {
 
 fn buildAddrInfoPrototype(self: *Self, token: *Heap.AllocationToken) !void {
     const map = Object.Map.Slots.create(token, addrinfo_slots.len);
+    map.map.header.setGloballyReachable(true);
     var map_builder = map.getMapBuilder(token);
 
     for (addrinfo_slots) |slot_name| {
@@ -168,6 +178,7 @@ fn buildAddrInfoPrototype(self: *Self, token: *Heap.AllocationToken) !void {
     }
 
     const object = map_builder.createObject(self.current_actor.id);
+    object.header.setGloballyReachable(true);
     self.addrinfo_prototype = try self.heap.track(object.asValue());
 }
 
