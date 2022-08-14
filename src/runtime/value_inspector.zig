@@ -81,6 +81,10 @@ fn inspectObject(
         }
     }
 
+    if (object.header.isGloballyReachable()) {
+        std.debug.print("(G) ", .{});
+    }
+
     switch (object.header.getObjectType()) {
         .ForwardingReference, .Map => unreachable,
         .Slots => {
