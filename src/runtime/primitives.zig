@@ -137,7 +137,7 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
         }
 
         // TODO: Figure out why stage2 explodes with this function being inline
-        pub fn getObject(self: Self, comptime index: isize, comptime object_type: Object.ObjectType) !*Object.ObjectT(object_type) {
+        pub fn getObject(self: Self, comptime index: isize, comptime object_type: Object.ObjectType) !Object.ObjectT(object_type).Ptr {
             const value = self.getValue(index);
 
             if (value.isObjectReference()) {

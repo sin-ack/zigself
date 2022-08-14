@@ -156,12 +156,12 @@ pub fn humanReadableNameFor(comptime object_type: ObjectType) []const u8 {
 
 /// Return this object as the given object type, or return null if it cannot
 /// be returned.
-pub inline fn asType(self: Self, comptime object_type: ObjectType) ?*ObjectT(object_type) {
+pub inline fn asType(self: Self, comptime object_type: ObjectType) ?ObjectT(object_type).Ptr {
     if (builtin.mode == .Debug) {
         if (self.header.getObjectType() != object_type) return null;
     }
 
-    return @ptrCast(*ObjectT(object_type), self.header);
+    return @ptrCast(ObjectT(object_type).Ptr, self.header);
 }
 
 // TODO: Deprecate and remove the functions below, and replace them with the

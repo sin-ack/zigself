@@ -12,7 +12,7 @@ const stage2_compat = @import("../../utility/stage2_compat.zig");
 pub const ArrayObject = extern struct {
     header: Object.Header,
 
-    const Ptr = stage2_compat.HeapPtr(ArrayObject, .Mutable);
+    pub const Ptr = stage2_compat.HeapPtr(ArrayObject, .Mutable);
 
     /// Create a new array with the given values and filling extra items with
     /// the filler value. If filler value is null, expects values to be at least
