@@ -1,3 +1,7 @@
+// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-only
+
 //! Compatibility helpers between stage1 and stage2.
 
 const builtin = @import("builtin");
