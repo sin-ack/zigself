@@ -17,6 +17,7 @@ pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
     const exe = b.addExecutable("self", "src/main.zig");
+    exe.use_stage1 = true;
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.linkLibC();
@@ -34,6 +35,7 @@ pub fn build(b: *std.build.Builder) void {
     run_step.dependOn(&run_cmd.step);
 
     var test_harness_exe = b.addExecutable("self-test", "tests/harness.zig");
+    test_harness_exe.use_stage1 = true;
     test_harness_exe.setTarget(target);
     test_harness_exe.setBuildMode(mode);
     test_harness_exe.addPackage(.{
