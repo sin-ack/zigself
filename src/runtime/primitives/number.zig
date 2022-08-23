@@ -15,7 +15,7 @@ const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 fn integerOpCommon(
     comptime primitive_name: [*:0]const u8,
     context: *PrimitiveContext,
-    operation: fn (context: PrimitiveContext, receiver: i64, term: i64) Allocator.Error!ExecutionResult,
+    comptime operation: fn (context: PrimitiveContext, receiver: i64, term: i64) Allocator.Error!ExecutionResult,
 ) !ExecutionResult {
     const arguments = context.getArguments("_" ++ primitive_name ++ ":");
     const receiver = try arguments.getInteger(PrimitiveContext.Receiver, .Signed);
