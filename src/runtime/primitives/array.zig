@@ -79,6 +79,17 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
     const position = try arguments.getInteger(0, .Unsigned);
     const new_value = arguments.getValue(1);
 
+    if (!context.actor.canWriteTo(context.receiver.getValue())) {
+        return ExecutionResult.completion(
+            try Completion.initRuntimeError(
+                context.vm,
+                context.source_range,
+                "_ArrayAt:Put: receiver is not writable for actor",
+                .{},
+            ),
+        );
+    }
+
     const array_values = receiver.getValues();
     if (position >= array_values.len) {
         return ExecutionResult.completion(

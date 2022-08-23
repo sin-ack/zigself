@@ -516,6 +516,10 @@ pub fn sendMessage(
             const object_that_has_the_assignable_slot = assignment_context.object;
             const value_ptr = assignment_context.value_ptr;
 
+            if (!actor.canWriteTo(object_that_has_the_assignable_slot.asValue())) {
+                return try Completion.initRuntimeError(vm, source_range, "Assignment target is not writable for actor", .{});
+            }
+
             if (object_that_has_the_assignable_slot.header.isGloballyReachable()) {
                 // Mark every object that's not globally reachable in the
                 // argument's object graph as globally reachable. This will

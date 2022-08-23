@@ -18,6 +18,17 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
     var receiver = try arguments.getObject(PrimitiveContext.Receiver, .Slots);
     var argument = try arguments.getObject(0, .Slots);
 
+    if (!context.actor.canWriteTo(context.receiver.getValue())) {
+        return ExecutionResult.completion(
+            try Completion.initRuntimeError(
+                context.vm,
+                context.source_range,
+                "_AddSlots: receiver is not writable for actor",
+                .{},
+            ),
+        );
+    }
+
     var token = try context.vm.heap.getAllocation(
         try Object.Slots.requiredSizeForMerging(receiver, argument, context.vm.allocator),
     );

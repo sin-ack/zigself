@@ -475,6 +475,18 @@ pub fn clearMailbox(self: *Self, allocator: Allocator) void {
     self.mailbox = .{};
 }
 
+pub fn canWriteTo(self: *Self, value: Value) bool {
+    return switch (value.getType()) {
+        .ObjectMarker => unreachable,
+        .Integer, .FloatingPoint => true,
+        .ObjectReference => writable: {
+            const object = value.asObject();
+            // FIXME: Don't hardcode global actor ID
+            break :writable self.id == 0 or !object.header.isGloballyReachable();
+        },
+    };
+}
+
 // FIXME: This isn't thread safe!
 var next_actor_id: u31 = 0;
 
