@@ -195,8 +195,20 @@ pub fn activateMethod(
     target_location: RegisterLocation,
     source_range: SourceRange,
 ) !void {
+    return try self.activateMethodWithContext(vm, token, self.actor_object.get().context, method, target_location, source_range);
+}
+
+pub fn activateMethodWithContext(
+    self: *Self,
+    vm: *VirtualMachine,
+    token: *Heap.AllocationToken,
+    context: Value,
+    method: *Object.Method,
+    target_location: RegisterLocation,
+    source_range: SourceRange,
+) !void {
     const activation_slot = try self.activation_stack.getNewActivationSlot(vm.allocator);
-    method.activateMethod(vm, token, self.id, self.actor_object.get().context, &.{}, target_location, source_range, activation_slot);
+    method.activateMethod(vm, token, self.id, context, &.{}, target_location, source_range, activation_slot);
 }
 
 pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {

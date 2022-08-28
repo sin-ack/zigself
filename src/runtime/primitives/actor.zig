@@ -7,6 +7,7 @@ const std = @import("std");
 const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const Value = @import("../value.zig").Value;
+const bless = @import("../object/bless.zig");
 const Object = @import("../Object.zig");
 const Completion = @import("../Completion.zig");
 const SourceRange = @import("../SourceRange.zig");
@@ -106,7 +107,21 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
     // NOTE: Need to advance the global actor to the next instruction to be returned to after the genesis actor exits.
     context.vm.current_actor.activation_stack.getCurrent().advanceInstruction();
 
+    // NOTE: The receiver here is passed as a dummy in order to get the new actor ID.
     const genesis_actor = try Actor.create(context.vm, &token, receiver);
+
+    const blessed_receiver = blessed_receiver: {
+        var tracked_method = try context.vm.heap.track(method.asValue());
+        defer tracked_method.untrack(context.vm.heap);
+
+        const blessed_receiver = try bless.bless(context.vm.heap, genesis_actor.id, receiver);
+
+        method = tracked_method.getValue().asObject().asMethodObject();
+
+        break :blessed_receiver blessed_receiver;
+    };
+
+    genesis_actor.actor_object.get().context = blessed_receiver;
     try genesis_actor.activateMethod(context.vm, &token, method, context.target_location, context.source_range);
     context.vm.setGenesisActor(genesis_actor);
     context.vm.switchToActor(genesis_actor);
@@ -140,7 +155,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     }
 
     // NOTE: Need to advance the current actor to the next instruction to be returned to after the this actor exits.
-    context.vm.current_actor.activation_stack.getCurrent().advanceInstruction();
+    context.actor.activation_stack.getCurrent().advanceInstruction();
 
     var spawn_method: *Object.Method = undefined;
     if (try findActorMethod(
@@ -171,8 +186,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         defer tracked_method.untrack(context.vm.heap);
 
         var token = try context.vm.heap.getAllocation(
-            spawn_method.requiredSizeForActivation() +
-                Object.Actor.requiredSizeForAllocation(),
+            spawn_method.requiredSizeForActivation(),
         );
 
         spawn_method = tracked_method.getValue().asObject().asMethodObject();
@@ -180,53 +194,60 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
         break :token token;
     };
+    defer token.deinit();
 
-    // Create the new actor by sending the message to the receiver.
-    const new_actor = try Actor.create(context.vm, &token, receiver);
-    try new_actor.activateMethod(context.vm, &token, spawn_method, context.target_location, context.source_range);
-    try context.vm.registerRegularActor(new_actor);
-    context.vm.switchToActor(new_actor);
+    const stack_snapshot = context.vm.takeStackSnapshot();
+    var before_spawn_method_activation = context.actor.activation_stack.getCurrent();
+    const before_spawn_method_activation_ref = before_spawn_method_activation.takeRef(context.actor.activation_stack);
 
-    var actor_result = try new_actor.executeUntil(context.vm, null);
-    switch (actor_result) {
+    // Activate the method in the actor which requested the spawn. This is required because
+    // any new actor we create does not have any memory of its own yet, so we need to create a
+    // new context for it before we can do anything.
+    try context.actor.activateMethodWithContext(context.vm, &token, receiver, spawn_method, context.target_location, context.source_range);
+
+    var actor_result = try context.actor.executeUntil(context.vm, before_spawn_method_activation_ref);
+    // This object is owned by the actor that requested the spawn.
+    var new_actor_context = switch (actor_result) {
         .ActorSwitch => {
             return ExecutionResult.completion(
                 try Completion.initRuntimeError(context.vm, context.source_range, "The actor spawn activation caused an actor switch", .{}),
             );
         },
-        .Completion => |*completion| {
+        .Completion => |*completion| value: {
             defer completion.deinit(context.vm);
-            context.vm.switchToActor(genesis_actor);
 
             switch (completion.data) {
-                .Normal => |value| {
-                    new_actor.unwindStacks();
-                    new_actor.actor_object.get().context = value;
-                },
+                .Normal => |value| break :value value,
                 .RuntimeError => |err| {
+                    context.vm.switchToActor(genesis_actor);
+
+                    // Refresh activation pointer
+                    before_spawn_method_activation = before_spawn_method_activation_ref.get(context.actor.activation_stack).?;
+
                     if (!context.vm.silent_errors) {
                         std.debug.print("Received error at top level while spawning actor: {s}\n", .{err.message});
-                        runtime_error.printTraceFromActivationStack(new_actor.activation_stack.getStack(), err.source_range);
+                        runtime_error.printTraceFromActivationStackUntil(context.actor.activation_stack.getStack(), err.source_range, before_spawn_method_activation);
                     }
 
-                    new_actor.yield_reason = .RuntimeError;
-                    return ExecutionResult.completion(Completion.initNormal(new_actor.actor_object.value));
+                    context.actor.activation_stack.restoreTo(before_spawn_method_activation);
+                    context.vm.restoreStackSnapshot(stack_snapshot);
+
+                    context.actor.yield_reason = .RuntimeError;
+                    // FIXME: What is a sensible return value here?
+                    return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
                 },
                 else => unreachable,
             }
         },
-    }
+    };
 
     // Refresh pointers in case the actor execution caused a GC
     receiver = context.receiver.getValue();
 
     var entrypoint_selector = entrypoint_selector: {
-        if (new_actor.entrypoint_selector) |message_value| {
+        if (context.actor.entrypoint_selector) |message_value| {
             break :entrypoint_selector message_value.get().getValues();
         }
-
-        if (!context.vm.unregisterRegularActor(new_actor))
-            @panic("!!! Somehow the actor unregistered itself?!");
 
         return ExecutionResult.completion(
             try Completion.initRuntimeError(
@@ -247,30 +268,37 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         entrypoint_selector,
         &entrypoint_method,
     )) |completion| {
-        if (!context.vm.unregisterRegularActor(new_actor))
-            @panic("!!! Somehow the actor unregistered itself?!");
         return ExecutionResult.completion(completion);
     }
+
+    context.actor.entrypoint_selector = null;
 
     token.deinit();
     token = token: {
         var tracked_method = try context.vm.heap.track(entrypoint_method.asValue());
         defer tracked_method.untrack(context.vm.heap);
+        var tracked_new_actor_context = try context.vm.heap.track(new_actor_context);
+        defer tracked_new_actor_context.untrack(context.vm.heap);
 
-        var required_memory = entrypoint_method.requiredSizeForActivation();
+        var required_memory = Object.Actor.requiredSizeForAllocation();
         if (context.actor != genesis_actor)
             required_memory += Object.ActorProxy.requiredSizeForAllocation();
 
         var inner_token = try context.vm.heap.getAllocation(required_memory);
 
         entrypoint_method = tracked_method.getValue().asObject().asMethodObject();
+        new_actor_context = tracked_new_actor_context.getValue();
         receiver = context.receiver.getValue();
 
         break :token inner_token;
     };
-    defer token.deinit();
 
-    try new_actor.activateMethod(context.vm, &token, entrypoint_method, context.target_location, context.source_range);
+    // NOTE: new_actor_context is a placeholder until the blessing operation happens, because we need the
+    //       new actor's ID.
+    const new_actor = try Actor.create(context.vm, &token, new_actor_context);
+    errdefer new_actor.destroy(context.vm.allocator);
+
+    try context.vm.registerRegularActor(new_actor);
 
     // Create a new ActorProxy object and write it to the result location of the
     // actor who spawned it, if it wasn't the genesis actor that spawned the
@@ -279,7 +307,34 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         const new_actor_proxy = try Object.ActorProxy.create(&token, context.actor.id, new_actor.actor_object.get());
         context.actor.writeRegister(context.target_location, new_actor_proxy.asValue());
         context.actor.yield_reason = .ActorSpawned;
+        context.vm.switchToActor(genesis_actor);
     }
+
+    // Bless the new actor context
+    const blessed_new_actor_context = blessed_new_actor_context: {
+        var tracked_method = try context.vm.heap.track(entrypoint_method.asValue());
+        defer tracked_method.untrack(context.vm.heap);
+
+        const blessed_new_actor_context = try bless.bless(context.vm.heap, new_actor.id, new_actor_context);
+
+        entrypoint_method = tracked_method.getValue().asObject().asMethodObject();
+
+        break :blessed_new_actor_context blessed_new_actor_context;
+    };
+    new_actor.actor_object.get().context = blessed_new_actor_context;
+
+    token.deinit();
+    token = token: {
+        var tracked_method = try context.vm.heap.track(entrypoint_method.asValue());
+        defer tracked_method.untrack(context.vm.heap);
+
+        var inner_token = try context.vm.heap.getAllocation(entrypoint_method.requiredSizeForActivation());
+
+        entrypoint_method = tracked_method.getValue().asObject().asMethodObject();
+        break :token inner_token;
+    };
+
+    try new_actor.activateMethod(context.vm, &token, entrypoint_method, context.target_location, context.source_range);
 
     // Since we are switching actors (which we should in the "spawning an actor
     // in another actor" case), we cannot return the new actor object normally.
@@ -302,9 +357,9 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 /// the activation once the spawn activation is complete (in order to prime it
 /// for its resuming).
 pub fn ActorSetEntrypoint(context: *PrimitiveContext) !ExecutionResult {
-    if (!context.vm.isInRegularActor()) {
+    if (!context.vm.isInActorMode()) {
         return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorSetEntrypoint: sent outside of a regular actor", .{}),
+            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorSetEntrypoint: sent outside of actor mode", .{}),
         );
     }
 
