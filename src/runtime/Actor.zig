@@ -322,14 +322,8 @@ pub fn exitActivation(
     const activation_stack_snapshot = self.activation_stack.getCurrent().stack_snapshot;
     self.activation_stack.popActivation().deinit();
 
-    if (last_activation) |last| {
-        if (self.activation_stack.getCurrent() == last) {
-            return .LastActivation;
-        }
-    } else {
-        if (self.activation_stack.getDepth() == 0)
-            return .LastActivation;
-    }
+    if (last_activation == null and self.activation_stack.getDepth() == 0)
+        return .LastActivation;
 
     // Restore each register until the current activation's saved register stack height
     // FIXME: Factor this out
@@ -339,6 +333,12 @@ pub fn exitActivation(
     for (saved_register_stack[activation_saved_register_height..]) |_, i| {
         const saved_register = saved_register_stack[saved_register_count - 1 - i];
         vm.writeRegister(saved_register.register, saved_register.value);
+    }
+
+    if (last_activation) |last| {
+        if (self.activation_stack.getCurrent() == last) {
+            return .LastActivation;
+        }
     }
 
     // Restore the stack snapshot of the activation we just exited
