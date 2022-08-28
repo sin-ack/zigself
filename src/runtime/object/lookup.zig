@@ -74,7 +74,7 @@ pub fn lookupByHash(
     vm: *VirtualMachine,
     selector_hash: SelectorHash,
 ) LookupResult {
-    if (LOOKUP_DEBUG) std.debug.print("Object.lookupByHash: Looking up hash {x} on a {} object at {*}\n", .{ selector_hash, self.header.getObjectType(), self.header });
+    if (LOOKUP_DEBUG) std.debug.print("Object.lookupByHash: Looking up hash {} on a {} object at {*}\n", .{ selector_hash, self.header.getObjectType(), self.header });
     if (selector_hash.regular == self_hash) {
         return LookupResult{ .Regular = self.asValue() };
     }
