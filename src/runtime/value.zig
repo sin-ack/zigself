@@ -159,7 +159,9 @@ pub const Value = packed struct {
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
             .Integer, .FloatingPoint => Value{ .data = self.data },
-            .ObjectReference => self.asObject().clone(token, actor_id).asValue(),
+            // NOTE: The only error condition that can happen here is during method and block map cloning.
+            //       Since user code is unable to do this, there is no reason to propagate a try here.
+            .ObjectReference => (self.asObject().clone(token, actor_id) catch unreachable).asValue(),
         };
     }
 };

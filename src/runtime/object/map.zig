@@ -125,8 +125,12 @@ pub const Map = extern struct {
         self.header.object_information = (self.header.object_information & ~MapTypeMask) | @enumToInt(map_type);
     }
 
+    pub fn asObjectAddress(self: Map.Ptr) [*]u64 {
+        return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+    }
+
     pub fn asValue(self: Map.Ptr) Value {
-        return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
+        return Value.fromObjectAddress(self.asObjectAddress());
     }
 
     pub fn shouldFinalize(self: Map.Ptr) bool {
@@ -150,6 +154,15 @@ pub const Map = extern struct {
             .Method => self.asMethodMap().getSizeInMemory(),
             .Block => self.asBlockMap().getSizeInMemory(),
             .Array => self.asArrayMap().getSizeInMemory(),
+        };
+    }
+
+    pub fn clone(self: Map.Ptr, token: *Heap.AllocationToken) !Object.Map.Ptr {
+        return switch (self.getMapType()) {
+            .Slots => @ptrCast(Map.Ptr, self.asSlotsMap().clone(token)),
+            .Method => @ptrCast(Map.Ptr, try self.asMethodMap().clone(token)),
+            .Block => @ptrCast(Map.Ptr, try self.asBlockMap().clone(token)),
+            .Array => @ptrCast(Map.Ptr, self.asArrayMap().clone(token)),
         };
     }
 
@@ -259,6 +272,15 @@ const SlotsMap = extern struct {
         self.map.init(.Slots, map_map);
         self.properties = 0;
         self.slot_count = slot_count;
+    }
+
+    pub fn clone(self: SlotsMap.Ptr, token: *Heap.AllocationToken) SlotsMap.Ptr {
+        const new_map = create(token, self.slot_count);
+
+        new_map.setAssignableSlotCount(self.getAssignableSlotCount());
+        std.mem.copy(Slot, new_map.getSlots(), self.getSlots());
+
+        return new_map;
     }
 };
 
@@ -385,6 +407,21 @@ const MethodMap = extern struct {
     pub fn getArgumentSlotCount(self: MethodMap.Ptr) u8 {
         return self.base_map.getArgumentSlotCount();
     }
+
+    pub fn clone(self: MethodMap.Ptr, token: *Heap.AllocationToken) !MethodMap.Ptr {
+        const new_map = try create(token,
+                               self.getArgumentSlotCount(),
+                               self.base_map.slots_map.slot_count,
+                               self.isInlineMethod(),
+                               self.method_name.asByteArray(),
+                               self.base_map.block.get(),
+                               self.base_map.definition_executable_ref.get());
+
+        new_map.setAssignableSlotCount(self.getAssignableSlotCount());
+        std.mem.copy(Slot, new_map.getSlots(), self.getSlots());
+
+        return new_map;
+    }
 };
 
 /// A map for a block object. A block object is a slots + statements object
@@ -448,6 +485,21 @@ const BlockMap = extern struct {
     pub fn getArgumentSlotCount(self: BlockMap.Ptr) u8 {
         return self.base_map.getArgumentSlotCount();
     }
+
+    pub fn clone(self: BlockMap.Ptr, token: *Heap.AllocationToken) !BlockMap.Ptr {
+        const new_map = try create(token,
+                               self.getArgumentSlotCount(),
+                               self.base_map.slots_map.slot_count,
+                               self.parent_activation,
+                               self.nonlocal_return_target_activation,
+                               self.base_map.block.get(),
+                               self.base_map.definition_executable_ref.get());
+
+        new_map.setAssignableSlotCount(self.getAssignableSlotCount());
+        std.mem.copy(Slot, new_map.getSlots(), self.getSlots());
+
+        return new_map;
+    }
 };
 
 /// A map for an array object.
@@ -488,5 +540,9 @@ const ArrayMap = extern struct {
 
     pub fn requiredSizeForAllocation() usize {
         return @sizeOf(ArrayMap);
+    }
+
+    pub fn clone(self: ArrayMap.Ptr, token: *Heap.AllocationToken) ArrayMap.Ptr {
+        return create(token, self.getSize());
     }
 };
