@@ -85,6 +85,8 @@ fn inspectObject(
         std.debug.print("(G) ", .{});
     }
 
+    std.debug.print("(#{}) ", .{object.header.getActorID()});
+
     switch (object.header.getObjectType()) {
         .ForwardingReference, .Map => unreachable,
         .Slots => {
