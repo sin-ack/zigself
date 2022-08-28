@@ -57,7 +57,7 @@ const success = ExecutionResult.success();
 pub fn execute(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activation.ActivationRef, executable: Executable.Ref, inst: Instruction) !ExecutionResult {
     const source_range = SourceRange.initNoRef(executable, actor.range);
 
-    if (EXECUTION_DEBUG) std.debug.print("[{*} {s}] Executing: {} = {}\n", .{ actor, executable.value.definition_script.value.file_path, inst.target, inst });
+    if (EXECUTION_DEBUG) std.debug.print("[#{} {s}] Executing: {} = {}\n", .{ actor.id, executable.value.definition_script.value.file_path, inst.target, inst });
 
     switch (inst.tag) {
         .Send => {
