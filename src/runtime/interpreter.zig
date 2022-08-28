@@ -481,6 +481,8 @@ pub fn sendMessage(
         }
     }
 
+    actor.ensureCanRead(receiver, source_range);
+
     return switch (receiver.lookup(vm, message_name)) {
         .Regular => |lookup_result| {
             if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {

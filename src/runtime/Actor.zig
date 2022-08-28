@@ -499,6 +499,26 @@ pub fn canWriteTo(self: *Self, value: Value) bool {
     };
 }
 
+/// Ensure that the current actor can read the given value.
+/// If the actor cannot read this value, then the VM should crash, as we shouldn't
+/// be able to reach this object in the first place.
+pub fn ensureCanRead(self: *Self, value: Value, source_range: SourceRange) void {
+    switch (value.getType()) {
+        .ObjectMarker => unreachable,
+        .Integer, .FloatingPoint => {},
+        .ObjectReference => {
+            const object = value.asObject();
+            if (!object.header.isGloballyReachable() and object.header.getActorID() != self.id)
+                std.debug.panic(
+                    "!!! Attempted to read object that is not readable for this actor!\n" ++
+                        "  Object {*} owned by actor #{}\n" ++
+                        "  Actor #{} is attempting to reach it at {}",
+                    .{ object.header, object.header.getActorID(), self.id, source_range },
+                );
+        },
+    }
+}
+
 // FIXME: This isn't thread safe!
 var next_actor_id: u31 = 0;
 
