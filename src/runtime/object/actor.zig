@@ -15,7 +15,7 @@ const SourceRange = @import("../SourceRange.zig");
 const PointerValue = value.PointerValue;
 const stage2_compat = @import("../../utility/stage2_compat.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
-const RegisterLocation = @import("../lowcode/register_location.zig").RegisterLocation;
+const RegisterLocation = @import("../bytecode.zig").RegisterLocation;
 
 // FIXME: This isn't thread safe!
 var singleton_actor_map: ?Heap.Tracked = null;

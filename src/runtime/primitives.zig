@@ -9,6 +9,7 @@ const Heap = @import("./Heap.zig");
 const Value = value_import.Value;
 const Actor = @import("./Actor.zig");
 const Object = @import("./Object.zig");
+const bytecode = @import("./bytecode.zig");
 const Completion = @import("./Completion.zig");
 const SourceRange = @import("./SourceRange.zig");
 const value_import = @import("./value.zig");
@@ -16,7 +17,6 @@ const stage2_compat = @import("../utility/stage2_compat.zig");
 const runtime_error = @import("./error.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const ExecutionResult = @import("./interpreter.zig").ExecutionResult;
-const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
 const IntegerValueSignedness = value_import.IntegerValueSignedness;
 
 const basic_primitives = @import("./primitives/basic.zig");
@@ -49,7 +49,7 @@ pub const PrimitiveContext = struct {
     /// activation should be written. It is fine for primitives to just return
     /// the result of the primitive as a normal completion directly, but if a
     /// new activation needs to be added, then this should be passed in.
-    target_location: RegisterLocation,
+    target_location: bytecode.RegisterLocation,
     /// The source range which triggered this primitive call. This will be
     /// passed to runtime error completions in the case of errors.
     source_range: SourceRange,
@@ -173,7 +173,7 @@ const PrimitiveSpec = struct {
         actor: *Actor,
         receiver: Heap.Tracked,
         arguments: []const Value,
-        target_location: RegisterLocation,
+        target_location: bytecode.RegisterLocation,
         source_range: SourceRange,
     ) PrimitiveError!ExecutionResult {
         var context = PrimitiveContext{

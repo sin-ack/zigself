@@ -78,15 +78,15 @@ pub fn RunScript(context: *PrimitiveContext) !ExecutionResult {
         ),
         error.OutOfMemory => return error.OutOfMemory,
     };
-    defer ast_executable.destroy();
+    defer ast_executable.unref();
 
-    const executable = try CodeGen.lowerExecutable(context.vm.allocator, ast_executable);
+    const executable = try CodeGen.lowerExecutable(context.vm.allocator, ast_executable.value);
     defer executable.unref();
 
     // Advance the instruction for the activation that will be returned to.
     context.actor.activation_stack.getCurrent().advanceInstruction();
 
-    try executable.value.pushSubEntrypointActivation(context.vm, context.source_range.executable, context.target_location, &context.actor.activation_stack);
+    try context.actor.activation_stack.pushSubEntrypointActivation(context.vm, context.target_location, executable);
     return ExecutionResult.activationChange();
 }
 
@@ -158,14 +158,14 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
         },
         error.OutOfMemory => return error.OutOfMemory,
     };
-    defer ast_executable.destroy();
+    defer ast_executable.unref();
 
-    const executable = try CodeGen.lowerExecutable(context.vm.allocator, ast_executable);
+    const executable = try CodeGen.lowerExecutable(context.vm.allocator, ast_executable.value);
     defer executable.unref();
 
     const stack_snapshot = context.vm.takeStackSnapshot();
     var activation_before_script = context.actor.activation_stack.getCurrent();
-    try executable.value.pushSubEntrypointActivation(context.vm, context.source_range.executable, context.target_location, &context.actor.activation_stack);
+    try context.actor.activation_stack.pushSubEntrypointActivation(context.vm, context.target_location, context.source_range.executable);
 
     const activation_before_script_ref = activation_before_script.takeRef(context.actor.activation_stack);
 

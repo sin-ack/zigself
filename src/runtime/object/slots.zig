@@ -14,6 +14,7 @@ const Actor = @import("../Actor.zig");
 const Value = value_import.Value;
 const Object = @import("../Object.zig");
 const MapType = @import("./map.zig").MapType;
+const bytecode = @import("../bytecode.zig");
 const Location = @import("../../language/location.zig");
 const traversal = @import("./traversal.zig");
 const ByteArray = @import("../ByteArray.zig");
@@ -21,12 +22,9 @@ const MapBuilder = @import("./map_builder.zig").MapBuilder;
 const SourceRange = @import("../SourceRange.zig");
 const value_import = @import("../value.zig");
 const stage2_compat = @import("../../utility/stage2_compat.zig");
-const BytecodeBlock = @import("../lowcode/Block.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationValue = value_import.ActivationValue;
-const RegisterLocation = @import("../lowcode/register_location.zig").RegisterLocation;
 const RuntimeActivation = @import("../Activation.zig");
-const BytecodeExecutable = @import("../lowcode/Executable.zig");
 
 /// Information about added/changed slots when an object is merged into another.
 const MergeInfo = struct {
@@ -421,8 +419,8 @@ pub const Method = extern struct {
     pub fn createTopLevelContextForExecutable(
         vm: *VirtualMachine,
         token: *Heap.AllocationToken,
-        executable: BytecodeExecutable.Ref,
-        block: *BytecodeBlock,
+        executable: bytecode.Executable.Ref,
+        block: *bytecode.Block,
     ) !Method.Ptr {
         const toplevel_context_method_map = blk: {
             const toplevel_context_name = ByteArray.createFromString(token, toplevel_context_string);
@@ -464,7 +462,7 @@ pub const Method = extern struct {
         actor_id: u31,
         receiver: Value,
         arguments: []const Value,
-        target_location: RegisterLocation,
+        target_location: bytecode.RegisterLocation,
         created_from: SourceRange,
         out_activation: *RuntimeActivation,
     ) void {
@@ -567,7 +565,7 @@ pub const Block = extern struct {
         token: *Heap.AllocationToken,
         receiver: Value,
         arguments: []const Value,
-        target_location: RegisterLocation,
+        target_location: bytecode.RegisterLocation,
         creator_message: Value,
         created_from: SourceRange,
         out_activation: *RuntimeActivation,
@@ -676,14 +674,14 @@ pub const Activation = extern struct {
 
     // --- Map forwarding ---
 
-    pub fn getDefinitionExecutable(self: Activation.Ptr) BytecodeExecutable.Ref {
+    pub fn getDefinitionExecutable(self: Activation.Ptr) bytecode.Executable.Ref {
         return switch (self.getActivationType()) {
             .Method => self.getMethodMap().base_map.definition_executable_ref.get(),
             .Block => self.getBlockMap().base_map.definition_executable_ref.get(),
         };
     }
 
-    pub fn getBytecodeBlock(self: Activation.Ptr) *BytecodeBlock {
+    pub fn getBytecodeBlock(self: Activation.Ptr) *bytecode.Block {
         return switch (self.getActivationType()) {
             .Method => self.getMethodMap().base_map.block.get(),
             .Block => self.getBlockMap().base_map.block.get(),

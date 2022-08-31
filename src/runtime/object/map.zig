@@ -12,16 +12,15 @@ const Slot = @import("../slot.zig").Slot;
 const hash = @import("../../utility/hash.zig");
 const Value = value_import.Value;
 const Object = @import("../Object.zig");
+const bytecode = @import("../bytecode.zig");
 const ByteArray = @import("../ByteArray.zig");
 const Activation = @import("../Activation.zig");
 const MapBuilder = @import("./map_builder.zig").MapBuilder;
 const IntegerValue = value_import.IntegerValue;
 const PointerValue = value_import.PointerValue;
 const value_import = @import("../value.zig");
-const BytecodeBlock = @import("../lowcode/Block.zig");
 const stage2_compat = @import("../../utility/stage2_compat.zig");
 const RefCountedValue = value_import.RefCountedValue;
-const BytecodeExecutable = @import("../lowcode/Executable.zig");
 
 var static_map_map: ?Value = null;
 
@@ -288,9 +287,9 @@ const SlotsMap = extern struct {
 const SlotsAndBytecodeMap = extern struct {
     slots_map: SlotsMap,
     /// The address of the bytecode block. Owned by definition_executable_ref.
-    block: PointerValue(BytecodeBlock),
+    block: PointerValue(bytecode.Block),
     /// The executable which this map was created from.
-    definition_executable_ref: RefCountedValue(BytecodeExecutable),
+    definition_executable_ref: RefCountedValue(bytecode.Executable),
 
     pub const Ptr = stage2_compat.HeapPtr(SlotsAndBytecodeMap, .Mutable);
 
@@ -301,8 +300,8 @@ const SlotsAndBytecodeMap = extern struct {
         map_map: Value,
         argument_slot_count: u8,
         total_slot_count: u32,
-        block: *BytecodeBlock,
-        executable: BytecodeExecutable.Ref,
+        block: *bytecode.Block,
+        executable: bytecode.Executable.Ref,
     ) void {
         std.debug.assert(argument_slot_count <= total_slot_count);
 
@@ -310,8 +309,8 @@ const SlotsAndBytecodeMap = extern struct {
         self.slots_map.map.init(map_type, map_map);
         self.setArgumentSlotCount(argument_slot_count);
 
-        self.block = PointerValue(BytecodeBlock).init(block);
-        self.definition_executable_ref = RefCountedValue(BytecodeExecutable).init(executable);
+        self.block = PointerValue(bytecode.Block).init(block);
+        self.definition_executable_ref = RefCountedValue(bytecode.Executable).init(executable);
     }
 
     /// Finalizes this object. All maps that have a SlotsAndBytecodeMap member
@@ -351,8 +350,8 @@ const MethodMap = extern struct {
         total_slot_count: u32,
         is_inline_method: bool,
         method_name: ByteArray,
-        block: *BytecodeBlock,
-        executable: BytecodeExecutable.Ref,
+        block: *bytecode.Block,
+        executable: bytecode.Executable.Ref,
     ) !MethodMap.Ptr {
         const map_map = getMapMap(token);
         const size = MethodMap.requiredSizeForAllocation(total_slot_count);
@@ -372,8 +371,8 @@ const MethodMap = extern struct {
         total_slot_count: u32,
         is_inline_method: bool,
         method_name: ByteArray,
-        block: *BytecodeBlock,
-        executable: BytecodeExecutable.Ref,
+        block: *bytecode.Block,
+        executable: bytecode.Executable.Ref,
     ) void {
         self.base_map.init(.Method, map_map, argument_slot_count, total_slot_count, block, executable);
         self.method_name = method_name.asValue();
@@ -449,8 +448,8 @@ const BlockMap = extern struct {
         total_slot_count: u32,
         parent_activation: Activation.ActivationRef,
         nonlocal_return_target_activation: Activation.ActivationRef,
-        block: *BytecodeBlock,
-        executable: BytecodeExecutable.Ref,
+        block: *bytecode.Block,
+        executable: bytecode.Executable.Ref,
     ) !BlockMap.Ptr {
         const map_map = getMapMap(token);
         const size = BlockMap.requiredSizeForAllocation(total_slot_count);
@@ -470,8 +469,8 @@ const BlockMap = extern struct {
         total_slot_count: u32,
         parent_activation: Activation.ActivationRef,
         nonlocal_return_target_activation: Activation.ActivationRef,
-        block: *BytecodeBlock,
-        executable: BytecodeExecutable.Ref,
+        block: *bytecode.Block,
+        executable: bytecode.Executable.Ref,
     ) void {
         self.base_map.init(.Block, map_map, argument_slot_count, total_slot_count, block, executable);
         self.parent_activation = parent_activation;

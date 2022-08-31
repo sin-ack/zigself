@@ -4,7 +4,6 @@
 
 const std = @import("std");
 
-pub const GeneralPurposeRegisterCount = 8;
 pub const RegisterLocation = enum {
     zero,
     ret,
@@ -16,6 +15,22 @@ pub const RegisterLocation = enum {
     r5,
     r6,
     r7,
+
+    pub const GeneralPurposeRegisterCount = 8;
+    pub const BitSet = std.StaticBitSet(GeneralPurposeRegisterCount);
+
+    pub fn isFinite() bool {
+        return true;
+    }
+
+    pub fn isNothing(self: RegisterLocation) bool {
+        return self == .zero;
+    }
+
+    pub fn zeroLabel() []const u8 {
+        // "%r0"
+        return "   ";
+    }
 
     /// Return the offset of the register for its register set.
     pub fn registerOffset(self: RegisterLocation) u32 {

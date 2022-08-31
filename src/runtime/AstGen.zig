@@ -7,11 +7,13 @@ const Allocator = std.mem.Allocator;
 
 const ast = @import("../language/ast.zig");
 const debug = @import("../debug.zig");
-const Block = @import("./astcode/Block.zig");
 const Script = @import("../language/script.zig");
-const Instruction = @import("./astcode/Instruction.zig");
-const Executable = @import("./astcode/Executable.zig");
-const RegisterLocation = @import("./astcode/register_location.zig").RegisterLocation;
+const bytecode = @import("./bytecode.zig");
+
+const Block = bytecode.AstcodeBlock;
+const Executable = bytecode.AstcodeExecutable;
+const Instruction = bytecode.AstcodeInstruction;
+const RegisterLocation = bytecode.astcode.RegisterLocation;
 
 const AST_EXECUTABLE_DUMP_DEBUG = debug.AST_EXECUTABLE_DUMP_DEBUG;
 
@@ -20,18 +22,21 @@ pub const MaximumArguments = 128; // Reasonable limit
 pub const MaximumAssignableSlots = 255;
 
 method_execution_depth: usize = 0,
+register_id_stack: std.ArrayList(u32),
 
 const AstGen = @This();
 const AstGenError = Allocator.Error || error{AstGenFailure};
 
 /// Given a script, generate an Executable for it with its entrypoint being the
 /// first block it contains.
-pub fn generateExecutableFromScript(allocator: Allocator, script: Script.Ref) AstGenError!*Executable {
+pub fn generateExecutableFromScript(allocator: Allocator, script: Script.Ref) AstGenError!Executable.Ref {
     const executable = try Executable.create(allocator, script);
-    errdefer executable.destroy();
+    errdefer executable.unref();
 
-    var g = AstGen{};
-    try g.generateScript(executable, script.value.ast_root.?);
+    var g = try AstGen.init(allocator);
+    defer g.deinit();
+
+    try g.generateScript(executable.value, script.value.ast_root.?);
 
     if (AST_EXECUTABLE_DUMP_DEBUG)
         std.debug.print("Executable dump: {}\n", .{executable});
@@ -39,12 +44,40 @@ pub fn generateExecutableFromScript(allocator: Allocator, script: Script.Ref) As
     return executable;
 }
 
+fn init(allocator: Allocator) !AstGen {
+    return AstGen{
+        .register_id_stack = std.ArrayList(u32).init(allocator),
+    };
+}
+
+fn deinit(self: *AstGen) void {
+    self.register_id_stack.deinit();
+}
+
+fn pushRegisterID(self: *AstGen) !void {
+    try self.register_id_stack.append(1);
+}
+
+fn allocateRegister(self: *AstGen) RegisterLocation {
+    var latest_id = &self.register_id_stack.items[self.register_id_stack.items.len - 1];
+    defer latest_id.* += 1;
+
+    return RegisterLocation.fromIndex(latest_id.*);
+}
+
+fn popRegisterID(self: *AstGen) void {
+    _ = self.register_id_stack.pop();
+}
+
 fn generateScript(self: *AstGen, executable: *Executable, script_node: ast.ScriptNode) AstGenError!void {
     const script_block_index = try executable.makeBlock();
     const script_block = executable.getBlock(script_block_index);
-    const last_expression_location = try self.generateStatementList(executable, script_block, script_node.statements.value.statements);
 
-    _ = try script_block.addInstruction(executable.allocator, Instruction.exitActivation(last_expression_location));
+    try self.pushRegisterID();
+    defer self.popRegisterID();
+
+    const last_expression_location = try self.generateStatementList(executable, script_block, script_node.statements.value.statements);
+    try script_block.addInstruction(executable.allocator, Instruction.init(self.allocateRegister(), .{ .Return = .{ .value_location = last_expression_location } }));
 }
 
 fn generateStatementList(self: *AstGen, executable: *Executable, block: *Block, statements: []ast.ExpressionNode) AstGenError!RegisterLocation {
@@ -93,11 +126,15 @@ fn generateObject(self: *AstGen, executable: *Executable, block: *Block, object:
 
     try self.generateSlotList(executable, block, object.slots);
 
-    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(object.range));
-    const object_location = try block.addInstruction(executable.allocator, Instruction.createObject(@intCast(u32, object.slots.len)));
+    try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .SourceRange = object.range }));
+
+    const object_location = self.allocateRegister();
+    try block.addInstruction(executable.allocator, Instruction.init(object_location, .{
+        .CreateObject = .{ .slot_count = @intCast(u32, object.slots.len) },
+    }));
 
     if (std.debug.runtime_safety)
-        _ = try block.addInstruction(executable.allocator, Instruction.verifySlotSentinel());
+        try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .VerifySlotSentinel = {} }));
 
     return object_location;
 }
@@ -107,12 +144,19 @@ fn generateBlock(self: *AstGen, executable: *Executable, block: *Block, block_no
     self.method_execution_depth = 0;
     defer self.method_execution_depth = saved_method_execution_depth;
 
+    try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .SourceRange = block_node.range }));
+
     const block_index = try self.generateSlotsAndCodeCommon(executable, block, block_node.slots, block_node.statements.value.statements);
-    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(block_node.range));
-    const block_location = try block.addInstruction(executable.allocator, Instruction.createBlock(@intCast(u32, block_node.slots.len), block_index));
+    const block_location = self.allocateRegister();
+    try block.addInstruction(executable.allocator, Instruction.init(block_location, .{
+        .CreateBlock = .{
+            .slot_count = @intCast(u32, block_node.slots.len),
+            .block_index = block_index,
+        },
+    }));
 
     if (std.debug.runtime_safety)
-        _ = try block.addInstruction(executable.allocator, Instruction.verifySlotSentinel());
+        try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .VerifySlotSentinel = {} }));
 
     return block_location;
 }
@@ -123,28 +167,36 @@ fn generateMethod(self: *AstGen, executable: *Executable, block: *Block, method_
 
     const block_index = try self.generateSlotsAndCodeCommon(executable, block, method.slots, method.statements.value.statements);
 
-    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(method.range));
-    const method_name_location = try block.addInstruction(executable.allocator, Instruction.createByteArray(method_name));
+    try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .SourceRange = method.range }));
+    const method_name_location = self.allocateRegister();
+    try block.addInstruction(executable.allocator, Instruction.init(method_name_location, .{ .CreateByteArray = method_name }));
 
     if (self.method_execution_depth > 1) {
-        _ = try block.addInstruction(executable.allocator, Instruction.setMethodInline());
+        try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .SetMethodInline = {} }));
     }
 
-    const method_location = try block.addInstruction(executable.allocator, Instruction.createMethod(method_name_location, @intCast(u32, method.slots.len), block_index));
+    const method_location = self.allocateRegister();
+    try block.addInstruction(executable.allocator, Instruction.init(method_location, .{
+        .CreateMethod = .{
+            .method_name_location = method_name_location,
+            .slot_count = @intCast(u32, method.slots.len),
+            .block_index = block_index,
+        },
+    }));
 
     if (std.debug.runtime_safety)
-        _ = try block.addInstruction(executable.allocator, Instruction.verifySlotSentinel());
+        try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .VerifySlotSentinel = {} }));
 
     return method_location;
 }
 
 fn generateArgumentList(self: *AstGen, executable: *Executable, block: *Block, arguments: []ast.ExpressionNode) !void {
     if (std.debug.runtime_safety)
-        _ = try block.addInstruction(executable.allocator, Instruction.pushArgumentSentinel());
+        try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .PushArgumentSentinel = {} }));
 
     for (arguments) |argument| {
         const argument_location = try self.generateExpression(executable, block, argument);
-        _ = try block.addInstruction(executable.allocator, Instruction.pushArg(argument_location));
+        try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .PushArg = .{ .argument_location = argument_location } }));
     }
 }
 
@@ -154,31 +206,51 @@ fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, messag
             const receiver_location = try self.generateExpression(executable, block, receiver);
             try self.generateArgumentList(executable, block, message.arguments);
 
-            _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(message.range));
-            break :message_location if (message.message_name[0] == '_')
-                try block.addInstruction(executable.allocator, Instruction.primSend(receiver_location, message.message_name[1..]))
-            else
-                try block.addInstruction(executable.allocator, Instruction.send(receiver_location, message.message_name));
+            try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .SourceRange = message.range }));
+
+            const message_location = self.allocateRegister();
+            if (message.message_name[0] == '_') {
+                try block.addInstruction(executable.allocator, Instruction.init(message_location, .{
+                    .PrimSend = .{
+                        .receiver_location = receiver_location,
+                        .message_name = message.message_name[1..],
+                    },
+                }));
+            } else {
+                try block.addInstruction(executable.allocator, Instruction.init(message_location, .{
+                    .Send = .{
+                        .receiver_location = receiver_location,
+                        .message_name = message.message_name,
+                    },
+                }));
+            }
+
+            break :message_location message_location;
         }
 
         try self.generateArgumentList(executable, block, message.arguments);
 
-        _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(message.range));
-        break :message_location if (message.message_name[0] == '_')
-            try block.addInstruction(executable.allocator, Instruction.selfPrimSend(message.message_name[1..]))
-        else
-            try block.addInstruction(executable.allocator, Instruction.selfSend(message.message_name));
+        try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .SourceRange = message.range }));
+
+        const message_location = self.allocateRegister();
+        if (message.message_name[0] == '_') {
+            try block.addInstruction(executable.allocator, Instruction.init(message_location, .{ .SelfPrimSend = .{ .message_name = message.message_name[1..] } }));
+        } else {
+            try block.addInstruction(executable.allocator, Instruction.init(message_location, .{ .SelfSend = .{ .message_name = message.message_name } }));
+        }
+
+        break :message_location message_location;
     };
 
     if (std.debug.runtime_safety)
-        _ = try block.addInstruction(executable.allocator, Instruction.verifyArgumentSentinel());
+        try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .VerifyArgumentSentinel = {} }));
     return message_location;
 }
 
 fn generateReturn(self: *AstGen, executable: *Executable, block: *Block, return_node: *ast.ReturnNode) AstGenError!RegisterLocation {
     const expr_location = try self.generateExpression(executable, block, return_node.expression);
-    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(return_node.range));
-    _ = try block.addInstruction(executable.allocator, Instruction.nonlocalReturn(expr_location));
+    try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .SourceRange = return_node.range }));
+    try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .NonlocalReturn = .{ .value_location = expr_location } }));
     return RegisterLocation.Nil;
 }
 
@@ -188,30 +260,37 @@ fn generateReturn(self: *AstGen, executable: *Executable, block: *Block, return_
 //       want to delete the AST after codegen.
 
 fn generateIdentifier(self: *AstGen, executable: *Executable, block: *Block, identifier: ast.IdentifierNode) AstGenError!RegisterLocation {
-    _ = self;
+    try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .SourceRange = identifier.range }));
 
-    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(identifier.range));
-    return if (identifier.value[0] == '_')
-        try block.addInstruction(executable.allocator, Instruction.selfPrimSend(identifier.value[1..]))
-    else
-        try block.addInstruction(executable.allocator, Instruction.selfSend(identifier.value));
+    const identifier_location = self.allocateRegister();
+    if (identifier.value[0] == '_') {
+        try block.addInstruction(executable.allocator, Instruction.init(identifier_location, .{ .SelfPrimSend = .{ .message_name = identifier.value[1..] } }));
+    } else {
+        try block.addInstruction(executable.allocator, Instruction.init(identifier_location, .{ .SelfSend = .{ .message_name = identifier.value } }));
+    }
+
+    return identifier_location;
 }
 
 fn generateString(self: *AstGen, executable: *Executable, block: *Block, string: ast.StringNode) AstGenError!RegisterLocation {
-    _ = self;
+    try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .SourceRange = string.range }));
 
-    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(string.range));
-    return try block.addInstruction(executable.allocator, Instruction.createByteArray(string.value));
+    const string_location = self.allocateRegister();
+    try block.addInstruction(executable.allocator, Instruction.init(string_location, .{ .CreateByteArray = string.value }));
+
+    return string_location;
 }
 
 fn generateNumber(self: *AstGen, executable: *Executable, block: *Block, number: ast.NumberNode) AstGenError!RegisterLocation {
-    _ = self;
+    try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .SourceRange = number.range }));
 
-    _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(number.range));
-    return switch (number.value) {
-        .Integer => |i| try block.addInstruction(executable.allocator, Instruction.createInteger(i)),
-        .FloatingPoint => |f| try block.addInstruction(executable.allocator, Instruction.createFloatingPoint(f)),
-    };
+    const number_location = self.allocateRegister();
+    switch (number.value) {
+        .Integer => |i| try block.addInstruction(executable.allocator, Instruction.init(number_location, .{ .CreateInteger = @intCast(i62, i) })),
+        .FloatingPoint => |f| try block.addInstruction(executable.allocator, Instruction.init(number_location, .{ .CreateFloatingPoint = f })),
+    }
+
+    return number_location;
 }
 
 fn generateSlotsAndCodeCommon(self: *AstGen, executable: *Executable, parent_block: *Block, slots: []ast.SlotNode, statements: []ast.ExpressionNode) AstGenError!u32 {
@@ -239,18 +318,21 @@ fn generateSlotsAndCodeCommon(self: *AstGen, executable: *Executable, parent_blo
     const child_block_index = try executable.makeBlock();
     const child_block = executable.getBlock(child_block_index);
 
+    try self.pushRegisterID();
+    defer self.popRegisterID();
+
     const last_expression_location = try self.generateStatementList(executable, child_block, statements);
-    _ = try child_block.addInstruction(executable.allocator, Instruction.exitActivation(last_expression_location));
+    try child_block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .Return = .{ .value_location = last_expression_location } }));
 
     return child_block_index;
 }
 
 fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots: []ast.SlotNode) AstGenError!void {
     if (std.debug.runtime_safety)
-        _ = try block.addInstruction(executable.allocator, Instruction.pushSlotSentinel());
+        try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .PushSlotSentinel = {} }));
 
     for (slots) |slot| {
-        const slot_value_index = blk: {
+        const slot_value_location = blk: {
             if (slot.value) |value| {
                 if (value == .Object) {
                     var has_argument = false;
@@ -271,24 +353,47 @@ fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots
             break :blk RegisterLocation.Nil;
         };
 
-        _ = try block.addInstruction(executable.allocator, Instruction.sourceRange(slot.range));
-        const slot_name_index = try block.addInstruction(executable.allocator, Instruction.createByteArray(slot.name));
+        try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{ .SourceRange = slot.range }));
+        const slot_name_location = self.allocateRegister();
+        try block.addInstruction(executable.allocator, Instruction.init(slot_name_location, .{ .CreateByteArray = slot.name }));
 
         if (slot.is_inherited) {
             std.debug.assert(!slot.is_mutable);
             std.debug.assert(!slot.is_argument);
             std.debug.assert(!slot.is_parent);
 
-            _ = try block.addInstruction(executable.allocator, Instruction.pushInheritedSlot(slot_name_index, slot_value_index));
+            try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{
+                .PushInheritedSlot = .{
+                    .name_location = slot_name_location,
+                    .value_location = slot_value_location,
+                },
+            }));
         } else if (slot.is_argument) {
             std.debug.assert(slot.is_mutable);
             std.debug.assert(!slot.is_parent);
 
-            _ = try block.addInstruction(executable.allocator, Instruction.pushArgumentSlot(slot_name_index, slot_value_index));
+            try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{
+                .PushArgumentSlot = .{
+                    .name_location = slot_name_location,
+                    .value_location = slot_value_location,
+                },
+            }));
         } else if (slot.is_mutable) {
-            _ = try block.addInstruction(executable.allocator, Instruction.pushAssignableSlot(slot_name_index, slot.is_parent, slot_value_index));
+            try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{
+                .PushAssignableSlot = .{
+                    .name_location = slot_name_location,
+                    .value_location = slot_value_location,
+                    .is_parent = slot.is_parent,
+                },
+            }));
         } else {
-            _ = try block.addInstruction(executable.allocator, Instruction.pushConstantSlot(slot_name_index, slot.is_parent, slot_value_index));
+            try block.addInstruction(executable.allocator, Instruction.init(.Nil, .{
+                .PushConstantSlot = .{
+                    .name_location = slot_name_location,
+                    .value_location = slot_value_location,
+                    .is_parent = slot.is_parent,
+                },
+            }));
         }
     }
 }

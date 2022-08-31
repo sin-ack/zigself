@@ -12,8 +12,8 @@ const Value = value_import.Value;
 const Stack = @import("./stack.zig").Stack;
 const Range = @import("../language/Range.zig");
 const Object = @import("./Object.zig");
+const bytecode = @import("./bytecode.zig");
 const Completion = @import("./Completion.zig");
-const Executable = @import("./lowcode/Executable.zig");
 const ActorValue = value_import.ActorValue;
 const Activation = @import("./Activation.zig");
 const MethodValue = value_import.MethodValue;
@@ -21,11 +21,9 @@ const interpreter = @import("./interpreter.zig");
 const SourceRange = @import("./SourceRange.zig");
 const value_import = @import("./value.zig");
 const ManagedValue = value_import.ManagedValue;
-const RegisterFile = @import("./lowcode/RegisterFile.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const ByteArrayValue = value_import.ByteArrayValue;
 const ActivationStack = Activation.ActivationStack;
-const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
 
 const ACTIVATION_EXIT_DEBUG = debug.ACTIVATION_EXIT_DEBUG;
 
@@ -56,7 +54,7 @@ mailbox: Mailbox = .{},
 
 /// The register file stores the register values for this actor. Lowcode
 /// execution uses these registers to perform its operations.
-register_file: RegisterFile = .{},
+register_file: bytecode.lowcode.RegisterFile = .{},
 argument_stack: Stack(Value, "Argument stack", ValueSentinel) = .{},
 slot_stack: Stack(Slot, "Slot stack", SlotSentinel) = .{},
 saved_register_stack: Stack(SavedRegister, "Saved register stack", null) = .{},
@@ -100,7 +98,7 @@ pub const StackSnapshot = struct {
 /// A saved register, which is restored at activation exit.
 pub const SavedRegister = struct {
     /// The register to restore the value to.
-    register: RegisterLocation,
+    register: bytecode.RegisterLocation,
     /// The value which should be restored.
     value: Value,
 };
@@ -192,7 +190,7 @@ pub fn activateMethod(
     vm: *VirtualMachine,
     token: *Heap.AllocationToken,
     method: *Object.Method,
-    target_location: RegisterLocation,
+    target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
     return try self.activateMethodWithContext(vm, token, self.actor_object.get().context, method, target_location, source_range);
@@ -204,7 +202,7 @@ pub fn activateMethodWithContext(
     token: *Heap.AllocationToken,
     context: Value,
     method: *Object.Method,
-    target_location: RegisterLocation,
+    target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
     const activation_slot = try self.activation_stack.getNewActivationSlot(vm.allocator);
@@ -374,11 +372,11 @@ pub fn restoreStackSnapshot(self: *Self, snapshot: StackSnapshot) void {
     self.saved_register_stack.restoreTo(snapshot.saved_register_height);
 }
 
-pub fn readRegister(self: Self, location: RegisterLocation) Value {
+pub fn readRegister(self: Self, location: bytecode.RegisterLocation) Value {
     return self.register_file.read(location);
 }
 
-pub fn writeRegister(self: *Self, location: RegisterLocation, value: Value) void {
+pub fn writeRegister(self: *Self, location: bytecode.RegisterLocation, value: Value) void {
     self.register_file.write(location, value);
 }
 

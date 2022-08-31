@@ -9,12 +9,12 @@ const Allocator = std.mem.Allocator;
 const Actor = @import("./Actor.zig");
 const value = @import("./value.zig");
 const Value = value.Value;
-const Executable = @import("./lowcode/Executable.zig");
+const Object = @import("./Object.zig");
+const bytecode = @import("./bytecode.zig");
 const SourceRange = @import("./SourceRange.zig");
 const IntegerValue = value.IntegerValue;
 const VirtualMachine = @import("./VirtualMachine.zig");
 const ActivationValue = value.ActivationValue;
-const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
 
 /// The ID of the activation which is used with ActivationRef in order to check
 /// whether the activation is still alive or not.
@@ -25,7 +25,7 @@ activation_id: u64,
 activation_object: ActivationValue,
 /// The location to which the result of the activation (obtained via the
 /// exit_activation instruction) is written.
-target_location: RegisterLocation,
+target_location: bytecode.RegisterLocation,
 /// This is the parent activation for the current block activation. The
 /// activation object of this activation will be used as the receiver of the
 /// block's own activation object. Not used with methods, since we don't want to
@@ -59,7 +59,7 @@ const Self = @This();
 pub fn initInPlace(
     self: *Self,
     activation_object: ActivationValue,
-    target_location: RegisterLocation,
+    target_location: bytecode.RegisterLocation,
     stack_snapshot: Actor.StackSnapshot,
     creator_message: Value,
     created_from: SourceRange,
@@ -88,12 +88,12 @@ pub fn selfObject(self: Self) ActivationValue {
 }
 
 /// Return the executable that this activation was created from.
-pub fn creationExecutable(self: Self) Executable.Ref {
+pub fn creationExecutable(self: Self) bytecode.Executable.Ref {
     return self.created_from.executable;
 }
 
 /// Return the executable that this activation's method or block is defined in.
-pub fn definitionExecutable(self: Self) Executable.Ref {
+pub fn definitionExecutable(self: Self) bytecode.Executable.Ref {
     return self.activation_object.get().getDefinitionExecutable();
 }
 
@@ -198,6 +198,43 @@ pub const ActivationStack = struct {
 
         const start_of_slice = self.stack.items.ptr;
         return @divExact(@ptrToInt(activation) - @ptrToInt(start_of_slice), @sizeOf(Self));
+    }
+
+    pub fn pushEntrypointActivation(self: *ActivationStack, vm: *VirtualMachine, new_executable: bytecode.Executable.Ref) !void {
+        try self.pushEntrypointActivationInner(vm, .zero, new_executable, new_executable);
+    }
+
+    /// Pushes an entrypoint activation for this executable, with the creation
+    /// context pointing at another executable. This is used when executing
+    /// scripts by _RunScript, for example.
+    pub fn pushSubEntrypointActivation(
+        self: *ActivationStack,
+        vm: *VirtualMachine,
+        target_location: bytecode.RegisterLocation,
+        new_executable: bytecode.Executable.Ref,
+    ) !void {
+        std.debug.assert(self.getDepth() > 0);
+        try self.pushEntrypointActivationInner(vm, target_location, self.getCurrent().definitionExecutable(), new_executable);
+    }
+
+    fn pushEntrypointActivationInner(
+        self: *ActivationStack,
+        vm: *VirtualMachine,
+        target_location: bytecode.RegisterLocation,
+        current_executable: bytecode.Executable.Ref,
+        new_executable: bytecode.Executable.Ref,
+    ) !void {
+        var source_range = SourceRange.initNoRef(current_executable, .{ .start = 0, .end = 1 });
+
+        var token = try vm.heap.getAllocation(
+            Object.Method.requiredSizeForCreatingTopLevelContext() +
+                Object.Activation.requiredSizeForAllocation(0, 0),
+        );
+        defer token.deinit();
+
+        const toplevel_context_method = try Object.Method.createTopLevelContextForExecutable(vm, &token, new_executable, new_executable.value.getEntrypointBlock());
+        const activation_slot = try self.getNewActivationSlot(vm.allocator);
+        toplevel_context_method.activateMethod(vm, &token, vm.current_actor.id, vm.lobby(), &.{}, target_location, source_range, activation_slot);
     }
 };
 

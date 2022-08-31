@@ -5,13 +5,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Value = @import("../value.zig").Value;
-const register_location = @import("./register_location.zig");
-
-const RegisterLocation = register_location.RegisterLocation;
+const Value = @import("../../value.zig").Value;
+const RegisterLocation = @import("./register_location.zig").RegisterLocation;
 
 /// General purpose registers which can be allocated.
-general_purpose: [register_location.GeneralPurposeRegisterCount]Value = undefined,
+general_purpose: [RegisterLocation.GeneralPurposeRegisterCount]Value = undefined,
 /// The return register.
 ret: Value = undefined,
 

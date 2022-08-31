@@ -5,23 +5,22 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Block = @import("./Block.zig");
+const bytecode = @import("../../bytecode.zig");
 const Liveness = @import("./Liveness.zig");
-const AstCodeRegisterLocation = @import("../astcode/register_location.zig").RegisterLocation;
-const lowcode_register_location = @import("./register_location.zig");
-const LowCodeRegisterLocation = lowcode_register_location.RegisterLocation;
+
+const AstcodeRegisterLocation = bytecode.astcode.RegisterLocation;
+const LowcodeRegisterLocation = bytecode.lowcode.RegisterLocation;
 
 allocated_registers: AllocatedRegisterMap = .{},
-free_registers: RegisterBitSet = RegisterBitSet.initFull(),
+free_registers: LowcodeRegisterLocation.BitSet = LowcodeRegisterLocation.BitSet.initFull(),
 active_intervals: ActiveIntervalArray = .{},
-clobbered_registers: RegisterBitSet = RegisterBitSet.initEmpty(),
+clobbered_registers: LowcodeRegisterLocation.BitSet = LowcodeRegisterLocation.BitSet.initEmpty(),
 
 const RegisterPool = @This();
-pub const RegisterBitSet = std.StaticBitSet(lowcode_register_location.GeneralPurposeRegisterCount);
 const ActiveIntervalArray = std.ArrayListUnmanaged(ActiveInterval);
-const AllocatedRegisterMap = std.AutoArrayHashMapUnmanaged(AstCodeRegisterLocation, LowCodeRegisterLocation);
+const AllocatedRegisterMap = std.AutoArrayHashMapUnmanaged(AstcodeRegisterLocation, LowcodeRegisterLocation);
 pub const ActiveInterval = struct {
-    bound_register: LowCodeRegisterLocation,
+    bound_register: LowcodeRegisterLocation,
     interval: Liveness.Interval,
 };
 
@@ -37,14 +36,20 @@ pub fn deinit(self: *RegisterPool, allocator: Allocator) void {
     self.active_intervals.deinit(allocator);
 }
 
-pub fn getAllocatedRegisterFor(self: RegisterPool, ast_register: AstCodeRegisterLocation) LowCodeRegisterLocation {
+pub fn getAllocatedRegisterFor(self: RegisterPool, ast_register: AstcodeRegisterLocation) LowcodeRegisterLocation {
     if (ast_register == .Nil)
         return .zero;
 
     return self.allocated_registers.get(ast_register).?;
 }
 
-pub fn allocateRegister(self: *RegisterPool, allocator: Allocator, block: *Block, liveness: *Liveness, ast_register: AstCodeRegisterLocation) !LowCodeRegisterLocation {
+pub fn allocateRegister(
+    self: *RegisterPool,
+    allocator: Allocator,
+    block: *bytecode.LowcodeBlock,
+    liveness: *Liveness,
+    ast_register: bytecode.astcode.RegisterLocation,
+) !bytecode.lowcode.RegisterLocation {
     if (ast_register == .Nil)
         return .zero;
 
@@ -58,15 +63,19 @@ pub fn allocateRegister(self: *RegisterPool, allocator: Allocator, block: *Block
 
     self.clobbered_registers.set(free_register.?);
     // FIXME: Remove manual register number adjustment!
-    const register = LowCodeRegisterLocation.fromInt(@intCast(u32, free_register.? + 2));
+    const register = LowcodeRegisterLocation.fromInt(@intCast(u32, free_register.? + 2));
     try self.insertActiveInterval(allocator, register, interval);
     try self.allocated_registers.put(allocator, ast_register, register);
 
-    // std.debug.print("RegisterPool.allocateRegister: Allocated register: {s} for AST register: {}\n", .{ @tagName(register), ast_register });
     return register;
 }
 
-fn insertActiveInterval(self: *RegisterPool, allocator: Allocator, register: LowCodeRegisterLocation, interval: Liveness.Interval) !void {
+fn insertActiveInterval(
+    self: *RegisterPool,
+    allocator: Allocator,
+    register: bytecode.lowcode.RegisterLocation,
+    interval: Liveness.Interval,
+) !void {
     const active_interval = ActiveInterval{ .bound_register = register, .interval = interval };
 
     var did_insert = false;
@@ -82,7 +91,7 @@ fn insertActiveInterval(self: *RegisterPool, allocator: Allocator, register: Low
         try self.active_intervals.append(allocator, active_interval);
 }
 
-fn spillFurthestRegister(self: *RegisterPool, allocator: Allocator, block: *Block) !usize {
+fn spillFurthestRegister(self: *RegisterPool, allocator: Allocator, block: *bytecode.LowcodeBlock) !usize {
     _ = self;
     _ = allocator;
     _ = block;
@@ -100,8 +109,6 @@ pub fn expireOldIntervals(self: *RegisterPool, start: usize) void {
         const register_offset = int.bound_register.registerOffset();
         self.free_registers.set(register_offset);
     }
-
-    // std.debug.print("Removing {} intervals, free registers: {b}\n", .{ intervals_to_remove, self.free_registers.mask });
 
     // FIXME: This is O(n^2).
     while (intervals_to_remove > 0) : (intervals_to_remove -= 1) {

@@ -8,6 +8,19 @@ pub const RegisterLocation = enum(u32) {
     Nil,
     _,
 
+    pub fn isFinite() bool {
+        return false;
+    }
+
+    pub fn isNothing(self: RegisterLocation) bool {
+        return self == .Nil;
+    }
+
+    pub fn zeroLabel() []const u8 {
+        // "%0"
+        return "  ";
+    }
+
     pub fn fromIndex(index: u32) RegisterLocation {
         std.debug.assert(index > 0);
         return fromIndexAllowNil(index);

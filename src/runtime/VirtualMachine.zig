@@ -14,10 +14,10 @@ const Object = @import("./Object.zig");
 const Script = @import("../language/script.zig");
 const AstGen = @import("./AstGen.zig");
 const CodeGen = @import("./CodeGen.zig");
-const MapBuilder = @import("./object/map_builder.zig").MapBuilder;
 const ByteArray = @import("./ByteArray.zig");
+const MapBuilder = @import("./object/map_builder.zig").MapBuilder;
 const runtime_error = @import("./error.zig");
-const RegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
+const RegisterLocation = @import("./bytecode.zig").RegisterLocation;
 
 /// The allocator object that will be used throughout the virtual machine's
 /// lifetime.
@@ -284,12 +284,12 @@ fn blockMessageNameLength(argument_count: u8) usize {
 
 pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
     var entrypoint_ast_executable = try AstGen.generateExecutableFromScript(self.allocator, script);
-    defer entrypoint_ast_executable.destroy();
+    defer entrypoint_ast_executable.unref();
 
-    var entrypoint_executable = try CodeGen.lowerExecutable(self.allocator, entrypoint_ast_executable);
+    var entrypoint_executable = try CodeGen.lowerExecutable(self.allocator, entrypoint_ast_executable.value);
     defer entrypoint_executable.unref();
 
-    try entrypoint_executable.value.pushEntrypointActivation(self, &self.current_actor.activation_stack);
+    try self.current_actor.activation_stack.pushEntrypointActivation(self, entrypoint_executable);
 
     while (true) {
         // The location to which the actor's parent actor should have the result
