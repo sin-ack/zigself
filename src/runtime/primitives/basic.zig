@@ -7,8 +7,8 @@ const Allocator = std.mem.Allocator;
 
 const Heap = @import("../Heap.zig");
 const Script = @import("../../language/script.zig");
-const AstGen = @import("../AstGen.zig");
-const CodeGen = @import("../CodeGen.zig");
+const AstGen = @import("../bytecode/AstGen.zig");
+const CodeGen = @import("../bytecode/CodeGen.zig");
 const Completion = @import("../Completion.zig");
 const interpreter = @import("../interpreter.zig");
 const error_set_utils = @import("../../utility/error_set.zig");

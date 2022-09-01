@@ -5,8 +5,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const debug = @import("../debug.zig");
-const bytecode = @import("./bytecode.zig");
+const debug = @import("../../debug.zig");
+const bytecode = @import("../bytecode.zig");
 const Liveness = bytecode.astcode.Liveness;
 const RegisterPool = bytecode.lowcode.RegisterPool;
 
