@@ -6,7 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const bytecode = @import("../../bytecode.zig");
-const Liveness = @import("./Liveness.zig");
+const Liveness = @import("../astcode.zig").Liveness;
 
 const AstcodeRegisterLocation = bytecode.astcode.RegisterLocation;
 const LowcodeRegisterLocation = bytecode.lowcode.RegisterLocation;
@@ -46,7 +46,7 @@ pub fn getAllocatedRegisterFor(self: RegisterPool, ast_register: AstcodeRegister
 pub fn allocateRegister(
     self: *RegisterPool,
     allocator: Allocator,
-    block: *bytecode.LowcodeBlock,
+    block: *bytecode.lowcode.Block,
     liveness: *Liveness,
     ast_register: bytecode.astcode.RegisterLocation,
 ) !bytecode.lowcode.RegisterLocation {
@@ -91,7 +91,7 @@ fn insertActiveInterval(
         try self.active_intervals.append(allocator, active_interval);
 }
 
-fn spillFurthestRegister(self: *RegisterPool, allocator: Allocator, block: *bytecode.LowcodeBlock) !usize {
+fn spillFurthestRegister(self: *RegisterPool, allocator: Allocator, block: *bytecode.lowcode.Block) !usize {
     _ = self;
     _ = allocator;
     _ = block;

@@ -7,13 +7,13 @@ const Allocator = std.mem.Allocator;
 
 const debug = @import("../debug.zig");
 const bytecode = @import("./bytecode.zig");
-const Liveness = bytecode.lowcode.Liveness;
+const Liveness = bytecode.astcode.Liveness;
 const RegisterPool = bytecode.lowcode.RegisterPool;
 
 const LOW_EXECUTABLE_DUMP_DEBUG = debug.LOW_EXECUTABLE_DUMP_DEBUG;
 
-pub fn lowerExecutable(allocator: Allocator, ast_executable: *bytecode.AstcodeExecutable) !bytecode.LowcodeExecutable.Ref {
-    var low_executable = try bytecode.LowcodeExecutable.create(allocator, ast_executable.definition_script);
+pub fn lowerExecutable(allocator: Allocator, ast_executable: *bytecode.astcode.Executable) !bytecode.lowcode.Executable.Ref {
+    var low_executable = try bytecode.lowcode.Executable.create(allocator, ast_executable.definition_script);
     errdefer low_executable.unref();
 
     for (ast_executable.blocks.items) |block| {
@@ -26,7 +26,7 @@ pub fn lowerExecutable(allocator: Allocator, ast_executable: *bytecode.AstcodeEx
     return low_executable;
 }
 
-fn lowerBlock(allocator: Allocator, executable: *bytecode.LowcodeExecutable, ast_block: *bytecode.AstcodeBlock) !void {
+fn lowerBlock(allocator: Allocator, executable: *bytecode.lowcode.Executable, ast_block: *bytecode.astcode.Block) !void {
     var liveness = try Liveness.analyzeBlock(allocator, ast_block);
     defer liveness.deinit(allocator);
 
@@ -43,17 +43,17 @@ fn lowerBlock(allocator: Allocator, executable: *bytecode.LowcodeExecutable, ast
         register_pool.expireOldIntervals(i);
     }
 
-    low_block.instructions.items[push_registers_inst_offset] = bytecode.LowcodeInstruction.init(.zero, .{ .PushRegisters = register_pool.clobbered_registers });
+    low_block.instructions.items[push_registers_inst_offset] = bytecode.lowcode.Instruction.init(.zero, .{ .PushRegisters = register_pool.clobbered_registers });
 }
 
 fn lowerInstruction(
     allocator: Allocator,
-    block: *bytecode.LowcodeBlock,
+    block: *bytecode.lowcode.Block,
     liveness: *Liveness,
     register_pool: *RegisterPool,
-    inst: bytecode.AstcodeInstruction,
+    inst: bytecode.astcode.Instruction,
 ) !void {
-    const Instruction = bytecode.LowcodeInstruction;
+    const Instruction = bytecode.lowcode.Instruction;
 
     switch (inst.value) {
         .Send => |payload| {

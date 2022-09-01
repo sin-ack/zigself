@@ -8,12 +8,12 @@ const Allocator = std.mem.Allocator;
 const ast = @import("../language/ast.zig");
 const debug = @import("../debug.zig");
 const Script = @import("../language/script.zig");
-const bytecode = @import("./bytecode.zig");
+const astcode = @import("./bytecode/astcode.zig");
 
-const Block = bytecode.AstcodeBlock;
-const Executable = bytecode.AstcodeExecutable;
-const Instruction = bytecode.AstcodeInstruction;
-const RegisterLocation = bytecode.astcode.RegisterLocation;
+const Block = astcode.Block;
+const Executable = astcode.Executable;
+const Instruction = astcode.Instruction;
+const RegisterLocation = astcode.RegisterLocation;
 
 const AST_EXECUTABLE_DUMP_DEBUG = debug.AST_EXECUTABLE_DUMP_DEBUG;
 
