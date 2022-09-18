@@ -165,7 +165,7 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
 
     const stack_snapshot = context.vm.takeStackSnapshot();
     var activation_before_script = context.actor.activation_stack.getCurrent();
-    try context.actor.activation_stack.pushSubEntrypointActivation(context.vm, context.target_location, context.source_range.executable);
+    try context.actor.activation_stack.pushSubEntrypointActivation(context.vm, context.target_location, executable);
 
     const activation_before_script_ref = activation_before_script.takeRef(context.actor.activation_stack);
 
