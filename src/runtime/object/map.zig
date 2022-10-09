@@ -89,7 +89,7 @@ fn generateAsMap(comptime MapT: type, comptime SubMapT: type, comptime map_type_
                 @call(.{}, @field(self, must_be_map_func_name), .{});
             }
 
-            return @ptrCast(*SubMapT, self);
+            return @ptrCast(SubMapT.Ptr, self);
         }
     }.func;
 }
