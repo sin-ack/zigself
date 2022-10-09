@@ -56,13 +56,7 @@ pub fn RunScript(context: *PrimitiveContext) !ExecutionResult {
     defer script.unref();
 
     const did_parse_without_errors = script.value.parseScript() catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => |e| return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
-            context.source_range,
-            "An unexpected error was raised from script.parseScript: {s}",
-            .{@errorName(e)},
-        )),
+        error.OutOfMemory => return err,
     };
 
     script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
@@ -107,21 +101,6 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
 
     const did_parse_without_errors = script.value.parseScript() catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        else => |e| {
-            // TODO: Instead of printing this error like this, pass it to the failure block.
-            std.debug.print("An unexpected error was raised from script.parseScript: {s}\n", .{@errorName(e)});
-            if (try interpreter.sendMessage(
-                context.vm,
-                context.actor,
-                failure_block,
-                "value",
-                context.target_location,
-                context.source_range,
-            )) |completion| {
-                return ExecutionResult.completion(completion);
-            }
-            return ExecutionResult.activationChange();
-        },
     };
 
     script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
