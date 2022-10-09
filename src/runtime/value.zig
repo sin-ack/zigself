@@ -171,7 +171,7 @@ pub fn PointerValue(comptime T: type) type {
     return PointerValueAlignment(T, null);
 }
 
-pub fn PointerValueAlignment(comptime T: type, alignment: ?u29) type {
+pub fn PointerValueAlignment(comptime T: type, comptime alignment: ?u29) type {
     const PointerT = if (alignment) |a| *align(a) T else *T;
 
     return packed struct {
