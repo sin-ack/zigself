@@ -19,8 +19,6 @@ pub fn format(
     options: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
-    _ = fmt;
-
     try range.start.format(fmt, options, writer);
     try writer.writeByte('-');
 
