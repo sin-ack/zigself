@@ -72,7 +72,8 @@ fn init(self: *Self, allocator: Allocator, buffer: [:0]const u8) !void {
             .start = token.location.start,
         });
 
-        if (token.tag == .EOF) break;
+        if (token.tag == .EOF or token.tag == .Invalid)
+            break;
     }
 
     self.token_tags = self.tokens.items(.tag);
