@@ -55,11 +55,3 @@ pub fn FnPtr(comptime T: type) type {
     else
         *const T;
 }
-
-/// Take a pointer to a function in a compatible way.
-pub fn fnPtr(function: anytype) FnPtr(@TypeOf(function)) {
-    return if (builtin.zig_backend == .stage1)
-        function
-    else
-        &function;
-}
