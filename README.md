@@ -1,6 +1,6 @@
 ## zigSelf
 
-[![Discord](https://img.shields.io/discord/983578577029181440?logo=discord&logoColor=white&logoWidth=20&labelColor=7289DA&label=Discord&color=119334&style=plastic)](https://discord.gg/HJ62kw6yvn)
+[![Discord](https://img.shields.io/discord/983578577029181440?logo=discord&logoColor=white&logoWidth=20&labelColor=7289DA&label=Discord&color=119334&style=plastic)](https://discord.gg/HJ62kw6yvn) [![justforfunnoreally.dev badge](https://img.shields.io/badge/justforfunnoreally-dev-9ff)](https://justforfunnoreally.dev)
 
 An implementation of the Self programming language.
 
