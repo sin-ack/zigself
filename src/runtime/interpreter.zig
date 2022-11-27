@@ -7,6 +7,7 @@ const std = @import("std");
 const Slot = slot_import.Slot;
 const debug = @import("../debug.zig");
 const Actor = @import("./Actor.zig");
+const bless = @import("./object/bless.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./Object.zig");
 const bytecode = @import("./bytecode.zig");
@@ -400,18 +401,25 @@ pub fn sendMessage(
             const argument_count = method_object.getArgumentSlotCount();
             const argument_slice = actor.argument_stack.lastNItems(argument_count);
 
-            // FIXME: Figure out a way to avoid copying to an owned slice here.
+            var target_actor = actor_message.target_actor.getActor();
+
+            // FIXME: Figure out a way to avoid creating an owned slice here.
             //        This is required for the time being because we don't have
             //        a better first-in-last-out (which is how messages are
             //        processed) structure yet.
-            const copied_arguments_slice = try vm.allocator.dupe(Value, argument_slice);
-            errdefer vm.allocator.free(copied_arguments_slice);
+            const new_arguments_slice = try vm.allocator.alloc(Value, argument_slice.len);
+            errdefer vm.allocator.free(new_arguments_slice);
 
-            try actor_message.target_actor.getActor().putMessageInMailbox(
+            // Blessing each argument is required so that actors don't share memory.
+            for (argument_slice) |argument, i| {
+                new_arguments_slice[i] = try bless.bless(vm.heap, target_actor.id, argument);
+            }
+
+            try target_actor.putMessageInMailbox(
                 vm.allocator,
                 actor.actor_object.get(),
                 method_object,
-                copied_arguments_slice,
+                new_arguments_slice,
                 source_range,
             );
 
