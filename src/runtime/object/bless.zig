@@ -33,7 +33,7 @@ fn calculateRequiredMemoryForBlessing(allocator: Allocator, value: Value) Alloca
 
             return object;
         }
-        }.f) catch |err| return @errSetCast(Allocator.Error, err);
+    }.f) catch |err| return @errSetCast(Allocator.Error, err);
 
     return required_memory;
 }
@@ -56,10 +56,13 @@ fn copyObjectGraphForNewActor(token: *Heap.AllocationToken, actor_id: u31, value
             gop.value_ptr.* = new_object.getAddress();
             return new_object;
         }
-        }.f) catch |err| return @errSetCast(Allocator.Error, err);
+    }.f) catch |err| return @errSetCast(Allocator.Error, err);
 }
 
 pub fn bless(heap: *Heap, actor_id: u31, const_value: Value) !Value {
+    if (!const_value.isObjectReference())
+        return const_value;
+
     var value = const_value;
 
     // Pass 1: Figure out the required memory for blessing this object graph.
