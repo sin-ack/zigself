@@ -304,7 +304,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     // actor who spawned it, if it wasn't the genesis actor that spawned the
     // new actor.
     if (context.actor != genesis_actor) {
-        const new_actor_proxy = try Object.ActorProxy.create(&token, context.actor.id, new_actor.actor_object.get());
+        const new_actor_proxy = Object.ActorProxy.create(context.vm.getMapMap(), &token, context.actor.id, new_actor.actor_object.get());
         context.actor.writeRegister(context.target_location, new_actor_proxy.asValue());
         context.actor.yield_reason = .ActorSpawned;
         context.vm.switchToActor(genesis_actor);
@@ -461,7 +461,7 @@ pub fn ActorSender(context: *PrimitiveContext) !ExecutionResult {
     defer token.deinit();
 
     const actor_object = context.actor.message_sender.?.get();
-    const actor_proxy = try Object.ActorProxy.create(&token, context.actor.id, actor_object);
+    const actor_proxy = Object.ActorProxy.create(context.vm.getMapMap(), &token, context.actor.id, actor_object);
 
     return ExecutionResult.completion(Completion.initNormal(actor_proxy.asValue()));
 }

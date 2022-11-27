@@ -31,6 +31,12 @@ block_message_names: std.AutoArrayHashMapUnmanaged(u8, Heap.Tracked),
 
 // --- References to global objects ---
 
+/// The map-map is what all maps point to as their map. It is a map that
+/// points to itself, making it the "prototype" of maps and aiding GC by
+/// handling the "map pointer" case for maps. Some objects also use it in place
+/// of their maps where their map would otherwise contain no useful information.
+map_map: Heap.Tracked = undefined,
+
 /// The root of the current Self world.
 lobby_object: Heap.Tracked = undefined,
 
@@ -99,7 +105,7 @@ pub fn create(allocator: Allocator) !*Self {
     };
 
     var token = try heap.getAllocation(
-        // Map map (special case for first ever map allocation)
+        // Map map
         Object.Map.Slots.requiredSizeForAllocation(0) +
             // Global objects
             Object.Map.Slots.requiredSizeForAllocation(0) +
@@ -111,7 +117,10 @@ pub fn create(allocator: Allocator) !*Self {
     );
     defer token.deinit();
 
-    const empty_map = Object.Map.Slots.create(&token, 0);
+    // Before creating any objects, we first need to create the map-map.
+    try self.createMapMap(&token);
+
+    const empty_map = Object.Map.Slots.create(self.getMapMap(), &token, 0);
     empty_map.map.header.setGloballyReachable(true);
 
     self.lobby_object = try makeEmptyGloballyReachableObject(&token, empty_map);
@@ -135,6 +144,14 @@ pub fn create(allocator: Allocator) !*Self {
     try self.buildAddrInfoPrototype(&token);
 
     return self;
+}
+
+fn createMapMap(self: *Self, token: *Heap.AllocationToken) !void {
+    self.map_map = try token.heap.track(Object.Map.Slots.createMapMap(token));
+}
+
+pub fn getMapMap(self: Self) Value {
+    return self.map_map.getValue();
 }
 
 fn makeEmptyGloballyReachableObject(token: *Heap.AllocationToken, map: Object.Map.Slots.Ptr) !Heap.Tracked {
@@ -168,7 +185,7 @@ fn requiredSizeForAddrInfoPrototypeAllocation() usize {
 }
 
 fn buildAddrInfoPrototype(self: *Self, token: *Heap.AllocationToken) !void {
-    const map = Object.Map.Slots.create(token, addrinfo_slots.len);
+    const map = Object.Map.Slots.create(self.getMapMap(), token, addrinfo_slots.len);
     map.map.header.setGloballyReachable(true);
     var map_builder = map.getMapBuilder(token);
 

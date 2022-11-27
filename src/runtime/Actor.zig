@@ -152,7 +152,7 @@ pub fn create(vm: *VirtualMachine, token: *Heap.AllocationToken, actor_context: 
     //       first call to create); otherwise, we are always owned by the genesis actor.
     const owning_actor_id = if (vm.isInActorMode()) vm.genesis_actor.?.id else 0;
 
-    const actor_object = try Object.Actor.create(token, owning_actor_id, self, actor_context);
+    const actor_object = try Object.Actor.create(vm.getMapMap(), token, owning_actor_id, self, actor_context);
 
     self.init(actor_object);
     return self;

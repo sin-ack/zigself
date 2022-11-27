@@ -28,14 +28,14 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
     defer token.deinit();
 
     if (size == 0) {
-        const array_map = Object.Map.Array.create(&token, 0);
+        const array_map = Object.Map.Array.create(context.vm.getMapMap(), &token, 0);
         const array = Object.Array.createWithValues(&token, context.actor.id, array_map, &[_]Value{}, null);
         return ExecutionResult.completion(Completion.initNormal(array.asValue()));
     } else {
         const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
         const filler = arguments.getValue(1);
 
-        const new_array_map = Object.Map.Array.create(&token, @intCast(u64, size));
+        const new_array_map = Object.Map.Array.create(context.vm.getMapMap(), &token, @intCast(u64, size));
         const new_array = Object.Array.createWithValues(&token, context.actor.id, new_array_map, receiver.getValues(), filler);
         return ExecutionResult.completion(Completion.initNormal(new_array.asValue()));
     }

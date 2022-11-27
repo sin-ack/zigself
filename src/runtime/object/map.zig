@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -21,30 +21,6 @@ const PointerValue = value_import.PointerValue;
 const value_import = @import("../value.zig");
 const stage2_compat = @import("../../utility/stage2_compat.zig");
 const RefCountedValue = value_import.RefCountedValue;
-
-var static_map_map: ?Value = null;
-
-pub fn getMapMap(token: *Heap.AllocationToken) Value {
-    if (static_map_map) |m| return m;
-
-    var new_map = token.allocate(.Object, @sizeOf(SlotsMap));
-
-    // FIXME: Clean this up
-    var header = @ptrCast(*Object.Header, new_map);
-    header.object_information = 0b11;
-    header.setObjectType(.Map);
-    header.setGloballyReachable(true);
-    var map = @ptrCast(Map.Ptr, header);
-    map.setMapType(.Slots);
-    var slots_map = map.asSlotsMap();
-    slots_map.properties = 0;
-    slots_map.slot_count = 0;
-
-    var map_value = Value.fromObjectAddress(new_map);
-    header.map_pointer = map_value;
-    static_map_map = map_value;
-    return map_value;
-}
 
 const MapTypeShift = Object.ObjectTypeShift + Object.ObjectTypeBits;
 const MapTypeBits = 3;
@@ -157,11 +133,13 @@ pub const Map = extern struct {
     }
 
     pub fn clone(self: Map.Ptr, token: *Heap.AllocationToken) !Object.Map.Ptr {
+        const map_map = self.header.map_pointer;
+
         return switch (self.getMapType()) {
-            .Slots => @ptrCast(Map.Ptr, self.asSlotsMap().clone(token)),
-            .Method => @ptrCast(Map.Ptr, try self.asMethodMap().clone(token)),
-            .Block => @ptrCast(Map.Ptr, try self.asBlockMap().clone(token)),
-            .Array => @ptrCast(Map.Ptr, self.asArrayMap().clone(token)),
+            .Slots => @ptrCast(Map.Ptr, self.asSlotsMap().clone(map_map, token)),
+            .Method => @ptrCast(Map.Ptr, try self.asMethodMap().clone(map_map, token)),
+            .Block => @ptrCast(Map.Ptr, try self.asBlockMap().clone(map_map, token)),
+            .Array => @ptrCast(Map.Ptr, self.asArrayMap().clone(map_map, token)),
         };
     }
 
@@ -256,8 +234,7 @@ const SlotsMap = extern struct {
     /// Create a new slots map. Takes the amount of slots this object will have.
     ///
     /// IMPORTANT: All slots *must* be initialized right after creation.
-    pub fn create(token: *Heap.AllocationToken, slot_count: u32) SlotsMap.Ptr {
-        const map_map = getMapMap(token);
+    pub fn create(map_map: Value, token: *Heap.AllocationToken, slot_count: u32) SlotsMap.Ptr {
         const size = SlotsMap.requiredSizeForAllocation(slot_count);
 
         var memory_area = token.allocate(.Object, size);
@@ -273,13 +250,26 @@ const SlotsMap = extern struct {
         self.slot_count = slot_count;
     }
 
-    pub fn clone(self: SlotsMap.Ptr, token: *Heap.AllocationToken) SlotsMap.Ptr {
-        const new_map = create(token, self.slot_count);
+    pub fn clone(self: SlotsMap.Ptr, map_map: Value, token: *Heap.AllocationToken) SlotsMap.Ptr {
+        const new_map = create(map_map, token, self.slot_count);
 
         new_map.setAssignableSlotCount(self.getAssignableSlotCount());
         std.mem.copy(Slot, new_map.getSlots(), self.getSlots());
 
         return new_map;
+    }
+
+    /// Create the special map-map object.
+    pub fn createMapMap(token: *Heap.AllocationToken) Value {
+        // Fake it 'til you make it.
+        var imaginary_map_pointer = Value.fromObjectAddress(@as([*]u64, undefined));
+
+        var map_map = create(imaginary_map_pointer, token, 0);
+        // FIXME: This is kinda crude. Let's give ourselves a way to set this
+        //        after-the-fact without reaching into the header of the object.
+        map_map.map.header.map_pointer = map_map.asValue();
+
+        return map_map.asValue();
     }
 };
 
@@ -345,6 +335,7 @@ const MethodMap = extern struct {
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
+        map_map: Value,
         token: *Heap.AllocationToken,
         argument_slot_count: u8,
         total_slot_count: u32,
@@ -353,7 +344,6 @@ const MethodMap = extern struct {
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
     ) !MethodMap.Ptr {
-        const map_map = getMapMap(token);
         const size = MethodMap.requiredSizeForAllocation(total_slot_count);
 
         var memory_area = token.allocate(.Object, size);
@@ -407,14 +397,17 @@ const MethodMap = extern struct {
         return self.base_map.getArgumentSlotCount();
     }
 
-    pub fn clone(self: MethodMap.Ptr, token: *Heap.AllocationToken) !MethodMap.Ptr {
-        const new_map = try create(token,
-                               self.getArgumentSlotCount(),
-                               self.base_map.slots_map.slot_count,
-                               self.isInlineMethod(),
-                               self.method_name.asByteArray(),
-                               self.base_map.block.get(),
-                               self.base_map.definition_executable_ref.get());
+    pub fn clone(self: MethodMap.Ptr, map_map: Value, token: *Heap.AllocationToken) !MethodMap.Ptr {
+        const new_map = try create(
+            map_map,
+            token,
+            self.getArgumentSlotCount(),
+            self.base_map.slots_map.slot_count,
+            self.isInlineMethod(),
+            self.method_name.asByteArray(),
+            self.base_map.block.get(),
+            self.base_map.definition_executable_ref.get(),
+        );
 
         new_map.setAssignableSlotCount(self.getAssignableSlotCount());
         std.mem.copy(Slot, new_map.getSlots(), self.getSlots());
@@ -443,6 +436,7 @@ const BlockMap = extern struct {
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
+        map_map: Value,
         token: *Heap.AllocationToken,
         argument_slot_count: u8,
         total_slot_count: u32,
@@ -451,7 +445,6 @@ const BlockMap = extern struct {
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
     ) !BlockMap.Ptr {
-        const map_map = getMapMap(token);
         const size = BlockMap.requiredSizeForAllocation(total_slot_count);
 
         var memory_area = token.allocate(.Object, size);
@@ -485,14 +478,17 @@ const BlockMap = extern struct {
         return self.base_map.getArgumentSlotCount();
     }
 
-    pub fn clone(self: BlockMap.Ptr, token: *Heap.AllocationToken) !BlockMap.Ptr {
-        const new_map = try create(token,
-                               self.getArgumentSlotCount(),
-                               self.base_map.slots_map.slot_count,
-                               self.parent_activation,
-                               self.nonlocal_return_target_activation,
-                               self.base_map.block.get(),
-                               self.base_map.definition_executable_ref.get());
+    pub fn clone(self: BlockMap.Ptr, map_map: Value, token: *Heap.AllocationToken) !BlockMap.Ptr {
+        const new_map = try create(
+            map_map,
+            token,
+            self.getArgumentSlotCount(),
+            self.base_map.slots_map.slot_count,
+            self.parent_activation,
+            self.nonlocal_return_target_activation,
+            self.base_map.block.get(),
+            self.base_map.definition_executable_ref.get(),
+        );
 
         new_map.setAssignableSlotCount(self.getAssignableSlotCount());
         std.mem.copy(Slot, new_map.getSlots(), self.getSlots());
@@ -508,8 +504,7 @@ const ArrayMap = extern struct {
 
     pub const Ptr = stage2_compat.HeapPtr(ArrayMap, .Mutable);
 
-    pub fn create(token: *Heap.AllocationToken, size: usize) ArrayMap.Ptr {
-        const map_map = getMapMap(token);
+    pub fn create(map_map: Value, token: *Heap.AllocationToken, size: usize) ArrayMap.Ptr {
         const memory_size = requiredSizeForAllocation();
 
         var memory_area = token.allocate(.Object, memory_size);
@@ -541,7 +536,7 @@ const ArrayMap = extern struct {
         return @sizeOf(ArrayMap);
     }
 
-    pub fn clone(self: ArrayMap.Ptr, token: *Heap.AllocationToken) ArrayMap.Ptr {
-        return create(token, self.getSize());
+    pub fn clone(self: ArrayMap.Ptr, map_map: Value, token: *Heap.AllocationToken) ArrayMap.Ptr {
+        return create(map_map, token, self.getSize());
     }
 };

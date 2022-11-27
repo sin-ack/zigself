@@ -111,7 +111,7 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
         std.mem.set(u8, new_byte_array.getValues()[bytes_to_copy..], filler);
     }
 
-    const byte_array_object = try Object.ByteArray.create(&token, context.actor.id, new_byte_array);
+    const byte_array_object = Object.ByteArray.create(context.vm.getMapMap(), &token, context.actor.id, new_byte_array);
     return ExecutionResult.completion(Completion.initNormal(byte_array_object.asValue()));
 }
 
@@ -162,6 +162,6 @@ pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
     std.mem.copy(u8, new_byte_array.getValues()[0..receiver_size], receiver.getValues());
     std.mem.copy(u8, new_byte_array.getValues()[receiver_size..], argument.getValues());
 
-    const byte_array_object = try Object.ByteArray.create(&token, context.actor.id, new_byte_array);
+    const byte_array_object = Object.ByteArray.create(context.vm.getMapMap(), &token, context.actor.id, new_byte_array);
     return ExecutionResult.completion(Completion.initNormal(byte_array_object.asValue()));
 }

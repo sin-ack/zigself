@@ -124,7 +124,7 @@ pub fn execute(
             var token = try vm.heap.getAllocation(Object.ByteArray.requiredSizeForAllocation(payload.len));
             defer token.deinit();
 
-            const byte_array = try Object.ByteArray.createWithValues(&token, actor.id, payload);
+            const byte_array = Object.ByteArray.createWithValues(vm.getMapMap(), &token, actor.id, payload);
             vm.writeRegister(inst.target, byte_array.asValue());
             return success;
         },
@@ -544,7 +544,7 @@ fn createObject(
     );
     defer token.deinit();
 
-    var slots_map = Object.Map.Slots.create(&token, total_slot_count);
+    var slots_map = Object.Map.Slots.create(vm.getMapMap(), &token, total_slot_count);
     var map_builder = slots_map.getMapBuilder(&token);
 
     for (slots) |slot| {
@@ -590,6 +590,7 @@ fn createMethod(
 
     const block = executable.value.getBlock(block_index);
     var method_map = try Object.Map.Method.create(
+        vm.getMapMap(),
         &token,
         argument_slot_count,
         total_slot_count,
@@ -657,6 +658,7 @@ fn createBlock(
     defer token.deinit();
 
     var block_map = try Object.Map.Block.create(
+        vm.getMapMap(),
         &token,
         argument_slot_count,
         total_slot_count,

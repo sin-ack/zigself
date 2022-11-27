@@ -242,8 +242,11 @@ pub const Slots = extern struct {
             return self;
         }
 
+        // FIXME: This is a rather crude way of getting the map-map. Pull in the map-map
+        //        via an argument.
+        const map_map = self.header.map_pointer.asObject().asType(.Map).?.asSlotsMap().map.header.map_pointer;
         // Let's allocate a new map with the target slot count.
-        var new_map = Object.Map.Slots.create(token, @intCast(u32, merge_info.slots));
+        var new_map = Object.Map.Slots.create(map_map, token, @intCast(u32, merge_info.slots));
         var map_builder = new_map.getMapBuilder(token);
 
         const the_context = .{
@@ -424,7 +427,7 @@ pub const Method = extern struct {
     ) !Method.Ptr {
         const toplevel_context_method_map = blk: {
             const toplevel_context_name = ByteArray.createFromString(token, toplevel_context_string);
-            break :blk try Map.Method.create(token, 0, 0, false, toplevel_context_name, block, executable);
+            break :blk try Map.Method.create(vm.getMapMap(), token, 0, 0, false, toplevel_context_name, block, executable);
         };
         return create(token, vm.current_actor.id, toplevel_context_method_map, &.{});
     }

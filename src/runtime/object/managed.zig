@@ -64,22 +64,6 @@ pub const FileDescriptor = struct {
     }
 };
 
-// FIXME: This isn't thread safe!
-var singleton_managed_map: ?Heap.Tracked = null;
-
-fn getOrCreateManagedMap(token: *Heap.AllocationToken) !Value {
-    if (singleton_managed_map) |map| return map.getValue();
-
-    const map = Object.Map.Slots.create(token, 0);
-    map.map.header.setGloballyReachable(true);
-    singleton_managed_map = try token.heap.track(map.asValue());
-    return map.asValue();
-}
-
-fn requiredSizeForManagedMap() usize {
-    return if (singleton_managed_map != null) 0 else Object.Map.Slots.requiredSizeForAllocation(0);
-}
-
 /// An object containing a managed value, and its type. When this object is
 /// finalized, it will perform the associated finalization step.
 pub const ManagedObject = extern struct {
@@ -88,12 +72,10 @@ pub const ManagedObject = extern struct {
 
     pub const Ptr = stage2_compat.HeapPtr(ManagedObject, .Mutable);
 
-    pub fn create(token: *Heap.AllocationToken, actor_id: u31, managed_type: ManagedType, value: Value) !ManagedObject.Ptr {
-        const managed_map = try getOrCreateManagedMap(token);
-
+    pub fn create(map_map: Value, token: *Heap.AllocationToken, actor_id: u31, managed_type: ManagedType, value: Value) !ManagedObject.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
         const self = @ptrCast(ManagedObject.Ptr, memory_area);
-        self.init(actor_id, managed_map, managed_type, value);
+        self.init(actor_id, map_map, managed_type, value);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
@@ -139,11 +121,10 @@ pub const ManagedObject = extern struct {
 
     pub fn getSizeInMemory(self: ManagedObject.Ptr) usize {
         _ = self;
-        // NOTE: Managed map will have been created at this point.
         return requiredSizeForAllocation();
     }
 
     pub fn requiredSizeForAllocation() usize {
-        return requiredSizeForManagedMap() + @sizeOf(ManagedObject);
+        return @sizeOf(ManagedObject);
     }
 };

@@ -56,7 +56,7 @@ pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
 
         var token = try context.vm.heap.getAllocation(Object.Managed.requiredSizeForAllocation());
         defer token.deinit();
-        const managed_fd = try Object.Managed.create(&token, context.actor.id, .FileDescriptor, fd.toValue());
+        const managed_fd = try Object.Managed.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, fd.toValue());
         return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
     }
 
@@ -392,7 +392,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     // Refresh pointers
     addrinfo_prototype = context.vm.addrinfo_prototype.getValue().asObject().asType(.Slots).?;
 
-    const result_array_map = Object.Map.Array.create(&token, result_count);
+    const result_array_map = Object.Map.Array.create(context.vm.getMapMap(), &token, result_count);
     const result_array = Object.Array.createWithValues(&token, context.actor.id, result_array_map, &.{}, context.vm.nil());
 
     const result_values = result_array.getValues();
@@ -404,7 +404,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
             i += 1;
         }) {
             const sockaddr_memory = @ptrCast([*]u8, result.addr.?);
-            const sockaddr_bytes_object = try Object.ByteArray.createWithValues(&token, context.actor.id, sockaddr_memory[0..result.addrlen]);
+            const sockaddr_bytes_object = Object.ByteArray.createWithValues(context.vm.getMapMap(), &token, context.actor.id, sockaddr_memory[0..result.addrlen]);
 
             const addrinfo_copy: *Object.Slots = addrinfo_prototype.clone(&token, context.actor.id);
             const addrinfo_value = addrinfo_copy.asValue();
@@ -448,7 +448,7 @@ pub fn SocketWithFamily_Type_Protocol_IfFail(context: *PrimitiveContext) !Execut
 
         var token = try context.vm.heap.getAllocation(Object.Managed.requiredSizeForAllocation());
         defer token.deinit();
-        const managed_fd = try Object.Managed.create(&token, context.actor.id, .FileDescriptor, fd.toValue());
+        const managed_fd = try Object.Managed.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, fd.toValue());
         return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
     }
 
@@ -546,7 +546,7 @@ pub fn AcceptFromFD_IfFail(context: *PrimitiveContext) !ExecutionResult {
 
             var token = try context.vm.heap.getAllocation(Object.Managed.requiredSizeForAllocation());
             defer token.deinit();
-            const managed_new_fd = try Object.Managed.create(&token, context.actor.id, .FileDescriptor, new_fd.toValue());
+            const managed_new_fd = try Object.Managed.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, new_fd.toValue());
             return ExecutionResult.completion(Completion.initNormal(managed_new_fd.asValue()));
         },
         .AGAIN => blk: {

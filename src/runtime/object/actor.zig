@@ -17,22 +17,6 @@ const stage2_compat = @import("../../utility/stage2_compat.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const RegisterLocation = @import("../bytecode.zig").RegisterLocation;
 
-// FIXME: This isn't thread safe!
-var singleton_actor_map: ?Heap.Tracked = null;
-
-fn getOrCreateActorMap(token: *Heap.AllocationToken) !Value {
-    if (singleton_actor_map) |map| return map.getValue();
-
-    const map = Object.Map.Slots.create(token, 0);
-    map.map.header.setGloballyReachable(true);
-    singleton_actor_map = try token.heap.track(map.asValue());
-    return map.asValue();
-}
-
-fn requiredSizeForActorMap() usize {
-    return if (singleton_actor_map != null) 0 else Object.Map.Slots.requiredSizeForAllocation(0);
-}
-
 /// An actor object which is the object that the genesis actor interacts with in
 /// Self code.
 pub const ActorObject = extern struct {
@@ -45,12 +29,10 @@ pub const ActorObject = extern struct {
 
     pub const Ptr = stage2_compat.HeapPtr(ActorObject, .Mutable);
 
-    pub fn create(token: *Heap.AllocationToken, genesis_actor_id: u31, actor: *Actor, context: Value) !ActorObject.Ptr {
-        const actor_map = try getOrCreateActorMap(token);
-
+    pub fn create(map_map: Value, token: *Heap.AllocationToken, genesis_actor_id: u31, actor: *Actor, context: Value) !ActorObject.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
         const self = @ptrCast(ActorObject.Ptr, memory_area);
-        self.init(genesis_actor_id, actor_map, actor, context);
+        self.init(genesis_actor_id, map_map, actor, context);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
@@ -76,7 +58,6 @@ pub const ActorObject = extern struct {
 
     pub fn getSizeInMemory(self: ActorObject.Ptr) usize {
         _ = self;
-        // NOTE: Actor map will have been created at this point.
         return requiredSizeForAllocation();
     }
 
@@ -84,7 +65,7 @@ pub const ActorObject = extern struct {
     /// that if spawning this actor, the activation's cost should be accounted
     /// for.
     pub fn requiredSizeForAllocation() usize {
-        return requiredSizeForActorMap() + @sizeOf(ActorObject);
+        return @sizeOf(ActorObject);
     }
 
     pub fn finalize(self: ActorObject.Ptr, allocator: Allocator) void {
@@ -103,12 +84,10 @@ pub const ActorProxyObject = extern struct {
     pub const Ptr = stage2_compat.HeapPtr(ActorProxyObject, .Mutable);
 
     /// Create the Actor object without sending a message to it.
-    pub fn create(token: *Heap.AllocationToken, current_actor_id: u31, actor_object: ActorObject.Ptr) !ActorProxyObject.Ptr {
-        const actor_map = try getOrCreateActorMap(token);
-
+    pub fn create(map_map: Value, token: *Heap.AllocationToken, current_actor_id: u31, actor_object: ActorObject.Ptr) ActorProxyObject.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
         const self = @ptrCast(ActorProxyObject.Ptr, memory_area);
-        self.init(current_actor_id, actor_map, actor_object);
+        self.init(current_actor_id, map_map, actor_object);
         return self;
     }
 
@@ -130,12 +109,12 @@ pub const ActorProxyObject = extern struct {
     }
 
     pub fn clone(self: ActorProxyObject.Ptr, token: *Heap.AllocationToken, actor_id: u31) ActorProxyObject.Ptr {
-        return create(token, actor_id, self.getActorObject()) catch unreachable;
+        const map_map = self.header.map_pointer;
+        return create(map_map, token, actor_id, self.getActorObject());
     }
 
     pub fn getSizeInMemory(self: ActorProxyObject.Ptr) usize {
         _ = self;
-        // NOTE: Actor map will have been created at this point.
         return requiredSizeForAllocation();
     }
 
