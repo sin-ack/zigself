@@ -156,13 +156,10 @@ pub fn humanReadableNameFor(comptime object_type: ObjectType) []const u8 {
     };
 }
 
-/// Return this object as the given object type, or return null if it cannot
-/// be returned.
+/// Return this object as the given object type, or return null if the object is
+/// not of the requested type.
 pub inline fn asType(self: Self, comptime object_type: ObjectType) ?ObjectT(object_type).Ptr {
-    if (builtin.mode == .Debug) {
-        if (self.header.getObjectType() != object_type) return null;
-    }
-
+    if (self.header.getObjectType() != object_type) return null;
     return @ptrCast(ObjectT(object_type).Ptr, self.header);
 }
 
