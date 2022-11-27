@@ -112,7 +112,7 @@ fn AssignableSlotsMixin(comptime ObjectT: type) type {
 /// object begins with a header followed by Values for each of the
 /// assignable slots.
 pub const Slots = extern struct {
-    header: Object.Header,
+    header: Object.Header align(@alignOf(u64)),
 
     pub usingnamespace SlotsLikeObjectBase(Slots);
     pub usingnamespace AssignableSlotsMixin(Slots);
@@ -381,7 +381,7 @@ pub const Slots = extern struct {
 /// A method object. A method object is a slots object with a method map as its
 /// parent.
 pub const Method = extern struct {
-    slots: Slots,
+    slots: Slots align(@alignOf(u64)),
 
     pub usingnamespace SlotsLikeObjectBase(Method);
     pub usingnamespace AssignableSlotsMixin(Method);
@@ -481,7 +481,7 @@ pub const Method = extern struct {
 /// A block object. A block object is a slots object with a block map as its
 /// parent.
 pub const Block = extern struct {
-    slots: Slots,
+    slots: Slots align(@alignOf(u64)),
 
     pub usingnamespace SlotsLikeObjectBase(Block);
     pub usingnamespace AssignableSlotsMixin(Block);
@@ -584,8 +584,8 @@ pub const Block = extern struct {
 /// An activation object, which is just a slots object but with an extra
 /// "receiver" value that is the actual value on which a message was activated.
 pub const Activation = extern struct {
-    slots: Slots,
-    receiver: Value,
+    slots: Slots align(@alignOf(u64)),
+    receiver: Value align(@alignOf(u64)),
 
     pub usingnamespace SlotsLikeObjectBase(Activation);
 

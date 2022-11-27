@@ -10,7 +10,7 @@ const Object = @import("../Object.zig");
 const stage2_compat = @import("../../utility/stage2_compat.zig");
 
 pub const ArrayObject = extern struct {
-    header: Object.Header,
+    header: Object.Header align(@alignOf(u64)),
 
     pub const Ptr = stage2_compat.HeapPtr(ArrayObject, .Mutable);
 

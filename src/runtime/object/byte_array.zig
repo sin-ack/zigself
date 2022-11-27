@@ -11,8 +11,8 @@ const ByteArray = @import("../ByteArray.zig");
 const stage2_compat = @import("../../utility/stage2_compat.zig");
 
 pub const ByteArrayObject = extern struct {
-    header: Object.Header,
-    byte_array: Value,
+    header: Object.Header align(@alignOf(u64)),
+    byte_array: Value align(@alignOf(u64)),
 
     pub const Ptr = stage2_compat.HeapPtr(ByteArrayObject, .Mutable);
 

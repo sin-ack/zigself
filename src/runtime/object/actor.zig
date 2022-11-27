@@ -20,12 +20,12 @@ const RegisterLocation = @import("../bytecode.zig").RegisterLocation;
 /// An actor object which is the object that the genesis actor interacts with in
 /// Self code.
 pub const ActorObject = extern struct {
-    header: Object.Header,
+    header: Object.Header align(@alignOf(u64)),
     /// The VM Actor that is owned by this actor object.
-    actor: PointerValue(Actor),
+    actor: PointerValue(Actor) align(@alignOf(u64)),
     /// The actor context, which is the object the actor spawn activation
     /// returns.
-    context: Value,
+    context: Value align(@alignOf(u64)),
 
     pub const Ptr = stage2_compat.HeapPtr(ActorObject, .Mutable);
 
@@ -77,9 +77,9 @@ pub const ActorObject = extern struct {
 
 /// An actor proxy which relays message to the mailbox of an actor.
 pub const ActorProxyObject = extern struct {
-    header: Object.Header,
+    header: Object.Header align(@alignOf(u64)),
     /// The Actor object to proxy messages to.
-    actor_object: ActorValue,
+    actor_object: ActorValue align(@alignOf(u64)),
 
     pub const Ptr = stage2_compat.HeapPtr(ActorProxyObject, .Mutable);
 

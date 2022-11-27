@@ -67,8 +67,8 @@ pub const FileDescriptor = struct {
 /// An object containing a managed value, and its type. When this object is
 /// finalized, it will perform the associated finalization step.
 pub const ManagedObject = extern struct {
-    header: Object.Header,
-    value: Value,
+    header: Object.Header align(@alignOf(u64)),
+    value: Value align(@alignOf(u64)),
 
     pub const Ptr = stage2_compat.HeapPtr(ManagedObject, .Mutable);
 

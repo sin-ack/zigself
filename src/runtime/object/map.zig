@@ -71,7 +71,7 @@ fn generateAsMap(comptime MapT: type, comptime SubMapT: type, comptime map_type_
 }
 
 pub const Map = extern struct {
-    header: Object.Header,
+    header: Object.Header align(@alignOf(u64)),
 
     pub const Slots = SlotsMap;
     pub const Method = MethodMap;
@@ -218,15 +218,15 @@ fn SlotsLikeMapBase(comptime MapT: type) type {
 //       definition, but comes *after* the slot count in the actual bit
 //       definitions.
 const SlotsMap = extern struct {
-    map: Map,
+    map: Map align(@alignOf(u64)),
     /// Slots map properties.
     /// The first byte is the amount of assignable slots the map has.
     /// The other bytes are currently reserved for future use.
     /// The last two bits are zero.
-    properties: u32,
+    properties: u32 align(1),
     /// The amount of slots. The slots begin after the end of this
     /// field.
-    slot_count: u32,
+    slot_count: u32 align(1),
 
     pub usingnamespace SlotsLikeMapBase(SlotsMap);
     pub const ObjectType = Object.Slots;
@@ -275,11 +275,11 @@ const SlotsMap = extern struct {
 
 /// Common code and fields shared between methods and blocks.
 const SlotsAndBytecodeMap = extern struct {
-    slots_map: SlotsMap,
+    slots_map: SlotsMap align(@alignOf(u64)),
     /// The address of the bytecode block. Owned by definition_executable_ref.
-    block: PointerValue(bytecode.Block),
+    block: PointerValue(bytecode.Block) align(@alignOf(u64)),
     /// The executable which this map was created from.
-    definition_executable_ref: RefCountedValue(bytecode.Executable),
+    definition_executable_ref: RefCountedValue(bytecode.Executable) align(@alignOf(u64)),
 
     pub const Ptr = stage2_compat.HeapPtr(SlotsAndBytecodeMap, .Mutable);
 
@@ -325,9 +325,9 @@ const SlotsAndBytecodeMap = extern struct {
 /// be executed. Finally, some debug info is stored which is then displayed in
 /// stack traces.
 const MethodMap = extern struct {
-    base_map: SlotsAndBytecodeMap,
+    base_map: SlotsAndBytecodeMap align(@alignOf(u64)),
     /// What the method is called.
-    method_name: Value,
+    method_name: Value align(@alignOf(u64)),
 
     pub usingnamespace SlotsLikeMapBase(MethodMap);
     pub const ObjectType = Object.Method;
@@ -421,14 +421,14 @@ const MethodMap = extern struct {
 /// executed while the method in which it is created is still on the activation
 /// stack.
 const BlockMap = extern struct {
-    base_map: SlotsAndBytecodeMap,
+    base_map: SlotsAndBytecodeMap align(@alignOf(u64)),
     /// A weak reference to the parent activation of this block. The block must
     /// not be activated if this activation has left the stack.
-    parent_activation: Activation.ActivationRef,
+    parent_activation: Activation.ActivationRef align(@alignOf(u64)),
     /// A weak reference to the non-local return target activation of this
     /// block. If a non-local return happens inside this block, then it will
     /// target this activation.
-    nonlocal_return_target_activation: Activation.ActivationRef,
+    nonlocal_return_target_activation: Activation.ActivationRef align(@alignOf(u64)),
 
     pub usingnamespace SlotsLikeMapBase(BlockMap);
     pub const ObjectType = Object.Block;
@@ -499,8 +499,8 @@ const BlockMap = extern struct {
 
 /// A map for an array object.
 const ArrayMap = extern struct {
-    map: Map,
-    size: IntegerValue(.Unsigned),
+    map: Map align(@alignOf(u64)),
+    size: IntegerValue(.Unsigned) align(@alignOf(u64)),
 
     pub const Ptr = stage2_compat.HeapPtr(ArrayMap, .Mutable);
 
