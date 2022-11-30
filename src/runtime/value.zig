@@ -10,6 +10,7 @@ const hash = @import("../utility/hash.zig");
 const Heap = @import("./Heap.zig");
 const debug = @import("../debug.zig");
 const Object = @import("./Object.zig");
+const Range = @import("../language/Range.zig");
 const RefPtr = @import("../utility/ref_counted.zig").RefPtr;
 const ByteArray = @import("./ByteArray.zig");
 const Completion = @import("./Completion.zig");
@@ -223,17 +224,24 @@ pub fn RefCountedValue(comptime T: type) type {
 pub const IntegerValueSignedness = enum { Signed, Unsigned };
 /// A value which is known to be an integer.
 pub fn IntegerValue(comptime signedness: IntegerValueSignedness) type {
-    const IntegerT = switch (signedness) {
-        .Signed => i64,
-        .Unsigned => u64,
+    // FIXME: Instead of using a magic value, obtain from Value
+    return IntegerValueAdvanced(if (signedness == .Signed) i62 else u62);
+}
+
+pub fn IntegerValueAdvanced(comptime IntegerT: type) type {
+    const integer_type_info = @typeInfo(IntegerT).Int;
+    // FIXME: Instead of using a magic value, obtain from Value
+    if (integer_type_info.bits > 62) {
+        @compileError("bits > 62 isn't supported by IntegerValueAdvanced");
+    }
+
+    const init_function = switch (integer_type_info.signedness) {
+        .signed => Value.fromInteger,
+        .unsigned => Value.fromUnsignedInteger,
     };
-    const init_function = switch (signedness) {
-        .Signed => Value.fromInteger,
-        .Unsigned => Value.fromUnsignedInteger,
-    };
-    const conversion_function = switch (signedness) {
-        .Signed => Value.asInteger,
-        .Unsigned => Value.asUnsignedInteger,
+    const conversion_function = switch (integer_type_info.signedness) {
+        .signed => Value.asInteger,
+        .unsigned => Value.asUnsignedInteger,
     };
 
     return packed struct {
@@ -252,7 +260,7 @@ pub fn IntegerValue(comptime signedness: IntegerValueSignedness) type {
                 }
             }
 
-            return conversion_function(self.value);
+            return @intCast(IntegerT, conversion_function(self.value));
         }
     };
 }
@@ -260,30 +268,172 @@ pub fn IntegerValue(comptime signedness: IntegerValueSignedness) type {
 /// A value which is of a known object type. Attempting to get the value as an
 /// object when something else is stored is a runtime panic in debug, and
 /// undefined behavior in release mode.
-pub fn ObjectValue(comptime ObjectT: type, comptime is_fn: []const u8) type {
+pub fn ObjectValue(comptime ObjectT: type, comptime is_fn: []const u8, comptime nullable: bool) type {
     return packed struct {
         value: Value,
 
         const Self = @This();
+        const NullValue = Value.fromUnsignedInteger(0);
 
-        pub fn init(ptr: ObjectT.Ptr) Self {
-            return .{ .value = ptr.asValue() };
-        }
-
-        pub fn get(self: Self) ObjectT.Ptr {
-            if (builtin.mode == .Debug) {
-                if (!(self.value.isObjectReference() and @call(.{}, @field(self.value.asObject(), is_fn), .{}))) {
-                    @panic("!!! " ++ is_fn ++ " check failed on object!");
-                }
+        pub usingnamespace if (!nullable) struct {
+            pub fn init(ptr: ObjectT.Ptr) Self {
+                return .{ .value = ptr.asValue() };
             }
 
-            return @ptrCast(ObjectT.Ptr, self.value.asObjectAddress());
+            pub fn get(self: Self) ObjectT.Ptr {
+                if (builtin.mode == .Debug) {
+                    if (!(self.value.isObjectReference() and @call(.{}, @field(self.value.asObject(), is_fn), .{}))) {
+                        @panic("!!! " ++ is_fn ++ " check failed on object!");
+                    }
+                }
+
+                return @ptrCast(ObjectT.Ptr, self.value.asObjectAddress());
+            }
+        } else struct {
+            pub fn init(ptr: ?ObjectT.Ptr) Self {
+                return .{ .value = if (ptr) |p| p.asValue() else NullValue };
+            }
+
+            pub fn get(self: Self) ?ObjectT.Ptr {
+                if (builtin.mode == .Debug) {
+                    if (self.value != NullValue and !(self.value.isObjectReference() and @call(.{}, @field(self.value.asObject(), is_fn), .{}))) {
+                        @panic("!!! " ++ is_fn ++ " check failed on object!");
+                    }
+                }
+
+                if (self.value == NullValue)
+                    return @as(?ObjectT.Ptr, null);
+                return @ptrCast(?ObjectT.Ptr, self.value.asObjectAddress());
+            }
+        };
+    };
+}
+
+pub const ActorValue = ObjectValue(Object.Actor, "isActorObject", false);
+pub const MethodValue = ObjectValue(Object.Method, "isMethodObject", false);
+pub const ManagedValue = ObjectValue(Object.Managed, "isManagedObject", false);
+pub const ByteArrayValue = ObjectValue(Object.ByteArray, "isByteArrayObject", false);
+pub const ActivationValue = ObjectValue(Object.Activation, "isActivationObject", false);
+
+pub const OptionalActorValue = ObjectValue(Object.Actor, "isActorObject", true);
+pub const OptionalManagedValue = ObjectValue(Object.Managed, "isManagedObject", true);
+pub const OptionalByteArrayValue = ObjectValue(Object.ByteArray, "isByteArrayObject", true);
+
+/// Type to store an enum as a heap value.
+pub fn EnumValue(comptime EnumT: type) type {
+    const enum_type_info = @typeInfo(EnumT);
+    const backing_type_info = @typeInfo(enum_type_info.Enum.tag_type).Int;
+
+    // FIXME: Instead of using a magic value, obtain from Value
+    if (backing_type_info.bits > 62) {
+        @compileError("Backing types larger than 62 bits aren't supported by EnumValue");
+    }
+
+    return packed struct {
+        inner: InnerType,
+
+        const Self = @This();
+        const InnerType = IntegerValueAdvanced(enum_type_info.Enum.tag_type);
+
+        pub fn init(value: EnumT) Self {
+            return .{ .inner = InnerType.init(@enumToInt(value)) };
+        }
+
+        pub fn get(self: Self) EnumT {
+            return @intToEnum(EnumT, self.inner.get());
         }
     };
 }
 
-pub const ActorValue = ObjectValue(Object.Actor, "isActorObject");
-pub const MethodValue = ObjectValue(Object.Method, "isMethodObject");
-pub const ManagedValue = ObjectValue(Object.Managed, "isManagedObject");
-pub const ByteArrayValue = ObjectValue(Object.ByteArray, "isByteArrayObject");
-pub const ActivationValue = ObjectValue(Object.Activation, "isActivationObject");
+// FIXME: This is very inefficient.
+/// Type to store a bool as a heap value.
+pub const BoolValue = packed struct {
+    inner: InnerType,
+
+    const Self = @This();
+    const InnerType = IntegerValueAdvanced(u1);
+
+    pub fn init(value: bool) Self {
+        return .{ .inner = InnerType.init(@boolToInt(value)) };
+    }
+
+    pub fn get(self: Self) bool {
+        return self.inner.get() != 0;
+    }
+};
+
+/// Type to store a Range as a heap value.
+pub const RangeValue = packed struct {
+    start: InnerType,
+    end: InnerType,
+
+    const Self = @This();
+    const InnerType = IntegerValue(.Unsigned);
+
+    pub fn init(range: Range) Self {
+        return .{ .start = InnerType.init(@intCast(u62, range.start)), .end = InnerType.init(@intCast(u62, range.end)) };
+    }
+
+    pub fn get(self: Self) Range {
+        return .{ .start = @intCast(usize, self.start.get()), .end = @intCast(usize, self.end.get()) };
+    }
+};
+
+/// Type to store any ArrayList type as a heap value. The ArrayList's alignment
+/// must be 4 or greater.
+pub fn ArrayListValue(comptime ArrayListT: type) type {
+    const array_list_fields = @typeInfo(ArrayListT).Struct.fields;
+    const items_field = items_field: {
+        inline for (array_list_fields) |field| {
+            if (std.mem.eql(u8, field.name, "items"))
+                break :items_field field;
+        }
+    };
+    const is_unmanaged = is_unmanaged: {
+        inline for (array_list_fields) |field| {
+            if (std.mem.eql(u8, field.name, "allocator"))
+                break :is_unmanaged false;
+        }
+
+        break :is_unmanaged true;
+    };
+
+    const items_alignment = @typeInfo(items_field.field_type).Pointer.alignment;
+    if (items_alignment < 4) {
+        @compileError("Passed ArrayList's alignment must be 4 or greater");
+    }
+
+    if (!is_unmanaged) {
+        @compileError("Only unmanaged ArrayLists are supported with ArrayListValue");
+    }
+
+    const ChildT = @typeInfo(items_field.field_type).Pointer.child;
+    const SliceT = []align(items_alignment) ChildT;
+    const PointerT = [*]align(items_alignment) ChildT;
+
+    return extern struct {
+        // NOTE: This is safe because we guarantee that the bottom two bits are
+        //       always clear with the items alignment check above.
+        items_ptr: u64 align(@alignOf(u64)),
+        items_len: IntegerValue(.Unsigned) align(@alignOf(u64)),
+        capacity: IntegerValue(.Unsigned) align(@alignOf(u64)),
+
+        pub const Self = @This();
+
+        pub fn init(array_list: ArrayListT) Self {
+            return .{
+                .items_ptr = @intCast(u64, @ptrToInt(array_list.items.ptr)),
+                .items_len = IntegerValue(.Unsigned).init(array_list.items.len),
+                .capacity = IntegerValue(.Unsigned).init(array_list.capacity),
+            };
+        }
+
+        pub fn getItems(self: Self) SliceT {
+            return @intToPtr(PointerT, self.items_ptr)[0..self.items_len.get()];
+        }
+
+        pub fn get(self: Self) ArrayListT {
+            return .{ .items = self.getItems(), .capacity = @intCast(usize, self.capacity.get()) };
+        }
+    };
+}

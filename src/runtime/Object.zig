@@ -178,9 +178,9 @@ fn mustBeSlotsObject(self: Self) void {
     }
 }
 
-pub fn asSlotsObject(self: Self) *Slots {
+pub fn asSlotsObject(self: Self) Slots.Ptr {
     if (builtin.mode == .Debug) self.mustBeSlotsObject();
-    return @ptrCast(*Slots, self.header);
+    return @ptrCast(Slots.Ptr, self.header);
 }
 
 // Activation objects
@@ -195,9 +195,9 @@ fn mustBeActivationObject(self: Self) void {
     }
 }
 
-pub fn asActivationObject(self: Self) *Activation {
+pub fn asActivationObject(self: Self) Activation.Ptr {
     if (builtin.mode == .Debug) self.mustBeActivationObject();
-    return @ptrCast(*Activation, self.header);
+    return @ptrCast(Activation.Ptr, self.header);
 }
 
 // Method objects
@@ -212,9 +212,9 @@ fn mustBeMethodObject(self: Self) void {
     }
 }
 
-pub fn asMethodObject(self: Self) *Method {
+pub fn asMethodObject(self: Self) Method.Ptr {
     if (builtin.mode == .Debug) self.mustBeMethodObject();
-    return @ptrCast(*Method, self.header);
+    return @ptrCast(Method.Ptr, self.header);
 }
 
 // Block objects
@@ -229,9 +229,9 @@ fn mustBeBlockObject(self: Self) void {
     }
 }
 
-pub fn asBlockObject(self: Self) *Block {
+pub fn asBlockObject(self: Self) Block.Ptr {
     if (builtin.mode == .Debug) self.mustBeBlockObject();
-    return @ptrCast(*Block, self.header);
+    return @ptrCast(Block.Ptr, self.header);
 }
 
 // Byte array objects
@@ -246,9 +246,9 @@ fn mustBeByteArrayObject(self: Self) void {
     }
 }
 
-pub fn asByteArrayObject(self: Self) *ByteArray {
+pub fn asByteArrayObject(self: Self) ByteArray.Ptr {
     if (builtin.mode == .Debug) self.mustBeByteArrayObject();
-    return @ptrCast(*ByteArray, self.header);
+    return @ptrCast(ByteArray.Ptr, self.header);
 }
 
 // Array objects
@@ -263,9 +263,9 @@ fn mustBeArrayObject(self: Self) void {
     }
 }
 
-pub fn asArrayObject(self: Self) *Array {
+pub fn asArrayObject(self: Self) Array.Ptr {
     if (builtin.mode == .Debug) self.mustBeArrayObject();
-    return @ptrCast(*Array, self.header);
+    return @ptrCast(Array.Ptr, self.header);
 }
 
 // Managed values
@@ -280,9 +280,9 @@ fn mustBeManaged(self: Self) void {
     }
 }
 
-pub fn asManaged(self: Self) *Managed {
+pub fn asManaged(self: Self) Managed.Ptr {
     if (builtin.mode == .Debug) self.mustBeManaged();
-    return @ptrCast(*Managed, self.header);
+    return @ptrCast(Managed.Ptr, self.header);
 }
 
 // Map objects
@@ -297,9 +297,9 @@ fn mustBeMap(self: Self) void {
     }
 }
 
-pub fn asMap(self: Self) *Map {
+pub fn asMap(self: Self) Map.Ptr {
     if (builtin.mode == .Debug) self.mustBeMap();
-    return @ptrCast(*Map, self.header);
+    return @ptrCast(Map.Ptr, self.header);
 }
 
 // Actor objects
@@ -314,9 +314,9 @@ fn mustBeActorObject(self: Self) void {
     }
 }
 
-pub fn asActorObject(self: Self) *Actor {
+pub fn asActorObject(self: Self) Actor.Ptr {
     if (builtin.mode == .Debug) self.mustBeActorObject();
-    return @ptrCast(*Actor, self.header);
+    return @ptrCast(Actor.Ptr, self.header);
 }
 
 // Actor proxy objects
@@ -331,9 +331,9 @@ fn mustBeActorProxyObject(self: Self) void {
     }
 }
 
-pub fn asActorProxyObject(self: Self) *ActorProxy {
+pub fn asActorProxyObject(self: Self) ActorProxy.Ptr {
     if (builtin.mode == .Debug) self.mustBeActorProxyObject();
-    return @ptrCast(*ActorProxy, self.header);
+    return @ptrCast(ActorProxy.Ptr, self.header);
 }
 
 // Forwarding references

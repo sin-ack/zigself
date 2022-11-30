@@ -42,7 +42,7 @@ blocked_fd: ?ManagedValue = null,
 /// this actor. When an activation is exited, execution flow returns to the
 /// previous activation on the stack. If a non-local return happens, however,
 /// the control flow instead returns to the non-local return target.
-activation_stack: ActivationStack = .{},
+activation_stack: ActivationStack,
 
 /// The actor object that sent the current message. Can be queried inside
 /// messages with _ActorSender. It is an error to query it outside of messages.

@@ -13,6 +13,7 @@ const Object = @import("./Object.zig");
 const bytecode = @import("./bytecode.zig");
 const SourceRange = @import("./SourceRange.zig");
 const IntegerValue = value.IntegerValue;
+const ArrayListValue = value.ArrayListValue;
 const VirtualMachine = @import("./VirtualMachine.zig");
 const ActivationValue = value.ActivationValue;
 
@@ -123,25 +124,32 @@ pub fn format(
     });
 }
 
-pub const ActivationStack = struct {
-    stack: std.ArrayListUnmanaged(Self) = .{},
+/// A stack of activations. Can be stored on the heap.
+pub const ActivationStack = extern struct {
+    stack: StackType,
+
+    const StackType = ArrayListValue(std.ArrayListAlignedUnmanaged(Self, @alignOf(u64)));
+
+    pub fn init() ActivationStack {
+        return .{ .stack = StackType.init(.{}) };
+    }
 
     pub fn deinit(self: *ActivationStack, allocator: Allocator) void {
-        self.stack.deinit(allocator);
+        self.stack.get().deinit(allocator);
     }
 
     pub fn getStack(self: ActivationStack) []Self {
-        return self.stack.items;
+        return self.stack.getItems();
     }
 
     pub fn getDepth(self: ActivationStack) usize {
-        return self.stack.items.len;
+        return self.stack.getItems().len;
     }
 
     pub fn getCurrent(self: ActivationStack) *Self {
         const depth = self.getDepth();
         std.debug.assert(depth > 0);
-        return &self.stack.items[depth - 1];
+        return &self.stack.getItems()[depth - 1];
     }
 
     /// Unwinds the stack until the given activation is reached.
@@ -153,41 +161,48 @@ pub const ActivationStack = struct {
         const current_activation = self.getCurrent();
         std.debug.assert(@ptrToInt(current_activation) >= @ptrToInt(activation));
 
+        const stack = self.stack.get();
+
         const distance = @divExact(@ptrToInt(current_activation) - @ptrToInt(activation), @sizeOf(Self));
         var current_depth = self.getDepth();
         const target_depth = current_depth - distance;
         while (current_depth != target_depth) : (current_depth -= 1) {
-            self.stack.items[current_depth - 1].deinit();
+            stack.items[current_depth - 1].deinit();
         }
 
-        self.stack.shrinkRetainingCapacity(target_depth);
+        stack.shrinkRetainingCapacity(target_depth);
     }
 
     pub fn getNewActivationSlot(self: *ActivationStack, allocator: Allocator) !*Self {
-        try self.stack.ensureUnusedCapacity(allocator, 1);
-        self.stack.items.len += 1;
-        const activation = &self.stack.items[self.getDepth() - 1];
+        const stack = self.stack.get();
+
+        try stack.ensureUnusedCapacity(allocator, 1);
+
+        stack.items.len += 1;
+        const activation = &stack.items[self.getDepth() - 1];
         return activation;
     }
 
     pub fn popActivation(self: *ActivationStack) *Self {
         const new_depth = self.getDepth() - 1;
 
+        const stack = self.stack.get();
         // NOTE: We intentionally return the activation that's out of the
         //       bounds of the stack. This value is used very briefly.
-        const activation = &self.stack.items[new_depth];
-        self.stack.shrinkRetainingCapacity(new_depth);
+        const activation = &stack.items[new_depth];
+        stack.shrinkRetainingCapacity(new_depth);
 
         return activation;
     }
 
     pub fn clear(self: *ActivationStack) void {
-        self.stack.clearRetainingCapacity();
+        self.stack.get().clearRetainingCapacity();
     }
 
     fn isActivationWithin(self: ActivationStack, activation: *Self) bool {
-        const start_of_slice = self.stack.items.ptr;
-        const end_of_slice = start_of_slice + self.stack.items.len;
+        const items = self.stack.getItems();
+        const start_of_slice = items.ptr;
+        const end_of_slice = start_of_slice + items.len;
 
         return @ptrToInt(activation) >= @ptrToInt(start_of_slice) and
             @ptrToInt(activation) < @ptrToInt(end_of_slice);
@@ -196,7 +211,7 @@ pub const ActivationStack = struct {
     pub fn offsetOf(self: ActivationStack, activation: *Self) usize {
         std.debug.assert(self.isActivationWithin(activation));
 
-        const start_of_slice = self.stack.items.ptr;
+        const start_of_slice = self.stack.getItems().ptr;
         return @divExact(@ptrToInt(activation) - @ptrToInt(start_of_slice), @sizeOf(Self));
     }
 
