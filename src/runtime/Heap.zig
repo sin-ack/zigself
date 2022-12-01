@@ -304,7 +304,7 @@ const RememberedSet = std.AutoArrayHashMapUnmanaged([*]u64, usize);
 /// anymore. See `Space.finalization_set` for more information.
 const FinalizationSet = std.AutoArrayHashMapUnmanaged([*]u64, void);
 /// A set of objects which are tracked across garbage collection events.
-const TrackedSet = std.AutoArrayHashMapUnmanaged(*[*]u64, void);
+const TrackedSet = std.ArrayListUnmanaged(*[*]u64);
 const Space = struct {
     /// A reference back to the heap.
     heap: *Self,
@@ -529,7 +529,7 @@ const Space = struct {
         }.f);
 
         // Go through the tracked set, copying referenced objects
-        for (self.tracked_set.keys()) |handle| {
+        for (self.tracked_set.items) |handle| {
             const address = handle.*;
             handle.* = (try self.copyAddress(allocator, address, target_space, true)).?;
             try target_space.addToTrackedSet(allocator, handle);
@@ -838,12 +838,7 @@ const Space = struct {
 
     /// Adds the given tracked value into the tracked set of this space.
     pub fn addToTrackedSet(self: *Space, allocator: Allocator, handle: *[*]u64) !void {
-        try self.tracked_set.put(allocator, handle, {});
-    }
-
-    /// Returns whether the tracked set contains the given tracked value.
-    pub fn trackedSetContains(self: *Space, handle: *[*]u64) !void {
-        return self.tracked_set.contains(handle);
+        try self.tracked_set.append(allocator, handle);
     }
 
     pub const RemoveFromTrackedSetError = error{AddressNotInTrackedSet};
@@ -851,9 +846,18 @@ const Space = struct {
     /// Returns AddressNotInTrackedSet if the handle was not in the tracked
     /// set.
     pub fn removeFromTrackedSet(self: *Space, handle: *[*]u64) !void {
-        if (!self.tracked_set.swapRemove(handle)) {
-            return RemoveFromTrackedSetError.AddressNotInTrackedSet;
+        // NOTE: The idea here is that most handles are created and then
+        //       destroyed soon after, so we walk the tracked set in reverse
+        //       order and remove it directly.
+        var i: usize = self.tracked_set.items.len;
+        while (i > 0) : (i -= 1) {
+            if (handle == self.tracked_set.items[i - 1]) {
+                _ = self.tracked_set.orderedRemove(i - 1);
+                return;
+            }
         }
+
+        return RemoveFromTrackedSetError.AddressNotInTrackedSet;
     }
 
     /// Adds the given address into the remembered set of this space.
@@ -926,33 +930,38 @@ const Space = struct {
                 word.* = new_address_as_reference;
         }
 
-        var tracked_handles_to_remove = TrackedSet{};
-        defer tracked_handles_to_remove.deinit(allocator);
+        var current_space_tracked_set = TrackedSet{};
 
         // Go through tracked set, and replace the address contained in any
         // handle with the new address.
-        for (self.tracked_set.keys()) |handle| {
+        for (self.tracked_set.items) |handle| {
+            var moved_into_new_space = false;
+
+            // If the new address' space is not this space, then we need to
+            // remove this address from our tracked set and add it to the other
+            // space's tracked set, so that it can be properly untracked.
+            //
+            // Otherwise, since this space already contains both the old and new
+            // address, we'll always be correctly untracking, so we can simply
+            // update the address.
             if (handle.* == old_address) {
-                // If the new address' space is not this space, then we need to
-                // remove this address from our tracked set and add it to the
-                // other space's tracked set, so that it can be properly
-                // untracked.
-                //
-                // Otherwise, since this space already contains both the
-                // old and new address, we'll always be correctly untracking,
-                // so we can simply update the address.
                 if (new_address_space) |new_space| {
-                    try tracked_handles_to_remove.put(allocator, handle, {});
                     try new_space.addToTrackedSet(allocator, handle);
+                    moved_into_new_space = true;
                 }
 
                 handle.* = new_address;
             }
+
+            if (!moved_into_new_space) {
+                try current_space_tracked_set.append(allocator, handle);
+            }
         }
 
-        for (tracked_handles_to_remove.keys()) |handle| {
-            self.removeFromTrackedSet(handle) catch unreachable;
-        }
+        // FIXME: Instead of deinitializing, rewrite the array contents instead
+        //        to avoid excess allocations.
+        self.tracked_set.deinit(allocator);
+        self.tracked_set = current_space_tracked_set;
 
         // If the new object is in the current space and should be finalized,
         // then put it in the finalization set.
