@@ -296,6 +296,12 @@ pub fn printTrackLocationCounts(self: *Self) void {
     }
 }
 
+/// Return whether a garbage collection cycle would need to happen in order to
+/// provide the required amount of bytes from the heap.
+pub fn needsToGarbageCollectToProvide(self: Self, bytes: usize) bool {
+    return self.eden.freeMemory() < bytes;
+}
+
 /// A mapping from an address to its size. This area of memory is checked for
 /// any object references in the current space which are then copied during a
 /// scavenge.
@@ -418,7 +424,7 @@ const Space = struct {
     }
 
     /// Return the amount of free memory in this space in bytes.
-    pub fn freeMemory(self: *Space) usize {
+    pub fn freeMemory(self: Space) usize {
         const available_words = self.memory.len - self.object_segment.len - self.byte_array_segment.len;
         return available_words * @sizeOf(u64);
     }

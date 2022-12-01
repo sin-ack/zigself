@@ -4,6 +4,7 @@
 
 const std = @import("std");
 
+const Heap = @import("./Heap.zig");
 const Slot = slot_import.Slot;
 const debug = @import("../debug.zig");
 const Actor = @import("./Actor.zig");
@@ -438,24 +439,30 @@ fn executeBlock(
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
-    const tracked_block = try vm.heap.track(block_receiver.asValue());
+    const message_name = try vm.getOrCreateBlockMessageName(@intCast(u8, arguments.len));
     var block = block_receiver;
 
-    const message_name = try vm.getOrCreateBlockMessageName(@intCast(u8, arguments.len));
-    var token = token: {
-        defer tracked_block.untrack(vm.heap);
+    var required_memory = Object.Activation.requiredSizeForAllocation(
+        block.getArgumentSlotCount(),
+        block.getAssignableSlotCount(),
+    );
+    if (!message_name.exists) required_memory += message_name.requiredSize();
 
-        var required_memory = Object.Activation.requiredSizeForAllocation(
-            block.getArgumentSlotCount(),
-            block.getAssignableSlotCount(),
-        );
-        if (!message_name.exists) required_memory += message_name.requiredSize();
+    var token = token: {
+        var tracked_block: ?Heap.Tracked = null;
+        defer if (tracked_block) |t| t.untrack(vm.heap);
+
+        if (vm.heap.needsToGarbageCollectToProvide(required_memory)) {
+            tracked_block = try vm.heap.track(block.asValue());
+        }
 
         // Ensure that we won't GC by creating an activation.
         var token = try vm.heap.getAllocation(required_memory);
 
-        // Refresh the pointer to the block.
-        block = tracked_block.getValue().asObject().asBlockObject();
+        if (tracked_block) |t| {
+            // Refresh the pointer to the block.
+            block = t.getValue().asObject().asBlockObject();
+        }
 
         break :token token;
     };
@@ -484,26 +491,36 @@ fn executeMethod(
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
-    const tracked_receiver = try vm.heap.track(const_receiver);
-    const tracked_method = try vm.heap.track(method_object.asValue());
     var receiver_of_method = const_receiver;
     var method = method_object;
 
+    const required_memory = Object.Activation.requiredSizeForAllocation(
+        method.getArgumentSlotCount(),
+        method.getAssignableSlotCount(),
+    );
+
     var token = token: {
-        defer tracked_receiver.untrack(vm.heap);
-        defer tracked_method.untrack(vm.heap);
+        var tracked_receiver: ?Heap.Tracked = null;
+        var tracked_method: ?Heap.Tracked = null;
+
+        defer if (tracked_receiver) |t| {
+            t.untrack(vm.heap);
+            tracked_method.?.untrack(vm.heap);
+        };
+
+        if (vm.heap.needsToGarbageCollectToProvide(required_memory)) {
+            tracked_receiver = try vm.heap.track(receiver_of_method);
+            tracked_method = try vm.heap.track(method.asValue());
+        }
 
         // Get the allocation token for the method
-        var token = try vm.heap.getAllocation(
-            Object.Activation.requiredSizeForAllocation(
-                method.getArgumentSlotCount(),
-                method.getAssignableSlotCount(),
-            ),
-        );
+        var token = try vm.heap.getAllocation(required_memory);
 
-        // Refresh the pointers to the method and its receiver.
-        receiver_of_method = tracked_receiver.getValue();
-        method = tracked_method.getValue().asObject().asMethodObject();
+        if (tracked_receiver) |t| {
+            // Refresh the pointers to the method and its receiver.
+            receiver_of_method = t.getValue();
+            method = tracked_method.?.getValue().asObject().asMethodObject();
+        }
 
         break :token token;
     };
