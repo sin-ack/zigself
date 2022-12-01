@@ -85,6 +85,12 @@ std traits _AddSlots: (|
             self
         ).
 
+        copyFrom: start To: end = (| new |
+            new: copyRemoveAll.
+            start to: end Do: [| :i | new add: at: i ].
+            new
+        ).
+
         private = (|
             prototype = (|
                 receiver* <- nil.
