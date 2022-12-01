@@ -69,6 +69,14 @@ std traits _AddSlots: (|
             s, ']'.
         ).
 
+        sort = (sortKey: [| :v | v]).
+        "Naive quicksort implementation."
+        sortKey: keyBlock = (| pivot |
+            size < 2 ifTrue: [ ^ self ].
+            private quickSortFrom: 0 Until: size KeyBlock: keyBlock.
+            self
+        ).
+
         private = (|
             prototype = (|
                 receiver* <- nil.
@@ -91,6 +99,34 @@ std traits _AddSlots: (|
                     ].
                     size: size prec.
                     at: size PutWithoutBoundsCheck: nil.
+                ).
+
+                quickSortFrom: start Until: end KeyBlock: keyBlock = (| pivot. pivotKey. pivotIndex. |
+                    (start >= end) || [start < 0] ifTrue: [ ^ nil ].
+
+                    pivot: at: end prec.
+                    pivotKey: keyBlock value: pivot.
+
+                    pivotIndex: start prec.
+
+                    start to: end prec Do: [| :i |
+                        (keyBlock value: at: i) <= pivotKey ifTrue: [
+                            pivotIndex: pivotIndex succ.
+                            swap: pivotIndex With: i.
+                        ]
+                    ].
+
+                    pivotIndex: pivotIndex succ.
+                    swap: pivotIndex With: end prec.
+
+                    quickSortFrom: start Until: pivotIndex KeyBlock: keyBlock.
+                    quickSortFrom: pivotIndex succ Until: end KeyBlock: keyBlock.
+                ).
+
+                swap: a With: b = (| temp |
+                    temp: at: a.
+                    at: a Put: at: b.
+                    at: b Put: temp.
                 ).
             |).
         | prototype clone; receiver: self).
