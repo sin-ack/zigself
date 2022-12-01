@@ -77,6 +77,14 @@ std traits _AddSlots: (|
             self
         ).
 
+        reverse = (| p |
+            p: private.
+            firstKey to: (lastKey - firstKey) / 2 Do: [| :k |
+                p swap: k With: lastKey - k.
+            ].
+            self
+        ).
+
         private = (|
             prototype = (|
                 receiver* <- nil.
