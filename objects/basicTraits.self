@@ -19,4 +19,7 @@ std traits _AddSlots: (|
 |).
 
 "Nil objects are singletons."
-nil _AddSlots: (| parent* = std traits singleton |).
+nil _AddSlots: (|
+    parent* = std traits singleton.
+    asString = 'nil'.
+|).
