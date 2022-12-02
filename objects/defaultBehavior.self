@@ -39,7 +39,7 @@ _AddSlots: (|
         !== v = (== v; not).
         "Return whether the two objects are equal. The objects do not have to
          be identical to be equal."
-        = v = (self == v).
+        = v = (== v).
         != v = (= v; not).
 
         "Convenient failure block for when you want the error to be fatal."
