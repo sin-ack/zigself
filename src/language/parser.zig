@@ -149,7 +149,7 @@ fn parseStatementList(self: *Self, allow_nonlocal_return: bool) ParseError!AST.S
         }
     }
 
-    return AST.StatementList.create(self.allocator, statements.toOwnedSlice());
+    return AST.StatementList.create(self.allocator, try statements.toOwnedSlice());
 }
 
 const NonlocalReturnState = enum { Disallowed, Allowed, WrappingThisExpr, Parsed };
@@ -399,8 +399,8 @@ fn parseKeywordMessage(self: *Self, receiver: ?AST.ExpressionNode) ParseError!?A
 
     message_node.* = .{
         .receiver = receiver,
-        .message_name = message_name.toOwnedSlice(),
-        .arguments = arguments.toOwnedSlice(),
+        .message_name = try message_name.toOwnedSlice(),
+        .arguments = try arguments.toOwnedSlice(),
         .range = .{ .start = if (receiver) |r| r.range().start else start_of_message, .end = end_of_last_argument },
     };
 
@@ -544,7 +544,7 @@ fn parseObject(self: *Self, did_use_slots: ?*bool, argument_slots: ?[]const AST.
     statements.ref();
     var object_node = try self.allocator.create(AST.ObjectNode);
     object_node.* = .{
-        .slots = slots.toOwnedSlice(),
+        .slots = try slots.toOwnedSlice(),
         .statements = statements,
         .range = .{ .start = start_of_object, .end = end_of_object },
     };
@@ -655,7 +655,7 @@ fn parseSlotList(self: *Self, comptime slot_list_type: SlotListType, initial_ord
         }
     }.lessThan);
 
-    return slots.toOwnedSlice();
+    return try slots.toOwnedSlice();
 }
 
 fn canParseSlot(self: *Self) bool {
@@ -908,7 +908,7 @@ fn parseSlotName(self: *Self, arguments: *std.ArrayList(AST.SlotNode), method_mo
             order += 1;
         }
 
-        return slot_name.toOwnedSlice();
+        return try slot_name.toOwnedSlice();
     }
 
     if (!self.token_tags[self.token_index].isOperator()) {
@@ -971,7 +971,7 @@ fn parseString(self: *Self) ParseError!?AST.StringNode {
             .Literal => switch (c) {
                 '\'' => {
                     return AST.StringNode{
-                        .value = string_buffer.toOwnedSlice(),
+                        .value = try string_buffer.toOwnedSlice(),
                         .range = .{ .start = start_of_string, .end = offset + 1 },
                     };
                 },
