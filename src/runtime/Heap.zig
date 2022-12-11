@@ -114,7 +114,7 @@ fn init(self: *Self, allocator: Allocator, vm: *VirtualMachine) !void {
     var eden = try Space.init(self, allocator, "eden", EdenSize);
     errdefer eden.deinit(allocator);
 
-    var handle_area = try HandleArea.create(allocator);
+    var handle_area = try HandleArea.create();
     errdefer handle_area.destroy();
 
     self.* = .{
