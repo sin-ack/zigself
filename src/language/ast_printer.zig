@@ -197,7 +197,7 @@ pub fn dumpMessage(self: *Self, message: AST.MessageNode) void {
     const message_type: []const u8 = blk: {
         if (message.arguments.len == 0) {
             break :blk GREEN ++ "unary" ++ CLEAR;
-        } else if (message.arguments.len == 1 and !std.ascii.isAlpha(message.message_name[0]) and message.message_name[0] != '_') {
+        } else if (message.arguments.len == 1 and !std.ascii.isAlphabetic(message.message_name[0]) and message.message_name[0] != '_') {
             break :blk MAGENTA ++ "binary" ++ CLEAR;
         } else {
             break :blk ORANGE ++ "keyword" ++ CLEAR;
