@@ -18,9 +18,9 @@ jobs:
           submodules: true
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v1.3.0
+        uses: goto-bus-stop/setup-zig@v2.0.1
         with:
-          version: master
+          version: 0.11.0-dev.715+cffbb32d3
 
       - name: Run zigSelf tests
         run: zig build test
