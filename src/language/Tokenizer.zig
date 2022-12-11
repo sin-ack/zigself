@@ -294,13 +294,13 @@ pub fn next(self: *Self) Token {
                 },
                 'x' => {
                     self.offset += 1;
-                    if (!std.ascii.isXDigit(self.buffer[self.offset])) {
+                    if (!std.ascii.isHex(self.buffer[self.offset])) {
                         token.tag = .Invalid;
                         break;
                     }
 
                     self.offset += 1;
-                    if (!std.ascii.isXDigit(self.buffer[self.offset])) {
+                    if (!std.ascii.isHex(self.buffer[self.offset])) {
                         token.tag = .Invalid;
                         break;
                     }
