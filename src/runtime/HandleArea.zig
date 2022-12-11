@@ -13,12 +13,14 @@
 //! Each chunk maintains how many handles have been allocated from it. When a
 //! chunk has no handles allocated on it and is not the last chunk, it is moved
 //! to a pool of unused chunks (which is bounded by MaximumUnusedChunks).
+//!
+//! NOTE: The handle area does not use the Zig Allocator interface to allocate its
+//!       chunks, because it doesn't allow allocating with an alignment greater than
+//!       the platform's page size.
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
+const aligned_allocator = @import("../utility/aligned_allocator.zig");
 
-/// The allocator that is internally used to allocate the chunks.
-backing_allocator: Allocator,
 first_chunk: *Chunk,
 latest_chunk: *Chunk,
 /// The chunks which are currently unused. They are maintained as a singly
@@ -52,8 +54,8 @@ const Chunk = extern struct {
     /// of the chunk allocation area).
     high_water_mark: u64 = 0,
 
-    pub fn create(allocator: Allocator) !*Chunk {
-        const memory_area = try allocator.alignedAlloc(u8, ChunkSize, ChunkSize);
+    pub fn create() !*Chunk {
+        const memory_area = try aligned_allocator.allocate(ChunkSize, ChunkSize);
         const self = @ptrCast(*Chunk, memory_area);
         self.* = .{};
 
@@ -72,11 +74,11 @@ const Chunk = extern struct {
         return self;
     }
 
-    pub fn destroy(self: *Chunk, allocator: Allocator) void {
+    pub fn destroy(self: *Chunk) void {
         // NOTE: Have to restore my original size so that the allocator doesn't
         //       complain.
         const memory_area = @ptrCast([*]u8, self);
-        allocator.free(memory_area[0..ChunkSize]);
+        aligned_allocator.destroy(memory_area[0..ChunkSize]);
     }
 
     pub fn insertAfterMe(self: *Chunk, new_chunk: *Chunk) void {
@@ -161,11 +163,10 @@ const Chunk = extern struct {
     }
 };
 
-pub fn create(backing_allocator: Allocator) !Self {
-    const initial_chunk = try Chunk.create(backing_allocator);
+pub fn create() !Self {
+    const initial_chunk = try Chunk.create();
 
     return Self{
-        .backing_allocator = backing_allocator,
         .first_chunk = initial_chunk,
         .latest_chunk = initial_chunk,
     };
@@ -175,14 +176,14 @@ pub fn destroy(self: *Self) void {
     var chunk_it: ?*Chunk = self.first_chunk;
     while (chunk_it) |chunk| {
         var next_chunk = chunk.next;
-        chunk.destroy(self.backing_allocator);
+        chunk.destroy();
         chunk_it = next_chunk;
     }
 
     chunk_it = self.unused_chunks;
     while (chunk_it) |chunk| {
         var next_chunk = chunk.next;
-        chunk.destroy(self.backing_allocator);
+        chunk.destroy();
         chunk_it = next_chunk;
     }
 }
@@ -219,7 +220,7 @@ fn allocateNewChunk(self: *Self) !void {
     var new_chunk = if (self.hasUnusedChunks())
         self.getFirstUnusedChunk()
     else
-        try Chunk.create(self.backing_allocator);
+        try Chunk.create();
 
     self.latest_chunk.insertAfterMe(new_chunk);
     self.latest_chunk = new_chunk;
@@ -245,7 +246,7 @@ fn moveChunkIntoUnusedPool(self: *Self, chunk: *Chunk) void {
         self.unused_chunks = chunk;
         self.unused_chunk_count += 1;
     } else {
-        chunk.destroy(self.backing_allocator);
+        chunk.destroy();
     }
 }
 
