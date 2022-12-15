@@ -129,13 +129,19 @@ pub const Object = extern struct {
         return @ptrCast(ObjectT(object_type).Ptr, self);
     }
 
-    /// Return the object as the given type, panicking if it's not the correct type.
+    /// Return the object as the given type, panicking in safe release modes if
+    /// it's not the correct type. In release modes without runtime safety,
+    /// asking for an object of different type is undefined behavior.
     pub fn mustBeType(self: Ptr, comptime object_type: ObjectType) ObjectT(object_type).Ptr {
-        if (self.asType(object_type)) |ptr| {
-            return ptr;
+        if (std.debug.runtime_safety) {
+            if (self.asType(object_type)) |ptr| {
+                return ptr;
+            }
+
+            std.debug.panic("!!! mustBeType tried to cast a {*} of type '{s}' to type '{s}'!", .{ self, @tagName(self.object_information.object_type), @tagName(object_type) });
         }
 
-        std.debug.panic("!!! mustBeType tried to cast a {*} of type '{s}' to type '{s}'!", .{ self, @tagName(self.object_information.object_type), @tagName(object_type) });
+        return @ptrCast(ObjectT(object_type).Ptr, self);
     }
 
     /// Return the address of this object.

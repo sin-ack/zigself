@@ -94,13 +94,19 @@ pub const Map = extern struct {
         return @ptrCast(MapT(map_type).Ptr, self);
     }
 
-    /// Return the map as the given type, panicking if it's not the correct type.
+    /// Return the map as the given type, panicking in safe release modes if
+    /// it's not the correct type. In release modes without runtime safety,
+    /// asking for a map of different type is undefined behavior.
     pub fn mustBeType(self: Ptr, comptime map_type: MapType) MapT(map_type).Ptr {
-        if (self.asType(map_type)) |ptr| {
-            return ptr;
+        if (std.debug.runtime_safety) {
+            if (self.asType(map_type)) |ptr| {
+                return ptr;
+            }
+
+            std.debug.panic("!!! mustBeType tried to cast a {*} of type '{s}' to type '{s}'!", .{ self, @tagName(self.map_information.map_type), @tagName(map_type) });
         }
 
-        std.debug.panic("!!! mustBeType tried to cast a {*} of type '{s}' to type '{s}'!", .{ self, @tagName(self.map_information.map_type), @tagName(map_type) });
+        return @ptrCast(MapT(map_type).Ptr, self);
     }
 
     // Delegated functions
