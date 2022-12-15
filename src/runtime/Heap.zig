@@ -10,7 +10,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const hash = @import("../utility/hash.zig");
 const debug = @import("../debug.zig");
 const Value = @import("./value.zig").Value;
-const Object = @import("./Object.zig");
+const Object = @import("./object.zig").Object;
 const ByteArray = @import("./ByteArray.zig");
 const Activation = @import("./Activation.zig");
 const HandleArea = @import("./HandleArea.zig");
@@ -437,7 +437,7 @@ const Space = struct {
     /// again.
     fn copyObjectTo(self: *Space, allocator: Allocator, address: [*]u64, target_space: *Space) ![*]u64 {
         const object = Object.fromAddress(address);
-        if (object.isForwardingReference()) {
+        if (object.isForwarded()) {
             const forward_address = object.getForwardAddress();
             return forward_address;
         }
@@ -458,7 +458,7 @@ const Space = struct {
         }
 
         // Create a forwarding reference
-        object.setForwardAddress(new_address);
+        object.forwardObjectTo(new_address);
         return new_address;
     }
 
@@ -649,7 +649,7 @@ const Space = struct {
                 if (self.objectSegmentContains(object_address)) {
                     const object = Object.fromAddress(object_address);
 
-                    if (object.isForwardingReference()) {
+                    if (object.isForwarded()) {
                         // Yes, the object's been copied. Replace the entry in
                         // the remembered set.
                         const new_address = object.getForwardAddress();
@@ -971,7 +971,7 @@ const Space = struct {
 
         // If the new object is in the current space and should be finalized,
         // then put it in the finalization set.
-        if (self.objectSegmentContains(new_address) and new_address_value.asObject().shouldFinalize())
+        if (self.objectSegmentContains(new_address) and new_address_value.asObject().canFinalize())
             try self.finalization_set.put(allocator, new_address, {});
     }
 
@@ -1096,8 +1096,8 @@ test "link an object to another and perform scavenge" {
 
     // Verify that the map map is shared (aka forwarding addresses work)
     try std.testing.expectEqual(
-        new_activation_object_map.map.header.getMap(),
-        new_referenced_object_map.map.header.getMap(),
+        new_activation_object_map.map.object.getMap(),
+        new_referenced_object_map.map.object.getMap(),
     );
 
     // Get the value we stored and compare it

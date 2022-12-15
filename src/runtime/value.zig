@@ -9,26 +9,24 @@ const Allocator = std.mem.Allocator;
 const hash = @import("../utility/hash.zig");
 const Heap = @import("./Heap.zig");
 const debug = @import("../debug.zig");
-const Object = @import("./Object.zig");
+const Object = @import("object.zig").Object;
 const RefPtr = @import("../utility/ref_counted.zig").RefPtr;
 const ByteArray = @import("./ByteArray.zig");
 const Completion = @import("./Completion.zig");
-const object_lookup = @import("./object/lookup.zig");
+const LookupResult = object_lookup.LookupResult;
+const SelectorHash = object_lookup.SelectorHash;
+const object_lookup = @import("object_lookup.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
-
-const LookupResult = object_lookup.LookupResult;
-const SelectorHash = object_lookup.SelectorHash;
-const parent_hash = hash.stringHash("parent");
 
 pub const Value = packed struct {
     data: u64,
 
     pub const ValueMarkerMask: u64 = 0b11;
 
-    pub const ValueType = enum(u64) {
+    pub const ValueType = enum(u2) {
         Integer = 0b00,
         ObjectReference = 0b01,
         FloatingPoint = 0b10,
@@ -103,7 +101,7 @@ pub const Value = packed struct {
     }
 
     /// Return the object the address of which is stored in this value.
-    pub inline fn asObject(self: Value) Object {
+    pub inline fn asObject(self: Value) Object.Ptr {
         std.debug.assert(self.isObjectReference());
         return Object.fromAddress(self.asObjectAddress());
     }
@@ -130,23 +128,26 @@ pub const Value = packed struct {
         vm: *VirtualMachine,
         selector_hash: SelectorHash,
     ) LookupResult {
+        if (selector_hash.regular == object_lookup.self_hash) {
+            return .{ .Regular = self };
+        }
+
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
-            .ObjectReference => self.asObject().lookupByHash(vm, selector_hash),
+            .ObjectReference => selector_hash.lookupObject(vm, self.asObject()),
 
             .Integer => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits integer\n", .{});
                 const integer_traits = vm.integer_traits.getValue();
-                if (selector_hash.regular == parent_hash)
+                if (selector_hash.regular == object_lookup.parent_hash)
                     return LookupResult{ .Regular = integer_traits };
 
                 return integer_traits.lookupByHash(vm, selector_hash);
             },
             .FloatingPoint => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits float\n", .{});
-
                 const float_traits = vm.float_traits.getValue();
-                if (selector_hash.regular == parent_hash)
+                if (selector_hash.regular == object_lookup.parent_hash)
                     return LookupResult{ .Regular = float_traits };
 
                 return float_traits.lookupByHash(vm, selector_hash);
@@ -260,7 +261,7 @@ pub fn IntegerValue(comptime signedness: IntegerValueSignedness) type {
 /// A value which is of a known object type. Attempting to get the value as an
 /// object when something else is stored is a runtime panic in debug, and
 /// undefined behavior in release mode.
-pub fn ObjectValue(comptime ObjectT: type, comptime is_fn: []const u8) type {
+pub fn ObjectValue(comptime ObjectT: type) type {
     return packed struct {
         value: Value,
 
@@ -271,19 +272,7 @@ pub fn ObjectValue(comptime ObjectT: type, comptime is_fn: []const u8) type {
         }
 
         pub fn get(self: Self) ObjectT.Ptr {
-            if (builtin.mode == .Debug) {
-                if (!(self.value.isObjectReference() and @call(.{}, @field(self.value.asObject(), is_fn), .{}))) {
-                    @panic("!!! " ++ is_fn ++ " check failed on object!");
-                }
-            }
-
-            return @ptrCast(ObjectT.Ptr, self.value.asObjectAddress());
+            return self.value.asObject().mustBeType(ObjectT.Type);
         }
     };
 }
-
-pub const ActorValue = ObjectValue(Object.Actor, "isActorObject");
-pub const MethodValue = ObjectValue(Object.Method, "isMethodObject");
-pub const ManagedValue = ObjectValue(Object.Managed, "isManagedObject");
-pub const ByteArrayValue = ObjectValue(Object.ByteArray, "isByteArrayObject");
-pub const ActivationValue = ObjectValue(Object.Activation, "isActivationObject");

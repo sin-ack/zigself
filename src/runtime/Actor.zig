@@ -11,33 +11,32 @@ const debug = @import("../debug.zig");
 const Value = value_import.Value;
 const Stack = @import("./stack.zig").Stack;
 const Range = @import("../language/Range.zig");
-const Object = @import("./Object.zig");
 const bytecode = @import("./bytecode.zig");
 const Completion = @import("./Completion.zig");
-const ActorValue = value_import.ActorValue;
 const Activation = @import("./Activation.zig");
-const MethodValue = value_import.MethodValue;
+const ActorObject = @import("objects/actor.zig").Actor;
 const interpreter = @import("./interpreter.zig");
 const SourceRange = @import("./SourceRange.zig");
+const MethodObject = @import("objects/method.zig").Method;
 const value_import = @import("./value.zig");
-const ManagedValue = value_import.ManagedValue;
+const ManagedObject = @import("objects/managed.zig").Managed;
 const VirtualMachine = @import("./VirtualMachine.zig");
-const ByteArrayValue = value_import.ByteArrayValue;
+const ByteArrayObject = @import("objects/byte_array.zig").ByteArray;
 const ActivationStack = Activation.ActivationStack;
 
 const ACTIVATION_EXIT_DEBUG = debug.ACTIVATION_EXIT_DEBUG;
 
 /// The actor object that this actor is represented by in Self code.
-actor_object: ActorValue,
+actor_object: ActorObject.Value,
 
 /// The selector that will be sent to the actor context after the actor spawn
 /// message has been sent to the actor. This selector must be set via
 /// _ActorSetEntrypoint: in the actor spawn method.
-entrypoint_selector: ?ByteArrayValue = null,
+entrypoint_selector: ?ByteArrayObject.Value = null,
 /// The reason this actor has yielded.
 yield_reason: YieldReason = .None,
 /// The file descriptor managed object that this actor was blocked on, if any.
-blocked_fd: ?ManagedValue = null,
+blocked_fd: ?ManagedObject.Value = null,
 /// The activation stack stores the list of activations that are currently on
 /// this actor. When an activation is exited, execution flow returns to the
 /// previous activation on the stack. If a non-local return happens, however,
@@ -46,7 +45,7 @@ activation_stack: ActivationStack = .{},
 
 /// The actor object that sent the current message. Can be queried inside
 /// messages with _ActorSender. It is an error to query it outside of messages.
-message_sender: ?ActorValue = null,
+message_sender: ?ActorObject.Value = null,
 
 /// The mailbox stores the messages that were sent to this actor through actor
 /// proxy objects.
@@ -130,10 +129,10 @@ pub const YieldReason = enum(u32) {
 /// A single message sent to this actor from another actor.
 pub const Message = struct {
     /// The actor object that sent this message.
-    sender: ActorValue,
+    sender: ActorObject.Value,
     /// The method that will be executed on the actor context. Belongs to this
     /// actor.
-    method: MethodValue,
+    method: MethodObject.Value,
     /// The arguments of this message as an owned slice.
     arguments: []Value,
     /// The SourceRange which spawned this message.
@@ -152,7 +151,7 @@ pub fn create(vm: *VirtualMachine, token: *Heap.AllocationToken, actor_context: 
     //       first call to create); otherwise, we are always owned by the genesis actor.
     const owning_actor_id = if (vm.isInActorMode()) vm.genesis_actor.?.id else 0;
 
-    const actor_object = try Object.Actor.create(vm.getMapMap(), token, owning_actor_id, self, actor_context);
+    const actor_object = try ActorObject.create(vm.getMapMap(), token, owning_actor_id, self, actor_context);
 
     self.init(actor_object);
     return self;
@@ -163,10 +162,10 @@ pub fn destroy(self: *Self, allocator: Allocator) void {
     allocator.destroy(self);
 }
 
-fn init(self: *Self, actor_object: *Object.Actor) void {
+fn init(self: *Self, actor_object: ActorObject.Ptr) void {
     self.* = .{
         .id = newActorID(),
-        .actor_object = ActorValue.init(actor_object),
+        .actor_object = ActorObject.Value.init(actor_object),
     };
 
     self.register_file.init();
@@ -189,7 +188,7 @@ pub fn activateMethod(
     self: *Self,
     vm: *VirtualMachine,
     token: *Heap.AllocationToken,
-    method: *Object.Method,
+    method: MethodObject.Ptr,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
@@ -201,7 +200,7 @@ pub fn activateMethodWithContext(
     vm: *VirtualMachine,
     token: *Heap.AllocationToken,
     context: Value,
-    method: *Object.Method,
+    method: MethodObject.Ptr,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
@@ -453,16 +452,16 @@ pub fn unwindStacks(self: *Self) void {
 pub fn putMessageInMailbox(
     self: *Self,
     allocator: Allocator,
-    sender: *Object.Actor,
-    method: *Object.Method,
+    sender: ActorObject.Ptr,
+    method: MethodObject.Ptr,
     arguments: []Value,
     source_range: SourceRange,
 ) !void {
     const node = try allocator.create(Mailbox.Node);
     node.* = .{
         .data = .{
-            .sender = ActorValue.init(sender),
-            .method = MethodValue.init(method),
+            .sender = ActorObject.Value.init(sender),
+            .method = MethodObject.Value.init(method),
             .arguments = arguments,
             .source_range = source_range,
         },
@@ -492,7 +491,7 @@ pub fn canWriteTo(self: *Self, value: Value) bool {
         .ObjectReference => writable: {
             const object = value.asObject();
             // FIXME: Don't hardcode global actor ID
-            break :writable self.id == 0 or !object.header.isGloballyReachable();
+            break :writable self.id == 0 or object.object_information.reachability != .Global;
         },
     };
 }
@@ -506,12 +505,12 @@ pub fn ensureCanRead(self: *Self, value: Value, source_range: SourceRange) void 
         .Integer, .FloatingPoint => {},
         .ObjectReference => {
             const object = value.asObject();
-            if (!object.header.isGloballyReachable() and object.header.getActorID() != self.id)
+            if (object.object_information.reachability != .Global and object.object_information.actor_id != self.id)
                 std.debug.panic(
                     "!!! Attempted to read object that is not readable for this actor!\n" ++
                         "  Object {*} owned by actor #{}\n" ++
                         "  Actor #{} is attempting to reach it at {}",
-                    .{ object.header, object.header.getActorID(), self.id, source_range },
+                    .{ object, object.object_information.actor_id, self.id, source_range },
                 );
         },
     }

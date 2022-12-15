@@ -10,10 +10,9 @@ const AST = @import("../language/ast.zig");
 const Heap = @import("./Heap.zig");
 const hash = @import("../utility/hash.zig");
 const Value = @import("./value.zig").Value;
-const Object = @import("./Object.zig");
 const AstGen = @import("./bytecode/AstGen.zig");
 const ByteArray = @import("./ByteArray.zig");
-const map_builder = @import("./object/map_builder.zig");
+const map_builder = @import("map_builder.zig");
 const stage2_compat = @import("../utility/stage2_compat.zig");
 
 /// The properties of a slot. This is shared by both ProtoSlot and Slot.
@@ -160,7 +159,7 @@ pub const Slot = packed struct {
     }
 
     pub fn initInherited(name: ByteArray, value: Value) Slot {
-        std.debug.assert(value.isObjectReference() and value.asObject().isSlotsObject());
+        std.debug.assert(value.isObjectReference() and value.asObject().object_information.object_type == .Slots);
         return init(name, .NotParent, .Constant, .NotArgument, .Inherited, value);
     }
 
@@ -273,7 +272,7 @@ pub const Slot = packed struct {
             const slot = &previous_slots[previous_slots.len - 1 - index];
 
             if (traverse_inherited_slots == .Traverse and slot.isInherited()) {
-                const inherited_slots = slot.value.asObject().asSlotsObject().getSlots();
+                const inherited_slots = slot.value.asObject().mustBeType(.Slots).getSlots();
                 for (inherited_slots) |_, inherited_index| {
                     const inherited_slot = &inherited_slots[inherited_slots.len - 1 - inherited_index];
                     if (self.getHash() == inherited_slot.getHash())
@@ -299,7 +298,7 @@ pub const Slot = packed struct {
             // 1 for the slot itself.
             var slot_count: u32 = 1;
 
-            next_slot: for (self.value.asObject().asSlotsObject().getSlots()) |inherited_slot| {
+            next_slot: for (self.value.asObject().mustBeType(.Slots).getSlots()) |inherited_slot| {
                 if (inherited_slot.isInherited()) {
                     // We don't want to inherit the inherited slots in the inherited object.
                     // (Try saying that 3 times fast...)
@@ -331,7 +330,7 @@ pub const Slot = packed struct {
 
             var slot_count: i32 = 0;
 
-            next_slot: for (self.value.asObject().asSlotsObject().getSlots()) |inherited_slot| {
+            next_slot: for (self.value.asObject().mustBeType(.Slots).getSlots()) |inherited_slot| {
                 if (inherited_slot.isInherited()) {
                     // We don't want to inherit the inherited slots in the inherited object.
                     // (Try saying that 3 times fast...)
@@ -414,7 +413,7 @@ pub const Slot = packed struct {
         current_slot_ptr.* = self;
 
         if (self.isInherited()) {
-            const inherited_object = self.value.asObject().asSlotsObject();
+            const inherited_object = self.value.asObject().mustBeType(.Slots);
             next_slot: for (inherited_object.getSlots()) |inherited_slot| {
                 if (inherited_slot.isInherited()) {
                     // We don't want to inherit the inherited slots in the inherited object.

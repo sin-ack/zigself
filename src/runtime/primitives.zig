@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const Heap = @import("./Heap.zig");
 const Value = value_import.Value;
 const Actor = @import("./Actor.zig");
-const Object = @import("./Object.zig");
+const object = @import("./object.zig");
 const bytecode = @import("./bytecode.zig");
 const Completion = @import("./Completion.zig");
 const SourceRange = @import("./SourceRange.zig");
@@ -137,18 +137,18 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
         }
 
         // TODO: Figure out why stage2 explodes with this function being inline
-        pub fn getObject(self: Self, comptime index: isize, comptime object_type: Object.ObjectType) !Object.ObjectT(object_type).Ptr {
+        pub fn getObject(self: Self, comptime index: isize, comptime object_type: object.ObjectType) !object.ObjectT(object_type).Ptr {
             const value = self.getValue(index);
 
             if (value.isObjectReference()) {
-                if (value.asObject().asType(object_type)) |object|
-                    return object;
+                if (value.asObject().asType(object_type)) |cast_object|
+                    return cast_object;
             }
 
             self.context.get_argument_error = ExecutionResult.completion(try Completion.initRuntimeError(
                 self.context.vm,
                 self.context.source_range,
-                "Expected " ++ Object.humanReadableNameFor(object_type) ++ " for" ++ getArgumentMessage(index) ++ primitive_name,
+                "Expected " ++ object.ObjectT(object_type).humanReadableName() ++ " for" ++ getArgumentMessage(index) ++ primitive_name,
                 .{},
             ));
             return error.GetArgumentFailure;

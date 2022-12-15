@@ -8,18 +8,29 @@ const Heap = @import("./Heap.zig");
 const Slot = slot_import.Slot;
 const debug = @import("../debug.zig");
 const Actor = @import("./Actor.zig");
-const bless = @import("./object/bless.zig");
+const bless = @import("./object_bless.zig");
 const Value = @import("./value.zig").Value;
-const Object = @import("./Object.zig");
+const Object = @import("./object.zig").Object;
 const bytecode = @import("./bytecode.zig");
+const BlockMap = block_object.BlockMap;
+const SlotsMap = slots_object.SlotsMap;
 const ByteArray = @import("./ByteArray.zig");
-const traversal = @import("./object/traversal.zig");
+const MethodMap = method_object.MethodMap;
+const traversal = @import("./object_traversal.zig");
 const Activation = @import("./Activation.zig");
 const Completion = @import("./Completion.zig");
 const primitives = @import("./primitives.zig");
 const SourceRange = @import("./SourceRange.zig");
+const BlockObject = block_object.Block;
+const SlotsObject = slots_object.Slots;
 const slot_import = @import("./slot.zig");
+const block_object = @import("objects/block.zig");
+const slots_object = @import("objects/slots.zig");
+const MethodObject = method_object.Method;
+const method_object = @import("objects/method.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
+const ByteArrayObject = @import("objects/byte_array.zig").ByteArray;
+const ActivationObject = @import("objects/activation.zig").Activation;
 
 const EXECUTION_DEBUG = debug.EXECUTION_DEBUG;
 
@@ -84,7 +95,7 @@ pub fn execute(
         },
         .PushConstantSlot => |payload| {
             const name_value = vm.readRegister(payload.name_location);
-            const name_byte_array_object = name_value.asObject().asByteArrayObject();
+            const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
             const value = vm.readRegister(payload.value_location);
 
             try actor.slot_stack.push(vm.allocator, Slot.initConstant(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
@@ -92,7 +103,7 @@ pub fn execute(
         },
         .PushAssignableSlot => |payload| {
             const name_value = vm.readRegister(payload.name_location);
-            const name_byte_array_object = name_value.asObject().asByteArrayObject();
+            const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
             const value = vm.readRegister(payload.value_location);
 
             try actor.slot_stack.push(vm.allocator, Slot.initAssignable(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
@@ -100,14 +111,14 @@ pub fn execute(
         },
         .PushArgumentSlot => |payload| {
             const name_value = vm.readRegister(payload.name_location);
-            const name_byte_array_object = name_value.asObject().asByteArrayObject();
+            const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
 
             try actor.slot_stack.push(vm.allocator, Slot.initArgument(name_byte_array_object.getByteArray()));
             return success;
         },
         .PushInheritedSlot => |payload| {
             const name_value = vm.readRegister(payload.name_location);
-            const name_byte_array_object = name_value.asObject().asByteArrayObject();
+            const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
             const value = vm.readRegister(payload.value_location);
 
             try actor.slot_stack.push(vm.allocator, Slot.initInherited(name_byte_array_object.getByteArray(), value));
@@ -122,10 +133,10 @@ pub fn execute(
             return success;
         },
         .CreateByteArray => |payload| {
-            var token = try vm.heap.getAllocation(Object.ByteArray.requiredSizeForAllocation(payload.len));
+            var token = try vm.heap.getAllocation(ByteArrayObject.requiredSizeForAllocation(payload.len));
             defer token.deinit();
 
-            const byte_array = Object.ByteArray.createWithValues(vm.getMapMap(), &token, actor.id, payload);
+            const byte_array = ByteArrayObject.createWithValues(vm.getMapMap(), &token, actor.id, payload);
             vm.writeRegister(inst.target, byte_array.asValue());
             return success;
         },
@@ -133,7 +144,7 @@ pub fn execute(
             return try createObject(vm, actor, payload.slot_count, inst.target);
         },
         .CreateMethod => |payload| {
-            const method_name_byte_array = vm.readRegister(payload.method_name_location).asObject().asByteArrayObject().getByteArray();
+            const method_name_byte_array = vm.readRegister(payload.method_name_location).asObject().mustBeType(.ByteArray).getByteArray();
             return try createMethod(
                 vm,
                 actor,
@@ -178,8 +189,10 @@ pub fn execute(
         },
         .PushArg => |payload| {
             var argument = vm.readRegister(payload.argument_location);
-            if (argument.isObjectReference() and argument.asObject().isActivationObject()) {
-                argument = argument.asObject().asActivationObject().findActivationReceiver();
+            if (argument.isObjectReference()) {
+                if (argument.asObject().asType(.Activation)) |activation| {
+                    argument = activation.findActivationReceiver();
+                }
             }
             try actor.argument_stack.push(vm.allocator, argument);
 
@@ -235,8 +248,10 @@ fn performSend(
 
     if (completion.isNormal()) {
         var result = completion.data.Normal;
-        if (result.isObjectReference() and result.asObject().isActivationObject()) {
-            result = result.asObject().asActivationObject().findActivationReceiver();
+        if (result.isObjectReference()) {
+            if (result.asObject().asType(.Activation)) |activation| {
+                result = activation.findActivationReceiver();
+            }
         }
 
         vm.writeRegister(target_location, result);
@@ -256,8 +271,10 @@ fn performPrimitiveSend(
 ) !ExecutionResult {
     if (primitives.getPrimitive(message_name)) |primitive| {
         var receiver = receiver_;
-        if (receiver.isObjectReference() and receiver.asObject().isActivationObject()) {
-            receiver = receiver.asObject().asActivationObject().findActivationReceiver();
+        if (receiver.isObjectReference()) {
+            if (receiver.asObject().asType(.Activation)) |activation| {
+                receiver = activation.findActivationReceiver();
+            }
         }
 
         const tracked_receiver = try vm.heap.track(receiver);
@@ -309,27 +326,30 @@ pub fn sendMessage(
     // FIXME: Only activate this when the message looks like a block execution.
     {
         var block_receiver = receiver;
-        if (block_receiver.isObjectReference() and block_receiver.asObject().isActivationObject()) {
-            block_receiver = block_receiver.asObject().asActivationObject().findActivationReceiver();
+        if (block_receiver.isObjectReference()) {
+            if (block_receiver.asObject().asType(.Activation)) |activation| {
+                block_receiver = activation.findActivationReceiver();
+            }
         }
 
-        if (block_receiver.isObjectReference() and block_receiver.asObject().isBlockObject()) {
-            const receiver_as_block = block_receiver.asObject().asBlockObject();
-            if (receiver_as_block.isCorrectMessageForBlockExecution(message_name)) {
-                const argument_count = receiver_as_block.getArgumentSlotCount();
-                const argument_slice = actor.argument_stack.lastNItems(argument_count);
+        if (block_receiver.isObjectReference()) {
+            if (block_receiver.asObject().asType(.Block)) |receiver_as_block| {
+                if (receiver_as_block.isCorrectMessageForBlockExecution(message_name)) {
+                    const argument_count = receiver_as_block.getArgumentSlotCount();
+                    const argument_slice = actor.argument_stack.lastNItems(argument_count);
 
-                // Advance the instruction for the activation that will be returned to.
-                actor.activation_stack.getCurrent().advanceInstruction();
+                    // Advance the instruction for the activation that will be returned to.
+                    actor.activation_stack.getCurrent().advanceInstruction();
 
-                try executeBlock(vm, actor, receiver_as_block, argument_slice, target_location, source_range);
+                    try executeBlock(vm, actor, receiver_as_block, argument_slice, target_location, source_range);
 
-                actor.argument_stack.popNItems(argument_count);
-                // Bump the argument stack height of the (now current)
-                // activation since we've now popped this activation's items off
-                // it.
-                actor.activation_stack.getCurrent().stack_snapshot.bumpArgumentHeight(actor);
-                return null;
+                    actor.argument_stack.popNItems(argument_count);
+                    // Bump the argument stack height of the (now current)
+                    // activation since we've now popped this activation's items off
+                    // it.
+                    actor.activation_stack.getCurrent().stack_snapshot.bumpArgumentHeight(actor);
+                    return null;
+                }
             }
         }
     }
@@ -338,25 +358,26 @@ pub fn sendMessage(
 
     return switch (receiver.lookup(vm, message_name)) {
         .Regular => |lookup_result| {
-            if (lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject()) {
-                const method_object = lookup_result.asObject().asMethodObject();
-                const argument_count = method_object.getArgumentSlotCount();
-                const argument_slice = actor.argument_stack.lastNItems(argument_count);
+            if (lookup_result.isObjectReference()) {
+                if (lookup_result.asObject().asType(.Method)) |method| {
+                    const argument_count = method.getArgumentSlotCount();
+                    const argument_slice = actor.argument_stack.lastNItems(argument_count);
 
-                // Advance the instruction for the activation that will be returned to.
-                actor.activation_stack.getCurrent().advanceInstruction();
+                    // Advance the instruction for the activation that will be returned to.
+                    actor.activation_stack.getCurrent().advanceInstruction();
 
-                try executeMethod(vm, actor, receiver, method_object, argument_slice, target_location, source_range);
+                    try executeMethod(vm, actor, receiver, method, argument_slice, target_location, source_range);
 
-                actor.argument_stack.popNItems(argument_count);
-                // Bump the argument stack height of the (now current)
-                // activation since we've now popped this activation's items off
-                // it.
-                actor.activation_stack.getCurrent().stack_snapshot.bumpArgumentHeight(actor);
-                return null;
-            } else {
-                return Completion.initNormal(lookup_result);
+                    actor.argument_stack.popNItems(argument_count);
+                    // Bump the argument stack height of the (now current)
+                    // activation since we've now popped this activation's items off
+                    // it.
+                    actor.activation_stack.getCurrent().stack_snapshot.bumpArgumentHeight(actor);
+                    return null;
+                }
             }
+
+            return Completion.initNormal(lookup_result);
         },
         .Assignment => |assignment_context| {
             const argument_slice = actor.argument_stack.lastNItems(1);
@@ -364,8 +385,10 @@ pub fn sendMessage(
             // NOTE: This is required, for instance, when we are assigning `self` to
             //       a slot (happens more often than you might think!). We need to strip
             //       the activation object to get to the actual value inside.
-            if (argument.isObjectReference() and argument.asObject().isActivationObject()) {
-                argument = argument.asObject().asActivationObject().findActivationReceiver();
+            if (argument.isObjectReference()) {
+                if (argument.asObject().asType(.Activation)) |activation| {
+                    argument = activation.findActivationReceiver();
+                }
             }
 
             const object_that_has_the_assignable_slot = assignment_context.object;
@@ -375,15 +398,15 @@ pub fn sendMessage(
                 return try Completion.initRuntimeError(vm, source_range, "Assignment target is not writable for actor", .{});
             }
 
-            if (object_that_has_the_assignable_slot.header.isGloballyReachable()) {
+            if (object_that_has_the_assignable_slot.object_information.reachability == .Global) {
                 // Mark every object that's not globally reachable in the
                 // argument's object graph as globally reachable. This will
                 // make the whole object graph part of the global object
                 // hierarchy.
                 _ = traversal.traverseNonGloballyReachableObjectGraph(argument, {}, struct {
-                    fn f(context: void, object: Object) error{}!Object {
+                    fn f(context: void, object: Object.Ptr) error{}!Object.Ptr {
                         _ = context;
-                        object.header.setGloballyReachable(true);
+                        object.object_information.reachability = .Global;
                         return object;
                     }
                 }.f) catch unreachable;
@@ -398,8 +421,8 @@ pub fn sendMessage(
             return Completion.initNormal(receiver);
         },
         .ActorMessage => |actor_message| {
-            const method_object = actor_message.method;
-            const argument_count = method_object.getArgumentSlotCount();
+            const method = actor_message.method;
+            const argument_count = method.getArgumentSlotCount();
             const argument_slice = actor.argument_stack.lastNItems(argument_count);
 
             var target_actor = actor_message.target_actor.getActor();
@@ -419,7 +442,7 @@ pub fn sendMessage(
             try target_actor.putMessageInMailbox(
                 vm.allocator,
                 actor.actor_object.get(),
-                method_object,
+                method,
                 new_arguments_slice,
                 source_range,
             );
@@ -434,7 +457,7 @@ pub fn sendMessage(
 fn executeBlock(
     vm: *VirtualMachine,
     actor: *Actor,
-    block_receiver: *Object.Block,
+    block_receiver: BlockObject.Ptr,
     arguments: []const Value,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
@@ -442,7 +465,7 @@ fn executeBlock(
     const message_name = try vm.getOrCreateBlockMessageName(@intCast(u8, arguments.len));
     var block = block_receiver;
 
-    var required_memory = Object.Activation.requiredSizeForAllocation(
+    var required_memory = ActivationObject.requiredSizeForAllocation(
         block.getArgumentSlotCount(),
         block.getAssignableSlotCount(),
     );
@@ -461,7 +484,7 @@ fn executeBlock(
 
         if (tracked_block) |t| {
             // Refresh the pointer to the block.
-            block = t.getValue().asObject().asBlockObject();
+            block = t.getValue().asObject().mustBeType(.Block);
         }
 
         break :token token;
@@ -486,15 +509,15 @@ fn executeMethod(
     vm: *VirtualMachine,
     actor: *Actor,
     const_receiver: Value,
-    method_object: *Object.Method,
+    const_method: MethodObject.Ptr,
     arguments: []const Value,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
     var receiver_of_method = const_receiver;
-    var method = method_object;
+    var method = const_method;
 
-    const required_memory = Object.Activation.requiredSizeForAllocation(
+    const required_memory = ActivationObject.requiredSizeForAllocation(
         method.getArgumentSlotCount(),
         method.getAssignableSlotCount(),
     );
@@ -519,7 +542,7 @@ fn executeMethod(
         if (tracked_receiver) |t| {
             // Refresh the pointers to the method and its receiver.
             receiver_of_method = t.getValue();
-            method = tracked_method.?.getValue().asObject().asMethodObject();
+            method = tracked_method.?.getValue().asObject().mustBeType(.Method);
         }
 
         break :token token;
@@ -529,11 +552,10 @@ fn executeMethod(
     // NOTE: The receiver of a method activation must never be an activation
     //       object (unless it explicitly wants that), as that would allow
     //       us to access the slots of upper scopes.
-    if (!method.expectsActivationObjectAsReceiver() and
-        receiver_of_method.isObjectReference() and
-        receiver_of_method.asObject().isActivationObject())
-    {
-        receiver_of_method = receiver_of_method.asObject().asActivationObject().findActivationReceiver();
+    if (!method.expectsActivationObjectAsReceiver() and receiver_of_method.isObjectReference()) {
+        if (receiver_of_method.asObject().asType(.Activation)) |activation| {
+            receiver_of_method = activation.findActivationReceiver();
+        }
     }
 
     const activation_slot = try actor.activation_stack.getNewActivationSlot(vm.allocator);
@@ -556,20 +578,20 @@ fn createObject(
     }
 
     var token = try vm.heap.getAllocation(
-        Object.Map.Slots.requiredSizeForAllocation(total_slot_count) +
-            Object.Slots.requiredSizeForAllocation(total_assignable_slot_count),
+        SlotsMap.requiredSizeForAllocation(total_slot_count) +
+            SlotsObject.requiredSizeForAllocation(total_assignable_slot_count),
     );
     defer token.deinit();
 
-    var slots_map = Object.Map.Slots.create(vm.getMapMap(), &token, total_slot_count);
+    var slots_map = SlotsMap.create(vm.getMapMap(), &token, total_slot_count);
     var map_builder = slots_map.getMapBuilder(&token);
 
     for (slots) |slot| {
         map_builder.addSlot(slot);
     }
 
-    const slots_object = map_builder.createObject(actor.id);
-    vm.writeRegister(target_location, slots_object.asValue());
+    const the_slots_object = map_builder.createObject(actor.id);
+    vm.writeRegister(target_location, the_slots_object.asValue());
     actor.slot_stack.popNItems(slot_count);
     return success;
 }
@@ -600,13 +622,13 @@ fn createMethod(
     }
 
     var token = try vm.heap.getAllocation(
-        Object.Map.Method.requiredSizeForAllocation(total_slot_count) +
-            Object.Method.requiredSizeForAllocation(total_assignable_slot_count),
+        MethodMap.requiredSizeForAllocation(total_slot_count) +
+            MethodObject.requiredSizeForAllocation(total_assignable_slot_count),
     );
     defer token.deinit();
 
     const block = executable.value.getBlock(block_index);
-    var method_map = try Object.Map.Method.create(
+    var method_map = try MethodMap.create(
         vm.getMapMap(),
         &token,
         argument_slot_count,
@@ -623,8 +645,8 @@ fn createMethod(
         map_builder.addSlot(slot);
     }
 
-    const method_object = map_builder.createObject(actor.id);
-    vm.writeRegister(target_location, method_object.asValue());
+    const method = map_builder.createObject(actor.id);
+    vm.writeRegister(target_location, method.asValue());
     actor.slot_stack.popNItems(slot_count);
     return success;
 }
@@ -669,12 +691,12 @@ fn createBlock(
     std.debug.assert(nonlocal_return_target_activation.get(actor.activation_stack).?.nonlocal_return_target_activation == null);
 
     var token = try vm.heap.getAllocation(
-        Object.Map.Block.requiredSizeForAllocation(total_slot_count) +
-            Object.Block.requiredSizeForAllocation(total_assignable_slot_count),
+        BlockMap.requiredSizeForAllocation(total_slot_count) +
+            BlockObject.requiredSizeForAllocation(total_assignable_slot_count),
     );
     defer token.deinit();
 
-    var block_map = try Object.Map.Block.create(
+    var block_map = try BlockMap.create(
         vm.getMapMap(),
         &token,
         argument_slot_count,
@@ -691,8 +713,8 @@ fn createBlock(
         map_builder.addSlot(slot);
     }
 
-    const block_object = map_builder.createObject(actor.id);
-    vm.writeRegister(target_location, block_object.asValue());
+    const the_block_object = map_builder.createObject(actor.id);
+    vm.writeRegister(target_location, the_block_object.asValue());
     actor.slot_stack.popNItems(slot_count);
     return success;
 }

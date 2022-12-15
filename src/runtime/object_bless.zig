@@ -5,10 +5,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Value = @import("../value.zig").Value;
-const Object = @import("../Object.zig");
-const Heap = @import("../Heap.zig");
-const traversal = @import("./traversal.zig");
+const Value = @import("value.zig").Value;
+const Object = @import("object.zig").Object;
+const Heap = @import("Heap.zig");
+const traversal = @import("object_traversal.zig");
 
 const SeenObjectsSet = std.AutoHashMap([*]u64, void);
 
@@ -20,7 +20,7 @@ fn calculateRequiredMemoryForBlessing(allocator: Allocator, value: Value) Alloca
     const context = .{ .seen_objects_set = &seen_objects_set, .required_memory = &required_memory };
     const Context = @TypeOf(context);
     _ = traversal.traverseNonGloballyReachableObjectGraph(value, context, struct {
-        fn f(ctx: Context, object: Object) Allocator.Error!Object {
+        fn f(ctx: Context, object: Object.Ptr) Allocator.Error!Object.Ptr {
             const gop = try ctx.seen_objects_set.getOrPut(object.getAddress());
             if (!gop.found_existing) {
                 ctx.required_memory.* += object.getSizeInMemory();
@@ -46,7 +46,7 @@ fn copyObjectGraphForNewActor(token: *Heap.AllocationToken, actor_id: u31, value
     const context = .{ .copied_objects_map = &copied_objects_map, .token = token, .actor_id = actor_id };
     const Context = @TypeOf(context);
     return traversal.traverseNonGloballyReachableObjectGraph(value, context, struct {
-        fn f(ctx: Context, old_object: Object) Allocator.Error!Object {
+        fn f(ctx: Context, old_object: Object.Ptr) Allocator.Error!Object.Ptr {
             const gop = try ctx.copied_objects_map.getOrPut(old_object.getAddress());
             if (gop.found_existing) {
                 return Object.fromAddress(gop.value_ptr.*);

@@ -6,13 +6,14 @@ const std = @import("std");
 
 const Heap = @import("../Heap.zig");
 const Value = value_import.Value;
-const Object = @import("../Object.zig");
 const ByteArray = @import("../ByteArray.zig");
 const Completion = @import("../Completion.zig");
+const SlotsObject = @import("../objects/slots.zig").Slots;
+const array_object = @import("../objects/array.zig");
 const value_import = @import("../value.zig");
-const ManagedValue = value_import.ManagedValue;
-const ManagedObject = @import("../object/managed.zig");
-const FileDescriptor = ManagedObject.FileDescriptor;
+const ManagedObject = @import("../objects/managed.zig").Managed;
+const FileDescriptor = @import("../objects/managed.zig").FileDescriptor;
+const ByteArrayObject = @import("../objects/byte_array.zig").ByteArray;
 const value_inspector = @import("../value_inspector.zig");
 
 const interpreter = @import("../interpreter.zig");
@@ -54,9 +55,9 @@ pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
         var fd = FileDescriptor.adopt(@intCast(std.os.fd_t, rc));
         errdefer fd.close();
 
-        var token = try context.vm.heap.getAllocation(Object.Managed.requiredSizeForAllocation());
+        var token = try context.vm.heap.getAllocation(ManagedObject.requiredSizeForAllocation());
         defer token.deinit();
-        const managed_fd = try Object.Managed.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, fd.toValue());
+        const managed_fd = try ManagedObject.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, fd.toValue());
         return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
     }
 
@@ -111,7 +112,7 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: *PrimitiveContext) !Executio
         .AGAIN => blk: {
             if (context.vm.isInRegularActor()) {
                 context.actor.yield_reason = .Blocked;
-                context.actor.blocked_fd = ManagedValue.init(fd);
+                context.actor.blocked_fd = ManagedObject.Value.init(fd);
 
                 context.vm.switchToActor(context.vm.genesis_actor.?);
                 break :blk ExecutionResult.actorSwitch();
@@ -378,13 +379,13 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
         var it: ?*std.os.addrinfo = result_ptr;
         while (it) |result| : (it = result.next) {
             required_memory += addrinfo_prototype.getSizeInMemory();
-            required_memory += Object.ByteArray.requiredSizeForAllocation(result.addrlen);
+            required_memory += ByteArrayObject.requiredSizeForAllocation(result.addrlen);
             result_count += 1;
         }
     }
 
-    required_memory += Object.Map.Array.requiredSizeForAllocation();
-    required_memory += Object.Array.requiredSizeForAllocation(result_count);
+    required_memory += array_object.ArrayMap.requiredSizeForAllocation();
+    required_memory += array_object.Array.requiredSizeForAllocation(result_count);
 
     var token = try context.vm.heap.getAllocation(required_memory);
     defer token.deinit();
@@ -392,8 +393,8 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     // Refresh pointers
     addrinfo_prototype = context.vm.addrinfo_prototype.getValue().asObject().asType(.Slots).?;
 
-    const result_array_map = Object.Map.Array.create(context.vm.getMapMap(), &token, result_count);
-    const result_array = Object.Array.createWithValues(&token, context.actor.id, result_array_map, &.{}, context.vm.nil());
+    const result_array_map = array_object.ArrayMap.create(context.vm.getMapMap(), &token, result_count);
+    const result_array = array_object.Array.createWithValues(&token, context.actor.id, result_array_map, &.{}, context.vm.nil());
 
     const result_values = result_array.getValues();
     {
@@ -404,9 +405,9 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
             i += 1;
         }) {
             const sockaddr_memory = @ptrCast([*]u8, result.addr.?);
-            const sockaddr_bytes_object = Object.ByteArray.createWithValues(context.vm.getMapMap(), &token, context.actor.id, sockaddr_memory[0..result.addrlen]);
+            const sockaddr_bytes_object = ByteArrayObject.createWithValues(context.vm.getMapMap(), &token, context.actor.id, sockaddr_memory[0..result.addrlen]);
 
-            const addrinfo_copy: *Object.Slots = addrinfo_prototype.clone(&token, context.actor.id);
+            const addrinfo_copy: *SlotsObject = addrinfo_prototype.clone(&token, context.actor.id);
             const addrinfo_value = addrinfo_copy.asValue();
 
             // FIXME: VM-generated structs already know where each slot is.
@@ -446,9 +447,9 @@ pub fn SocketWithFamily_Type_Protocol_IfFail(context: *PrimitiveContext) !Execut
         var fd = FileDescriptor.adopt(@intCast(std.os.fd_t, rc));
         errdefer fd.close();
 
-        var token = try context.vm.heap.getAllocation(Object.Managed.requiredSizeForAllocation());
+        var token = try context.vm.heap.getAllocation(ManagedObject.requiredSizeForAllocation());
         defer token.deinit();
-        const managed_fd = try Object.Managed.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, fd.toValue());
+        const managed_fd = try ManagedObject.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, fd.toValue());
         return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
     }
 
@@ -544,15 +545,15 @@ pub fn AcceptFromFD_IfFail(context: *PrimitiveContext) !ExecutionResult {
             var new_fd = FileDescriptor.adopt(new_fd_value);
             errdefer new_fd.close();
 
-            var token = try context.vm.heap.getAllocation(Object.Managed.requiredSizeForAllocation());
+            var token = try context.vm.heap.getAllocation(ManagedObject.requiredSizeForAllocation());
             defer token.deinit();
-            const managed_new_fd = try Object.Managed.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, new_fd.toValue());
+            const managed_new_fd = try ManagedObject.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, new_fd.toValue());
             return ExecutionResult.completion(Completion.initNormal(managed_new_fd.asValue()));
         },
         .AGAIN => blk: {
             if (context.vm.isInRegularActor()) {
                 context.actor.yield_reason = .Blocked;
-                context.actor.blocked_fd = ManagedValue.init(fd_object);
+                context.actor.blocked_fd = ManagedObject.Value.init(fd_object);
 
                 context.vm.switchToActor(context.vm.genesis_actor.?);
                 break :blk ExecutionResult.actorSwitch();

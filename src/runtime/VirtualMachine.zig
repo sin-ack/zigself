@@ -5,17 +5,20 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Map = @import("objects/map.zig").Map;
 const Heap = @import("./Heap.zig");
 const Slot = @import("./slot.zig").Slot;
 const Actor = @import("./Actor.zig");
 const Value = @import("./value.zig").Value;
 const Range = @import("../language/Range.zig");
-const Object = @import("./Object.zig");
 const Script = @import("../language/script.zig");
 const AstGen = @import("./bytecode/AstGen.zig");
 const CodeGen = @import("./bytecode/CodeGen.zig");
+const SlotsMap = slots_object.SlotsMap;
 const ByteArray = @import("./ByteArray.zig");
-const MapBuilder = @import("./object/map_builder.zig").MapBuilder;
+const ActorObject = @import("objects/actor.zig").Actor;
+const SlotsObject = slots_object.Slots;
+const slots_object = @import("objects/slots.zig");
 const runtime_error = @import("./error.zig");
 const RegisterLocation = @import("./bytecode.zig").RegisterLocation;
 
@@ -106,12 +109,12 @@ pub fn create(allocator: Allocator) !*Self {
 
     var token = try heap.getAllocation(
         // Map map
-        Object.Map.Slots.requiredSizeForAllocation(0) +
+        Map.requiredSizeForAllocatingMapMap() +
             // Global objects
-            Object.Map.Slots.requiredSizeForAllocation(0) +
-            (10 * Object.Slots.requiredSizeForAllocation(0)) +
+            SlotsMap.requiredSizeForAllocation(0) +
+            (10 * SlotsObject.requiredSizeForAllocation(0)) +
             // Global actor
-            Object.Actor.requiredSizeForAllocation() +
+            ActorObject.requiredSizeForAllocation() +
             // addrinfo prototype
             requiredSizeForAddrInfoPrototypeAllocation(),
     );
@@ -120,8 +123,8 @@ pub fn create(allocator: Allocator) !*Self {
     // Before creating any objects, we first need to create the map-map.
     try self.createMapMap(&token);
 
-    const empty_map = Object.Map.Slots.create(self.getMapMap(), &token, 0);
-    empty_map.map.header.setGloballyReachable(true);
+    const empty_map = SlotsMap.create(self.getMapMap(), &token, 0);
+    empty_map.map.object.object_information.reachability = .Global;
 
     self.lobby_object = try makeEmptyGloballyReachableObject(&token, empty_map);
 
@@ -147,21 +150,21 @@ pub fn create(allocator: Allocator) !*Self {
 }
 
 fn createMapMap(self: *Self, token: *Heap.AllocationToken) !void {
-    self.map_map = try token.heap.track(Object.Map.Slots.createMapMap(token));
+    self.map_map = try token.heap.track(Map.createMapMap(token));
 }
 
-pub fn getMapMap(self: Self) Value {
-    return self.map_map.getValue();
+pub fn getMapMap(self: Self) Map.Ptr {
+    return self.map_map.getValue().asObject().mustBeType(.Map);
 }
 
-fn makeEmptyGloballyReachableObject(token: *Heap.AllocationToken, map: Object.Map.Slots.Ptr) !Heap.Tracked {
+fn makeEmptyGloballyReachableObject(token: *Heap.AllocationToken, map: SlotsMap.Ptr) !Heap.Tracked {
     // NOTE: These objects will always belong to the global actor, so we hardcode the actor ID 0 to them.
     //       Otherwise we would hit a chicken-and-egg situation where the global actor needs the lobby
     //       and the lobby needs the global actor.
     const GlobalActorID = 0;
 
-    const slots = Object.Slots.create(token, GlobalActorID, map, &.{});
-    slots.header.setGloballyReachable(true);
+    const slots = SlotsObject.create(token, GlobalActorID, map, &.{});
+    slots.object.object_information.reachability = .Global;
     return try token.heap.track(slots.asValue());
 }
 
@@ -176,8 +179,8 @@ const addrinfo_slots = &[_][]const u8{
 };
 
 fn requiredSizeForAddrInfoPrototypeAllocation() usize {
-    var required_size = Object.Map.Slots.requiredSizeForAllocation(addrinfo_slots.len) +
-        Object.Slots.requiredSizeForAllocation(addrinfo_slots.len);
+    var required_size = SlotsMap.requiredSizeForAllocation(addrinfo_slots.len) +
+        SlotsObject.requiredSizeForAllocation(addrinfo_slots.len);
     for (addrinfo_slots) |slot_name| {
         required_size += ByteArray.requiredSizeForAllocation(slot_name.len);
     }
@@ -185,18 +188,18 @@ fn requiredSizeForAddrInfoPrototypeAllocation() usize {
 }
 
 fn buildAddrInfoPrototype(self: *Self, token: *Heap.AllocationToken) !void {
-    const map = Object.Map.Slots.create(self.getMapMap(), token, addrinfo_slots.len);
-    map.map.header.setGloballyReachable(true);
-    var map_builder = map.getMapBuilder(token);
+    const slots_map = SlotsMap.create(self.getMapMap(), token, addrinfo_slots.len);
+    slots_map.map.object.object_information.reachability = .Global;
+    var map_builder = slots_map.getMapBuilder(token);
 
     for (addrinfo_slots) |slot_name| {
         const slot_name_byte_array = ByteArray.createFromString(token, slot_name);
         map_builder.addSlot(Slot.initAssignable(slot_name_byte_array, .NotParent, self.nil()));
     }
 
-    const object = map_builder.createObject(self.current_actor.id);
-    object.header.setGloballyReachable(true);
-    self.addrinfo_prototype = try self.heap.track(object.asValue());
+    const prototype = map_builder.createObject(self.current_actor.id);
+    prototype.object.object_information.reachability = .Global;
+    self.addrinfo_prototype = try self.heap.track(prototype.asValue());
 }
 
 pub fn destroy(self: *Self) void {

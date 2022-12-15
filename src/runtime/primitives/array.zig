@@ -7,9 +7,10 @@ const Allocator = std.mem.Allocator;
 
 const Heap = @import("../Heap.zig");
 const Value = @import("../value.zig").Value;
-const Object = @import("../Object.zig");
-const traversal = @import("../object/traversal.zig");
+const Object = @import("../object.zig").Object;
+const traversal = @import("../object_traversal.zig");
 const Completion = @import("../Completion.zig");
+const array_object = @import("../objects/array.zig");
 const ExecutionResult = @import("../interpreter.zig").ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
@@ -23,20 +24,20 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
     const arguments = context.getArguments("_ArrayCopySize:FillingExtrasWith:");
     const size = try arguments.getInteger(0, .Unsigned);
 
-    const required_memory = Object.Map.Array.requiredSizeForAllocation() + Object.Array.requiredSizeForAllocation(@intCast(u64, size));
+    const required_memory = array_object.ArrayMap.requiredSizeForAllocation() + array_object.Array.requiredSizeForAllocation(@intCast(u64, size));
     var token = try context.vm.heap.getAllocation(required_memory);
     defer token.deinit();
 
     if (size == 0) {
-        const array_map = Object.Map.Array.create(context.vm.getMapMap(), &token, 0);
-        const array = Object.Array.createWithValues(&token, context.actor.id, array_map, &[_]Value{}, null);
+        const array_map = array_object.ArrayMap.create(context.vm.getMapMap(), &token, 0);
+        const array = array_object.Array.createWithValues(&token, context.actor.id, array_map, &[_]Value{}, null);
         return ExecutionResult.completion(Completion.initNormal(array.asValue()));
     } else {
         const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
         const filler = arguments.getValue(1);
 
-        const new_array_map = Object.Map.Array.create(context.vm.getMapMap(), &token, @intCast(u64, size));
-        const new_array = Object.Array.createWithValues(&token, context.actor.id, new_array_map, receiver.getValues(), filler);
+        const new_array_map = array_object.ArrayMap.create(context.vm.getMapMap(), &token, @intCast(u64, size));
+        const new_array = array_object.Array.createWithValues(&token, context.actor.id, new_array_map, receiver.getValues(), filler);
         return ExecutionResult.completion(Completion.initNormal(new_array.asValue()));
     }
 }
@@ -104,12 +105,12 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
 
     array_values[position] = new_value;
 
-    if (receiver.header.isGloballyReachable()) {
+    if (receiver.object.object_information.reachability == .Global) {
         // Mark the object graph of new_value as globally reachable
         _ = traversal.traverseNonGloballyReachableObjectGraph(new_value, {}, struct {
-            fn f(c: void, object: Object) error{}!Object {
+            fn f(c: void, object: Object.Ptr) error{}!Object.Ptr {
                 _ = c;
-                object.header.setGloballyReachable(true);
+                object.object_information.reachability = .Global;
                 return object;
             }
         }.f) catch unreachable;

@@ -7,13 +7,15 @@ const std = @import("std");
 const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const Value = @import("../value.zig").Value;
-const bless = @import("../object/bless.zig");
-const Object = @import("../Object.zig");
+const bless = @import("../object_bless.zig");
 const Completion = @import("../Completion.zig");
+const ActorObject = @import("../objects/actor.zig").Actor;
 const SourceRange = @import("../SourceRange.zig");
+const MethodObject = @import("../objects/method.zig").Method;
 const runtime_error = @import("../error.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const ExecutionResult = @import("../interpreter.zig").ExecutionResult;
+const ActorProxyObject = @import("../objects/actor_proxy.zig").ActorProxy;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 /// Find the given selector as a method suitable for spawning an actor.
@@ -25,7 +27,7 @@ fn findActorMethod(
     source_range: SourceRange,
     receiver: Value,
     selector: []const u8,
-    out_method: **Object.Method,
+    out_method: **MethodObject,
 ) !?Completion {
     const method = method: {
         switch (receiver.lookup(vm, selector)) {
@@ -36,16 +38,17 @@ fn findActorMethod(
                 return try Completion.initRuntimeError(vm, source_range, "Spawning actor with non-unary method '{s}' not permitted", .{selector});
             },
             .Regular => |lookup_result| {
-                if (!(lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject())) {
-                    return Completion.initNormal(lookup_result);
+                if (lookup_result.isObjectReference()) {
+                    if (lookup_result.asObject().asType(.Method)) |lookup_result_as_method| {
+                        if (lookup_result_as_method.getArgumentSlotCount() != 0) {
+                            return try Completion.initRuntimeError(vm, source_range, "Spawning actor with non-unary method '{s}' not permitted", .{selector});
+                        }
+
+                        break :method lookup_result_as_method;
+                    }
                 }
 
-                const lookup_result_as_method = lookup_result.asObject().asMethodObject();
-                if (lookup_result_as_method.getArgumentSlotCount() != 0) {
-                    return try Completion.initRuntimeError(vm, source_range, "Spawning actor with non-unary method '{s}' not permitted", .{selector});
-                }
-
-                break :method lookup_result_as_method;
+                return Completion.initNormal(lookup_result);
             },
             .ActorMessage => {
                 return try Completion.initRuntimeError(vm, source_range, "Spawning actor by sending message to actor proxy not permitted", .{});
@@ -71,13 +74,13 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
 
     // FIXME: We should perhaps allow any object to be the genesis actor
     //        context, so blocks can also work for example.
-    if (!(receiver.isObjectReference() and receiver.asObject().isSlotsObject())) {
+    if (!(receiver.isObjectReference() and receiver.asObject().object_information.object_type == .Slots)) {
         return ExecutionResult.completion(
             try Completion.initRuntimeError(context.vm, context.source_range, "Expected receiver of _Genesis: to be a slots object", .{}),
         );
     }
 
-    var method: *Object.Method = undefined;
+    var method: *MethodObject = undefined;
     if (try findActorMethod(
         context.vm,
         context.source_range,
@@ -94,10 +97,10 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
 
         var token = try context.vm.heap.getAllocation(
             method.requiredSizeForActivation() +
-                Object.Actor.requiredSizeForAllocation(),
+                ActorObject.requiredSizeForAllocation(),
         );
 
-        method = tracked_method.getValue().asObject().asMethodObject();
+        method = tracked_method.getValue().asObject().mustBeType(.Method);
         receiver = context.receiver.getValue();
 
         break :token token;
@@ -116,7 +119,7 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
 
         const blessed_receiver = try bless.bless(context.vm.heap, genesis_actor.id, receiver);
 
-        method = tracked_method.getValue().asObject().asMethodObject();
+        method = tracked_method.getValue().asObject().mustBeType(.Method);
 
         break :blessed_receiver blessed_receiver;
     };
@@ -148,7 +151,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
     // FIXME: We should perhaps allow any object to receive a message context,
     //        so blocks can also work for example.
-    if (!(receiver.isObjectReference() and receiver.asObject().isSlotsObject())) {
+    if (!(receiver.isObjectReference() and receiver.asObject().object_information.object_type == .Slots)) {
         return ExecutionResult.completion(
             try Completion.initRuntimeError(context.vm, context.source_range, "Expected receiver of _ActorSpawn: to be a slots object", .{}),
         );
@@ -157,7 +160,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     // NOTE: Need to advance the current actor to the next instruction to be returned to after the this actor exits.
     context.actor.activation_stack.getCurrent().advanceInstruction();
 
-    var spawn_method: *Object.Method = undefined;
+    var spawn_method: *MethodObject = undefined;
     if (try findActorMethod(
         context.vm,
         context.source_range,
@@ -189,7 +192,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
             spawn_method.requiredSizeForActivation(),
         );
 
-        spawn_method = tracked_method.getValue().asObject().asMethodObject();
+        spawn_method = tracked_method.getValue().asObject().mustBeType(.Method);
         receiver = context.receiver.getValue();
 
         break :token token;
@@ -259,7 +262,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         );
     };
 
-    var entrypoint_method: *Object.Method = undefined;
+    var entrypoint_method: *MethodObject = undefined;
 
     if (try findActorMethod(
         context.vm,
@@ -280,13 +283,13 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         var tracked_new_actor_context = try context.vm.heap.track(new_actor_context);
         defer tracked_new_actor_context.untrack(context.vm.heap);
 
-        var required_memory = Object.Actor.requiredSizeForAllocation();
+        var required_memory = ActorObject.requiredSizeForAllocation();
         if (context.actor != genesis_actor)
-            required_memory += Object.ActorProxy.requiredSizeForAllocation();
+            required_memory += ActorProxyObject.requiredSizeForAllocation();
 
         var inner_token = try context.vm.heap.getAllocation(required_memory);
 
-        entrypoint_method = tracked_method.getValue().asObject().asMethodObject();
+        entrypoint_method = tracked_method.getValue().asObject().mustBeType(.Method);
         new_actor_context = tracked_new_actor_context.getValue();
         receiver = context.receiver.getValue();
 
@@ -304,7 +307,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     // actor who spawned it, if it wasn't the genesis actor that spawned the
     // new actor.
     if (context.actor != genesis_actor) {
-        const new_actor_proxy = Object.ActorProxy.create(context.vm.getMapMap(), &token, context.actor.id, new_actor.actor_object.get());
+        const new_actor_proxy = ActorProxyObject.create(context.vm.getMapMap(), &token, context.actor.id, new_actor.actor_object.get());
         context.actor.writeRegister(context.target_location, new_actor_proxy.asValue());
         context.actor.yield_reason = .ActorSpawned;
         context.vm.switchToActor(genesis_actor);
@@ -317,7 +320,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
         const blessed_new_actor_context = try bless.bless(context.vm.heap, new_actor.id, new_actor_context);
 
-        entrypoint_method = tracked_method.getValue().asObject().asMethodObject();
+        entrypoint_method = tracked_method.getValue().asObject().mustBeType(.Method);
 
         break :blessed_new_actor_context blessed_new_actor_context;
     };
@@ -330,7 +333,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
         var inner_token = try context.vm.heap.getAllocation(entrypoint_method.requiredSizeForActivation());
 
-        entrypoint_method = tracked_method.getValue().asObject().asMethodObject();
+        entrypoint_method = tracked_method.getValue().asObject().mustBeType(.Method);
         break :token inner_token;
     };
 
@@ -456,12 +459,12 @@ pub fn ActorSender(context: *PrimitiveContext) !ExecutionResult {
     // FIXME: It would be nice to use a single actor proxy instead of spawning
     //        them on demand, as replying to senders is a common operation.
     var token = try context.vm.heap.getAllocation(
-        Object.ActorProxy.requiredSizeForAllocation(),
+        ActorProxyObject.requiredSizeForAllocation(),
     );
     defer token.deinit();
 
     const actor_object = context.actor.message_sender.?.get();
-    const actor_proxy = Object.ActorProxy.create(context.vm.getMapMap(), &token, context.actor.id, actor_object);
+    const actor_proxy = ActorProxyObject.create(context.vm.getMapMap(), &token, context.actor.id, actor_object);
 
     return ExecutionResult.completion(Completion.initNormal(actor_proxy.asValue()));
 }

@@ -6,9 +6,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Value = @import("../value.zig").Value;
-const Object = @import("../Object.zig");
 const ByteArray = @import("../ByteArray.zig");
 const Completion = @import("../Completion.zig");
+const ByteArrayObject = @import("../objects/byte_array.zig").ByteArray;
 const ExecutionResult = @import("../interpreter.zig").ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
@@ -94,7 +94,7 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
     const filler = filler_contents[0];
 
     var token = try context.vm.heap.getAllocation(
-        Object.ByteArray.requiredSizeForAllocation(@intCast(u64, size)),
+        ByteArrayObject.requiredSizeForAllocation(@intCast(u64, size)),
     );
     defer token.deinit();
 
@@ -111,7 +111,7 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
         std.mem.set(u8, new_byte_array.getValues()[bytes_to_copy..], filler);
     }
 
-    const byte_array_object = Object.ByteArray.create(context.vm.getMapMap(), &token, context.actor.id, new_byte_array);
+    const byte_array_object = ByteArrayObject.create(context.vm.getMapMap(), &token, context.actor.id, new_byte_array);
     return ExecutionResult.completion(Completion.initNormal(byte_array_object.asValue()));
 }
 
@@ -150,7 +150,7 @@ pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
     const argument_size = argument.getValues().len;
 
     var token = try context.vm.heap.getAllocation(
-        Object.ByteArray.requiredSizeForAllocation(receiver_size + argument_size),
+        ByteArrayObject.requiredSizeForAllocation(receiver_size + argument_size),
     );
     defer token.deinit();
 
@@ -162,6 +162,6 @@ pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
     std.mem.copy(u8, new_byte_array.getValues()[0..receiver_size], receiver.getValues());
     std.mem.copy(u8, new_byte_array.getValues()[receiver_size..], argument.getValues());
 
-    const byte_array_object = Object.ByteArray.create(context.vm.getMapMap(), &token, context.actor.id, new_byte_array);
+    const byte_array_object = ByteArrayObject.create(context.vm.getMapMap(), &token, context.actor.id, new_byte_array);
     return ExecutionResult.completion(Completion.initNormal(byte_array_object.asValue()));
 }

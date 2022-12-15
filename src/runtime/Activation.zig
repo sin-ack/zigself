@@ -9,12 +9,12 @@ const Allocator = std.mem.Allocator;
 const Actor = @import("./Actor.zig");
 const value = @import("./value.zig");
 const Value = value.Value;
-const Object = @import("./Object.zig");
 const bytecode = @import("./bytecode.zig");
 const SourceRange = @import("./SourceRange.zig");
 const IntegerValue = value.IntegerValue;
+const MethodObject = @import("objects/method.zig").Method;
 const VirtualMachine = @import("./VirtualMachine.zig");
-const ActivationValue = value.ActivationValue;
+const ActivationObject = @import("objects/activation.zig").Activation;
 
 /// The ID of the activation which is used with ActivationRef in order to check
 /// whether the activation is still alive or not.
@@ -22,7 +22,7 @@ activation_id: u64,
 /// The activation object which holds the receiver for this activation and the
 /// arguments + assignable slots defined on the method or block. This is the
 /// response to the "self" object in an activation.
-activation_object: ActivationValue,
+activation_object: ActivationObject.Value,
 /// The location to which the result of the activation (obtained via the
 /// exit_activation instruction) is written.
 target_location: bytecode.RegisterLocation,
@@ -58,7 +58,7 @@ const Self = @This();
 /// Creates a copy of `created_from`.
 pub fn initInPlace(
     self: *Self,
-    activation_object: ActivationValue,
+    activation_object: ActivationObject.Value,
     target_location: bytecode.RegisterLocation,
     stack_snapshot: Actor.StackSnapshot,
     creator_message: Value,
@@ -83,7 +83,7 @@ pub fn takeRef(self: *Self, stack: ActivationStack) ActivationRef {
 }
 
 /// Return the result of the `self` message for the current context.
-pub fn selfObject(self: Self) ActivationValue {
+pub fn selfObject(self: Self) ActivationObject.Value {
     return self.activation_object;
 }
 
@@ -227,12 +227,12 @@ pub const ActivationStack = struct {
         var source_range = SourceRange.initNoRef(current_executable, .{ .start = 0, .end = 1 });
 
         var token = try vm.heap.getAllocation(
-            Object.Method.requiredSizeForCreatingTopLevelContext() +
-                Object.Activation.requiredSizeForAllocation(0, 0),
+            MethodObject.requiredSizeForCreatingTopLevelContext() +
+                ActivationObject.requiredSizeForAllocation(0, 0),
         );
         defer token.deinit();
 
-        const toplevel_context_method = try Object.Method.createTopLevelContextForExecutable(vm, &token, new_executable, new_executable.value.getEntrypointBlock());
+        const toplevel_context_method = try MethodObject.createTopLevelContextForExecutable(vm, &token, new_executable, new_executable.value.getEntrypointBlock());
         const activation_slot = try self.getNewActivationSlot(vm.allocator);
         toplevel_context_method.activateMethod(vm, &token, vm.current_actor.id, vm.lobby(), &.{}, target_location, source_range, activation_slot);
     }

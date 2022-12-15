@@ -6,13 +6,13 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Slot = @import("./slot.zig").Slot;
-const Object = @import("./Object.zig");
+const Object = @import("./object.zig").Object;
 const Value = @import("./value.zig").Value;
 const VirtualMachine = @import("./VirtualMachine.zig");
 
 pub const InspectDisplayType = enum { Inline, Multiline };
 const VisitedObjectLink = struct {
-    object: Object,
+    object: Object.Ptr,
     previous: ?*const VisitedObjectLink,
 };
 
@@ -39,7 +39,7 @@ fn inspectValueInternal(
 fn inspectObject(
     comptime display_type: InspectDisplayType,
     vm: *VirtualMachine,
-    object: Object,
+    object: Object.Ptr,
     indent: usize,
     visited_object_link: ?*const VisitedObjectLink,
 ) Allocator.Error!void {
@@ -81,30 +81,31 @@ fn inspectObject(
         }
     }
 
-    if (object.header.isGloballyReachable()) {
+    if (object.object_information.reachability == .Global) {
         std.debug.print("(G) ", .{});
     }
 
-    std.debug.print("(#{}) ", .{object.header.getActorID()});
+    std.debug.print("(#{}) ", .{object.object_information.actor_id});
 
-    switch (object.header.getObjectType()) {
-        .ForwardingReference, .Map => unreachable,
+    // FIXME: Move this into object delegation.
+    switch (object.object_information.object_type) {
+        .ForwardedObject, .Map => unreachable,
         .Slots => {
-            const slots = object.asSlotsObject();
+            const slots = object.mustBeType(.Slots);
 
             std.debug.print("(|{s}", .{separator});
             try inspectSlots(display_type, vm, slots, indent + 2, separator, &my_link);
             printWithIndent(display_type, indent, "|)", .{});
         },
         .Activation => {
-            const activation = object.asActivationObject();
+            const activation = object.mustBeType(.Activation);
 
             std.debug.print("<activation object> (|{s}", .{separator});
             try inspectSlots(display_type, vm, activation, indent + 2, separator, &my_link);
             printWithIndent(display_type, indent, "|)", .{});
         },
         .Method => {
-            const method = object.asMethodObject();
+            const method = object.mustBeType(.Method);
 
             std.debug.print("<method object \"{s}\"> ", .{method.getMap().method_name.asByteArray().getValues()});
 
@@ -117,7 +118,7 @@ fn inspectObject(
             }
         },
         .Block => {
-            const block = object.asBlockObject();
+            const block = object.mustBeType(.Block);
 
             std.debug.print("<block object> ", .{});
 
@@ -130,12 +131,12 @@ fn inspectObject(
             }
         },
         .ByteArray => {
-            const byte_array = object.asByteArrayObject();
+            const byte_array = object.mustBeType(.ByteArray);
             const values = byte_array.getValues();
             std.debug.print("<byte array size: {d}> \"{s}\"", .{ values.len, values });
         },
         .Array => {
-            const array = object.asArrayObject();
+            const array = object.mustBeType(.Array);
             const values = array.getValues();
 
             std.debug.print("<array size: {d}> ", .{values.len});
@@ -156,7 +157,7 @@ fn inspectObject(
             }
         },
         .Managed => {
-            const managed = object.asManaged();
+            const managed = object.mustBeType(.Managed);
             std.debug.print("<managed object: {}> ", .{managed.getManagedType()});
             try inspectValueInternal(display_type, vm, managed.value, indent, &my_link);
         },

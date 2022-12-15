@@ -5,8 +5,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Object = @import("../Object.zig");
+const Object = @import("../object.zig").Object;
 const Completion = @import("../Completion.zig");
+const SlotsObject = @import("../objects/slots.zig").Slots;
 const value_inspector = @import("../value_inspector.zig");
 const ExecutionResult = @import("../interpreter.zig").ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
@@ -30,7 +31,7 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
     }
 
     var token = try context.vm.heap.getAllocation(
-        try Object.Slots.requiredSizeForMerging(receiver, argument, context.vm.allocator),
+        try SlotsObject.requiredSizeForMerging(receiver, argument, context.vm.allocator),
     );
     defer token.deinit();
 
