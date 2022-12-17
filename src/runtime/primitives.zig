@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
+const builtin = @import("builtin");
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
@@ -204,6 +205,61 @@ const PrimitiveSpec = struct {
     }
 };
 
+fn makeDisabledPrimitive(comptime primitive_name: []const u8) PrimitiveFunction {
+    return struct {
+        fn PrimitiveDisabled(context: *PrimitiveContext) PrimitiveError!ExecutionResult {
+            return ExecutionResult.completion(
+                try Completion.initRuntimeError(
+                    context.vm,
+                    context.source_range,
+                    "_" ++ primitive_name ++ " is disabled on this target",
+                    .{},
+                ),
+            );
+        }
+    }.PrimitiveDisabled;
+}
+
+const ConditionalPrimitiveSpec = struct {
+    name: []const u8,
+    arity: u8,
+    function_name: []const u8,
+
+    pub fn asConcrete(comptime self: @This(), comptime Module: type) PrimitiveSpec {
+        return .{ .name = self.name, .arity = self.arity, .function = @field(Module, self.function_name) };
+    }
+
+    pub fn asDisabled(comptime self: @This()) PrimitiveSpec {
+        return .{ .name = self.name, .arity = self.arity, .function = makeDisabledPrimitive(self.name) };
+    }
+};
+
+fn disabledPrimitivesForTarget(comptime prims: []const ConditionalPrimitiveSpec) []const PrimitiveSpec {
+    var result: []const PrimitiveSpec = &[_]PrimitiveSpec{};
+
+    inline for (prims) |prim| {
+        result = result ++ &[_]PrimitiveSpec{prim.asDisabled()};
+    }
+
+    return result;
+}
+
+/// Return the primitives as-is if the condition is true; otherwise return
+/// a disabled primitive for each of the primitives passed.
+fn conditionalPrimitives(comptime condition: bool, comptime Module: type, comptime prims: []const ConditionalPrimitiveSpec) []const PrimitiveSpec {
+    if (condition) {
+        var result = [_]PrimitiveSpec{};
+
+        inline for (prims) |prim| {
+            result = result ++ [_]PrimitiveSpec{prim.asConcrete(Module)};
+        }
+
+        return &result;
+    }
+
+    return disabledPrimitivesForTarget(prims);
+}
+
 const PrimitiveRegistry = &[_]PrimitiveSpec{
     // basic primitives
     .{ .name = "Nil", .arity = 0, .function = basic_primitives.Nil },
@@ -243,20 +299,6 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "Inspect", .arity = 0, .function = object_primitives.Inspect },
     .{ .name = "Clone", .arity = 0, .function = object_primitives.Clone },
     .{ .name = "Eq:", .arity = 1, .function = object_primitives.Eq },
-    // System call primitives
-    .{ .name = "ManagedStdin", .arity = 0, .function = system_call_primitives.ManagedStdin },
-    .{ .name = "ManagedStdout", .arity = 0, .function = system_call_primitives.ManagedStdout },
-    .{ .name = "Open:WithFlags:IfFail:", .arity = 3, .function = system_call_primitives.Open_WithFlags_IfFail },
-    .{ .name = "Read:BytesInto:AtOffset:From:IfFail:", .arity = 5, .function = system_call_primitives.Read_BytesInto_AtOffset_From_IfFail },
-    .{ .name = "Write:BytesFrom:AtOffset:Into:IfFail:", .arity = 5, .function = system_call_primitives.Write_BytesFrom_AtOffset_Into_IfFail },
-    .{ .name = "Close:", .arity = 1, .function = system_call_primitives.Close },
-    .{ .name = "Exit:", .arity = 1, .function = system_call_primitives.Exit },
-    .{ .name = "PollFDs:Events:WaitingForMS:IfFail:", .arity = 4, .function = system_call_primitives.PollFDs_Events_WaitingForMS_IfFail },
-    .{ .name = "GetAddrInfoForHost:Port:Family:SocketType:Protocol:Flags:IfFail:", .arity = 7, .function = system_call_primitives.GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail },
-    .{ .name = "SocketWithFamily:Type:Protocol:IfFail:", .arity = 4, .function = system_call_primitives.SocketWithFamily_Type_Protocol_IfFail },
-    .{ .name = "BindFD:ToSockaddrBytes:IfFail:", .arity = 3, .function = system_call_primitives.BindFD_ToSockaddrBytes_IfFail },
-    .{ .name = "ListenOnFD:WithBacklog:IfFail:", .arity = 3, .function = system_call_primitives.ListenOnFD_WithBacklog_IfFail },
-    .{ .name = "AcceptFromFD:IfFail:", .arity = 2, .function = system_call_primitives.AcceptFromFD_IfFail },
     // Actor primitives
     .{ .name = "Genesis:", .arity = 1, .function = actor_primitives.Genesis },
     .{ .name = "ActorSpawn:", .arity = 1, .function = actor_primitives.ActorSpawn },
@@ -266,7 +308,24 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "ActorYield", .arity = 0, .function = actor_primitives.ActorYield },
     .{ .name = "ActorSender", .arity = 0, .function = actor_primitives.ActorSender },
     .{ .name = "ActorBlockedFD", .arity = 0, .function = actor_primitives.ActorBlockedFD },
-};
+    // System call primitives
+    .{ .name = "ManagedStdin", .arity = 0, .function = system_call_primitives.ManagedStdin },
+    .{ .name = "ManagedStdout", .arity = 0, .function = system_call_primitives.ManagedStdout },
+    .{ .name = "Open:WithFlags:IfFail:", .arity = 3, .function = system_call_primitives.Open_WithFlags_IfFail },
+    .{ .name = "Read:BytesInto:AtOffset:From:IfFail:", .arity = 5, .function = system_call_primitives.Read_BytesInto_AtOffset_From_IfFail },
+    .{ .name = "Write:BytesFrom:AtOffset:Into:IfFail:", .arity = 5, .function = system_call_primitives.Write_BytesFrom_AtOffset_Into_IfFail },
+    .{ .name = "Close:", .arity = 1, .function = system_call_primitives.Close },
+    .{ .name = "Exit:", .arity = 1, .function = system_call_primitives.Exit },
+    .{ .name = "PollFDs:Events:WaitingForMS:IfFail:", .arity = 4, .function = system_call_primitives.PollFDs_Events_WaitingForMS_IfFail },
+}
+// FIXME: This is just a very basic condition to make wasm builds work. Set up a proper conditional system so that we can have i.e. Linux-specific primitives also.
+++ conditionalPrimitives(builtin.os.tag != .wasi, system_call_primitives, &[_]ConditionalPrimitiveSpec{
+    .{ .name = "GetAddrInfoForHost:Port:Family:SocketType:Protocol:Flags:IfFail:", .arity = 7, .function_name = "GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail" },
+    .{ .name = "SocketWithFamily:Type:Protocol:IfFail:", .arity = 4, .function_name = "SocketWithFamily_Type_Protocol_IfFail" },
+    .{ .name = "BindFD:ToSockaddrBytes:IfFail:", .arity = 3, .function_name = "BindFD_ToSockaddrBytes_IfFail" },
+    .{ .name = "ListenOnFD:WithBacklog:IfFail:", .arity = 3, .function_name = "ListenOnFD_WithBacklog_IfFail" },
+    .{ .name = "AcceptFromFD:IfFail:", .arity = 2, .function_name = "AcceptFromFD_IfFail" },
+});
 
 // FIXME: This is very naive! We shouldn't need to linear search every single
 //        time.
