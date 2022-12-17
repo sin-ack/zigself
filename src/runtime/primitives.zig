@@ -244,6 +244,8 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "Clone", .arity = 0, .function = object_primitives.Clone },
     .{ .name = "Eq:", .arity = 1, .function = object_primitives.Eq },
     // System call primitives
+    .{ .name = "ManagedStdin", .arity = 0, .function = system_call_primitives.ManagedStdin },
+    .{ .name = "ManagedStdout", .arity = 0, .function = system_call_primitives.ManagedStdout },
     .{ .name = "Open:WithFlags:IfFail:", .arity = 3, .function = system_call_primitives.Open_WithFlags_IfFail },
     .{ .name = "Read:BytesInto:AtOffset:From:IfFail:", .arity = 5, .function = system_call_primitives.Read_BytesInto_AtOffset_From_IfFail },
     .{ .name = "Write:BytesFrom:AtOffset:Into:IfFail:", .arity = 5, .function = system_call_primitives.Write_BytesFrom_AtOffset_Into_IfFail },

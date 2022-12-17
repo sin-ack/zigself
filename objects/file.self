@@ -10,6 +10,8 @@ std traits _AddSlots: (|
 
         defaultReadMaximum = 8 kib.
 
+        copyAdopting: fd = (clone; fd: fd).
+
         "FIXME: Add O_* flags."
         open: path = (open: path IfFail: raiseError).
         open: path WithFlags: flags = (open: path WithFlags: flags IfFail: raiseError).
@@ -119,6 +121,6 @@ std _AddSlots: (|
 |).
 
 std _AddSlots: (|
-    in = std file open: '/dev/stdin'.
-    out = std file open: '/dev/stdout' WithFlags: 1.
+    in = std file copyAdopting: _ManagedStdin.
+    out = std file copyAdopting: _ManagedStdout.
 |).

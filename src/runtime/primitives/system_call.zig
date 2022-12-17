@@ -47,6 +47,14 @@ fn makeManagedFD(context: *PrimitiveContext, native_fd: std.os.fd_t, flags: File
     return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
 }
 
+pub fn ManagedStdin(context: *PrimitiveContext) !ExecutionResult {
+    return makeManagedFD(context, std.os.STDIN_FILENO, .{ .close_during_finalization = false });
+}
+
+pub fn ManagedStdout(context: *PrimitiveContext) !ExecutionResult {
+    return makeManagedFD(context, std.os.STDOUT_FILENO, .{ .close_during_finalization = false });
+}
+
 /// Open the path with the given flags and return a file descriptor.
 /// On failure, call the given block with the errno as the argument.
 pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
