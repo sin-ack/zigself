@@ -35,6 +35,16 @@ That's it! If you want to build a release version, you can build one with
 
 There is an (experimental) REPL that you can run with `zig build run -- repl.self`.
 
+## Building for Wasm
+
+ZigSelf is able to run as a WebAssembly module via WASI. To build it, add the
+`wasm32-wasi` target when building: `zig build -Dtarget=wasm32-wasi`
+
+You can then run the resulting executable at `zig-out/bin/self.wasm` with
+[Wasmtime](https://github.com/bytecodealliance/wasmtime). Currently ZigSelf does
+not support loading Self code via stdin, so you will need to give it filesystem
+access like so: `wasmtime --mapdir=.::. zig-out/bin/self.wasm <script name>`
+
 ## Contributing
 
 All contributions are welcome! Please follow [the contribution
