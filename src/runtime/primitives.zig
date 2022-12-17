@@ -196,7 +196,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     // basic primitives
     .{ .name = "Nil", .arity = 0, .function = basic_primitives.Nil },
     .{ .name = "RunScript", .arity = 0, .function = basic_primitives.RunScript },
-    .{ .name = "EvaluateStringIfFail:", .arity = 1, .function = basic_primitives.EvaluateStringIfFail },
+    .{ .name = "EvaluateStringContext:IfFail:", .arity = 2, .function = basic_primitives.EvaluateStringContext_IfFail },
     .{ .name = "Error:", .arity = 1, .function = basic_primitives.Error },
     .{ .name = "Restart", .arity = 0, .function = basic_primitives.Restart },
     // byte array primitives

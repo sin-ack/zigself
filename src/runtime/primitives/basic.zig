@@ -6,12 +6,22 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("../Heap.zig");
+const Slot = @import("../slot.zig").Slot;
+const Actor = @import("../Actor.zig");
 const Script = @import("../../language/script.zig");
 const AstGen = @import("../bytecode/AstGen.zig");
 const CodeGen = @import("../bytecode/CodeGen.zig");
+const SlotsMap = @import("../objects/slots.zig").SlotsMap;
+const MethodMap = @import("../objects/method.zig").MethodMap;
+const ByteArray = @import("../ByteArray.zig");
 const Completion = @import("../Completion.zig");
+const ActorObject = @import("../objects/actor.zig").Actor;
+const SlotsObject = @import("../objects/slots.zig").Slots;
 const interpreter = @import("../interpreter.zig");
+const MethodObject = @import("../objects/method.zig").Method;
+const object_bless = @import("../object_bless.zig");
 const error_set_utils = @import("../../utility/error_set.zig");
+const ActorProxyObject = @import("../objects/actor_proxy.zig").ActorProxy;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 const ExecutionResult = interpreter.ExecutionResult;
@@ -84,24 +94,16 @@ pub fn RunScript(context: *PrimitiveContext) !ExecutionResult {
     return ExecutionResult.activationChange();
 }
 
-pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
-    // FIXME: _EvaluateStringIfFail: should be replaced with _EvaluateString and
-    //       fail the current actor the same way _RunScript does. The REPL
-    //       should create a new actor for each string evaluation.
-    if (context.vm.isInActorMode())
-        @panic("TODO make '_EvaluateStringIfFail:' work with actor mode");
-
-    const arguments = context.getArguments("_EvaluateStringIfFail:");
+pub fn EvaluateStringContext_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const arguments = context.getArguments("_EvaluateStringContext:IfFail:");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
-    const failure_block = arguments.getValue(0);
+    const failure_block = arguments.getValue(1);
 
     const running_script_path = context.actor.activation_stack.getCurrent().definitionExecutable().value.definition_script.value.running_path;
     var script = try Script.createFromString(context.vm.allocator, running_script_path, receiver.getValues());
     defer script.unref();
 
-    const did_parse_without_errors = script.value.parseScript() catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-    };
+    const did_parse_without_errors = try script.value.parseScript();
 
     script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
     if (!did_parse_without_errors) {
@@ -142,49 +144,70 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
     const executable = try CodeGen.lowerExecutable(context.vm.allocator, ast_executable.value);
     defer executable.unref();
 
-    const stack_snapshot = context.vm.takeStackSnapshot();
-    var activation_before_script = context.actor.activation_stack.getCurrent();
-    try context.actor.activation_stack.pushSubEntrypointActivation(context.vm, context.target_location, executable);
+    const required_memory_for_actor_context =
+        ByteArray.requiredSizeForAllocation("evaluate".len) +
+        MethodMap.requiredSizeForAllocation(0) +
+        MethodObject.requiredSizeForAllocation(0);
+    const required_memory_for_spawn = ActorObject.requiredSizeForAllocation() +
+        ActorProxyObject.requiredSizeForAllocation();
+    var token = try context.vm.heap.getAllocation(required_memory_for_actor_context + required_memory_for_spawn);
+    defer token.deinit();
 
-    const activation_before_script_ref = activation_before_script.takeRef(context.actor.activation_stack);
+    const evaluation_context = arguments.getValue(0);
+    const genesis_actor = context.vm.genesis_actor.?;
 
-    var actor_result = try context.actor.executeUntil(context.vm, activation_before_script_ref);
-    switch (actor_result) {
-        .ActorSwitch => unreachable,
-        .Completion => |*completion| {
-            switch (completion.data) {
-                .RuntimeError => |err| {
-                    defer completion.deinit(context.vm);
+    // Create the actor object.
+    // NOTE: evaluation_context is a placeholder until we get the actor ID.
+    const new_actor = try Actor.create(context.vm, &token, evaluation_context);
+    errdefer new_actor.destroy(context.vm.allocator);
 
-                    // Refresh activation pointer
-                    activation_before_script = activation_before_script_ref.get(context.actor.activation_stack).?;
+    try context.vm.registerRegularActor(new_actor);
 
-                    // TODO: Pass error information to failure block
-                    std.debug.print("Received error while evaluating string: {s}\n", .{err.message});
-                    runtime_error.printTraceFromActivationStackUntil(context.actor.activation_stack.getStack(), err.source_range, activation_before_script);
+    const new_actor_proxy = ActorProxyObject.create(context.vm.getMapMap(), &token, context.actor.id, new_actor.actor_object.get());
 
-                    context.actor.activation_stack.restoreTo(activation_before_script);
-                    context.vm.restoreStackSnapshot(stack_snapshot);
+    const evaluate_method_name = ByteArray.createFromString(&token, "evaluate");
+    const evaluate_method_map = try MethodMap.create(context.vm.getMapMap(), &token, 0, 0, false, evaluate_method_name, executable.value.getEntrypointBlock(), executable);
+    var evaluate_method = MethodObject.create(&token, new_actor.id, evaluate_method_map, &.{});
 
-                    if (try interpreter.sendMessage(
-                        context.vm,
-                        context.actor,
-                        failure_block,
-                        "value",
-                        context.target_location,
-                        context.source_range,
-                    )) |block_completion| {
-                        return ExecutionResult.completion(block_completion);
-                    }
+    // Bless the evaluation context so that we can send it to the new actor.
+    const blessed_evaluation_context = try object_bless.bless(context.vm.heap, new_actor.id, evaluation_context);
+    new_actor.actor_object.get().context = blessed_evaluation_context;
 
-                    // Because we're changing the activation, we need to manually adjust the PC.
-                    activation_before_script.advanceInstruction();
-                    return ExecutionResult.activationChange();
-                },
-                else => return ExecutionResult.completion(completion.*),
-            }
-        },
-    }
+    // NOTE: Need to advance the current actor to the next instruction to be returned to after the this actor exits.
+    context.actor.activation_stack.getCurrent().advanceInstruction();
+
+    context.actor.writeRegister(context.target_location, new_actor_proxy.asValue());
+    context.actor.yield_reason = .ActorSpawned;
+    context.vm.switchToActor(genesis_actor);
+
+    token.deinit();
+    token = token: {
+        var tracked_method = try context.vm.heap.track(evaluate_method.asValue());
+        defer tracked_method.untrack(context.vm.heap);
+
+        var inner_token = try context.vm.heap.getAllocation(evaluate_method.requiredSizeForActivation());
+
+        evaluate_method = tracked_method.getValue().asObject().mustBeType(.Method);
+        break :token inner_token;
+    };
+
+    try new_actor.activateMethod(context.vm, &token, evaluate_method, context.target_location, context.source_range);
+
+    // Since we are switching actors (which we should in the "spawning an actor
+    // in another actor" case), we cannot return the new actor object normally.
+    // What we need to do instead is to write the new actor object to the target
+    // location of either the _ActorResume or the _ActorSpawn: prim_send
+    // instruction, which will be the instruction that's before the current one
+    // (because we advance the pc in each of the aforementioned primitives).
+    const genesis_current_activation = genesis_actor.activation_stack.getCurrent();
+    const genesis_pc_before_last = genesis_current_activation.pc - 1;
+    const genesis_activation_object = genesis_current_activation.activation_object.get();
+    const genesis_definition_block = genesis_activation_object.getBytecodeBlock();
+    const genesis_inst_before_last = genesis_definition_block.getInstruction(genesis_pc_before_last);
+
+    genesis_actor.writeRegister(genesis_inst_before_last.target, new_actor.actor_object.value);
+
+    return ExecutionResult.actorSwitch();
 }
 
 /// Raise the argument as an error. The argument must be a byte vector.
