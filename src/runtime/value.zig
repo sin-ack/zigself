@@ -97,7 +97,7 @@ pub const Value = packed struct {
     /// Return the object address stored in this object as a pointer.
     pub inline fn asObjectAddress(self: Value) [*]u64 {
         std.debug.assert(self.isObjectReference());
-        return @intToPtr([*]u64, self.data & ~ValueMarkerMask);
+        return @intToPtr([*]u64, @intCast(usize, self.data & ~ValueMarkerMask));
     }
 
     /// Return the object the address of which is stored in this value.
@@ -185,7 +185,7 @@ pub fn PointerValueAlignment(comptime T: type, comptime alignment: ?u29) type {
         }
 
         pub fn get(self: Self) PointerT {
-            return @intToPtr(PointerT, self.value.asUnsignedInteger());
+            return @intToPtr(PointerT, @intCast(usize, self.value.asUnsignedInteger()));
         }
     };
 }

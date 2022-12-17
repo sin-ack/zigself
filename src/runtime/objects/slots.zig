@@ -88,7 +88,7 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
             std.debug.assert(slot.isAssignable());
             std.debug.assert(!slot.isArgument());
 
-            return &getAssignableSlots(self)[slot.value.asUnsignedInteger()];
+            return &getAssignableSlots(self)[@intCast(usize, slot.value.asUnsignedInteger())];
         }
 
         /// Return a shallow copy of this object.

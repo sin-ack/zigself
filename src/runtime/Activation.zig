@@ -252,7 +252,7 @@ pub const ActivationRef = packed struct {
     }
 
     fn getPointer(self: ActivationRef, stack: ActivationStack) *Self {
-        return &stack.stack.items[self.offset.get()];
+        return &stack.stack.items[@intCast(usize, self.offset.get())];
     }
 
     pub fn isAlive(self: ActivationRef, stack: ActivationStack) bool {

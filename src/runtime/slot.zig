@@ -390,7 +390,7 @@ pub const Slot = packed struct {
 
             if (previous_slot.isAssignable()) {
                 const overwritten_assignable_slot_index = previous_slot.value.asUnsignedInteger();
-                _ = assignable_slot_values.orderedRemove(overwritten_assignable_slot_index);
+                _ = assignable_slot_values.orderedRemove(@intCast(usize, overwritten_assignable_slot_index));
 
                 // Go through all the previous slots, and subtract 1 from all
                 // the slots which have assignable slot indices larger than the

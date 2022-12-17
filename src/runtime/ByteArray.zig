@@ -37,7 +37,7 @@ pub fn getValues(self: Self) []u8 {
     const header_size = @sizeOf(Header);
     const total_length = self.header.length.get();
 
-    return @ptrCast([*]u8, self.header)[header_size..total_length];
+    return @ptrCast([*]u8, self.header)[header_size..@intCast(usize, total_length)];
 }
 
 pub fn asValue(self: Self) Value {
@@ -45,12 +45,12 @@ pub fn asValue(self: Self) Value {
 }
 
 pub fn getSizeInMemory(self: Self) usize {
-    return requiredSizeForAllocation(self.header.length.get() - @sizeOf(Header));
+    return requiredSizeForAllocation(@intCast(usize, self.header.length.get() - @sizeOf(Header)));
 }
 
 /// Return the size required for the byte vector with `length` amount of
 /// bytes to be stored inside.
-pub fn requiredSizeForAllocation(length: u64) usize {
+pub fn requiredSizeForAllocation(length: usize) usize {
     // A basic ceil
     const required_words = if (length == 0) 0 else ((length - 1) / @sizeOf(u64)) + 1;
 

@@ -174,10 +174,11 @@ pub const Activation = extern struct {
     pub fn getAssignableSlotValue(self: Activation.Ptr, slot: Slot) *GenericValue {
         std.debug.assert(slot.isAssignable());
 
+        const offset = @intCast(usize, slot.value.asUnsignedInteger());
         return if (slot.isArgument())
-            &self.getArgumentSlots()[slot.value.asUnsignedInteger()]
+            &self.getArgumentSlots()[offset]
         else
-            &self.getNonargumentSlots()[slot.value.asUnsignedInteger()];
+            &self.getNonargumentSlots()[offset];
     }
 
     pub fn canFinalize(self: Activation.Ptr) bool {
