@@ -68,6 +68,18 @@ pub const PrimitiveContext = struct {
     ) PrimitiveArguments(primitive_name) {
         return PrimitiveArguments(primitive_name).init(self);
     }
+
+    pub fn wouldOverflow(self: PrimitiveContext, comptime TargetType: type, argument: anytype, comptime argument_name: []const u8) !?ExecutionResult {
+        const ArgumentType = @TypeOf(argument);
+
+        if (@bitSizeOf(ArgumentType) >= @bitSizeOf(TargetType)) return null;
+
+        if (argument > std.math.maxInt(TargetType)) {
+            return try ExecutionResult.completion(Completion.initRuntimeError(self.vm, self.source_range, argument_name ++ " argument must be less than {} bits wide", .{@bitSizeOf(TargetType)}));
+        }
+
+        return null;
+    }
 };
 
 /// Helper struct for returning typed values for primitives (and returning

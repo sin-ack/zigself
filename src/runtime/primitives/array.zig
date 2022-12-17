@@ -23,8 +23,9 @@ const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionResult {
     const arguments = context.getArguments("_ArrayCopySize:FillingExtrasWith:");
     const size = try arguments.getInteger(0, .Unsigned);
+    if (try context.wouldOverflow(usize, size, "size")) |result| return result;
 
-    const required_memory = array_object.ArrayMap.requiredSizeForAllocation() + array_object.Array.requiredSizeForAllocation(@intCast(u64, size));
+    const required_memory = array_object.ArrayMap.requiredSizeForAllocation() + array_object.Array.requiredSizeForAllocation(@intCast(usize, size));
     var token = try context.vm.heap.getAllocation(required_memory);
     defer token.deinit();
 
@@ -36,7 +37,7 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
         const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
         const filler = arguments.getValue(1);
 
-        const new_array_map = array_object.ArrayMap.create(context.vm.getMapMap(), &token, @intCast(u64, size));
+        const new_array_map = array_object.ArrayMap.create(context.vm.getMapMap(), &token, @intCast(usize, size));
         const new_array = array_object.Array.createWithValues(&token, context.actor.id, new_array_map, receiver.getValues(), filler);
         return ExecutionResult.completion(Completion.initNormal(new_array.asValue()));
     }
@@ -55,6 +56,7 @@ pub fn ArrayAt(context: *PrimitiveContext) !ExecutionResult {
     const arguments = context.getArguments("_ArrayAt:");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
     const position = try arguments.getInteger(0, .Unsigned);
+    if (try context.wouldOverflow(usize, position, "position")) |result| return result;
 
     const array_values = receiver.getValues();
     if (position >= array_values.len) {
@@ -68,7 +70,7 @@ pub fn ArrayAt(context: *PrimitiveContext) !ExecutionResult {
         );
     }
 
-    return ExecutionResult.completion(Completion.initNormal(array_values[position]));
+    return ExecutionResult.completion(Completion.initNormal(array_values[@intCast(usize, position)]));
 }
 
 /// Place the object in the second argument to the integer position in the first
@@ -79,6 +81,8 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
     const position = try arguments.getInteger(0, .Unsigned);
     const new_value = arguments.getValue(1);
+
+    if (try context.wouldOverflow(usize, position, "position")) |result| return result;
 
     if (!context.actor.canWriteTo(context.receiver.getValue())) {
         return ExecutionResult.completion(
@@ -103,7 +107,7 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
         );
     }
 
-    array_values[position] = new_value;
+    array_values[@intCast(usize, position)] = new_value;
 
     if (receiver.object.object_information.reachability == .Global) {
         // Mark the object graph of new_value as globally reachable

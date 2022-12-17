@@ -25,7 +25,8 @@ pub fn ByteArraySize(context: *PrimitiveContext) !ExecutionResult {
 pub fn ByteAt(context: *PrimitiveContext) !ExecutionResult {
     const arguments = context.getArguments("_ByteAt:");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
-    const position = try arguments.getInteger(0, .Unsigned);
+    var position = try arguments.getInteger(0, .Unsigned);
+    if (try context.wouldOverflow(usize, position, "position")) |result| return result;
 
     const values = receiver.getValues();
     if (position >= values.len) {
@@ -37,7 +38,7 @@ pub fn ByteAt(context: *PrimitiveContext) !ExecutionResult {
         ));
     }
 
-    return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(values[position])));
+    return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(values[@intCast(usize, position)])));
 }
 
 /// Place the second argument at the position given by the first argument on the
@@ -48,6 +49,7 @@ pub fn ByteAt_Put(context: *PrimitiveContext) !ExecutionResult {
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
     const position = try arguments.getInteger(0, .Unsigned);
     const new_value = try arguments.getInteger(1, .Unsigned);
+    if (try context.wouldOverflow(usize, position, "position")) |result| return result;
 
     var values = receiver.getValues();
 
@@ -69,7 +71,7 @@ pub fn ByteAt_Put(context: *PrimitiveContext) !ExecutionResult {
         ));
     }
 
-    values[position] = @intCast(u8, new_value);
+    values[@intCast(usize, position)] = @intCast(u8, new_value);
     return ExecutionResult.completion(Completion.initNormal(receiver.asValue()));
 }
 
@@ -80,6 +82,7 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
     var receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
     const size = try arguments.getInteger(0, .Unsigned);
     const filler_byte_array = try arguments.getObject(1, .ByteArray);
+    if (try context.wouldOverflow(usize, size, "size")) |result| return result;
 
     const filler_contents = filler_byte_array.getValues();
     if (filler_contents.len != 1) {
@@ -94,7 +97,7 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
     const filler = filler_contents[0];
 
     var token = try context.vm.heap.getAllocation(
-        ByteArrayObject.requiredSizeForAllocation(@intCast(u64, size)),
+        ByteArrayObject.requiredSizeForAllocation(@intCast(usize, size)),
     );
     defer token.deinit();
 
