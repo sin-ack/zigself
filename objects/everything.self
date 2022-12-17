@@ -5,7 +5,7 @@ SPDX-License-Identifier: GPL-3.0-only
 "
 
 "Required by default slots"
-_AddSlots: (| nil = _Nil |).
+_AddSlots: (| nil = _Nil. lobby = self |).
 
 "Basic Self operations and objects."
 'globals.self' _RunScript.
