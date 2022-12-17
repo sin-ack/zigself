@@ -37,7 +37,7 @@ pub fn createFromFile(allocator: Allocator, file_path: []const u8) !*Self {
 
     var self = try allocator.create(Self);
     errdefer allocator.destroy(self);
-    try self.init(allocator, file_contents);
+    try self.init(allocator, file_contents, true);
     return self;
 }
 
@@ -47,11 +47,11 @@ pub fn createFromString(allocator: Allocator, contents: []const u8) !*Self {
 
     var self = try allocator.create(Self);
     errdefer allocator.destroy(self);
-    try self.init(allocator, contents_copy);
+    try self.init(allocator, contents_copy, false);
     return self;
 }
 
-fn init(self: *Self, allocator: Allocator, buffer: [:0]const u8) !void {
+fn init(self: *Self, allocator: Allocator, buffer: [:0]const u8, from_file: bool) !void {
     self.* = .{
         .allocator = allocator,
         .buffer = buffer,
@@ -65,6 +65,10 @@ fn init(self: *Self, allocator: Allocator, buffer: [:0]const u8) !void {
     errdefer self.line_offsets.deinit(allocator);
 
     var tokenizer = Tokenizer.init(self.buffer);
+    if (from_file) {
+        tokenizer.skipShebangFromStart();
+    }
+
     while (true) {
         const token = tokenizer.next();
         try self.tokens.append(allocator, .{

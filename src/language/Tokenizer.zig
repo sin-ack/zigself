@@ -35,6 +35,20 @@ pub fn init(buffer: [:0]const u8) Self {
     return .{ .buffer = buffer };
 }
 
+pub fn skipShebangFromStart(self: *Self) void {
+    std.debug.assert(self.offset == 0);
+
+    if (std.mem.startsWith(u8, self.buffer, "#!")) {
+        const first_newline = std.mem.indexOfScalar(u8, self.buffer, '\n');
+        if (first_newline) |nl| {
+            self.offset = nl;
+            return;
+        }
+
+        self.offset = self.buffer.len;
+    }
+}
+
 pub fn next(self: *Self) Token {
     var state = State.Start;
     var token = Token{
