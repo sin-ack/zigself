@@ -44,17 +44,19 @@ const MaximumHandlesInChunk = @divExact(ChunkSize - @sizeOf(Chunk), @sizeOf(Hand
 
 /// A chunk, starting with the metadata. Each chunk is exactly ChunkSize bytes.
 const Chunk = extern struct {
-    // These members will take up 40 bytes on 32-bit systems, and 56 bytes on
-    // 64-bit systems. Either way, they are aligned by 8 bytes.
-    magic: u64 align(@alignOf(usize)) = ChunkMagic,
+    magic: u64 align(@alignOf(u64)) = ChunkMagic,
+
+    // These two become 8 bytes on 32-bit and 16 bytes on 64-bit.
     original_allocation_ptr: [*]align(std.mem.page_size) u8 align(@alignOf(usize)),
     original_allocation_len: usize align(@alignOf(usize)),
+
     previous: ?*Chunk align(@alignOf(usize)) = null,
     next: ?*Chunk align(@alignOf(usize)) = null,
-    count: u64 align(@alignOf(usize)) = 0,
+
+    count: u64 align(@alignOf(u64)) = 0,
     /// The topmost handle we allocated (in @sizeOf(HandleType)s from the start
     /// of the chunk allocation area).
-    high_water_mark: u64 = 0,
+    high_water_mark: usize align(@alignOf(u64)) = 0,
 
     pub fn create() !*Chunk {
         const allocation = try aligned_allocator.allocate(ChunkSize, ChunkSize);
@@ -164,6 +166,11 @@ const Chunk = extern struct {
         return handle_address >= start_of_memory and handle_address < end_of_memory;
     }
 };
+
+comptime {
+    if (@sizeOf(Chunk) % @alignOf([*]u64) != 0)
+        @compileError("!!! Chunk header size is not aligned to [*]u64!");
+}
 
 pub fn create() !Self {
     const initial_chunk = try Chunk.create();
