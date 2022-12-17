@@ -1,3 +1,4 @@
+#!/usr/bin/env self
 'objects/everything.self' _RunScript.
 
 (|
