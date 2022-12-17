@@ -44,20 +44,25 @@ const MaximumHandlesInChunk = @divExact(ChunkSize - @sizeOf(Chunk), @sizeOf(Hand
 
 /// A chunk, starting with the metadata. Each chunk is exactly ChunkSize bytes.
 const Chunk = extern struct {
-    // These members will take up 32 bytes on 32-bit systems, and 40 bytes on
+    // These members will take up 40 bytes on 32-bit systems, and 56 bytes on
     // 64-bit systems. Either way, they are aligned by 8 bytes.
-    magic: u64 = ChunkMagic,
-    previous: ?*Chunk = null,
-    next: ?*Chunk = null,
-    count: u64 = 0,
+    magic: u64 align(@alignOf(usize)) = ChunkMagic,
+    original_allocation_ptr: [*]align(std.mem.page_size) u8 align(@alignOf(usize)),
+    original_allocation_len: usize align(@alignOf(usize)),
+    previous: ?*Chunk align(@alignOf(usize)) = null,
+    next: ?*Chunk align(@alignOf(usize)) = null,
+    count: u64 align(@alignOf(usize)) = 0,
     /// The topmost handle we allocated (in @sizeOf(HandleType)s from the start
     /// of the chunk allocation area).
     high_water_mark: u64 = 0,
 
     pub fn create() !*Chunk {
-        const memory_area = try aligned_allocator.allocate(ChunkSize, ChunkSize);
-        const self = @ptrCast(*Chunk, memory_area);
-        self.* = .{};
+        const allocation = try aligned_allocator.allocate(ChunkSize, ChunkSize);
+        const self = @ptrCast(*Chunk, allocation.get());
+        self.* = .{
+            .original_allocation_ptr = allocation.original_slice.ptr,
+            .original_allocation_len = allocation.original_slice.len,
+        };
 
         return self;
     }
@@ -75,10 +80,7 @@ const Chunk = extern struct {
     }
 
     pub fn destroy(self: *Chunk) void {
-        // NOTE: Have to restore my original size so that the allocator doesn't
-        //       complain.
-        const memory_area = @ptrCast([*]u8, self);
-        aligned_allocator.destroy(memory_area[0..ChunkSize]);
+        aligned_allocator.destroy(self.original_allocation_ptr[0..self.original_allocation_len]);
     }
 
     pub fn insertAfterMe(self: *Chunk, new_chunk: *Chunk) void {
