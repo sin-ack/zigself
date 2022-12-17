@@ -18,48 +18,46 @@ const VirtualMachine = @import("../VirtualMachine.zig");
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
 /// A file descriptor value consists of two things:
-/// - 30 bits of flags, currently only used for holding the "closed" state of a fd.
+/// - 30 bits of flags.
 /// - 32 bits for the actual file descriptor.
 pub const FileDescriptor = packed struct(u62) {
-    flags: u30,
+    flags: Flags,
     fd: std.os.fd_t,
 
-    const ClosedFlag: u30 = 1;
+    pub const Flags = packed struct(u30) {
+        // Whether the FD is already closed.
+        is_closed: bool = false,
+        // Whether the FD should be closed during finalization.
+        close_during_finalization: bool = true,
+        // Reserved for future use.
+        reserved: u28 = 0,
+    };
 
-    pub fn adopt(fd: std.os.fd_t) FileDescriptor {
+    pub fn adopt(fd: std.os.fd_t, flags: Flags) FileDescriptor {
         return .{
-            .flags = 0,
             .fd = fd,
+            .flags = flags,
         };
     }
 
     pub fn fromValue(value: GenericValue) FileDescriptor {
         const raw_value = value.asUnsignedInteger();
-        return .{
-            .flags = @intCast(u30, raw_value >> 32),
-            .fd = @intCast(std.os.fd_t, raw_value & @as(u64, 0xFFFFFFFF)),
-        };
+        return @bitCast(FileDescriptor, @intCast(u62, raw_value));
     }
 
     pub fn toValue(self: FileDescriptor) GenericValue {
-        const value: u62 = (@as(u62, self.flags) << 32) | @intCast(u32, self.fd);
-        return GenericValue.fromUnsignedInteger(value);
-    }
-
-    /// Return whether this file descriptor has been closed.
-    pub fn isClosed(self: FileDescriptor) bool {
-        return self.flags & ClosedFlag != 0;
-    }
-
-    /// Set whether this fd is closed or not.
-    pub fn setClosed(self: *FileDescriptor, closed: bool) void {
-        self.flags = (self.flags & ~ClosedFlag) + (if (closed) ClosedFlag else 0);
+        return GenericValue.fromUnsignedInteger(@bitCast(u62, self));
     }
 
     pub fn close(self: *FileDescriptor) void {
-        if (self.isClosed()) return;
+        if (self.flags.is_closed) return;
         std.os.close(self.fd);
-        self.setClosed(true);
+        self.flags.is_closed = true;
+    }
+
+    pub fn finalize(self: *FileDescriptor) void {
+        if (!self.flags.close_during_finalization) return;
+        self.close();
     }
 };
 
@@ -116,7 +114,7 @@ pub const Managed = extern struct {
         switch (self.getManagedType()) {
             .FileDescriptor => {
                 var fd = FileDescriptor.fromValue(self.value);
-                fd.close();
+                fd.finalize();
             },
         }
     }

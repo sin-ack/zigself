@@ -37,6 +37,16 @@ fn callFailureBlock(
     return ExecutionResult.activationChange();
 }
 
+/// Create a managed FD out of a native FD value.
+fn makeManagedFD(context: *PrimitiveContext, native_fd: std.os.fd_t, flags: FileDescriptor.Flags) !ExecutionResult {
+    var token = try context.vm.heap.getAllocation(ManagedObject.requiredSizeForAllocation());
+    defer token.deinit();
+
+    var fd = FileDescriptor.adopt(native_fd, flags);
+    const managed_fd = try ManagedObject.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, fd.toValue());
+    return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
+}
+
 /// Open the path with the given flags and return a file descriptor.
 /// On failure, call the given block with the errno as the argument.
 pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
@@ -52,13 +62,8 @@ pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
     const rc = std.os.system.open(&null_terminated_path, @intCast(u32, flags), @intCast(u32, 0));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
-        var fd = FileDescriptor.adopt(@intCast(std.os.fd_t, rc));
-        errdefer fd.close();
-
-        var token = try context.vm.heap.getAllocation(ManagedObject.requiredSizeForAllocation());
-        defer token.deinit();
-        const managed_fd = try ManagedObject.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, fd.toValue());
-        return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
+        const fd = @intCast(std.os.fd_t, rc);
+        return makeManagedFD(context, fd, .{});
     }
 
     return try callFailureBlock(context, errno, failure_block);
@@ -275,7 +280,7 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
     const fd_values = fds.getValues();
     const event_values = events.getValues();
     for (fd_values) |fd, i| {
-        const managed_fd = fd.asObject().asType(.Managed).?;
+        const managed_fd = fd.asObject().mustBeType(.Managed);
         const fd_value = FileDescriptor.fromValue(managed_fd.value);
         const event_flags = event_values[i];
 
@@ -444,13 +449,8 @@ pub fn SocketWithFamily_Type_Protocol_IfFail(context: *PrimitiveContext) !Execut
     const rc = std.os.system.socket(@intCast(c_uint, family), full_socket_type, @intCast(c_uint, protocol));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
-        var fd = FileDescriptor.adopt(@intCast(std.os.fd_t, rc));
-        errdefer fd.close();
-
-        var token = try context.vm.heap.getAllocation(ManagedObject.requiredSizeForAllocation());
-        defer token.deinit();
-        const managed_fd = try ManagedObject.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, fd.toValue());
-        return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
+        var fd = @intCast(std.os.fd_t, rc);
+        return makeManagedFD(context, fd, .{});
     }
 
     return try callFailureBlock(context, errno, failure_block);
@@ -542,13 +542,7 @@ pub fn AcceptFromFD_IfFail(context: *PrimitiveContext) !ExecutionResult {
                 _ = std.os.fcntl(new_fd_value, std.os.F.SETFL, std.os.O.NONBLOCK) catch unreachable;
             }
 
-            var new_fd = FileDescriptor.adopt(new_fd_value);
-            errdefer new_fd.close();
-
-            var token = try context.vm.heap.getAllocation(ManagedObject.requiredSizeForAllocation());
-            defer token.deinit();
-            const managed_new_fd = try ManagedObject.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, new_fd.toValue());
-            return ExecutionResult.completion(Completion.initNormal(managed_new_fd.asValue()));
+            return makeManagedFD(context, new_fd_value, .{});
         },
         .AGAIN => blk: {
             if (context.vm.isInRegularActor()) {
