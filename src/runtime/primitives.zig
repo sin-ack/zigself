@@ -248,13 +248,13 @@ fn disabledPrimitivesForTarget(comptime prims: []const ConditionalPrimitiveSpec)
 /// a disabled primitive for each of the primitives passed.
 fn conditionalPrimitives(comptime condition: bool, comptime Module: type, comptime prims: []const ConditionalPrimitiveSpec) []const PrimitiveSpec {
     if (condition) {
-        var result = [_]PrimitiveSpec{};
+        var result: []const PrimitiveSpec = &[_]PrimitiveSpec{};
 
         inline for (prims) |prim| {
             result = result ++ [_]PrimitiveSpec{prim.asConcrete(Module)};
         }
 
-        return &result;
+        return result;
     }
 
     return disabledPrimitivesForTarget(prims);
