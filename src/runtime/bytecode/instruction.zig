@@ -11,55 +11,48 @@ const LowcodeRegisterLocation = @import("./lowcode/register_location.zig").Regis
 fn Instruction(comptime RegisterLocationT: type) type {
     return struct {
         target: RegisterLocation,
-        // This is a union(enum) where the tag identifies the instruction and
-        // payload is the instruction parameters.
-        value: Payload,
+        opcode: Opcode,
+        payload: Payload,
 
         const Self = @This();
         pub const RegisterLocation = RegisterLocationT;
 
-        const Payload = union(enum) {
+        /// The opcode for this instruction.
+        pub const Opcode = enum(u8) {
             // Sends (entering an activation)
-            Send: PayloadType.Send,
-            PrimSend: PayloadType.Send,
-            SelfSend: PayloadType.SelfSend,
-            SelfPrimSend: PayloadType.SelfSend,
+            Send,
+            PrimSend,
+            SelfSend,
+            SelfPrimSend,
 
             // Pushing to the slot stack
-            PushConstantSlot: PayloadType.PushParentableSlot,
-            PushAssignableSlot: PayloadType.PushParentableSlot,
-            PushArgumentSlot: PayloadType.PushNonParentSlot,
-            PushInheritedSlot: PayloadType.PushNonParentSlot,
+            PushConstantSlot,
+            PushAssignableSlot,
+            PushArgumentSlot,
+            PushInheritedSlot,
 
             // Pushing to the argument stack
-            PushArg: struct { argument_location: RegisterLocation },
+            PushArg,
 
             // Creation (basic objects)
-            CreateInteger: i62,
-            CreateFloatingPoint: f64,
-            CreateByteArray: []const u8,
+            CreateInteger,
+            CreateFloatingPoint,
+            CreateByteArray,
 
             // Creation (slots objects)
-            CreateObject: struct { slot_count: u32 },
-            CreateMethod: struct {
-                method_name_location: RegisterLocation,
-                slot_count: u32,
-                block_index: u32,
-            },
-            CreateBlock: struct {
-                slot_count: u32,
-                block_index: u32,
-            },
+            CreateObject,
+            CreateMethod,
+            CreateBlock,
 
             // Modifiers
             SetMethodInline,
 
             // Source range
-            SourceRange: Range,
+            SourceRange,
 
             // Exiting an activation
-            Return: PayloadType.Return,
-            NonlocalReturn: PayloadType.Return,
+            Return,
+            NonlocalReturn,
 
             // Sentinels (debugging)
             PushArgumentSentinel,
@@ -70,36 +63,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
             // --- Lowcode only instructions ---
 
             // Register saving at activation entry point
-            PushRegisters: if (RegisterLocation.isFinite())
-                RegisterLocation.BitSet
-            else
-                void,
-
-            const PayloadType = struct {
-                const Send = struct {
-                    receiver_location: RegisterLocation,
-                    message_name: []const u8,
-                };
-
-                const SelfSend = struct {
-                    message_name: []const u8,
-                };
-
-                pub const PushParentableSlot = struct {
-                    name_location: RegisterLocation,
-                    value_location: RegisterLocation,
-                    is_parent: bool,
-                };
-
-                pub const PushNonParentSlot = struct {
-                    name_location: RegisterLocation,
-                    value_location: RegisterLocation,
-                };
-
-                pub const Return = struct {
-                    value_location: RegisterLocation,
-                };
-            };
+            PushRegisters,
 
             pub fn toString(self: Payload) []const u8 {
                 return switch (self) {
@@ -129,6 +93,87 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .VerifySlotSentinel => "verify_slot_sentinel",
                 };
             }
+
+            pub fn payloadField(self: Opcode) []const u8 {
+                return switch (self) {
+                    .Send, .PrimSend => "Send",
+                    .SelfSend, .SelfPrimSend => "SelfSend",
+                    .PushConstantSlot, .PushAssignableSlot => "PushParentableSlot",
+                    .PushArgumentSlot, .PushInheritedSlot => "PushNonParentSlot",
+                    .Return, .NonlocalReturn => "Return",
+
+                    .PushRegisters => "PushRegisters",
+                    .CreateInteger => "CreateInteger",
+                    .CreateFloatingPoint => "CreateFloatingPoint",
+                    .CreateObject => "CreateObject",
+                    .CreateMethod => "CreateMethod",
+                    .CreateBlock => "CreateBlock",
+                    .CreateByteArray => "CreateByteArray",
+                    .PushArg => "PushArg",
+                    .SourceRange => "SourceRange",
+
+                    .PushArgumentSentinel, .PushSlotSentinel, .VerifyArgumentSentinel, .VerifySlotSentinel, .SetMethodInline => "None",
+                };
+            }
+
+            pub fn PayloadT(comptime opcode: Opcode) type {
+                const opcode_field = opcode.payloadField();
+                inline for (@typeInfo(Payload).Union.fields) |field| {
+                    if (std.mem.eql(u8, opcode_field, field.name))
+                        return field.field_type;
+                }
+
+                unreachable;
+            }
+        };
+
+        /// The payload for the opcode.
+        pub const Payload = union {
+            None: void,
+
+            Send: struct {
+                receiver_location: RegisterLocation,
+                message_name: []const u8,
+            },
+            SelfSend: struct {
+                message_name: []const u8,
+            },
+            PushParentableSlot: struct {
+                name_location: RegisterLocation,
+                value_location: RegisterLocation,
+                is_parent: bool,
+            },
+            PushNonParentSlot: struct {
+                name_location: RegisterLocation,
+                value_location: RegisterLocation,
+            },
+            PushArg: struct {
+                argument_location: RegisterLocation,
+            },
+            CreateInteger: i62,
+            CreateFloatingPoint: f64,
+            CreateByteArray: []const u8,
+            CreateObject: struct { slot_count: u32 },
+            CreateMethod: struct {
+                method_name_location: RegisterLocation,
+                slot_count: u32,
+                block_index: u32,
+            },
+            CreateBlock: struct {
+                slot_count: u32,
+                block_index: u32,
+            },
+            SourceRange: Range,
+            Return: struct {
+                value_location: RegisterLocation,
+            },
+
+            // --- Lowcode only payloads ---
+
+            PushRegisters: if (RegisterLocation.isFinite())
+                RegisterLocation.BitSet
+            else
+                void,
         };
 
         pub fn init(target: RegisterLocation, value: Payload) Self {
@@ -147,68 +192,75 @@ fn Instruction(comptime RegisterLocationT: type) type {
             try std.fmt.format(writer, "{s}", .{inst.value.toString()});
 
             switch (inst.value) {
-                .Send, .PrimSend => |payload| {
+                .Send, .PrimSend => {
+                    const payload = inst.payload.Send;
                     try std.fmt.format(writer, "({}, \"{s}\")", .{ payload.receiver_location, payload.message_name });
                 },
-                .SelfSend, .SelfPrimSend => |payload| {
+                .SelfSend, .SelfPrimSend => {
+                    const payload = inst.payload.SelfSend;
                     try std.fmt.format(writer, "(\"{s}\")", .{payload.message_name});
                 },
-                .PushConstantSlot, .PushAssignableSlot => |payload| {
+                .PushConstantSlot, .PushAssignableSlot => {
+                    const payload = inst.payload.PushParentableSlot;
                     try std.fmt.format(writer, "({}, {}, {})", .{ payload.name_location, payload.value_location, payload.is_parent });
                 },
 
-                .PushArgumentSlot, .PushInheritedSlot => |payload| {
+                .PushArgumentSlot, .PushInheritedSlot => {
+                    const payload = inst.payload.PushNonParentSlot;
                     try std.fmt.format(writer, "({}, {})", .{ payload.name_location, payload.value_location });
                 },
 
-                .CreateInteger => |payload| {
-                    try std.fmt.format(writer, "({})", .{payload});
+                .CreateInteger => {
+                    try std.fmt.format(writer, "({})", .{inst.payload.CreateInteger});
                 },
 
-                .CreateFloatingPoint => |payload| {
-                    try std.fmt.format(writer, "({})", .{payload});
+                .CreateFloatingPoint => {
+                    try std.fmt.format(writer, "({})", .{inst.payload.CreateFloatingPoint});
                 },
 
-                .CreateObject => |payload| {
-                    try std.fmt.format(writer, "({})", .{payload.slot_count});
+                .CreateObject => {
+                    try std.fmt.format(writer, "({})", .{inst.payload.CreateObject.slot_count});
                 },
 
-                .CreateMethod => |payload| {
+                .CreateMethod => {
+                    const payload = inst.payload.CreateMethod;
                     try std.fmt.format(writer, "({}, {}, #{})", .{ payload.method_name_location, payload.slot_count, payload.block_index });
                 },
 
-                .CreateBlock => |payload| {
+                .CreateBlock => {
+                    const payload = inst.payload.CreateBlock;
                     try std.fmt.format(writer, "({}, #{})", .{ payload.slot_count, payload.block_index });
                 },
 
-                .CreateByteArray => |payload| {
-                    try std.fmt.format(writer, "(\"{s}\")", .{payload});
+                .CreateByteArray => {
+                    try std.fmt.format(writer, "(\"{s}\")", .{inst.payload.CreateByteArray});
                 },
 
-                .PushRegisters => |payload| {
+                .PushRegisters => {
                     if (comptime RegisterLocation.isFinite()) {
                         // NOTE: Update width whenever MaskInt changes in bit width
-                        try std.fmt.format(writer, "({b:0>8})", .{payload.mask});
+                        try std.fmt.format(writer, "({b:0>8})", .{inst.payload.PushRegisters.mask});
                     }
                 },
 
-                .Return, .NonlocalReturn => |payload| {
-                    try std.fmt.format(writer, "({})", .{payload.value_location});
+                .Return, .NonlocalReturn => {
+                    try std.fmt.format(writer, "({})", .{inst.payload.Return.value_location});
                 },
 
-                .PushArg => |payload| {
-                    try std.fmt.format(writer, "({})", .{payload.argument_location});
+                .PushArg => {
+                    try std.fmt.format(writer, "({})", .{inst.payload.PushArg.argument_location});
                 },
 
-                .SourceRange => |payload| {
+                .SourceRange => {
+                    const payload = inst.payload.SourceRange;
                     try std.fmt.format(writer, "({}:{})", .{ payload.start, payload.end });
                 },
 
-                .SetMethodInline,
                 .PushArgumentSentinel,
                 .PushSlotSentinel,
                 .VerifyArgumentSentinel,
                 .VerifySlotSentinel,
+                .SetMethodInline,
                 => {
                     try std.fmt.format(writer, "()", .{});
                 },

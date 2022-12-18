@@ -49,27 +49,26 @@ fn addIntervalForRegister(self: *Liveness, allocator: Allocator, location: astco
 }
 
 fn instructionReferencesRegister(inst: astcode.Instruction, location: astcode.RegisterLocation) bool {
-    return switch (inst.value) {
-        .Send => |payload| blk: {
-            break :blk payload.receiver_location == location;
+    return switch (inst.opcode) {
+        .Send, .PrimSend => blk: {
+            break :blk inst.payload.Send.receiver_location == location;
         },
-        .PrimSend => |payload| blk: {
-            break :blk payload.receiver_location == location;
-        },
-        .PushConstantSlot, .PushAssignableSlot => |payload| blk: {
+        .PushConstantSlot, .PushAssignableSlot => blk: {
+            const payload = inst.payload.PushParentableSlot;
             break :blk payload.name_location == location or payload.value_location == location;
         },
-        .PushArgumentSlot, .PushInheritedSlot => |payload| blk: {
+        .PushArgumentSlot, .PushInheritedSlot => blk: {
+            const payload = inst.payload.PushNonParentSlot;
             break :blk payload.name_location == location or payload.value_location == location;
         },
-        .CreateMethod => |payload| blk: {
-            break :blk payload.method_name_location == location;
+        .CreateMethod => blk: {
+            break :blk inst.payload.CreateMethod.method_name_location == location;
         },
-        .Return, .NonlocalReturn => |payload| blk: {
-            break :blk payload.value_location == location;
+        .Return, .NonlocalReturn => blk: {
+            break :blk inst.payload.Return.value_location == location;
         },
-        .PushArg => |payload| blk: {
-            break :blk payload.argument_location == location;
+        .PushArg => blk: {
+            break :blk inst.payload.PushArg.argument_location == location;
         },
 
         .SelfSend,

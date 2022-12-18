@@ -76,24 +76,29 @@ pub fn execute(
 
     if (EXECUTION_DEBUG) std.debug.print("[#{} {s}] Executing: {} = {}\n", .{ actor.id, executable.value.definition_script.value.file_path, inst.target, inst });
 
-    switch (inst.value) {
-        .Send => |payload| {
+    switch (inst.opcode) {
+        .Send => {
+            const payload = inst.payload.Send;
             const receiver = vm.readRegister(payload.receiver_location);
             return try performSend(vm, actor, receiver, payload.message_name, inst.target, source_range);
         },
-        .SelfSend => |payload| {
+        .SelfSend => {
+            const payload = inst.payload.SelfSend;
             const receiver = actor.activation_stack.getCurrent().activation_object.value;
             return try performSend(vm, actor, receiver, payload.message_name, inst.target, source_range);
         },
-        .PrimSend => |payload| {
+        .PrimSend => {
+            const payload = inst.payload.Send;
             const receiver = vm.readRegister(payload.receiver_location);
             return try performPrimitiveSend(vm, actor, receiver, payload.message_name, inst.target, source_range);
         },
-        .SelfPrimSend => |payload| {
+        .SelfPrimSend => {
+            const payload = inst.payload.SelfSend;
             const receiver = actor.activation_stack.getCurrent().activation_object.get().findActivationReceiver();
             return try performPrimitiveSend(vm, actor, receiver, payload.message_name, inst.target, source_range);
         },
-        .PushConstantSlot => |payload| {
+        .PushConstantSlot => {
+            const payload = inst.payload.PushParentableSlot;
             const name_value = vm.readRegister(payload.name_location);
             const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
             const value = vm.readRegister(payload.value_location);
@@ -101,7 +106,8 @@ pub fn execute(
             try actor.slot_stack.push(vm.allocator, Slot.initConstant(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
             return success;
         },
-        .PushAssignableSlot => |payload| {
+        .PushAssignableSlot => {
+            const payload = inst.payload.PushParentableSlot;
             const name_value = vm.readRegister(payload.name_location);
             const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
             const value = vm.readRegister(payload.value_location);
@@ -109,14 +115,16 @@ pub fn execute(
             try actor.slot_stack.push(vm.allocator, Slot.initAssignable(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
             return success;
         },
-        .PushArgumentSlot => |payload| {
+        .PushArgumentSlot => {
+            const payload = inst.payload.PushNonParentSlot;
             const name_value = vm.readRegister(payload.name_location);
             const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
 
             try actor.slot_stack.push(vm.allocator, Slot.initArgument(name_byte_array_object.getByteArray()));
             return success;
         },
-        .PushInheritedSlot => |payload| {
+        .PushInheritedSlot => {
+            const payload = inst.payload.PushNonParentSlot;
             const name_value = vm.readRegister(payload.name_location);
             const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
             const value = vm.readRegister(payload.value_location);
@@ -124,15 +132,16 @@ pub fn execute(
             try actor.slot_stack.push(vm.allocator, Slot.initInherited(name_byte_array_object.getByteArray(), value));
             return success;
         },
-        .CreateInteger => |payload| {
-            vm.writeRegister(inst.target, Value.fromInteger(payload));
+        .CreateInteger => {
+            vm.writeRegister(inst.target, Value.fromInteger(inst.payload.CreateInteger));
             return success;
         },
-        .CreateFloatingPoint => |payload| {
-            vm.writeRegister(inst.target, Value.fromFloatingPoint(payload));
+        .CreateFloatingPoint => {
+            vm.writeRegister(inst.target, Value.fromFloatingPoint(inst.payload.CreateFloatingPoint));
             return success;
         },
-        .CreateByteArray => |payload| {
+        .CreateByteArray => {
+            const payload = inst.payload.CreateByteArray;
             var token = try vm.heap.getAllocation(ByteArrayObject.requiredSizeForAllocation(payload.len));
             defer token.deinit();
 
@@ -140,10 +149,11 @@ pub fn execute(
             vm.writeRegister(inst.target, byte_array.asValue());
             return success;
         },
-        .CreateObject => |payload| {
-            return try createObject(vm, actor, payload.slot_count, inst.target);
+        .CreateObject => {
+            return try createObject(vm, actor, inst.payload.CreateObject.slot_count, inst.target);
         },
-        .CreateMethod => |payload| {
+        .CreateMethod => {
+            const payload = inst.payload.CreateMethod;
             const method_name_byte_array = vm.readRegister(payload.method_name_location).asObject().mustBeType(.ByteArray).getByteArray();
             return try createMethod(
                 vm,
@@ -155,7 +165,8 @@ pub fn execute(
                 inst.target,
             );
         },
-        .CreateBlock => |payload| {
+        .CreateBlock => {
+            const payload = inst.payload.CreateBlock;
             return try createBlock(
                 vm,
                 actor,
@@ -165,16 +176,16 @@ pub fn execute(
                 inst.target,
             );
         },
-        .Return => |payload| {
-            const value = vm.readRegister(payload.value_location);
+        .Return => {
+            const value = vm.readRegister(inst.payload.Return.value_location);
             vm.writeRegister(.ret, value);
 
             if (actor.exitCurrentActivation(vm, last_activation_ref) == .LastActivation)
                 return ExecutionResult.completion(Completion.initNormal(vm.readRegister(.ret)));
             return activation_change;
         },
-        .NonlocalReturn => |payload| {
-            const value = vm.readRegister(payload.value_location);
+        .NonlocalReturn => {
+            const value = vm.readRegister(inst.payload.Return.value_location);
             vm.writeRegister(.ret, value);
 
             const current_activation = actor.activation_stack.getCurrent();
@@ -187,8 +198,8 @@ pub fn execute(
                 return ExecutionResult.completion(Completion.initNormal(vm.readRegister(.ret)));
             return activation_change;
         },
-        .PushArg => |payload| {
-            var argument = vm.readRegister(payload.argument_location);
+        .PushArg => {
+            var argument = vm.readRegister(inst.payload.PushArg.argument_location);
             if (argument.isObjectReference()) {
                 if (argument.asObject().asType(.Activation)) |activation| {
                     argument = activation.findActivationReceiver();
@@ -198,8 +209,8 @@ pub fn execute(
 
             return success;
         },
-        .PushRegisters => |clobbered_registers| {
-            var iterator = clobbered_registers.iterator(.{});
+        .PushRegisters => {
+            var iterator = inst.payload.PushRegisters.iterator(.{});
             while (iterator.next()) |clobbered_register| {
                 // FIXME: Remove manual register number adjustment!
                 const register = bytecode.RegisterLocation.fromInt(@intCast(u32, clobbered_register + 2));
@@ -212,8 +223,8 @@ pub fn execute(
             actor.next_method_is_inline = true;
             return success;
         },
-        .SourceRange => |range| {
-            actor.range = range;
+        .SourceRange => {
+            actor.range = inst.payload.SourceRange;
             return success;
         },
         .PushArgumentSentinel => {

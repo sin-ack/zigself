@@ -349,9 +349,9 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     const genesis_pc_before_last = genesis_current_activation.pc - 1;
     const genesis_activation_object = genesis_current_activation.activation_object.get();
     const genesis_definition_block = genesis_activation_object.getBytecodeBlock();
-    const genesis_inst_before_last = genesis_definition_block.getInstruction(genesis_pc_before_last);
+    const genesis_inst_before_last_target = genesis_definition_block.getTargetLocation(genesis_pc_before_last);
 
-    genesis_actor.writeRegister(genesis_inst_before_last.target, new_actor.actor_object.value);
+    genesis_actor.writeRegister(genesis_inst_before_last_target, new_actor.actor_object.value);
 
     return ExecutionResult.actorSwitch();
 }

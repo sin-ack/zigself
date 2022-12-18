@@ -43,7 +43,7 @@ fn lowerBlock(allocator: Allocator, executable: *bytecode.lowcode.Executable, as
         register_pool.expireOldIntervals(i);
     }
 
-    low_block.instructions.items[push_registers_inst_offset] = bytecode.lowcode.Instruction.init(.zero, .{ .PushRegisters = register_pool.clobbered_registers });
+    low_block.setInstruction(push_registers_inst_offset, .PushRegisters, .zero, register_pool.clobbered_registers);
 }
 
 fn lowerInstruction(
@@ -53,151 +53,146 @@ fn lowerInstruction(
     register_pool: *RegisterPool,
     inst: bytecode.astcode.Instruction,
 ) !void {
-    const Instruction = bytecode.lowcode.Instruction;
-
-    switch (inst.value) {
-        .Send => |payload| {
+    switch (inst.opcode) {
+        .Send => {
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
+            const payload = inst.payload.Send;
 
-            try block.addInstruction(allocator, Instruction.init(target, .{
-                .Send = .{
-                    .receiver_location = register_pool.getAllocatedRegisterFor(payload.receiver_location),
-                    .message_name = payload.message_name,
-                },
-            }));
+            try block.addInstruction(allocator, .Send, target, .{
+                .receiver_location = register_pool.getAllocatedRegisterFor(payload.receiver_location),
+                .message_name = payload.message_name,
+            });
         },
-        .PrimSend => |payload| {
+        .PrimSend => {
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
+            const payload = inst.payload.Send;
 
-            try block.addInstruction(allocator, Instruction.init(target, .{
-                .PrimSend = .{
-                    .receiver_location = register_pool.getAllocatedRegisterFor(payload.receiver_location),
-                    .message_name = payload.message_name,
-                },
-            }));
+            try block.addInstruction(allocator, .PrimSend, target, .{
+                .receiver_location = register_pool.getAllocatedRegisterFor(payload.receiver_location),
+                .message_name = payload.message_name,
+            });
         },
-        .SelfSend => |payload| {
+        .SelfSend => {
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
+            const payload = inst.payload.SelfSend;
 
-            try block.addInstruction(allocator, Instruction.init(target, .{
-                .SelfSend = .{ .message_name = payload.message_name },
-            }));
+            try block.addInstruction(allocator, .SelfSend, target, .{ .message_name = payload.message_name });
         },
-        .SelfPrimSend => |payload| {
+        .SelfPrimSend => {
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
+            const payload = inst.payload.SelfSend;
 
-            try block.addInstruction(allocator, Instruction.init(target, .{
-                .SelfPrimSend = .{ .message_name = payload.message_name },
-            }));
+            try block.addInstruction(allocator, .SelfPrimSend, target, .{ .message_name = payload.message_name });
         },
-        .PushConstantSlot => |payload| {
+        .PushConstantSlot => {
+            const payload = inst.payload.PushParentableSlot;
             const name_location = register_pool.getAllocatedRegisterFor(payload.name_location);
             const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
 
-            try block.addInstruction(allocator, Instruction.init(.zero, .{ .PushConstantSlot = .{
+            try block.addInstruction(allocator, .PushConstantSlot, .zero, .{
                 .name_location = name_location,
                 .value_location = value_location,
                 .is_parent = payload.is_parent,
-            } }));
+            });
         },
-        .PushAssignableSlot => |payload| {
+        .PushAssignableSlot => {
+            const payload = inst.payload.PushParentableSlot;
             const name_location = register_pool.getAllocatedRegisterFor(payload.name_location);
             const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
 
-            try block.addInstruction(allocator, Instruction.init(.zero, .{ .PushAssignableSlot = .{
+            try block.addInstruction(allocator, .PushAssignableSlot, .zero, .{
                 .name_location = name_location,
                 .value_location = value_location,
                 .is_parent = payload.is_parent,
-            } }));
+            });
         },
-        .PushArgumentSlot => |payload| {
+        .PushArgumentSlot => {
+            const payload = inst.payload.PushNonParentSlot;
             const name_location = register_pool.getAllocatedRegisterFor(payload.name_location);
             const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
 
-            try block.addInstruction(allocator, Instruction.init(.zero, .{ .PushArgumentSlot = .{
+            try block.addInstruction(allocator, .PushArgumentSlot, .zero, .{
                 .name_location = name_location,
                 .value_location = value_location,
-            } }));
+            });
         },
-        .PushInheritedSlot => |payload| {
+        .PushInheritedSlot => {
+            const payload = inst.payload.PushNonParentSlot;
             const name_location = register_pool.getAllocatedRegisterFor(payload.name_location);
             const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
 
-            try block.addInstruction(allocator, Instruction.init(.zero, .{ .PushInheritedSlot = .{
+            try block.addInstruction(allocator, .PushInheritedSlot, .zero, .{
                 .name_location = name_location,
                 .value_location = value_location,
-            } }));
+            });
         },
-        .CreateInteger => |payload| {
+        .CreateInteger => {
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-            try block.addInstruction(allocator, Instruction.init(target, .{ .CreateInteger = payload }));
+            try block.addInstruction(allocator, .CreateInteger, target, inst.payload.CreateInteger);
         },
-        .CreateFloatingPoint => |payload| {
+        .CreateFloatingPoint => {
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-            try block.addInstruction(allocator, Instruction.init(target, .{ .CreateFloatingPoint = payload }));
+            try block.addInstruction(allocator, .CreateFloatingPoint, target, inst.payload.CreateFloatingPoint);
         },
-        .CreateByteArray => |payload| {
+        .CreateByteArray => {
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-            try block.addInstruction(allocator, Instruction.init(target, .{ .CreateByteArray = payload }));
+            try block.addInstruction(allocator, .CreateByteArray, target, inst.payload.CreateByteArray);
         },
-        .CreateObject => |payload| {
+        .CreateObject => {
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-
-            try block.addInstruction(allocator, Instruction.init(target, .{
-                .CreateObject = .{ .slot_count = payload.slot_count },
-            }));
+            try block.addInstruction(allocator, .CreateObject, target, .{
+                .slot_count = inst.payload.CreateObject.slot_count,
+            });
         },
-        .CreateMethod => |payload| {
+        .CreateMethod => {
+            const payload = inst.payload.CreateMethod;
             const method_name_location = register_pool.getAllocatedRegisterFor(payload.method_name_location);
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
 
-            try block.addInstruction(allocator, Instruction.init(target, .{
-                .CreateMethod = .{
-                    .method_name_location = method_name_location,
-                    .slot_count = payload.slot_count,
-                    .block_index = payload.block_index,
-                },
-            }));
+            try block.addInstruction(allocator, .CreateMethod, target, .{
+                .method_name_location = method_name_location,
+                .slot_count = payload.slot_count,
+                .block_index = payload.block_index,
+            });
         },
-        .CreateBlock => |payload| {
+        .CreateBlock => {
+            const payload = inst.payload.CreateBlock;
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
 
-            try block.addInstruction(allocator, Instruction.init(target, .{
-                .CreateBlock = .{
-                    .slot_count = payload.slot_count,
-                    .block_index = payload.block_index,
-                },
-            }));
+            try block.addInstruction(allocator, .CreateBlock, target, .{
+                .slot_count = payload.slot_count,
+                .block_index = payload.block_index,
+            });
         },
         .SetMethodInline => {
-            try block.addInstruction(allocator, Instruction.init(.zero, .{ .SetMethodInline = {} }));
+            try block.addInstruction(allocator, .SetMethodInline, .zero, {});
         },
-        .Return => |payload| {
-            const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
-            try block.addInstruction(allocator, Instruction.init(.zero, .{ .Return = .{ .value_location = value_location } }));
+        .Return => {
+            const value_location = register_pool.getAllocatedRegisterFor(inst.payload.Return.value_location);
+            try block.addInstruction(allocator, .Return, .zero, .{ .value_location = value_location });
         },
-        .NonlocalReturn => |payload| {
-            const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
-            try block.addInstruction(allocator, Instruction.init(.zero, .{ .NonlocalReturn = .{ .value_location = value_location } }));
+        .NonlocalReturn => {
+            const value_location = register_pool.getAllocatedRegisterFor(inst.payload.Return.value_location);
+            try block.addInstruction(allocator, .NonlocalReturn, .zero, .{ .value_location = value_location });
         },
-        .PushArg => |payload| {
-            const argument_location = register_pool.getAllocatedRegisterFor(payload.argument_location);
-            try block.addInstruction(allocator, Instruction.init(.zero, .{ .PushArg = .{ .argument_location = argument_location } }));
+        .PushArg => {
+            const argument_location = register_pool.getAllocatedRegisterFor(inst.payload.PushArg.argument_location);
+            try block.addInstruction(allocator, .PushArg, .zero, .{ .argument_location = argument_location });
         },
-        .SourceRange => |payload| {
-            try block.addInstruction(allocator, Instruction.init(.zero, .{ .SourceRange = payload }));
+        .SourceRange => {
+            try block.addInstruction(allocator, .SourceRange, .zero, inst.payload.SourceRange);
         },
         .PushArgumentSentinel => {
-            try block.addInstruction(allocator, Instruction.init(.zero, .{ .PushArgumentSentinel = {} }));
+            try block.addInstruction(allocator, .PushArgumentSentinel, .zero, {});
         },
         .PushSlotSentinel => {
-            try block.addInstruction(allocator, Instruction.init(.zero, .{ .PushSlotSentinel = {} }));
+            try block.addInstruction(allocator, .PushSlotSentinel, .zero, {});
         },
         .VerifyArgumentSentinel => {
-            try block.addInstruction(allocator, Instruction.init(.zero, .{ .VerifyArgumentSentinel = {} }));
+            try block.addInstruction(allocator, .VerifyArgumentSentinel, .zero, {});
         },
         .VerifySlotSentinel => {
-            try block.addInstruction(allocator, Instruction.init(.zero, .{ .VerifySlotSentinel = {} }));
+            try block.addInstruction(allocator, .VerifySlotSentinel, .zero, {});
         },
         .PushRegisters => unreachable,
     }
