@@ -267,9 +267,9 @@ pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?Activation.Activat
             .vm = vm,
             .actor = self,
             .last_activation_ref = until,
+            .activation = activation,
             .executable = executable,
             .block = block,
-            .instruction_id = activation.pc,
         };
 
         const execution_result = try interpreter.execute(&context);
@@ -292,9 +292,7 @@ pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?Activation.Activat
                     .Restart => activation.restart(),
                 }
             },
-            .Success => {
-                activation.advanceInstruction();
-            },
+            .Success => unreachable,
         }
     }
 
