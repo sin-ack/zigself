@@ -34,7 +34,7 @@ pub fn MapT(comptime map_type: MapType) type {
     const map_type_name = @tagName(map_type);
     inline for (@typeInfo(MapRegistry).Union.fields) |field| {
         if (std.mem.eql(u8, map_type_name, field.name))
-            return field.field_type;
+            return field.type;
     }
 
     unreachable;

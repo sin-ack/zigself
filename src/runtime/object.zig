@@ -51,7 +51,7 @@ pub fn ObjectT(comptime object_type: ObjectType) type {
     const object_type_name = @tagName(object_type);
     inline for (@typeInfo(ObjectRegistry).Union.fields) |field| {
         if (std.mem.eql(u8, object_type_name, field.name))
-            return field.field_type;
+            return field.type;
     }
 
     unreachable;
@@ -64,14 +64,14 @@ comptime {
         if (std.mem.eql(u8, field.name, "ForwardedObject"))
             continue :next_object;
 
-        var object_first_field = @typeInfo(field.field_type).Struct.fields[0].field_type;
+        var object_first_field = @typeInfo(field.type).Struct.fields[0].type;
         while (@typeInfo(object_first_field) == .Struct) {
             if (object_first_field == Object)
                 continue :next_object;
-            object_first_field = @typeInfo(object_first_field).Struct.fields[0].field_type;
+            object_first_field = @typeInfo(object_first_field).Struct.fields[0].type;
         }
 
-        @compileError("!!! Object " ++ @typeName(field.field_type) ++ " does not contain an object header!");
+        @compileError("!!! Object " ++ @typeName(field.type) ++ " does not contain an object header!");
     }
 }
 

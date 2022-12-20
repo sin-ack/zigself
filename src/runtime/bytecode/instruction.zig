@@ -120,7 +120,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
                 const opcode_field = opcode.payloadField();
                 inline for (@typeInfo(Payload).Union.fields) |field| {
                     if (std.mem.eql(u8, opcode_field, field.name))
-                        return field.field_type;
+                        return field.type;
                 }
 
                 unreachable;
