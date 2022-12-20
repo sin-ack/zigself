@@ -263,15 +263,7 @@ pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?Activation.Activat
     var block = activation_object.getBytecodeBlock();
 
     while (true) {
-        // TODO: Get individual instruction fields as needed in order to improve
-        //       CPU cache usage. This requires a refactor of the interpreter.
-        const inst = bytecode.Instruction{
-            .target = block.getTargetLocation(activation.pc),
-            .opcode = block.getOpcode(activation.pc),
-            .payload = block.getPayload(activation.pc),
-        };
-
-        const execution_result = try interpreter.execute(vm, self, until, executable, inst);
+        const execution_result = try interpreter.execute(vm, self, until, executable, block, activation.pc);
         switch (execution_result) {
             .ActorSwitch => {
                 return ActorResult{ .ActorSwitch = {} };

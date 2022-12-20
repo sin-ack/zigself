@@ -70,35 +70,38 @@ pub fn execute(
     actor: *Actor,
     last_activation_ref: ?Activation.ActivationRef,
     executable: bytecode.Executable.Ref,
-    inst: bytecode.Instruction,
+    block: *bytecode.Block,
+    instruction_id: u32,
 ) !ExecutionResult {
     const source_range = SourceRange.initNoRef(executable, actor.range);
 
-    if (EXECUTION_DEBUG) std.debug.print("[#{} {s}] Executing: {} = {}\n", .{ actor.id, executable.value.definition_script.value.file_path, inst.target, inst });
+    // FIXME: Re-enable this.
+    // if (EXECUTION_DEBUG) std.debug.print("[#{} {s}] Executing: {} = {}\n", .{ actor.id, executable.value.definition_script.value.file_path, inst.target, inst });
 
-    switch (inst.opcode) {
+    const target_location = block.getTargetLocation(instruction_id);
+    switch (block.getOpcode(instruction_id)) {
         .Send => {
-            const payload = inst.payload.Send;
+            const payload = block.getTypedPayload(instruction_id, .Send);
             const receiver = vm.readRegister(payload.receiver_location);
-            return try performSend(vm, actor, receiver, payload.message_name, inst.target, source_range);
+            return try performSend(vm, actor, receiver, payload.message_name, target_location, source_range);
         },
         .SelfSend => {
-            const payload = inst.payload.SelfSend;
+            const payload = block.getTypedPayload(instruction_id, .SelfSend);
             const receiver = actor.activation_stack.getCurrent().activation_object.value;
-            return try performSend(vm, actor, receiver, payload.message_name, inst.target, source_range);
+            return try performSend(vm, actor, receiver, payload.message_name, target_location, source_range);
         },
         .PrimSend => {
-            const payload = inst.payload.Send;
+            const payload = block.getTypedPayload(instruction_id, .PrimSend);
             const receiver = vm.readRegister(payload.receiver_location);
-            return try performPrimitiveSend(vm, actor, receiver, payload.message_name, inst.target, source_range);
+            return try performPrimitiveSend(vm, actor, receiver, payload.message_name, target_location, source_range);
         },
         .SelfPrimSend => {
-            const payload = inst.payload.SelfSend;
+            const payload = block.getTypedPayload(instruction_id, .SelfPrimSend);
             const receiver = actor.activation_stack.getCurrent().activation_object.get().findActivationReceiver();
-            return try performPrimitiveSend(vm, actor, receiver, payload.message_name, inst.target, source_range);
+            return try performPrimitiveSend(vm, actor, receiver, payload.message_name, target_location, source_range);
         },
         .PushConstantSlot => {
-            const payload = inst.payload.PushParentableSlot;
+            const payload = block.getTypedPayload(instruction_id, .PushConstantSlot);
             const name_value = vm.readRegister(payload.name_location);
             const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
             const value = vm.readRegister(payload.value_location);
@@ -107,7 +110,7 @@ pub fn execute(
             return success;
         },
         .PushAssignableSlot => {
-            const payload = inst.payload.PushParentableSlot;
+            const payload = block.getTypedPayload(instruction_id, .PushAssignableSlot);
             const name_value = vm.readRegister(payload.name_location);
             const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
             const value = vm.readRegister(payload.value_location);
@@ -116,7 +119,7 @@ pub fn execute(
             return success;
         },
         .PushArgumentSlot => {
-            const payload = inst.payload.PushNonParentSlot;
+            const payload = block.getTypedPayload(instruction_id, .PushArgumentSlot);
             const name_value = vm.readRegister(payload.name_location);
             const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
 
@@ -124,7 +127,7 @@ pub fn execute(
             return success;
         },
         .PushInheritedSlot => {
-            const payload = inst.payload.PushNonParentSlot;
+            const payload = block.getTypedPayload(instruction_id, .PushInheritedSlot);
             const name_value = vm.readRegister(payload.name_location);
             const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
             const value = vm.readRegister(payload.value_location);
@@ -133,27 +136,27 @@ pub fn execute(
             return success;
         },
         .CreateInteger => {
-            vm.writeRegister(inst.target, Value.fromInteger(inst.payload.CreateInteger));
+            vm.writeRegister(target_location, Value.fromInteger(block.getTypedPayload(instruction_id, .CreateInteger)));
             return success;
         },
         .CreateFloatingPoint => {
-            vm.writeRegister(inst.target, Value.fromFloatingPoint(inst.payload.CreateFloatingPoint));
+            vm.writeRegister(target_location, Value.fromFloatingPoint(block.getTypedPayload(instruction_id, .CreateFloatingPoint)));
             return success;
         },
         .CreateByteArray => {
-            const payload = inst.payload.CreateByteArray;
+            const payload = block.getTypedPayload(instruction_id, .CreateByteArray);
             var token = try vm.heap.getAllocation(ByteArrayObject.requiredSizeForAllocation(payload.len));
             defer token.deinit();
 
             const byte_array = ByteArrayObject.createWithValues(vm.getMapMap(), &token, actor.id, payload);
-            vm.writeRegister(inst.target, byte_array.asValue());
+            vm.writeRegister(target_location, byte_array.asValue());
             return success;
         },
         .CreateObject => {
-            return try createObject(vm, actor, inst.payload.CreateObject.slot_count, inst.target);
+            return try createObject(vm, actor, block.getTypedPayload(instruction_id, .CreateObject).slot_count, target_location);
         },
         .CreateMethod => {
-            const payload = inst.payload.CreateMethod;
+            const payload = block.getTypedPayload(instruction_id, .CreateMethod);
             const method_name_byte_array = vm.readRegister(payload.method_name_location).asObject().mustBeType(.ByteArray).getByteArray();
             return try createMethod(
                 vm,
@@ -162,22 +165,22 @@ pub fn execute(
                 method_name_byte_array,
                 payload.slot_count,
                 payload.block_index,
-                inst.target,
+                target_location,
             );
         },
         .CreateBlock => {
-            const payload = inst.payload.CreateBlock;
+            const payload = block.getTypedPayload(instruction_id, .CreateBlock);
             return try createBlock(
                 vm,
                 actor,
                 executable,
                 payload.slot_count,
                 payload.block_index,
-                inst.target,
+                target_location,
             );
         },
         .Return => {
-            const value = vm.readRegister(inst.payload.Return.value_location);
+            const value = vm.readRegister(block.getTypedPayload(instruction_id, .Return).value_location);
             vm.writeRegister(.ret, value);
 
             if (actor.exitCurrentActivation(vm, last_activation_ref) == .LastActivation)
@@ -185,7 +188,7 @@ pub fn execute(
             return activation_change;
         },
         .NonlocalReturn => {
-            const value = vm.readRegister(inst.payload.Return.value_location);
+            const value = vm.readRegister(block.getTypedPayload(instruction_id, .NonlocalReturn).value_location);
             vm.writeRegister(.ret, value);
 
             const current_activation = actor.activation_stack.getCurrent();
@@ -199,7 +202,7 @@ pub fn execute(
             return activation_change;
         },
         .PushArg => {
-            var argument = vm.readRegister(inst.payload.PushArg.argument_location);
+            var argument = vm.readRegister(block.getTypedPayload(instruction_id, .PushArg).argument_location);
             if (argument.isObjectReference()) {
                 if (argument.asObject().asType(.Activation)) |activation| {
                     argument = activation.findActivationReceiver();
@@ -210,7 +213,7 @@ pub fn execute(
             return success;
         },
         .PushRegisters => {
-            var iterator = inst.payload.PushRegisters.iterator(.{});
+            var iterator = block.getTypedPayload(instruction_id, .PushRegisters).iterator(.{});
             while (iterator.next()) |clobbered_register| {
                 // FIXME: Remove manual register number adjustment!
                 const register = bytecode.RegisterLocation.fromInt(@intCast(u32, clobbered_register + 2));
@@ -224,7 +227,7 @@ pub fn execute(
             return success;
         },
         .SourceRange => {
-            actor.range = inst.payload.SourceRange;
+            actor.range = block.getTypedPayload(instruction_id, .SourceRange);
             return success;
         },
         .PushArgumentSentinel => {
