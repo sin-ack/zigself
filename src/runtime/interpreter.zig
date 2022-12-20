@@ -90,8 +90,6 @@ pub const InterpreterContext = struct {
     }
 };
 
-const activation_change = ExecutionResult.activationChange();
-const success = ExecutionResult.success();
 pub fn execute(context: *InterpreterContext) !ExecutionResult {
     // FIXME: Re-enable this.
     // if (EXECUTION_DEBUG) std.debug.print("[#{} {s}] Executing: {} = {}\n", .{ actor.id, executable.value.definition_script.value.file_path, inst.target, inst });
@@ -162,7 +160,7 @@ fn opcodePushConstantSlot(context: InterpreterContext) !ExecutionResult {
     const value = context.vm.readRegister(payload.value_location);
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initConstant(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodePushAssignableSlot(context: InterpreterContext) !ExecutionResult {
@@ -172,7 +170,7 @@ fn opcodePushAssignableSlot(context: InterpreterContext) !ExecutionResult {
     const value = context.vm.readRegister(payload.value_location);
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initAssignable(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodePushArgumentSlot(context: InterpreterContext) !ExecutionResult {
@@ -181,7 +179,7 @@ fn opcodePushArgumentSlot(context: InterpreterContext) !ExecutionResult {
     const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initArgument(name_byte_array_object.getByteArray()));
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodePushInheritedSlot(context: InterpreterContext) !ExecutionResult {
@@ -191,17 +189,17 @@ fn opcodePushInheritedSlot(context: InterpreterContext) !ExecutionResult {
     const value = context.vm.readRegister(payload.value_location);
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initInherited(name_byte_array_object.getByteArray(), value));
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodeCreateInteger(context: InterpreterContext) !ExecutionResult {
     context.vm.writeRegister(context.block.getTargetLocation(context.instructionIndex()), Value.fromInteger(context.block.getTypedPayload(context.instructionIndex(), .CreateInteger)));
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodeCreateFloatingPoint(context: InterpreterContext) !ExecutionResult {
     context.vm.writeRegister(context.block.getTargetLocation(context.instructionIndex()), Value.fromFloatingPoint(context.block.getTypedPayload(context.instructionIndex(), .CreateFloatingPoint)));
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodeCreateByteArray(context: InterpreterContext) !ExecutionResult {
@@ -211,7 +209,7 @@ fn opcodeCreateByteArray(context: InterpreterContext) !ExecutionResult {
 
     const byte_array = ByteArrayObject.createWithValues(context.vm.getMapMap(), &token, context.actor.id, payload);
     context.vm.writeRegister(context.block.getTargetLocation(context.instructionIndex()), byte_array.asValue());
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodeCreateObject(context: InterpreterContext) !ExecutionResult {
@@ -250,7 +248,7 @@ fn opcodeReturn(context: InterpreterContext) !ExecutionResult {
 
     if (context.actor.exitCurrentActivation(context.vm, context.last_activation_ref) == .LastActivation)
         return ExecutionResult.completion(Completion.initNormal(context.vm.readRegister(.ret)));
-    return activation_change;
+    return ExecutionResult.activationChange();
 }
 
 fn opcodeNonlocalReturn(context: InterpreterContext) !ExecutionResult {
@@ -265,7 +263,7 @@ fn opcodeNonlocalReturn(context: InterpreterContext) !ExecutionResult {
 
     if (context.actor.exitActivation(context.vm, context.last_activation_ref, target_activation) == .LastActivation)
         return ExecutionResult.completion(Completion.initNormal(context.vm.readRegister(.ret)));
-    return activation_change;
+    return ExecutionResult.activationChange();
 }
 
 fn opcodePushArg(context: InterpreterContext) !ExecutionResult {
@@ -277,7 +275,7 @@ fn opcodePushArg(context: InterpreterContext) !ExecutionResult {
     }
     try context.actor.argument_stack.push(context.vm.allocator, argument);
 
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodePushRegisters(context: InterpreterContext) !ExecutionResult {
@@ -288,37 +286,37 @@ fn opcodePushRegisters(context: InterpreterContext) !ExecutionResult {
         try context.actor.saved_register_stack.push(context.vm.allocator, .{ .register = register, .value = context.vm.readRegister(register) });
     }
 
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodeSetMethodInline(context: InterpreterContext) !ExecutionResult {
     context.actor.next_method_is_inline = true;
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodeSourceRange(context: InterpreterContext) !ExecutionResult {
     context.actor.range = context.block.getTypedPayload(context.instructionIndex(), .SourceRange);
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodePushArgumentSentinel(context: InterpreterContext) !ExecutionResult {
     try context.actor.argument_stack.pushSentinel(context.vm.allocator);
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodePushSlotSentinel(context: InterpreterContext) !ExecutionResult {
     try context.actor.slot_stack.pushSentinel(context.vm.allocator);
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodeVerifyArgumentSentinel(context: InterpreterContext) !ExecutionResult {
     context.actor.argument_stack.verifySentinel();
-    return success;
+    return ExecutionResult.success();
 }
 
 fn opcodeVerifySlotSentinel(context: InterpreterContext) !ExecutionResult {
     context.actor.slot_stack.verifySentinel();
-    return success;
+    return ExecutionResult.success();
 }
 
 fn performSend(
@@ -330,7 +328,7 @@ fn performSend(
     source_range: SourceRange,
 ) !ExecutionResult {
     const completion = (try sendMessage(vm, actor, receiver, message_name, target_location, source_range)) orelse
-        return activation_change;
+        return ExecutionResult.activationChange();
 
     if (completion.isNormal()) {
         var result = completion.data.Normal;
@@ -341,7 +339,7 @@ fn performSend(
         }
 
         vm.writeRegister(target_location, result);
-        return success;
+        return ExecutionResult.success();
     }
 
     return ExecutionResult.completion(completion);
@@ -381,7 +379,7 @@ fn performPrimitiveSend(
             .Completion => |completion| {
                 if (completion.isNormal()) {
                     vm.writeRegister(target_location, completion.data.Normal);
-                    return success;
+                    return ExecutionResult.success();
                 }
 
                 return ExecutionResult.completion(completion);
@@ -679,7 +677,7 @@ fn createObject(
     const the_slots_object = map_builder.createObject(actor.id);
     vm.writeRegister(target_location, the_slots_object.asValue());
     actor.slot_stack.popNItems(slot_count);
-    return success;
+    return ExecutionResult.success();
 }
 
 fn createMethod(
@@ -734,7 +732,7 @@ fn createMethod(
     const method = map_builder.createObject(actor.id);
     vm.writeRegister(target_location, method.asValue());
     actor.slot_stack.popNItems(slot_count);
-    return success;
+    return ExecutionResult.success();
 }
 
 fn createBlock(
@@ -802,5 +800,5 @@ fn createBlock(
     const the_block_object = map_builder.createObject(actor.id);
     vm.writeRegister(target_location, the_block_object.asValue());
     actor.slot_stack.popNItems(slot_count);
-    return success;
+    return ExecutionResult.success();
 }
