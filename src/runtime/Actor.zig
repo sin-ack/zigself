@@ -263,7 +263,17 @@ pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?Activation.Activat
     var block = activation_object.getBytecodeBlock();
 
     while (true) {
-        const execution_result = try interpreter.execute(vm, self, until, executable, block, activation.pc);
+        var context = interpreter.InterpreterContext{
+            .vm = vm,
+            .actor = self,
+            .last_activation_ref = until,
+            .executable = executable,
+            .block = block,
+            .instruction_id = activation.pc,
+        };
+
+        const execution_result = try interpreter.execute(&context);
+
         switch (execution_result) {
             .ActorSwitch => {
                 return ActorResult{ .ActorSwitch = {} };
