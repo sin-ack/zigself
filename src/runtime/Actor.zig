@@ -292,7 +292,6 @@ pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?Activation.Activat
                     .Restart => activation.restart(),
                 }
             },
-            .Success => unreachable,
         }
     }
 

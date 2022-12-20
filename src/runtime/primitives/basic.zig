@@ -78,7 +78,7 @@ pub fn RunScript(context: *PrimitiveContext) !ExecutionResult {
     defer executable.unref();
 
     // Advance the instruction for the activation that will be returned to.
-    context.actor.activation_stack.getCurrent().advanceInstruction();
+    _ = context.actor.activation_stack.getCurrent().advanceInstruction();
 
     try context.actor.activation_stack.pushSubEntrypointActivation(context.vm, context.target_location, executable);
     return ExecutionResult.activationChange();
@@ -178,7 +178,7 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
                     }
 
                     // Because we're changing the activation, we need to manually adjust the PC.
-                    activation_before_script.advanceInstruction();
+                    _ = activation_before_script.advanceInstruction();
                     return ExecutionResult.activationChange();
                 },
                 else => return ExecutionResult.completion(completion.*),

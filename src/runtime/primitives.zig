@@ -188,7 +188,7 @@ const PrimitiveSpec = struct {
         arguments: []const Value,
         target_location: bytecode.RegisterLocation,
         source_range: SourceRange,
-    ) PrimitiveError!ExecutionResult {
+    ) !ExecutionResult {
         var context = PrimitiveContext{
             .vm = vm,
             .actor = actor,

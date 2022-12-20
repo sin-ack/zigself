@@ -108,7 +108,7 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
     defer token.deinit();
 
     // NOTE: Need to advance the global actor to the next instruction to be returned to after the genesis actor exits.
-    context.vm.current_actor.activation_stack.getCurrent().advanceInstruction();
+    _ = context.vm.current_actor.activation_stack.getCurrent().advanceInstruction();
 
     // NOTE: The receiver here is passed as a dummy in order to get the new actor ID.
     const genesis_actor = try Actor.create(context.vm, &token, receiver);
@@ -158,7 +158,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     }
 
     // NOTE: Need to advance the current actor to the next instruction to be returned to after the this actor exits.
-    context.actor.activation_stack.getCurrent().advanceInstruction();
+    _ = context.actor.activation_stack.getCurrent().advanceInstruction();
 
     var spawn_method: *MethodObject = undefined;
     if (try findActorMethod(
@@ -388,7 +388,7 @@ pub fn ActorResume(context: *PrimitiveContext) !ExecutionResult {
     std.debug.assert(context.vm.regularActorIsRegistered(actor));
 
     // NOTE: Need to advance the current actor to the next instruction to be returned to after the this actor exits.
-    context.actor.activation_stack.getCurrent().advanceInstruction();
+    _ = context.actor.activation_stack.getCurrent().advanceInstruction();
 
     // Preemptively write a nil to the _ActorResume location so we don't hold
     // onto a temporary accidentally.
@@ -434,7 +434,7 @@ pub fn ActorYield(context: *PrimitiveContext) !ExecutionResult {
         );
     }
 
-    context.actor.activation_stack.getCurrent().advanceInstruction();
+    _ = context.actor.activation_stack.getCurrent().advanceInstruction();
     context.actor.yield_reason = .Yielded;
     context.vm.switchToActor(context.vm.genesis_actor.?);
 

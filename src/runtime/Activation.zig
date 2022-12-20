@@ -97,8 +97,9 @@ pub fn definitionExecutable(self: Self) bytecode.Executable.Ref {
     return self.activation_object.get().getDefinitionExecutable();
 }
 
-pub fn advanceInstruction(self: *Self) void {
+pub fn advanceInstruction(self: *Self) u32 {
     self.pc += 1;
+    return self.pc;
 }
 
 /// Resets the instruction index of this activation.
