@@ -79,174 +79,531 @@ pub fn execute(
     // if (EXECUTION_DEBUG) std.debug.print("[#{} {s}] Executing: {} = {}\n", .{ actor.id, executable.value.definition_script.value.file_path, inst.target, inst });
 
     const target_location = block.getTargetLocation(instruction_id);
-    switch (block.getOpcode(instruction_id)) {
-        .Send => {
-            const payload = block.getTypedPayload(instruction_id, .Send);
-            const receiver = vm.readRegister(payload.receiver_location);
-            return try performSend(vm, actor, receiver, payload.message_name, target_location, source_range);
-        },
-        .SelfSend => {
-            const payload = block.getTypedPayload(instruction_id, .SelfSend);
-            const receiver = actor.activation_stack.getCurrent().activation_object.value;
-            return try performSend(vm, actor, receiver, payload.message_name, target_location, source_range);
-        },
-        .PrimSend => {
-            const payload = block.getTypedPayload(instruction_id, .PrimSend);
-            const receiver = vm.readRegister(payload.receiver_location);
-            return try performPrimitiveSend(vm, actor, receiver, payload.message_name, target_location, source_range);
-        },
-        .SelfPrimSend => {
-            const payload = block.getTypedPayload(instruction_id, .SelfPrimSend);
-            const receiver = actor.activation_stack.getCurrent().activation_object.get().findActivationReceiver();
-            return try performPrimitiveSend(vm, actor, receiver, payload.message_name, target_location, source_range);
-        },
-        .PushConstantSlot => {
-            const payload = block.getTypedPayload(instruction_id, .PushConstantSlot);
-            const name_value = vm.readRegister(payload.name_location);
-            const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
-            const value = vm.readRegister(payload.value_location);
+    return switch (block.getOpcode(instruction_id)) {
+        .Send => try opcodeSend(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .SelfSend => try opcodeSelfSend(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .PrimSend => try opcodePrimSend(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .SelfPrimSend => try opcodeSelfPrimSend(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .PushConstantSlot => try opcodePushConstantSlot(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .PushAssignableSlot => try opcodePushAssignableSlot(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .PushArgumentSlot => try opcodePushArgumentSlot(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .PushInheritedSlot => try opcodePushInheritedSlot(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .CreateInteger => try opcodeCreateInteger(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .CreateFloatingPoint => try opcodeCreateFloatingPoint(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .CreateByteArray => try opcodeCreateByteArray(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .CreateObject => try opcodeCreateObject(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .CreateMethod => try opcodeCreateMethod(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .CreateBlock => try opcodeCreateBlock(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .Return => try opcodeReturn(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .NonlocalReturn => try opcodeNonlocalReturn(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .PushArg => try opcodePushArg(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .PushRegisters => try opcodePushRegisters(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .SetMethodInline => try opcodeSetMethodInline(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .SourceRange => try opcodeSourceRange(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .PushArgumentSentinel => try opcodePushArgumentSentinel(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .PushSlotSentinel => try opcodePushSlotSentinel(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .VerifyArgumentSentinel => try opcodeVerifyArgumentSentinel(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+        .VerifySlotSentinel => try opcodeVerifySlotSentinel(vm, actor, last_activation_ref, executable, block, instruction_id, target_location, source_range),
+    };
+}
 
-            try actor.slot_stack.push(vm.allocator, Slot.initConstant(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
-            return success;
-        },
-        .PushAssignableSlot => {
-            const payload = block.getTypedPayload(instruction_id, .PushAssignableSlot);
-            const name_value = vm.readRegister(payload.name_location);
-            const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
-            const value = vm.readRegister(payload.value_location);
+fn opcodeSend(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = executable;
+    _ = last_activation_ref;
+    const payload = block.getTypedPayload(instruction_id, .Send);
+    const receiver = vm.readRegister(payload.receiver_location);
+    return try performSend(vm, actor, receiver, payload.message_name, target_location, source_range);
+}
 
-            try actor.slot_stack.push(vm.allocator, Slot.initAssignable(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
-            return success;
-        },
-        .PushArgumentSlot => {
-            const payload = block.getTypedPayload(instruction_id, .PushArgumentSlot);
-            const name_value = vm.readRegister(payload.name_location);
-            const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
+fn opcodeSelfSend(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = executable;
+    _ = last_activation_ref;
+    const payload = block.getTypedPayload(instruction_id, .SelfSend);
+    const receiver = actor.activation_stack.getCurrent().activation_object.value;
+    return try performSend(vm, actor, receiver, payload.message_name, target_location, source_range);
+}
 
-            try actor.slot_stack.push(vm.allocator, Slot.initArgument(name_byte_array_object.getByteArray()));
-            return success;
-        },
-        .PushInheritedSlot => {
-            const payload = block.getTypedPayload(instruction_id, .PushInheritedSlot);
-            const name_value = vm.readRegister(payload.name_location);
-            const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
-            const value = vm.readRegister(payload.value_location);
+fn opcodePrimSend(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = executable;
+    _ = last_activation_ref;
+    const payload = block.getTypedPayload(instruction_id, .PrimSend);
+    const receiver = vm.readRegister(payload.receiver_location);
+    return try performPrimitiveSend(vm, actor, receiver, payload.message_name, target_location, source_range);
+}
 
-            try actor.slot_stack.push(vm.allocator, Slot.initInherited(name_byte_array_object.getByteArray(), value));
-            return success;
-        },
-        .CreateInteger => {
-            vm.writeRegister(target_location, Value.fromInteger(block.getTypedPayload(instruction_id, .CreateInteger)));
-            return success;
-        },
-        .CreateFloatingPoint => {
-            vm.writeRegister(target_location, Value.fromFloatingPoint(block.getTypedPayload(instruction_id, .CreateFloatingPoint)));
-            return success;
-        },
-        .CreateByteArray => {
-            const payload = block.getTypedPayload(instruction_id, .CreateByteArray);
-            var token = try vm.heap.getAllocation(ByteArrayObject.requiredSizeForAllocation(payload.len));
-            defer token.deinit();
+fn opcodeSelfPrimSend(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = executable;
+    _ = last_activation_ref;
+    const payload = block.getTypedPayload(instruction_id, .SelfPrimSend);
+    const receiver = actor.activation_stack.getCurrent().activation_object.get().findActivationReceiver();
+    return try performPrimitiveSend(vm, actor, receiver, payload.message_name, target_location, source_range);
+}
 
-            const byte_array = ByteArrayObject.createWithValues(vm.getMapMap(), &token, actor.id, payload);
-            vm.writeRegister(target_location, byte_array.asValue());
-            return success;
-        },
-        .CreateObject => {
-            return try createObject(vm, actor, block.getTypedPayload(instruction_id, .CreateObject).slot_count, target_location);
-        },
-        .CreateMethod => {
-            const payload = block.getTypedPayload(instruction_id, .CreateMethod);
-            const method_name_byte_array = vm.readRegister(payload.method_name_location).asObject().mustBeType(.ByteArray).getByteArray();
-            return try createMethod(
-                vm,
-                actor,
-                executable,
-                method_name_byte_array,
-                payload.slot_count,
-                payload.block_index,
-                target_location,
-            );
-        },
-        .CreateBlock => {
-            const payload = block.getTypedPayload(instruction_id, .CreateBlock);
-            return try createBlock(
-                vm,
-                actor,
-                executable,
-                payload.slot_count,
-                payload.block_index,
-                target_location,
-            );
-        },
-        .Return => {
-            const value = vm.readRegister(block.getTypedPayload(instruction_id, .Return).value_location);
-            vm.writeRegister(.ret, value);
+fn opcodePushConstantSlot(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = target_location;
+    _ = executable;
+    _ = last_activation_ref;
+    const payload = block.getTypedPayload(instruction_id, .PushConstantSlot);
+    const name_value = vm.readRegister(payload.name_location);
+    const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
+    const value = vm.readRegister(payload.value_location);
 
-            if (actor.exitCurrentActivation(vm, last_activation_ref) == .LastActivation)
-                return ExecutionResult.completion(Completion.initNormal(vm.readRegister(.ret)));
-            return activation_change;
-        },
-        .NonlocalReturn => {
-            const value = vm.readRegister(block.getTypedPayload(instruction_id, .NonlocalReturn).value_location);
-            vm.writeRegister(.ret, value);
+    try actor.slot_stack.push(vm.allocator, Slot.initConstant(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
+    return success;
+}
 
-            const current_activation = actor.activation_stack.getCurrent();
-            // FIXME: Better name
-            const target_activation_ref = current_activation.nonlocal_return_target_activation.?;
-            const target_activation = target_activation_ref.get(actor.activation_stack) orelse
-                return ExecutionResult.completion(try Completion.initRuntimeError(vm, source_range, "Attempted to non-local return to non-existent activation", .{}));
+fn opcodePushAssignableSlot(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = target_location;
+    _ = executable;
+    _ = last_activation_ref;
+    const payload = block.getTypedPayload(instruction_id, .PushAssignableSlot);
+    const name_value = vm.readRegister(payload.name_location);
+    const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
+    const value = vm.readRegister(payload.value_location);
 
-            if (actor.exitActivation(vm, last_activation_ref, target_activation) == .LastActivation)
-                return ExecutionResult.completion(Completion.initNormal(vm.readRegister(.ret)));
-            return activation_change;
-        },
-        .PushArg => {
-            var argument = vm.readRegister(block.getTypedPayload(instruction_id, .PushArg).argument_location);
-            if (argument.isObjectReference()) {
-                if (argument.asObject().asType(.Activation)) |activation| {
-                    argument = activation.findActivationReceiver();
-                }
-            }
-            try actor.argument_stack.push(vm.allocator, argument);
+    try actor.slot_stack.push(vm.allocator, Slot.initAssignable(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
+    return success;
+}
 
-            return success;
-        },
-        .PushRegisters => {
-            var iterator = block.getTypedPayload(instruction_id, .PushRegisters).iterator(.{});
-            while (iterator.next()) |clobbered_register| {
-                // FIXME: Remove manual register number adjustment!
-                const register = bytecode.RegisterLocation.fromInt(@intCast(u32, clobbered_register + 2));
-                try actor.saved_register_stack.push(vm.allocator, .{ .register = register, .value = vm.readRegister(register) });
-            }
+fn opcodePushArgumentSlot(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = target_location;
+    _ = executable;
+    _ = last_activation_ref;
+    const payload = block.getTypedPayload(instruction_id, .PushArgumentSlot);
+    const name_value = vm.readRegister(payload.name_location);
+    const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
 
-            return success;
-        },
-        .SetMethodInline => {
-            actor.next_method_is_inline = true;
-            return success;
-        },
-        .SourceRange => {
-            actor.range = block.getTypedPayload(instruction_id, .SourceRange);
-            return success;
-        },
-        .PushArgumentSentinel => {
-            try actor.argument_stack.pushSentinel(vm.allocator);
-            return success;
-        },
-        .PushSlotSentinel => {
-            try actor.slot_stack.pushSentinel(vm.allocator);
-            return success;
-        },
-        .VerifyArgumentSentinel => {
-            actor.argument_stack.verifySentinel();
-            return success;
-        },
-        .VerifySlotSentinel => {
-            actor.slot_stack.verifySentinel();
-            return success;
-        },
+    try actor.slot_stack.push(vm.allocator, Slot.initArgument(name_byte_array_object.getByteArray()));
+    return success;
+}
+
+fn opcodePushInheritedSlot(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = executable;
+    _ = last_activation_ref;
+    _ = source_range;
+    _ = target_location;
+    const payload = block.getTypedPayload(instruction_id, .PushInheritedSlot);
+    const name_value = vm.readRegister(payload.name_location);
+    const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
+    const value = vm.readRegister(payload.value_location);
+
+    try actor.slot_stack.push(vm.allocator, Slot.initInherited(name_byte_array_object.getByteArray(), value));
+    return success;
+}
+
+fn opcodeCreateInteger(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = executable;
+    _ = last_activation_ref;
+    _ = actor;
+    vm.writeRegister(target_location, Value.fromInteger(block.getTypedPayload(instruction_id, .CreateInteger)));
+    return success;
+}
+
+fn opcodeCreateFloatingPoint(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = executable;
+    _ = last_activation_ref;
+    _ = actor;
+    vm.writeRegister(target_location, Value.fromFloatingPoint(block.getTypedPayload(instruction_id, .CreateFloatingPoint)));
+    return success;
+}
+
+fn opcodeCreateByteArray(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = executable;
+    _ = last_activation_ref;
+    const payload = block.getTypedPayload(instruction_id, .CreateByteArray);
+    var token = try vm.heap.getAllocation(ByteArrayObject.requiredSizeForAllocation(payload.len));
+    defer token.deinit();
+
+    const byte_array = ByteArrayObject.createWithValues(vm.getMapMap(), &token, actor.id, payload);
+    vm.writeRegister(target_location, byte_array.asValue());
+    return success;
+}
+
+fn opcodeCreateObject(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = executable;
+    _ = last_activation_ref;
+    return try createObject(vm, actor, block.getTypedPayload(instruction_id, .CreateObject).slot_count, target_location);
+}
+
+fn opcodeCreateMethod(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = last_activation_ref;
+    const payload = block.getTypedPayload(instruction_id, .CreateMethod);
+    const method_name_byte_array = vm.readRegister(payload.method_name_location).asObject().mustBeType(.ByteArray).getByteArray();
+    return try createMethod(
+        vm,
+        actor,
+        executable,
+        method_name_byte_array,
+        payload.slot_count,
+        payload.block_index,
+        target_location,
+    );
+}
+
+fn opcodeCreateBlock(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = last_activation_ref;
+    const payload = block.getTypedPayload(instruction_id, .CreateBlock);
+    return try createBlock(
+        vm,
+        actor,
+        executable,
+        payload.slot_count,
+        payload.block_index,
+        target_location,
+    );
+}
+
+fn opcodeReturn(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = executable;
+    _ = source_range;
+    _ = target_location;
+    const value = vm.readRegister(block.getTypedPayload(instruction_id, .Return).value_location);
+    vm.writeRegister(.ret, value);
+
+    if (actor.exitCurrentActivation(vm, last_activation_ref) == .LastActivation)
+        return ExecutionResult.completion(Completion.initNormal(vm.readRegister(.ret)));
+    return activation_change;
+}
+
+fn opcodeNonlocalReturn(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = target_location;
+    _ = executable;
+    const value = vm.readRegister(block.getTypedPayload(instruction_id, .NonlocalReturn).value_location);
+    vm.writeRegister(.ret, value);
+
+    const current_activation = actor.activation_stack.getCurrent();
+    // FIXME: Better name
+    const target_activation_ref = current_activation.nonlocal_return_target_activation.?;
+    const target_activation = target_activation_ref.get(actor.activation_stack) orelse
+        return ExecutionResult.completion(try Completion.initRuntimeError(vm, source_range, "Attempted to non-local return to non-existent activation", .{}));
+
+    if (actor.exitActivation(vm, last_activation_ref, target_activation) == .LastActivation)
+        return ExecutionResult.completion(Completion.initNormal(vm.readRegister(.ret)));
+    return activation_change;
+}
+
+fn opcodePushArg(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = target_location;
+    _ = executable;
+    _ = last_activation_ref;
+    var argument = vm.readRegister(block.getTypedPayload(instruction_id, .PushArg).argument_location);
+    if (argument.isObjectReference()) {
+        if (argument.asObject().asType(.Activation)) |activation| {
+            argument = activation.findActivationReceiver();
+        }
     }
+    try actor.argument_stack.push(vm.allocator, argument);
+
+    return success;
+}
+
+fn opcodePushRegisters(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = target_location;
+    _ = executable;
+    _ = last_activation_ref;
+    var iterator = block.getTypedPayload(instruction_id, .PushRegisters).iterator(.{});
+    while (iterator.next()) |clobbered_register| {
+        // FIXME: Remove manual register number adjustment!
+        const register = bytecode.RegisterLocation.fromInt(@intCast(u32, clobbered_register + 2));
+        try actor.saved_register_stack.push(vm.allocator, .{ .register = register, .value = vm.readRegister(register) });
+    }
+
+    return success;
+}
+
+fn opcodeSetMethodInline(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = vm;
+    _ = source_range;
+    _ = target_location;
+    _ = instruction_id;
+    _ = block;
+    _ = executable;
+    _ = last_activation_ref;
+    actor.next_method_is_inline = true;
+    return success;
+}
+
+fn opcodeSourceRange(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = vm;
+    _ = source_range;
+    _ = target_location;
+    _ = executable;
+    _ = last_activation_ref;
+    actor.range = block.getTypedPayload(instruction_id, .SourceRange);
+    return success;
+}
+
+fn opcodePushArgumentSentinel(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = target_location;
+    _ = instruction_id;
+    _ = block;
+    _ = executable;
+    _ = last_activation_ref;
+    try actor.argument_stack.pushSentinel(vm.allocator);
+    return success;
+}
+
+fn opcodePushSlotSentinel(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = target_location;
+    _ = instruction_id;
+    _ = block;
+    _ = executable;
+    _ = last_activation_ref;
+    try actor.slot_stack.pushSentinel(vm.allocator);
+    return success;
+}
+
+fn opcodeVerifyArgumentSentinel(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = target_location;
+    _ = instruction_id;
+    _ = block;
+    _ = executable;
+    _ = last_activation_ref;
+    _ = vm;
+    actor.argument_stack.verifySentinel();
+    return success;
+}
+
+fn opcodeVerifySlotSentinel(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    last_activation_ref: ?Activation.ActivationRef,
+    executable: bytecode.Executable.Ref,
+    block: *bytecode.Block,
+    instruction_id: u32,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !ExecutionResult {
+    _ = source_range;
+    _ = target_location;
+    _ = instruction_id;
+    _ = block;
+    _ = executable;
+    _ = last_activation_ref;
+    _ = vm;
+    actor.slot_stack.verifySentinel();
+    return success;
 }
 
 fn performSend(
