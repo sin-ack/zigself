@@ -74,8 +74,17 @@ pub const Activation = extern struct {
         var memory_area = token.allocate(.Object, size);
         var self = @ptrCast(Activation.Ptr, memory_area);
         self.init(map_type, actor_id, map, receiver);
-        std.mem.copy(GenericValue, self.getArgumentSlots(), arguments);
-        std.mem.copy(GenericValue, self.getNonargumentSlots(), assignable_slot_values);
+
+        // NOTE: Inlining getAssignableSlots here in order to avoid multiple
+        //       dynamic dispatches.
+        const activation_header_size = @sizeOf(Activation);
+        const assignable_slots = std.mem.bytesAsSlice(
+            GenericValue,
+            @ptrCast([*]align(@alignOf(u64)) u8, memory_area)[activation_header_size..size],
+        );
+
+        std.mem.copy(GenericValue, assignable_slots[0..argument_slot_count], arguments);
+        std.mem.copy(GenericValue, assignable_slots[argument_slot_count..], assignable_slot_values);
 
         return self;
     }
