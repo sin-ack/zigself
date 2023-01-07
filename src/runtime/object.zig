@@ -25,6 +25,8 @@ pub const ObjectType = enum(u22) {
     ActorProxy,
     Map,
     ForwardedObject,
+    // Intrinsic objects
+    AddrInfo,
 };
 
 /// A registry of object types. Objects within this array will be encoded into
@@ -42,6 +44,8 @@ pub const ObjectRegistry = union(ObjectType) {
     // This is the base map object that the map-map uses. It will be extended
     // by other types which require additional data on their maps.
     Map: @import("objects/map.zig").Map,
+    // Intrinsic objects
+    AddrInfo: @import("objects/intrinsic/addrinfo.zig").AddrInfo,
     // This is a special object type that overwrites the current object when the
     // garbage collector copies the object to a new location.
     ForwardedObject: void,

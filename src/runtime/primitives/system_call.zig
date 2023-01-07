@@ -15,6 +15,9 @@ const ManagedObject = @import("../objects/managed.zig").Managed;
 const FileDescriptor = @import("../objects/managed.zig").FileDescriptor;
 const ByteArrayObject = @import("../objects/byte_array.zig").ByteArray;
 const value_inspector = @import("../value_inspector.zig");
+const addrinfo_object = @import("../objects/intrinsic/addrinfo.zig");
+const AddrInfoObject = addrinfo_object.AddrInfo;
+const AddrInfoMap = addrinfo_object.AddrInfoMap;
 
 const interpreter = @import("../interpreter.zig");
 
@@ -387,12 +390,11 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
 
     var required_memory: usize = 0;
     var result_count: usize = 0;
-    var addrinfo_prototype = context.vm.addrinfo_prototype.getValue().asObject().asType(.Slots).?;
     {
         var it: ?*std.os.addrinfo = result_ptr;
         while (it) |result| : (it = result.next) {
-            required_memory += addrinfo_prototype.getSizeInMemory();
-            required_memory += ByteArrayObject.requiredSizeForAllocation(result.addrlen);
+            required_memory += AddrInfoMap.requiredSizeToCreateFromAddrinfo(result);
+            required_memory += AddrInfoObject.requiredSizeForAllocation();
             result_count += 1;
         }
     }
@@ -402,9 +404,6 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
 
     var token = try context.vm.heap.getAllocation(required_memory);
     defer token.deinit();
-
-    // Refresh pointers
-    addrinfo_prototype = context.vm.addrinfo_prototype.getValue().asObject().asType(.Slots).?;
 
     const result_array_map = array_object.ArrayMap.create(context.vm.getMapMap(), &token, result_count);
     const result_array = array_object.Array.createWithValues(&token, context.actor.id, result_array_map, &.{}, context.vm.nil());
@@ -417,21 +416,10 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
             it = result.next;
             i += 1;
         }) {
-            const sockaddr_memory = @ptrCast([*]u8, result.addr.?);
-            const sockaddr_bytes_object = ByteArrayObject.createWithValues(context.vm.getMapMap(), &token, context.actor.id, sockaddr_memory[0..result.addrlen]);
+            const addrinfo_map = AddrInfoMap.createFromAddrinfo(context.vm.getMapMap(), &token, context.actor.id, result);
+            const addrinfo = addrinfo_map.createObject(&token, context.actor.id);
 
-            const addrinfo_copy: *SlotsObject = addrinfo_prototype.clone(&token, context.actor.id);
-            const addrinfo_value = addrinfo_copy.asValue();
-
-            // FIXME: VM-generated structs already know where each slot is.
-            //        Instead of doing a manual lookup, be smarter here.
-            addrinfo_value.lookup(context.vm, "family:").Assignment.value_ptr.* = Value.fromInteger(result.family);
-            addrinfo_value.lookup(context.vm, "socketType:").Assignment.value_ptr.* = Value.fromInteger(result.socktype);
-            addrinfo_value.lookup(context.vm, "protocol:").Assignment.value_ptr.* = Value.fromInteger(result.protocol);
-            addrinfo_value.lookup(context.vm, "flags:").Assignment.value_ptr.* = Value.fromInteger(result.flags);
-            addrinfo_value.lookup(context.vm, "sockaddrBytes:").Assignment.value_ptr.* = sockaddr_bytes_object.asValue();
-
-            result_values[i] = addrinfo_value;
+            result_values[i] = addrinfo.asValue();
         }
     }
 

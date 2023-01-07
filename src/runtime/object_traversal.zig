@@ -79,6 +79,9 @@ fn traverseObjectGraphInner(
                         // don't point to anything that's not globally
                         // reachable.
                         .Array => old_object,
+                        // TODO: This is incorrect, move object traversal
+                        //       responsibility to the object type.
+                        .AddrInfo => old_object,
                     };
                     const map: Map.Ptr = new_object.mustBeType(.Map);
 
@@ -86,6 +89,10 @@ fn traverseObjectGraphInner(
                     switch (map_type) {
                         .Slots, .Method, .Block => {
                             const slots: Slot.Slice = switch (map_type) {
+                                // TODO: This is incorrect, move object
+                                //       traversal responsibility to the object
+                                //       type.
+                                .AddrInfo => unreachable,
                                 .MapMap, .Array => unreachable,
                                 inline else => |t| map.mustBeType(t).getSlots(),
                             };
@@ -96,7 +103,7 @@ fn traverseObjectGraphInner(
                                 }
                             }
                         },
-                        .MapMap, .Array => {},
+                        .MapMap, .Array, .AddrInfo => {},
                     }
 
                     break :value new_object.asValue();
@@ -130,7 +137,7 @@ fn traverseObjectGraphInner(
 
                     break :value new_object.asValue();
                 },
-                .ByteArray, .ActorProxy, .Managed => {
+                .ByteArray, .ActorProxy, .Managed, .AddrInfo => {
                     const new_object = try callback(context, old_object);
                     new_object.map = new_map;
                     break :value new_object.asValue();

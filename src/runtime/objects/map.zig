@@ -19,6 +19,8 @@ pub const MapType = enum(u30) {
     Method,
     Block,
     Array,
+    // Intrinsic maps
+    AddrInfo,
 };
 
 /// A registry of map types. Works basically identically to the object registry.
@@ -28,6 +30,8 @@ pub const MapRegistry = union(enum(u30)) {
     Method: @import("method.zig").MethodMap,
     Block: @import("block.zig").BlockMap,
     Array: @import("array.zig").ArrayMap,
+    // Intrinsic maps
+    AddrInfo: @import("intrinsic/addrinfo.zig").AddrInfoMap,
 };
 
 pub fn MapT(comptime map_type: MapType) type {

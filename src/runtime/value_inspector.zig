@@ -169,6 +169,29 @@ fn inspectObject(
             // TODO: Add more detailed inspection
             std.debug.print("<actor proxy>", .{});
         },
+        .AddrInfo => {
+            const addrinfo_map = object.mustBeType(.AddrInfo).getMap();
+
+            std.debug.print("<addrinfo> (|{s}", .{separator});
+
+            printWithIndent(display_type, indent + 2, "family = ", .{});
+            try inspectValueInternal(display_type, vm, addrinfo_map.family, indent + 2, &my_link);
+            std.debug.print(".{s}", .{separator});
+            printWithIndent(display_type, indent + 2, "socketType = ", .{});
+            try inspectValueInternal(display_type, vm, addrinfo_map.socketType, indent + 2, &my_link);
+            std.debug.print(".{s}", .{separator});
+            printWithIndent(display_type, indent + 2, "protocol = ", .{});
+            try inspectValueInternal(display_type, vm, addrinfo_map.protocol, indent + 2, &my_link);
+            std.debug.print(".{s}", .{separator});
+            printWithIndent(display_type, indent + 2, "flags = ", .{});
+            try inspectValueInternal(display_type, vm, addrinfo_map.flags, indent + 2, &my_link);
+            std.debug.print(".{s}", .{separator});
+            printWithIndent(display_type, indent + 2, "sockaddrBytes = ", .{});
+            try inspectValueInternal(display_type, vm, addrinfo_map.sockaddrBytes, indent + 2, &my_link);
+            std.debug.print(".{s}", .{separator});
+
+            printWithIndent(display_type, indent, "|)", .{});
+        },
     }
 }
 
