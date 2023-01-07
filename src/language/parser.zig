@@ -1103,15 +1103,19 @@ fn parseInteger(self: *Self) ParseError!AST.NumberNode {
                 '0'...'9' => {
                     const digit = c - '0';
 
-                    if (@mulWithOverflow(i62, integer, 10, &integer)) {
+                    const mul_result = @mulWithOverflow(integer, 10);
+                    if (mul_result[1] != 0) {
                         try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
                         break;
                     }
+                    integer = mul_result[0];
 
-                    if (@addWithOverflow(i62, integer, digit, &integer)) {
+                    const add_result = @addWithOverflow(integer, digit);
+                    if (add_result[1] != 0) {
                         try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
                         break;
                     }
+                    integer = add_result[0];
                 },
                 else => break,
             },
@@ -1119,28 +1123,36 @@ fn parseInteger(self: *Self) ParseError!AST.NumberNode {
                 '0'...'9' => {
                     const digit = c - '0';
 
-                    if (@mulWithOverflow(i62, integer, 10, &integer)) {
+                    const mul_result = @mulWithOverflow(integer, 16);
+                    if (mul_result[1] != 0) {
                         try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
                         break;
                     }
+                    integer = mul_result[0];
 
-                    if (@addWithOverflow(i62, integer, digit, &integer)) {
+                    const add_result = @addWithOverflow(integer, digit);
+                    if (add_result[1] != 0) {
                         try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
                         break;
                     }
+                    integer = add_result[0];
                 },
                 'A'...'F', 'a'...'f' => {
                     const digit = 10 + (if (c >= 'a') c - 'a' else c - 'A');
 
-                    if (@mulWithOverflow(i62, integer, 16, &integer)) {
+                    const mul_result = @mulWithOverflow(integer, 16);
+                    if (mul_result[1] != 0) {
                         try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
                         break;
                     }
+                    integer = mul_result[0];
 
-                    if (@addWithOverflow(i62, integer, digit, &integer)) {
+                    const add_result = @addWithOverflow(integer, digit);
+                    if (add_result[1] != 0) {
                         try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
                         break;
                     }
+                    integer = add_result[0];
                 },
                 else => break,
             },
@@ -1148,15 +1160,19 @@ fn parseInteger(self: *Self) ParseError!AST.NumberNode {
                 '0'...'7' => {
                     const digit = c - '0';
 
-                    if (@mulWithOverflow(i62, integer, 8, &integer)) {
+                    const mul_result = @mulWithOverflow(integer, 8);
+                    if (mul_result[1] != 0) {
                         try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
                         break;
                     }
+                    integer = mul_result[0];
 
-                    if (@addWithOverflow(i62, integer, digit, &integer)) {
+                    const add_result = @addWithOverflow(integer, digit);
+                    if (add_result[1] != 0) {
                         try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
                         break;
                     }
+                    integer = add_result[0];
                 },
                 '8', '9' => unreachable,
                 else => break,
@@ -1165,15 +1181,19 @@ fn parseInteger(self: *Self) ParseError!AST.NumberNode {
                 '0', '1' => {
                     const digit = c - '0';
 
-                    if (@mulWithOverflow(i62, integer, 2, &integer)) {
+                    const mul_result = @mulWithOverflow(integer, 2);
+                    if (mul_result[1] != 0) {
                         try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
                         break;
                     }
+                    integer = mul_result[0];
 
-                    if (@addWithOverflow(i62, integer, digit, &integer)) {
+                    const add_result = @addWithOverflow(integer, digit);
+                    if (add_result[1] != 0) {
                         try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
                         break;
                     }
+                    integer = add_result[0];
                 },
                 '2'...'9' => unreachable,
                 else => break,
