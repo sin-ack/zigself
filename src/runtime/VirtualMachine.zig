@@ -60,10 +60,6 @@ float_traits: Heap.Tracked = undefined,
 string_traits: Heap.Tracked = undefined,
 integer_traits: Heap.Tracked = undefined,
 
-// --- Prototypes used by primitives ---
-
-addrinfo_prototype: Heap.Tracked = undefined,
-
 // --- Settings ---
 
 /// Whether the interpreter should be silent when an error happens.
@@ -114,9 +110,7 @@ pub fn create(allocator: Allocator) !*Self {
             SlotsMap.requiredSizeForAllocation(0) +
             (10 * SlotsObject.requiredSizeForAllocation(0)) +
             // Global actor
-            ActorObject.requiredSizeForAllocation() +
-            // addrinfo prototype
-            requiredSizeForAddrInfoPrototypeAllocation(),
+            ActorObject.requiredSizeForAllocation(),
     );
     defer token.deinit();
 
@@ -144,8 +138,6 @@ pub fn create(allocator: Allocator) !*Self {
     self.global_actor = try Actor.create(self, &token, self.lobby_object.getValue());
     self.current_actor = self.global_actor;
 
-    try self.buildAddrInfoPrototype(&token);
-
     return self;
 }
 
@@ -168,40 +160,6 @@ fn makeEmptyGloballyReachableObject(token: *Heap.AllocationToken, map: SlotsMap.
     return try token.heap.track(slots.asValue());
 }
 
-// FIXME: There should be a better way of creating prototype objects for
-//        primitives. We can't keep adding every prototype here like this.
-const addrinfo_slots = &[_][]const u8{
-    "flags",
-    "family",
-    "socketType",
-    "protocol",
-    "sockaddrBytes",
-};
-
-fn requiredSizeForAddrInfoPrototypeAllocation() usize {
-    var required_size = SlotsMap.requiredSizeForAllocation(addrinfo_slots.len) +
-        SlotsObject.requiredSizeForAllocation(addrinfo_slots.len);
-    for (addrinfo_slots) |slot_name| {
-        required_size += ByteArray.requiredSizeForAllocation(slot_name.len);
-    }
-    return required_size;
-}
-
-fn buildAddrInfoPrototype(self: *Self, token: *Heap.AllocationToken) !void {
-    const slots_map = SlotsMap.create(self.getMapMap(), token, addrinfo_slots.len);
-    slots_map.map.object.object_information.reachability = .Global;
-    var map_builder = slots_map.getMapBuilder(token);
-
-    for (addrinfo_slots) |slot_name| {
-        const slot_name_byte_array = ByteArray.createFromString(token, slot_name);
-        map_builder.addSlot(Slot.initAssignable(slot_name_byte_array, .NotParent, self.nil()));
-    }
-
-    const prototype = map_builder.createObject(self.current_actor.id);
-    prototype.object.object_information.reachability = .Global;
-    self.addrinfo_prototype = try self.heap.track(prototype.asValue());
-}
-
 pub fn destroy(self: *Self) void {
     // NOTE: All actors are finalized by the actor object that they're owned
     //       by when the heap is deallocated.
@@ -217,7 +175,6 @@ pub fn destroy(self: *Self) void {
     self.float_traits.untrack(self.heap);
     self.string_traits.untrack(self.heap);
     self.integer_traits.untrack(self.heap);
-    self.addrinfo_prototype.untrack(self.heap);
 
     {
         var it = self.block_message_names.iterator();
