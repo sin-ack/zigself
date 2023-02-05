@@ -1,10 +1,5 @@
 const std = @import("std");
 
-const zig_args = std.build.Pkg{
-    .name = "zig-args",
-    .source = .{ .path = "./vendor/zig-args/args.zig" },
-};
-
 pub fn build(b: *std.build.Builder) void {
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
@@ -12,17 +7,22 @@ pub fn build(b: *std.build.Builder) void {
     // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
 
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const mode = b.standardReleaseOptions();
+    // Standard optimization options allow the person running `zig build` to select
+    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
+    // set a preferred release mode, allowing the user to decide how to optimize.
+    const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable("self", "src/main.zig");
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
+    const exe = b.addExecutable(.{
+        .name = "self",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
     exe.linkLibC();
     exe.install();
-
-    exe.addPackage(zig_args);
+    exe.addAnonymousModule("zig-args", .{
+        .source_file = .{ .path = "./vendor/zig-args/args.zig" },
+    });
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(b.getInstallStep());
@@ -33,14 +33,16 @@ pub fn build(b: *std.build.Builder) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    var test_harness_exe = b.addExecutable("self-test", "tests/harness.zig");
-    test_harness_exe.setTarget(target);
-    test_harness_exe.setBuildMode(mode);
-    test_harness_exe.addPackage(.{
-        .name = "zigself",
-        .source = .{ .path = "src/package.zig" },
+    var test_harness_exe = b.addExecutable(.{
+        .name = "self-test",
+        .root_source_file = .{ .path = "tests/harness.zig" },
+        .target = target,
+        .optimize = optimize,
     });
     test_harness_exe.linkLibC();
+    test_harness_exe.addAnonymousModule("zigself", .{
+        .source_file = .{ .path = "src/package.zig" },
+    });
 
     const test_harness_run_cmd = test_harness_exe.run();
     if (b.args) |args| {

@@ -363,7 +363,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     const service_c = try std.fmt.allocPrintZ(context.vm.allocator, "{}", .{port});
     defer context.vm.allocator.free(service_c);
 
-    var result_ptr: *std.os.addrinfo = undefined;
+    var result_ptr: ?*std.os.addrinfo = undefined;
     const rc = std.os.system.getaddrinfo(if (node_c) |s| s.ptr else null, service_c, &hints, &result_ptr);
     switch (rc) {
         @intToEnum(std.os.system.EAI, 0) => {},
@@ -386,7 +386,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     }
     _ = failure_block;
 
-    defer std.os.system.freeaddrinfo(result_ptr);
+    defer if (result_ptr) |r| std.os.system.freeaddrinfo(r);
 
     var required_memory: usize = 0;
     var result_count: usize = 0;
