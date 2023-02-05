@@ -139,6 +139,15 @@ const specialized_executors = blk: {
 pub fn executeSpecialized(comptime opcode: bytecode.Instruction.Opcode) OpcodeHandler {
     return struct {
         fn execute(context: *InterpreterContext) InterpreterError!void {
+            if (EXECUTION_DEBUG) {
+                const inst = bytecode.Instruction{
+                    .target = context.block.getTargetLocation(context.instructionIndex()),
+                    .opcode = context.block.getOpcode(context.instructionIndex()),
+                    .payload = context.block.getPayload(context.instructionIndex()),
+                };
+                std.debug.print("[#{} {s}] Executing: {} = {}\n", .{ context.actor.id, context.executable.value.definition_script.value.file_path, inst.target, inst });
+            }
+
             try @call(.always_inline, opcodeHandler(opcode), .{context});
             if (context.result != null) return;
 

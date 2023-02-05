@@ -65,7 +65,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
             // Register saving at activation entry point
             PushRegisters,
 
-            pub fn toString(self: Payload) []const u8 {
+            pub fn toString(self: Opcode) []const u8 {
                 return switch (self) {
                     .Send => "send",
                     .PrimSend => "prim_send",
@@ -189,9 +189,9 @@ fn Instruction(comptime RegisterLocationT: type) type {
             _ = fmt;
             _ = options;
 
-            try std.fmt.format(writer, "{s}", .{inst.value.toString()});
+            try std.fmt.format(writer, "{s}", .{inst.opcode.toString()});
 
-            switch (inst.value) {
+            switch (inst.opcode) {
                 .Send, .PrimSend => {
                     const payload = inst.payload.Send;
                     try std.fmt.format(writer, "({}, \"{s}\")", .{ payload.receiver_location, payload.message_name });
