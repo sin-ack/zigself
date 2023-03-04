@@ -641,8 +641,8 @@ fn executeMethod(
         var tracked_method: ?Heap.Tracked = null;
 
         defer if (tracked_receiver) |t| {
-            t.untrack(vm.heap);
             tracked_method.?.untrack(vm.heap);
+            t.untrack(vm.heap);
         };
 
         if (vm.heap.needsToGarbageCollectToProvide(required_memory)) {
