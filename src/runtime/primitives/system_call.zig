@@ -290,7 +290,7 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
 
     const fd_values = fds.getValues();
     const event_values = events.getValues();
-    for (fd_values) |fd, i| {
+    for (fd_values, 0..) |fd, i| {
         const managed_fd = fd.asObject().mustBeType(.Managed);
         const fd_value = FileDescriptor.fromValue(managed_fd.value);
         const event_flags = event_values[i];
@@ -305,7 +305,7 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
     const rc = std.os.system.poll(poll_fds.ptr, @intCast(u32, fds.getSize()), @intCast(i32, timeout_ms));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
-        for (poll_fds) |pollfd, i| {
+        for (poll_fds, 0..) |pollfd, i| {
             event_values[i] = Value.fromInteger(@intCast(i64, pollfd.revents));
         }
         return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intCast(usize, rc))));

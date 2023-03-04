@@ -58,7 +58,7 @@ fn print(self: *Self, comptime fmt: []const u8, args: anytype) void {
     writer.writeAll(DARKGRAY) catch return;
 
     var last_indent: usize = 0;
-    for (self.branches.items) |branch, i| {
+    for (self.branches.items, 0..) |branch, i| {
         if (i + 1 == self.branches.items.len) {
             if (self.is_stem) {
                 writer.writeAll(if (branch.concluded) "└" else "├") catch return;
@@ -87,7 +87,7 @@ pub fn dumpScript(self: *Self, script: AST.ScriptNode) void {
     self.print(CYAN ++ "ScriptNode\n" ++ CLEAR, .{});
 
     self.indent();
-    for (script.statements.value.statements) |expression, i| {
+    for (script.statements.value.statements, 0..) |expression, i| {
         self.setStem(if (i == script.statements.value.statements.len - 1) .Last else .NotLast);
         self.dumpExpression(expression);
     }
@@ -119,7 +119,7 @@ pub fn dumpObject(self: *Self, object: AST.ObjectNode) void {
     self.setStem(.NotLast);
     self.print("slots:\n", .{});
     self.indent();
-    for (object.slots) |slot, i| {
+    for (object.slots, 0..) |slot, i| {
         self.setStem(if (i == object.slots.len - 1) .Last else .NotLast);
         self.dumpSlot(slot);
     }
@@ -128,7 +128,7 @@ pub fn dumpObject(self: *Self, object: AST.ObjectNode) void {
     self.setStem(.Last);
     self.print("statements:\n", .{});
     self.indent();
-    for (object.statements.value.statements) |expression, i| {
+    for (object.statements.value.statements, 0..) |expression, i| {
         self.setStem(if (i == object.statements.value.statements.len - 1) .Last else .NotLast);
         self.dumpExpression(expression);
     }
@@ -171,7 +171,7 @@ pub fn dumpBlock(self: *Self, block: AST.BlockNode) void {
     self.setStem(.NotLast);
     self.print("slots:\n", .{});
     self.indent();
-    for (block.slots) |slot, i| {
+    for (block.slots, 0..) |slot, i| {
         self.setStem(if (i == block.slots.len - 1) .Last else .NotLast);
         self.dumpSlot(slot);
     }
@@ -180,7 +180,7 @@ pub fn dumpBlock(self: *Self, block: AST.BlockNode) void {
     self.setStem(.Last);
     self.print("statements:\n", .{});
     self.indent();
-    for (block.statements.value.statements) |expression, i| {
+    for (block.statements.value.statements, 0..) |expression, i| {
         self.setStem(if (i == block.statements.value.statements.len - 1) .Last else .NotLast);
         self.dumpExpression(expression);
     }
@@ -225,7 +225,7 @@ pub fn dumpMessage(self: *Self, message: AST.MessageNode) void {
         self.setStem(.Last);
         self.print("arguments:\n", .{});
         self.indent();
-        for (message.arguments) |argument, i| {
+        for (message.arguments, 0..) |argument, i| {
             self.setStem(if (i == message.arguments.len - 1) .Last else .NotLast);
             self.dumpExpression(argument);
         }

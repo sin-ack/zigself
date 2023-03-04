@@ -79,7 +79,7 @@ fn insertActiveInterval(
     const active_interval = ActiveInterval{ .bound_register = register, .interval = interval };
 
     var did_insert = false;
-    for (self.active_intervals.items) |int, i| {
+    for (self.active_intervals.items, 0..) |int, i| {
         if (int.interval.end > interval.end) {
             try self.active_intervals.insert(allocator, i, active_interval);
             did_insert = true;

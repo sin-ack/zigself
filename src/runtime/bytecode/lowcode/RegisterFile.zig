@@ -16,7 +16,7 @@ ret: Value = undefined,
 const RegisterFile = @This();
 
 pub fn init(self: *RegisterFile) void {
-    for (self.general_purpose) |*register| {
+    for (&self.general_purpose) |*register| {
         register.* = Value{ .data = 0 };
     }
 
@@ -63,7 +63,7 @@ pub fn visitValues(
     context: anytype,
     visitor: fn (ctx: @TypeOf(context), register: *Value) Allocator.Error!void,
 ) !void {
-    for (self.general_purpose) |*register| {
+    for (&self.general_purpose) |*register| {
         try visitor(context, register);
     }
 

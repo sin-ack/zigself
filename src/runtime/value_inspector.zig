@@ -145,7 +145,7 @@ fn inspectObject(
             } else {
                 std.debug.print("[{s}", .{separator});
 
-                for (values) |value, i| {
+                for (values, 0..) |value, i| {
                     printWithIndent(display_type, indent + 2, "", .{});
                     try inspectValueInternal(display_type, vm, value, indent + 2, &my_link);
 

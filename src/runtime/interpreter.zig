@@ -549,7 +549,7 @@ pub fn sendMessage(
             errdefer vm.allocator.free(new_arguments_slice);
 
             // Blessing each argument is required so that actors don't share memory.
-            for (argument_slice) |argument, i| {
+            for (argument_slice, 0..) |argument, i| {
                 new_arguments_slice[i] = try bless.bless(vm.heap, target_actor.id, argument);
             }
 
@@ -686,7 +686,7 @@ fn createObject(
 
     var total_slot_count: u32 = 0;
     var total_assignable_slot_count: u8 = 0;
-    for (slots) |slot, i| {
+    for (slots, 0..) |slot, i| {
         total_slot_count += slot.requiredSlotSpace(slots[0..i]);
         total_assignable_slot_count += @intCast(u8, slot.requiredAssignableSlotValueSpace(slots[0..i]));
     }
@@ -724,7 +724,7 @@ fn createMethod(
     var total_slot_count: u32 = 0;
     var total_assignable_slot_count: u8 = 0;
     var argument_slot_count: u8 = 0;
-    for (slots) |slot, i| {
+    for (slots, 0..) |slot, i| {
         total_slot_count += slot.requiredSlotSpace(slots[0..i]);
         total_assignable_slot_count += @intCast(u8, slot.requiredAssignableSlotValueSpace(slots[0..i]));
 
@@ -775,7 +775,7 @@ fn createBlock(
     var total_slot_count: u32 = 0;
     var total_assignable_slot_count: u8 = 0;
     var argument_slot_count: u8 = 0;
-    for (slots) |slot, i| {
+    for (slots, 0..) |slot, i| {
         total_slot_count += slot.requiredSlotSpace(slots[0..i]);
         total_assignable_slot_count += @intCast(u8, slot.requiredAssignableSlotValueSpace(slots[0..i]));
 

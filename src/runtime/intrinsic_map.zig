@@ -51,7 +51,7 @@ pub fn IntrinsicMap(comptime MapT: type, comptime object_type: ObjectType) type 
 
     const struct_fields = struct_info.fields;
     comptime var field_names: []const []const u8 = &.{};
-    inline for (struct_fields) |field, i| {
+    inline for (struct_fields, 0..) |field, i| {
         if (i == 0 and field.type != Map) {
             @compileError("The first field of IntrinsicMaps must be Map");
         }
@@ -182,7 +182,7 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
 
             const map = self.getMap();
 
-            inline for (field_hashes) |field_hash, i| {
+            inline for (field_hashes, 0..) |field_hash, i| {
                 if (selector_hash.regular == field_hash) {
                     return object_lookup.LookupResult{ .Regular = @field(map, field_names[i]) };
                 }

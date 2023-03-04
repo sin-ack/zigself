@@ -38,7 +38,7 @@ fn lowerBlock(allocator: Allocator, executable: *bytecode.lowcode.Executable, as
 
     const push_registers_inst_offset = try low_block.reserveInstruction(allocator);
 
-    for (ast_block.instructions.items) |inst, i| {
+    for (ast_block.instructions.items, 0..) |inst, i| {
         try lowerInstruction(allocator, low_block, &liveness, &register_pool, inst);
         register_pool.expireOldIntervals(i);
     }

@@ -268,12 +268,12 @@ pub const Slot = packed struct {
     fn getSlotWithMyName(self: Slot, comptime traverse_inherited_slots: TraverseInheritedSlots, previous_slots: anytype) GetSlotWithMyNameResult(@TypeOf(previous_slots)) {
         // NOTE: Walking backwards to find the first slot that overwrote the
         //       earlier ones.
-        for (previous_slots) |_, index| {
+        for (previous_slots, 0..) |_, index| {
             const slot = &previous_slots[previous_slots.len - 1 - index];
 
             if (traverse_inherited_slots == .Traverse and slot.isInherited()) {
                 const inherited_slots = slot.value.asObject().mustBeType(.Slots).getSlots();
-                for (inherited_slots) |_, inherited_index| {
+                for (inherited_slots, 0..) |_, inherited_index| {
                     const inherited_slot = &inherited_slots[inherited_slots.len - 1 - inherited_index];
                     if (self.getHash() == inherited_slot.getHash())
                         return inherited_slot;

@@ -22,7 +22,7 @@ pub fn analyzeBlock(allocator: Allocator, block: *astcode.Block) !Liveness {
     errdefer self.deinit(allocator);
 
     // FIXME: This is O(n^2).
-    for (block.instructions.items) |inst, start| {
+    for (block.instructions.items, 0..) |inst, start| {
         try self.addIntervalForRegister(allocator, inst.target, start, block);
     }
 
@@ -38,7 +38,7 @@ fn addIntervalForRegister(self: *Liveness, allocator: Allocator, location: astco
 
     var end = start;
 
-    for (block.instructions.items[start + 1 ..]) |inst, i| {
+    for (block.instructions.items[start + 1 ..], 0..) |inst, i| {
         if (instructionReferencesRegister(inst, location)) {
             // The register died with this instruction, so it was last alive on the instruction before it.
             end = start + i - 1;

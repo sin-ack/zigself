@@ -319,7 +319,7 @@ pub fn exitActivation(
 
     if (ACTIVATION_EXIT_DEBUG) {
         std.debug.print("Actor.exitActivation: Exiting activation\n", .{});
-        for (self.activation_stack.getStack()) |*a, i| {
+        for (self.activation_stack.getStack(), 0..) |*a, i| {
             const pointer = if (a == target_activation)
                 @as(u8, '>')
             else if (a == last_activation)
@@ -345,7 +345,7 @@ pub fn exitActivation(
     const activation_saved_register_height = activation_stack_snapshot.saved_register_height;
     const saved_register_stack = self.saved_register_stack.allItems();
     const saved_register_count = saved_register_stack.len;
-    for (saved_register_stack[activation_saved_register_height..]) |_, i| {
+    for (saved_register_stack[activation_saved_register_height..], 0..) |_, i| {
         const saved_register = saved_register_stack[saved_register_count - 1 - i];
         vm.writeRegister(saved_register.register, saved_register.value);
     }

@@ -80,7 +80,7 @@ fn Executable(comptime BlockT: type) type {
             _ = options;
 
             try std.fmt.format(writer, "ASTcode executable @ {s} ({} blocks):\n", .{ executable.definition_script.value.file_path, executable.blocks.items.len });
-            for (executable.blocks.items) |block, i| {
+            for (executable.blocks.items, 0..) |block, i| {
                 try std.fmt.format(writer, "Block {}:\n{}\n", .{ i, block });
             }
         }

@@ -19,7 +19,7 @@ const powers = blk: {
     var powers_array = [_]u64{0} ** 64;
     powers_array[0] = 1;
 
-    for (powers_array[1..]) |*p, i| {
+    for (powers_array[1..], 0..) |*p, i| {
         p.* = (powers_array[i] * P) % M;
     }
 
@@ -106,7 +106,7 @@ pub fn stringHash(string: []const u8) u32 {
     var hash_value: u64 = 0;
     var power: u64 = powers[0];
 
-    for (string) |c, i| {
+    for (string, 0..) |c, i| {
         const mapped_character = character_translation_map[c];
         std.debug.assert(mapped_character != 0);
 
