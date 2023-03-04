@@ -13,7 +13,6 @@ const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig").Object;
 const ByteArray = @import("./ByteArray.zig");
 const Activation = @import("./Activation.zig");
-const HandleArea = @import("./HandleArea.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const ActivationStack = Activation.ActivationStack;
 
@@ -43,8 +42,13 @@ to_space: Space,
 /// memory requirements of the program grows.
 old_space: Space,
 
-/// This is where all the handles for tracked objects are stored.
-handle_area: HandleArea,
+/// Holds the handles to heap values. The values stored here will be scanned
+/// during heap allocations.
+handles: [HandleAreaSize]?[*]u64 = .{null} ** HandleAreaSize,
+/// The index of the handle that was allocated most recently. We do a linear
+/// search in a ring fashion from this offset to find a new slot.
+// Begins from HandleAreaSize - 1 in order to search the first index first.
+most_recent_handle_index: std.math.IntFittingRange(0, HandleAreaSize - 1) = HandleAreaSize - 1,
 
 allocator: Allocator,
 /// The virtual machine running the whole thing. We use this to scan the
@@ -58,6 +62,8 @@ caller_tracked_mapping: if (GC_TRACK_SOURCE_DEBUG) std.AutoArrayHashMap(*[*]u64,
 const EdenSize = 1 * 1024 * 1024;
 const NewSpaceSize = 4 * 1024 * 1024;
 const InitialOldSpaceSize = 16 * 1024 * 1024;
+// 2x the empirically determined maximum handles used during zig build test.
+const HandleAreaSize = 32;
 
 const Segment = enum { Object, ByteArray };
 pub const AllocationToken = struct {
@@ -114,9 +120,6 @@ fn init(self: *Self, allocator: Allocator, vm: *VirtualMachine) !void {
     var eden = try Space.init(self, allocator, "eden", EdenSize);
     errdefer eden.deinit(allocator);
 
-    var handle_area = try HandleArea.create();
-    errdefer handle_area.destroy();
-
     self.* = .{
         .vm = vm,
         .allocator = allocator,
@@ -125,7 +128,6 @@ fn init(self: *Self, allocator: Allocator, vm: *VirtualMachine) !void {
         .from_space = from_space,
         .to_space = to_space,
         .old_space = old_space,
-        .handle_area = handle_area,
     };
 
     self.from_space.scavenge_target = &self.to_space;
@@ -138,7 +140,6 @@ fn deinit(self: *Self) void {
     self.from_space.deinit(self.allocator);
     self.to_space.deinit(self.allocator);
     self.old_space.deinit(self.allocator);
-    self.handle_area.destroy();
 
     if (GC_TRACK_SOURCE_DEBUG) {
         self.caller_tracked_mapping.deinit();
@@ -166,24 +167,40 @@ pub fn markAddressAsNeedingFinalization(self: *Self, address: [*]u64) !void {
     try self.eden.addToFinalizationSet(self.allocator, address);
 }
 
-fn allocateHandle(self: *Self) !*[*]u64 {
-    return self.handle_area.allocHandle();
+fn allocateHandle(self: *Self) *?[*]u64 {
+    var handle_index = self.most_recent_handle_index +% 1;
+    while (handle_index != self.most_recent_handle_index) : (handle_index +%= 1) {
+        const handle = &self.handles[handle_index];
+        if (handle.* != null) continue;
+
+        self.most_recent_handle_index = handle_index;
+        return handle;
+    }
+
+    @panic("!!! Could not find a free handle slot!");
+}
+
+fn freeHandle(self: *Self, handle: *?[*]u64) void {
+    self.most_recent_handle_index = @intCast(@TypeOf(self.most_recent_handle_index), @divExact(@ptrToInt(handle) - @ptrToInt(&self.handles), @sizeOf([*]u64))) -% 1;
+    handle.* = null;
 }
 
 /// Track the given value, returning a Tracked. When a garbage collection
 /// occurs, the value will be updated with the new location.
 pub fn track(self: *Self, value: Value) !Tracked {
     if (value.isObjectReference()) {
-        const handle = try self.allocateHandle();
+        const handle = self.allocateHandle();
         handle.* = value.asObjectAddress();
+
+        // XXX: The handle cannot be null at this point.
+        const nonnull_handle = @ptrCast(*[*]u64, handle);
 
         if (GC_TRACK_SOURCE_DEBUG) {
             const address = @returnAddress();
-            try self.caller_tracked_mapping.put(handle, address);
+            try self.caller_tracked_mapping.put(nonnull_handle, address);
         }
 
-        const tracked = Tracked.createWithObject(handle);
-        _ = try self.eden.startTracking(self.allocator, handle);
+        const tracked = Tracked.createWithObject(nonnull_handle);
 
         return tracked;
     } else {
@@ -198,16 +215,32 @@ pub fn untrack(self: *Self, tracked: Tracked) void {
             _ = self.caller_tracked_mapping.swapRemove(tracked.value.Object);
         }
 
-        _ = self.eden.stopTracking(tracked.value.Object);
-        self.handle_area.freeHandle(tracked.value.Object);
+        // XXX: The handle dies here, so this is alright.
+        self.freeHandle(@ptrCast(*?[*]u64, tracked.value.Object));
     }
+}
+
+pub fn visitValues(
+    self: *Self,
+    context: anytype,
+    visitor: fn (ctx: @TypeOf(context), value: *Value) Allocator.Error!void,
+) !void {
+    for (&self.handles) |*handle| {
+        if (handle.*) |h| {
+            var handle_as_value = Value.fromObjectAddress(h);
+            try visitor(context, &handle_as_value);
+            handle.* = handle_as_value.asObjectAddress();
+        }
+    }
+
+    try self.vm.visitValues(context, visitor);
 }
 
 /// Go through the whole heap, updating references to the given value with the
 /// new value.
 pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) !void {
     const VisitorContext = struct { old_value: Value, new_value: Value };
-    self.vm.visitValues(VisitorContext{ .old_value = old_value, .new_value = new_value }, struct {
+    self.visitValues(VisitorContext{ .old_value = old_value, .new_value = new_value }, struct {
         fn f(context: VisitorContext, value: *Value) !void {
             if (value.data == context.old_value.data)
                 value.* = context.new_value;
@@ -215,7 +248,7 @@ pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) !v
     }.f) catch unreachable;
 
     // Finally scan each heap space and update the references.
-    try self.eden.updateAllReferencesTo(self.allocator, old_value.asObjectAddress(), new_value.asObjectAddress(), null);
+    try self.eden.updateAllReferencesTo(self.allocator, old_value.asObjectAddress(), new_value.asObjectAddress());
 }
 
 /// Figure out which spaces the referrer and target object are in, and add an
@@ -309,8 +342,6 @@ const RememberedSet = std.AutoArrayHashMapUnmanaged([*]u64, usize);
 /// A set of objects which should be notified when they are not referenced
 /// anymore. See `Space.finalization_set` for more information.
 const FinalizationSet = std.AutoArrayHashMapUnmanaged([*]u64, void);
-/// A set of objects which are tracked across garbage collection events.
-const TrackedSet = std.ArrayListUnmanaged(*[*]u64);
 const Space = struct {
     /// A reference back to the heap.
     heap: *Self,
@@ -347,11 +378,6 @@ const Space = struct {
     ///When an item in this set gets copied to the target space, it is removed
     ///from this set and added to the target set.
     finalization_set: FinalizationSet,
-    /// The tracked set of this space. At a garbage collection, all the objects
-    /// pointed to by values in this set will be marked as referenced and will
-    /// be copied to the new space. The tracked values are then transferred to
-    /// the new space, updating them with their new locations.
-    tracked_set: TrackedSet,
     /// The scavenging target of this space. When the space runs out of memory
     /// and this space is set, the space will attempt to perform a scavenging
     /// operation towards this space. This space must have the same size as the
@@ -380,7 +406,6 @@ const Space = struct {
             .size = size,
             .remembered_set = .{},
             .finalization_set = .{},
-            .tracked_set = .{},
         };
     }
 
@@ -418,7 +443,6 @@ const Space = struct {
         }
 
         self.finalization_set.deinit(allocator);
-        self.tracked_set.deinit(allocator);
         self.remembered_set.deinit(allocator);
         allocator.free(self.memory);
     }
@@ -524,7 +548,7 @@ const Space = struct {
         // Visit all the values in the VM and copy any addresses.
         const VisitorContext = struct { self: *Space, allocator: Allocator, target_space: *Space };
         const context = VisitorContext{ .self = self, .allocator = allocator, .target_space = target_space };
-        try self.heap.vm.visitValues(context, struct {
+        try self.heap.visitValues(context, struct {
             fn f(ctx: VisitorContext, value: *Value) !void {
                 if (value.isObjectReference()) {
                     if (try ctx.self.copyAddress(ctx.allocator, value.asObjectAddress(), ctx.target_space, false)) |new_address| {
@@ -533,13 +557,6 @@ const Space = struct {
                 }
             }
         }.f);
-
-        // Go through the tracked set, copying referenced objects
-        for (self.tracked_set.items) |handle| {
-            const address = handle.*;
-            handle.* = (try self.copyAddress(allocator, address, target_space, true)).?;
-            try target_space.addToTrackedSet(allocator, handle);
-        }
 
         {
             var remembered_set_iterator = self.remembered_set.iterator();
@@ -678,7 +695,6 @@ const Space = struct {
         self.byte_array_segment = (self.memory.ptr + self.memory.len)[0..runtime_zero];
         self.remembered_set.clearRetainingCapacity();
         self.finalization_set.clearRetainingCapacity();
-        self.tracked_set.clearRetainingCapacity();
     }
 
     /// Performs a garbage collection operation on this space.
@@ -761,7 +777,6 @@ const Space = struct {
         std.mem.swap([]u64, &self.byte_array_segment, &target_space.byte_array_segment);
         std.mem.swap(RememberedSet, &self.remembered_set, &target_space.remembered_set);
         std.mem.swap(FinalizationSet, &self.finalization_set, &target_space.finalization_set);
-        std.mem.swap(TrackedSet, &self.tracked_set, &target_space.tracked_set);
     }
 
     fn objectSegmentContains(self: *Space, address: [*]u64) bool {
@@ -842,30 +857,6 @@ const Space = struct {
         }
     }
 
-    /// Adds the given tracked value into the tracked set of this space.
-    pub fn addToTrackedSet(self: *Space, allocator: Allocator, handle: *[*]u64) !void {
-        try self.tracked_set.append(allocator, handle);
-    }
-
-    pub const RemoveFromTrackedSetError = error{AddressNotInTrackedSet};
-    /// Removes the given object handle from the tracked set of this space.
-    /// Returns AddressNotInTrackedSet if the handle was not in the tracked
-    /// set.
-    pub fn removeFromTrackedSet(self: *Space, handle: *[*]u64) !void {
-        // NOTE: The idea here is that most handles are created and then
-        //       destroyed soon after, so we walk the tracked set in reverse
-        //       order and remove it directly.
-        var i: usize = self.tracked_set.items.len;
-        while (i > 0) : (i -= 1) {
-            if (handle == self.tracked_set.items[i - 1]) {
-                _ = self.tracked_set.orderedRemove(i - 1);
-                return;
-            }
-        }
-
-        return RemoveFromTrackedSetError.AddressNotInTrackedSet;
-    }
-
     /// Adds the given address into the remembered set of this space.
     pub fn addToRememberedSet(self: *Space, allocator: Allocator, address: [*]u64, size: usize) !void {
         try self.remembered_set.put(allocator, address, size);
@@ -880,46 +871,11 @@ const Space = struct {
         }
     }
 
-    /// Find the space which has this value, and add the tracked value to the
-    /// tracked set of that space.
-    pub fn startTracking(self: *Space, allocator: Allocator, handle: *[*]u64) Allocator.Error!bool {
-        const address = handle.*;
-
-        if (self.objectSegmentContains(address) or self.byteArraySegmentContains(address)) {
-            try self.addToTrackedSet(allocator, handle);
-            return true;
-        }
-
-        if (self.tenure_target) |tenure_target| {
-            if (try tenure_target.startTracking(allocator, handle)) return true;
-        }
-
-        return false;
-    }
-
-    /// Find the space which has this value, and remove the tracked value from
-    /// the tracked set of that space.
-    pub fn stopTracking(self: *Space, handle: *[*]u64) bool {
-        const address = handle.*;
-
-        if (self.objectSegmentContains(address) or self.byteArraySegmentContains(address)) {
-            self.removeFromTrackedSet(handle) catch unreachable;
-            return true;
-        }
-
-        if (self.tenure_target) |tenure_target| {
-            if (tenure_target.stopTracking(handle)) return true;
-        }
-
-        return false;
-    }
-
     pub fn updateAllReferencesToImpl(
         self: *Space,
         allocator: Allocator,
         old_address: [*]u64,
         new_address: [*]u64,
-        new_address_space: ?*Space,
     ) !void {
         if (self.lazy_allocate) {
             // This space hasn't been allocated yet, so there's no reason to
@@ -936,39 +892,6 @@ const Space = struct {
                 word.* = new_address_as_reference;
         }
 
-        var current_space_tracked_set = TrackedSet{};
-
-        // Go through tracked set, and replace the address contained in any
-        // handle with the new address.
-        for (self.tracked_set.items) |handle| {
-            var moved_into_new_space = false;
-
-            // If the new address' space is not this space, then we need to
-            // remove this address from our tracked set and add it to the other
-            // space's tracked set, so that it can be properly untracked.
-            //
-            // Otherwise, since this space already contains both the old and new
-            // address, we'll always be correctly untracking, so we can simply
-            // update the address.
-            if (handle.* == old_address) {
-                if (new_address_space) |new_space| {
-                    try new_space.addToTrackedSet(allocator, handle);
-                    moved_into_new_space = true;
-                }
-
-                handle.* = new_address;
-            }
-
-            if (!moved_into_new_space) {
-                try current_space_tracked_set.append(allocator, handle);
-            }
-        }
-
-        // FIXME: Instead of deinitializing, rewrite the array contents instead
-        //        to avoid excess allocations.
-        self.tracked_set.deinit(allocator);
-        self.tracked_set = current_space_tracked_set;
-
         // If the new object is in the current space and should be finalized,
         // then put it in the finalization set.
         if (self.objectSegmentContains(new_address) and new_address_value.asObject().canFinalize())
@@ -982,13 +905,11 @@ const Space = struct {
         allocator: Allocator,
         old_address: [*]u64,
         new_address: [*]u64,
-        new_address_space: ?*Space,
     ) Allocator.Error!void {
-        try self.updateAllReferencesToImpl(allocator, old_address, new_address, new_address_space);
+        try self.updateAllReferencesToImpl(allocator, old_address, new_address);
 
         if (self.tenure_target) |tenure_target| {
-            const space_contains_new_address = self.objectSegmentContains(new_address) or self.byteArraySegmentContains(new_address);
-            try tenure_target.updateAllReferencesTo(allocator, old_address, new_address, if (space_contains_new_address) self else new_address_space);
+            try tenure_target.updateAllReferencesTo(allocator, old_address, new_address);
         }
     }
 };
