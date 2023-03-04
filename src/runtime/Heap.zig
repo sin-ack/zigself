@@ -20,6 +20,8 @@ const GC_DEBUG = debug.GC_DEBUG;
 const GC_TOKEN_DEBUG = debug.GC_TOKEN_DEBUG;
 const GC_TRACK_SOURCE_DEBUG = debug.GC_TRACK_SOURCE_DEBUG;
 const REMEMBERED_SET_DEBUG = debug.REMEMBERED_SET_DEBUG;
+const HEAP_HANDLE_MISS_DEBUG = debug.HEAP_HANDLE_MISS_DEBUG;
+const CRASH_ON_OUT_OF_ORDER_HANDLE_FREES = debug.CRASH_ON_OUT_OF_ORDER_HANDLE_FREES;
 
 const Self = @This();
 const UninitializedHeapScrubByte = 0xAB;
@@ -171,7 +173,10 @@ fn allocateHandle(self: *Self) *?[*]u64 {
     var handle_index = self.most_recent_handle_index +% 1;
     while (handle_index != self.most_recent_handle_index) : (handle_index +%= 1) {
         const handle = &self.handles[handle_index];
-        if (handle.* != null) continue;
+        if (handle.* != null) {
+            if (HEAP_HANDLE_MISS_DEBUG) std.debug.print("Heap.allocateHandle: Handle index {} was full, retrying\n", .{handle_index});
+            continue;
+        }
 
         self.most_recent_handle_index = handle_index;
         return handle;
@@ -181,6 +186,12 @@ fn allocateHandle(self: *Self) *?[*]u64 {
 }
 
 fn freeHandle(self: *Self, handle: *?[*]u64) void {
+    if (CRASH_ON_OUT_OF_ORDER_HANDLE_FREES) {
+        if (handle != &self.handles[self.most_recent_handle_index]) {
+            @panic("!!! Out-of-order handle free!");
+        }
+    }
+
     self.most_recent_handle_index = @intCast(@TypeOf(self.most_recent_handle_index), @divExact(@ptrToInt(handle) - @ptrToInt(&self.handles), @sizeOf([*]u64))) -% 1;
     handle.* = null;
 }

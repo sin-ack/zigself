@@ -23,3 +23,11 @@ pub const LOW_EXECUTABLE_DUMP_DEBUG = false;
 pub const EXECUTION_DEBUG = false;
 /// Print pushes and pops to VM stacks.
 pub const STACK_DEBUG = false;
+/// Report when a an empty heap handle slot was found non-optimally.
+pub const HEAP_HANDLE_MISS_DEBUG = false;
+/// Crash the VM if an out-of-order heap handle untrack happens.
+/// i.e. track(A) track(B), then untrack(A) untrack(B).
+/// This causes slowdowns in the VM because Heap.allocateHandle has to do more
+/// work to find an empty handle slot, so you can use this to track down those
+/// cases.
+pub const CRASH_ON_OUT_OF_ORDER_HANDLE_FREES = false;
