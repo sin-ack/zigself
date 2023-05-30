@@ -84,8 +84,8 @@ pub const Map = extern struct {
     fn delegate(self: Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
         return switch (self.map_information.map_type) {
             // Breaks the cycle.
-            .MapMap => @call(.auto, @field(self, name ++ "MapMap"), args),
-            inline else => |t| @call(.auto, @field(@ptrCast(MapT(t).Ptr, self), name), args),
+            .MapMap => @call(.auto, @field(Map, name ++ "MapMap"), .{self} ++ args),
+            inline else => |t| @call(.auto, @field(MapT(t), name), .{@ptrCast(MapT(t).Ptr, self)} ++ args),
         };
     }
 

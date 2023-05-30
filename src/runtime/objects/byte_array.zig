@@ -29,7 +29,7 @@ pub const ByteArray = extern struct {
     /// Create an initialized byte array object from the given values.
     pub fn createWithValues(map_map: Map.Ptr, token: *Heap.AllocationToken, actor_id: u31, values: []const u8) ByteArray.Ptr {
         const self = createUninitialized(map_map, token, actor_id, values.len);
-        std.mem.copy(u8, self.getValues(), values);
+        @memcpy(self.getValues(), values);
         return self;
     }
 

@@ -78,7 +78,7 @@ fn collectTests(allocator: Allocator, directory: std.fs.IterableDir) !std.ArrayL
         defer walker.deinit();
 
         next_file: while (try walker.next()) |entry| {
-            if (entry.kind != .File)
+            if (entry.kind != .file)
                 continue :next_file;
             if (!std.mem.endsWith(u8, entry.basename, ".self"))
                 continue :next_file;

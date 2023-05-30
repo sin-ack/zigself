@@ -108,7 +108,7 @@ pub const Object = extern struct {
     fn delegate(self: Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
         return switch (self.object_information.object_type) {
             .ForwardedObject => unreachable,
-            inline else => |t| @call(.auto, @field(@ptrCast(ObjectT(t).Ptr, self), name), args),
+            inline else => |t| @call(.auto, @field(ObjectT(t), name), .{@ptrCast(ObjectT(t).Ptr, self)} ++ args),
         };
     }
 

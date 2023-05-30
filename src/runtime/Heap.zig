@@ -483,7 +483,7 @@ const Space = struct {
         const object_size_in_words = object_size / @sizeOf(u64);
         // We must have enough space at this point.
         const new_address = target_space.allocateInObjectSegment(allocator, object_size) catch unreachable;
-        std.mem.copy(u64, new_address[0..object_size_in_words], address[0..object_size_in_words]);
+        @memcpy(new_address[0..object_size_in_words], address[0..object_size_in_words]);
 
         // Add this object to the target space's finalization set if it is in
         // ours.
@@ -506,7 +506,7 @@ const Space = struct {
         const byte_array_size_in_words = byte_array_size / @sizeOf(u64);
         // We must have enough space at this point.
         const new_address = target_space.allocateInByteArraySegment(allocator, byte_array_size) catch unreachable;
-        std.mem.copy(u64, new_address[0..byte_array_size_in_words], address[0..byte_array_size_in_words]);
+        @memcpy(new_address[0..byte_array_size_in_words], address[0..byte_array_size_in_words]);
 
         return new_address;
     }
@@ -818,7 +818,7 @@ const Space = struct {
         const start_of_object = @ptrCast([*]u64, &self.object_segment[current_object_segment_offset]);
 
         if (builtin.mode == .Debug)
-            std.mem.set(u8, @ptrCast([*]align(@alignOf(u64)) u8, start_of_object)[0..size], UninitializedHeapScrubByte);
+            @memset(@ptrCast([*]align(@alignOf(u64)) u8, start_of_object)[0..size], UninitializedHeapScrubByte);
 
         return start_of_object;
     }
@@ -834,7 +834,7 @@ const Space = struct {
         self.byte_array_segment.len += size_in_words;
 
         if (builtin.mode == .Debug)
-            std.mem.set(u8, @ptrCast([*]align(@alignOf(u64)) u8, self.byte_array_segment.ptr)[0..size], UninitializedHeapScrubByte);
+            @memset(@ptrCast([*]align(@alignOf(u64)) u8, self.byte_array_segment.ptr)[0..size], UninitializedHeapScrubByte);
 
         return self.byte_array_segment.ptr;
     }

@@ -83,8 +83,8 @@ pub const Activation = extern struct {
             @ptrCast([*]align(@alignOf(u64)) u8, memory_area)[activation_header_size..size],
         );
 
-        std.mem.copy(GenericValue, assignable_slots[0..argument_slot_count], arguments);
-        std.mem.copy(GenericValue, assignable_slots[argument_slot_count..], assignable_slot_values);
+        @memcpy(assignable_slots[0..argument_slot_count], arguments);
+        @memcpy(assignable_slots[argument_slot_count..], assignable_slot_values);
 
         return self;
     }
@@ -263,8 +263,8 @@ pub const Activation = extern struct {
 
     fn dispatch(self: Activation.Ptr, comptime fn_name: []const u8) DispatchReturn(fn_name) {
         return switch (self.getActivationType()) {
-            .Method => @call(.auto, @field(self.getMethodMap(), fn_name), .{}),
-            .Block => @call(.auto, @field(self.getBlockMap(), fn_name), .{}),
+            .Method => @call(.auto, @field(MethodMap, fn_name), .{self.getMethodMap()}),
+            .Block => @call(.auto, @field(BlockMap, fn_name), .{self.getBlockMap()}),
         };
     }
 };

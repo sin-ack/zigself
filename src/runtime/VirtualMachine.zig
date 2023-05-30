@@ -236,14 +236,14 @@ pub fn getOrCreateBlockMessageName(self: *Self, argument_count: u8) !BlockMessag
 
 fn writeBlockMessageName(name: []u8, argument_count: u8) void {
     std.debug.assert(name.len == blockMessageNameLength(argument_count));
-    std.mem.copy(u8, name, "value");
+    @memcpy(name[0..5], "value");
 
     if (argument_count > 0) {
         name[5] = ':';
 
         var remaining_buffer = name[6..];
         while (remaining_buffer.len > 0) {
-            std.mem.copy(u8, remaining_buffer, "With:");
+            @memcpy(remaining_buffer[0..5], "With:");
             remaining_buffer = remaining_buffer[5..];
         }
     }

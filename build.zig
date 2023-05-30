@@ -19,12 +19,12 @@ pub fn build(b: *std.build.Builder) void {
         .optimize = optimize,
     });
     exe.linkLibC();
-    exe.install();
+    b.installArtifact(exe);
     exe.addAnonymousModule("zig-args", .{
         .source_file = .{ .path = "./vendor/zig-args/args.zig" },
     });
 
-    const run_cmd = exe.run();
+    const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd.addArgs(args);
@@ -44,7 +44,7 @@ pub fn build(b: *std.build.Builder) void {
         .source_file = .{ .path = "src/package.zig" },
     });
 
-    const test_harness_run_cmd = test_harness_exe.run();
+    const test_harness_run_cmd = b.addRunArtifact(test_harness_exe);
     if (b.args) |args| {
         test_harness_run_cmd.addArgs(args);
     }

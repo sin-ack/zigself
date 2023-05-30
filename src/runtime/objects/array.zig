@@ -54,10 +54,10 @@ pub const Array = extern struct {
         };
 
         const values_to_copy = values[0..std.math.min(values.len, map.getSize())];
-        std.mem.copy(Value, self.getValues(), values_to_copy);
+        @memcpy(self.getValues()[0..values_to_copy.len], values_to_copy);
 
         if (map.getSize() > values.len) {
-            std.mem.set(Value, self.getValues()[values.len..], filler.?);
+            @memset(self.getValues()[values.len..], filler.?);
         }
     }
 

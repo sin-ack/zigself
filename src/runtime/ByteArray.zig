@@ -16,7 +16,7 @@ header: Header.Ptr,
 
 pub fn createFromString(token: *Heap.AllocationToken, string: []const u8) Self {
     var self = createUninitialized(token, string.len);
-    std.mem.copy(u8, self.getValues(), string);
+    @memcpy(self.getValues(), string);
     return self;
 }
 

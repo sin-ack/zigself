@@ -108,10 +108,10 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
 
     const new_byte_array = ByteArray.createUninitialized(&token, @intCast(usize, size));
     const bytes_to_copy = @intCast(usize, std.math.min(size, values.len));
-    std.mem.copy(u8, new_byte_array.getValues(), values[0..bytes_to_copy]);
+    @memcpy(new_byte_array.getValues()[0..bytes_to_copy], values[0..bytes_to_copy]);
 
     if (size > values.len) {
-        std.mem.set(u8, new_byte_array.getValues()[bytes_to_copy..], filler);
+        @memset(new_byte_array.getValues()[bytes_to_copy..], filler);
     }
 
     const byte_array_object = ByteArrayObject.create(context.vm.getMapMap(), &token, context.actor.id, new_byte_array);
@@ -162,8 +162,8 @@ pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
     argument = context.arguments[0].asObject().asType(.ByteArray).?;
 
     var new_byte_array = ByteArray.createUninitialized(&token, receiver_size + argument_size);
-    std.mem.copy(u8, new_byte_array.getValues()[0..receiver_size], receiver.getValues());
-    std.mem.copy(u8, new_byte_array.getValues()[receiver_size..], argument.getValues());
+    @memcpy(new_byte_array.getValues()[0..receiver_size], receiver.getValues());
+    @memcpy(new_byte_array.getValues()[receiver_size..], argument.getValues());
 
     const byte_array_object = ByteArrayObject.create(context.vm.getMapMap(), &token, context.actor.id, new_byte_array);
     return ExecutionResult.completion(Completion.initNormal(byte_array_object.asValue()));

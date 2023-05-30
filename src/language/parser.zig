@@ -649,7 +649,7 @@ fn parseSlotList(self: *Self, comptime slot_list_type: SlotListType, initial_ord
     }
 
     // Sort inherited slots first.
-    std.sort.sort(AST.SlotNode, slots.items, void{}, struct {
+    std.mem.sort(AST.SlotNode, slots.items, void{}, struct {
         fn lessThan(context: void, lhs: AST.SlotNode, rhs: AST.SlotNode) bool {
             _ = context;
 

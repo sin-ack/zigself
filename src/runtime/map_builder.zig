@@ -78,7 +78,7 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
         /// Assumes that a garbage collection will not happen before the values'
         /// use.
         pub fn writeAssignableSlotValuesTo(self: *Self, slot_values: []Value) void {
-            std.mem.copy(Value, slot_values, self.assignable_slot_values.constSlice());
+            @memcpy(slot_values, self.assignable_slot_values.constSlice());
         }
     };
 }

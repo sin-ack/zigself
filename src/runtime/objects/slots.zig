@@ -190,7 +190,7 @@ pub const Slots = extern struct {
         var memory_area = token.allocate(.Object, size);
         var self = @ptrCast(Slots.Ptr, memory_area);
         self.init(actor_id, map);
-        std.mem.copy(Value, self.getAssignableSlots(), assignable_slot_values);
+        @memcpy(self.getAssignableSlots(), assignable_slot_values);
 
         return self;
     }
@@ -555,7 +555,7 @@ pub const SlotsMap = extern struct {
         const new_map = create(map_map, token, self.information.slot_count);
 
         new_map.setAssignableSlotCount(self.getAssignableSlotCount());
-        std.mem.copy(Slot, new_map.getSlots(), self.getSlots());
+        @memcpy(new_map.getSlots(), self.getSlots());
 
         return new_map;
     }
