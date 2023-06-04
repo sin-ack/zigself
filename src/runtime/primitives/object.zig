@@ -110,7 +110,7 @@ pub fn Clone(context: *PrimitiveContext) !ExecutionResult {
 
     receiver = context.receiver.getValue();
 
-    return ExecutionResult.completion(Completion.initNormal(receiver.clone(&token, context.actor.id)));
+    return ExecutionResult.completion(Completion.initNormal(receiver.clone(context.vm, &token, context.actor.id)));
 }
 
 /// Return whether the receiver and argument are identical. Returns either

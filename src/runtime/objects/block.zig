@@ -229,9 +229,9 @@ pub const BlockMap = extern struct {
         return self.base_map.getArgumentSlotCount();
     }
 
-    pub fn clone(self: BlockMap.Ptr, map_map: Map.Ptr, token: *Heap.AllocationToken) !BlockMap.Ptr {
+    pub fn clone(self: BlockMap.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken) !BlockMap.Ptr {
         const new_map = try create(
-            map_map,
+            vm.getMapMap(),
             token,
             self.getArgumentSlotCount(),
             self.base_map.slots.information.slot_count,

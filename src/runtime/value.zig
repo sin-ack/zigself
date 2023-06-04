@@ -156,13 +156,13 @@ pub const Value = packed struct {
     }
 
     /// Clones this value and returns a copy of it.
-    pub fn clone(self: Value, token: *Heap.AllocationToken, actor_id: u31) Value {
+    pub fn clone(self: Value, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) Value {
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
             .Integer, .FloatingPoint => Value{ .data = self.data },
             // NOTE: The only error condition that can happen here is during method and block map cloning.
             //       Since user code is unable to do this, there is no reason to propagate a try here.
-            .ObjectReference => (self.asObject().clone(token, actor_id) catch unreachable).asValue(),
+            .ObjectReference => (self.asObject().clone(vm, token, actor_id) catch unreachable).asValue(),
         };
     }
 };

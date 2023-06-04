@@ -550,7 +550,7 @@ pub fn sendMessage(
 
             // Blessing each argument is required so that actors don't share memory.
             for (argument_slice, 0..) |argument, i| {
-                new_arguments_slice[i] = try bless.bless(vm.heap, target_actor.id, argument);
+                new_arguments_slice[i] = try bless.bless(vm, vm.heap, target_actor.id, argument);
             }
 
             try target_actor.putMessageInMailbox(

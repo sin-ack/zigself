@@ -117,7 +117,7 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
         var tracked_method = try context.vm.heap.track(method.asValue());
         defer tracked_method.untrack(context.vm.heap);
 
-        const blessed_receiver = try bless.bless(context.vm.heap, genesis_actor.id, receiver);
+        const blessed_receiver = try bless.bless(context.vm, context.vm.heap, genesis_actor.id, receiver);
 
         method = tracked_method.getValue().asObject().mustBeType(.Method);
 
@@ -318,7 +318,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         var tracked_method = try context.vm.heap.track(entrypoint_method.asValue());
         defer tracked_method.untrack(context.vm.heap);
 
-        const blessed_new_actor_context = try bless.bless(context.vm.heap, new_actor.id, new_actor_context);
+        const blessed_new_actor_context = try bless.bless(context.vm, context.vm.heap, new_actor.id, new_actor_context);
 
         entrypoint_method = tracked_method.getValue().asObject().mustBeType(.Method);
 

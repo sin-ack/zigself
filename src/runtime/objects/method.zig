@@ -236,9 +236,9 @@ pub const MethodMap = extern struct {
         return self.base_map.getArgumentSlotCount();
     }
 
-    pub fn clone(self: MethodMap.Ptr, map_map: Map.Ptr, token: *Heap.AllocationToken) !MethodMap.Ptr {
+    pub fn clone(self: MethodMap.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken) !MethodMap.Ptr {
         const new_map = try create(
-            map_map,
+            vm.getMapMap(),
             token,
             self.getArgumentSlotCount(),
             self.base_map.slots.information.slot_count,

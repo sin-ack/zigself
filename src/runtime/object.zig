@@ -186,14 +186,14 @@ pub const Object = extern struct {
     }
 
     /// Create a new shallow copy of this object. The map is not affected.
-    pub fn clone(self: Ptr, token: *Heap.AllocationToken, actor_id: u31) Allocator.Error!Ptr {
+    pub fn clone(self: Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) Allocator.Error!Ptr {
         // NOTE: Inlining the delegation here because we need to cast the result into the generic object type.
         return switch (self.object_information.object_type) {
             .ForwardedObject => unreachable,
             inline else => |t| {
                 if (!@hasDecl(ObjectT(t), "clone")) unreachable;
 
-                const result_or_error = @ptrCast(ObjectT(t).Ptr, self).clone(token, actor_id);
+                const result_or_error = @ptrCast(ObjectT(t).Ptr, self).clone(vm, token, actor_id);
                 const result = if (@typeInfo(@TypeOf(result_or_error)) == .ErrorUnion) try result_or_error else result_or_error;
                 return @ptrCast(Object.Ptr, result);
             },

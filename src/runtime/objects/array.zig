@@ -107,7 +107,8 @@ pub const Array = extern struct {
         return std.mem.bytesAsSlice(Value, start_of_items[0 .. self.getSize() * @sizeOf(Value)]);
     }
 
-    pub fn clone(self: Array.Ptr, token: *Heap.AllocationToken, actor_id: u31) Array.Ptr {
+    pub fn clone(self: Array.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) Array.Ptr {
+        _ = vm;
         return createWithValues(token, actor_id, self.getMap(), self.getValues(), null);
     }
 
@@ -171,8 +172,8 @@ pub const ArrayMap = extern struct {
         return @sizeOf(ArrayMap);
     }
 
-    pub fn clone(self: ArrayMap.Ptr, map_map: Map.Ptr, token: *Heap.AllocationToken) ArrayMap.Ptr {
-        return create(map_map, token, self.getSize());
+    pub fn clone(self: ArrayMap.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken) ArrayMap.Ptr {
+        return create(vm.getMapMap(), token, self.getSize());
     }
 
     pub fn canFinalize(self: ArrayMap.Ptr) bool {

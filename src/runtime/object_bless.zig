@@ -9,6 +9,7 @@ const Value = @import("value.zig").Value;
 const Object = @import("object.zig").Object;
 const Heap = @import("Heap.zig");
 const traversal = @import("object_traversal.zig");
+const VirtualMachine = @import("VirtualMachine.zig");
 
 const SeenObjectsSet = std.AutoHashMap([*]u64, void);
 
@@ -34,11 +35,11 @@ fn calculateRequiredMemoryForBlessing(allocator: Allocator, value: Value) Alloca
 }
 
 const CopiedObjectsMap = std.AutoHashMap([*]u64, [*]u64);
-fn copyObjectGraphForNewActor(token: *Heap.AllocationToken, actor_id: u31, value: Value) Allocator.Error!Value {
+fn copyObjectGraphForNewActor(vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31, value: Value) Allocator.Error!Value {
     var copied_objects_map = CopiedObjectsMap.init(token.heap.allocator);
     defer copied_objects_map.deinit();
 
-    const context = .{ .copied_objects_map = &copied_objects_map, .token = token, .actor_id = actor_id };
+    const context = .{ .copied_objects_map = &copied_objects_map, .vm = vm, .token = token, .actor_id = actor_id };
     const Context = @TypeOf(context);
     return traversal.traverseNonGloballyReachableObjectGraph(value, context, struct {
         fn f(ctx: Context, old_object: Object.Ptr) Allocator.Error!Object.Ptr {
@@ -47,14 +48,14 @@ fn copyObjectGraphForNewActor(token: *Heap.AllocationToken, actor_id: u31, value
                 return Object.fromAddress(gop.value_ptr.*);
             }
 
-            const new_object = try old_object.clone(ctx.token, ctx.actor_id);
+            const new_object = try old_object.clone(ctx.vm, ctx.token, ctx.actor_id);
             gop.value_ptr.* = new_object.getAddress();
             return new_object;
         }
     }.f) catch |err| return @errSetCast(Allocator.Error, err);
 }
 
-pub fn bless(heap: *Heap, actor_id: u31, const_value: Value) !Value {
+pub fn bless(vm: *VirtualMachine, heap: *Heap, actor_id: u31, const_value: Value) !Value {
     if (!const_value.isObjectReference())
         return const_value;
 
@@ -76,7 +77,7 @@ pub fn bless(heap: *Heap, actor_id: u31, const_value: Value) !Value {
     defer token.deinit();
 
     // Pass 2: Actually copy the objects.
-    const new_value = try copyObjectGraphForNewActor(&token, actor_id, value);
+    const new_value = try copyObjectGraphForNewActor(vm, &token, actor_id, value);
 
     return new_value;
 }

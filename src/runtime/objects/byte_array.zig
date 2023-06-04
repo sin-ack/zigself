@@ -80,8 +80,8 @@ pub const ByteArray = extern struct {
         return self.byte_array.asByteArray();
     }
 
-    pub fn clone(self: ByteArray.Ptr, token: *Heap.AllocationToken, actor_id: u31) ByteArray.Ptr {
-        const map_map = self.object.getMap();
+    pub fn clone(self: ByteArray.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) ByteArray.Ptr {
+        const map_map = vm.getMapMap();
         return createWithValues(map_map, token, actor_id, self.getValues());
     }
 

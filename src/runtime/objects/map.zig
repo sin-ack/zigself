@@ -132,7 +132,7 @@ pub const Map = extern struct {
         return self.delegate(usize, "getSizeForCloning", .{});
     }
 
-    pub fn clone(self: Map.Ptr, token: *Heap.AllocationToken, actor_id: u31) Allocator.Error!Map.Ptr {
+    pub fn clone(self: Map.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) Allocator.Error!Map.Ptr {
         _ = actor_id;
 
         // NOTE: Inlining the delegation here because we need to cast the result into the generic object type.
@@ -141,8 +141,7 @@ pub const Map = extern struct {
             inline else => |t| {
                 if (!@hasDecl(MapT(t), "clone")) unreachable;
 
-                const map_map = self.object.getMap();
-                const result_or_error = @ptrCast(MapT(t).Ptr, self).clone(map_map, token);
+                const result_or_error = @ptrCast(MapT(t).Ptr, self).clone(vm, token);
                 const result = if (@typeInfo(@TypeOf(result_or_error)) == .ErrorUnion) try result_or_error else result_or_error;
                 return @ptrCast(Map.Ptr, result);
             },

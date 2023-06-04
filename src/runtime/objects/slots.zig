@@ -96,7 +96,8 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
         }
 
         /// Return a shallow copy of this object.
-        pub fn clone(self: ObjectT.Ptr, token: *Heap.AllocationToken, actor_id: u31) ObjectT.Ptr {
+        pub fn clone(self: ObjectT.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) ObjectT.Ptr {
+            _ = vm;
             return ObjectT.create(token, actor_id, self.getMap(), getAssignableSlots(self));
         }
     };
@@ -546,8 +547,8 @@ pub const SlotsMap = extern struct {
         };
     }
 
-    pub fn clone(self: SlotsMap.Ptr, map_map: Map.Ptr, token: *Heap.AllocationToken) SlotsMap.Ptr {
-        const new_map = create(map_map, token, self.information.slot_count);
+    pub fn clone(self: SlotsMap.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken) SlotsMap.Ptr {
+        const new_map = create(vm.getMapMap(), token, self.information.slot_count);
 
         new_map.setAssignableSlotCount(self.getAssignableSlotCount());
         @memcpy(new_map.getSlots(), self.getSlots());

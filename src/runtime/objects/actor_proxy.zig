@@ -59,8 +59,8 @@ pub const ActorProxy = extern struct {
         return self.actor_object.get();
     }
 
-    pub fn clone(self: ActorProxy.Ptr, token: *Heap.AllocationToken, actor_id: u31) ActorProxy.Ptr {
-        const map_map = self.object.getMap();
+    pub fn clone(self: ActorProxy.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) ActorProxy.Ptr {
+        const map_map = vm.getMapMap();
         return create(map_map, token, actor_id, self.getActor());
     }
 

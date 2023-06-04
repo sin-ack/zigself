@@ -8,6 +8,7 @@ const Map = @import("../map.zig").Map;
 const Heap = @import("../../Heap.zig");
 const Value = @import("../../value.zig").Value;
 const IntrinsicMap = @import("../../intrinsic_map.zig").IntrinsicMap;
+const VirtualMachine = @import("../../VirtualMachine.zig");
 const ByteArrayObject = @import("../byte_array.zig").ByteArray;
 
 /// The addrinfo object is used by the _GetAddrInfoForHost:... primitive to
@@ -49,8 +50,8 @@ pub const AddrInfoMap = extern struct {
         self.map.init(.AddrInfo, map_map);
     }
 
-    pub fn clone(self: AddrInfoMap.Ptr, map_map: Map.Ptr, token: *Heap.AllocationToken) AddrInfoMap.Ptr {
-        const new_map = create(map_map, token);
+    pub fn clone(self: AddrInfoMap.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken) AddrInfoMap.Ptr {
+        const new_map = create(vm.getMapMap(), token);
         new_map.flags = self.flags;
         new_map.family = self.family;
         new_map.socketType = self.socketType;
