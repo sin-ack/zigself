@@ -112,6 +112,14 @@ fn Block(comptime InstructionT: type, comptime access_mode: AccessMode) type {
             };
         }
 
+        /// Return the amount of instructions in this block.
+        pub fn getLength(self: Self) usize {
+            return switch (access_mode) {
+                .ByField => self.instructions.len,
+                .ByInstruction => self.instructions.items.len,
+            };
+        }
+
         pub fn format(
             block: Self,
             comptime fmt: []const u8,
