@@ -73,7 +73,7 @@ pub const ByteArray = extern struct {
     }
 
     pub fn getLength(self: ByteArray.Ptr) u64 {
-        return self.getByteArray().header.length.get();
+        return self.getByteArray().getLength();
     }
 
     pub fn getByteArray(self: ByteArray.Ptr) VMByteArray {

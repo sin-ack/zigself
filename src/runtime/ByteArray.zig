@@ -40,12 +40,16 @@ pub fn getValues(self: Self) []u8 {
     return @ptrCast([*]u8, self.header)[header_size..@intCast(usize, total_length)];
 }
 
+pub fn getLength(self: Self) usize {
+    return @intCast(usize, self.header.length.get() - @sizeOf(Header));
+}
+
 pub fn asValue(self: Self) Value {
     return Value.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self.header)));
 }
 
 pub fn getSizeInMemory(self: Self) usize {
-    return requiredSizeForAllocation(@intCast(usize, self.header.length.get() - @sizeOf(Header)));
+    return requiredSizeForAllocation(self.getLength());
 }
 
 /// Return the size required for the byte vector with `length` amount of
