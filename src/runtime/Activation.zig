@@ -227,13 +227,14 @@ pub const ActivationStack = struct {
     ) !void {
         var source_range = SourceRange.initNoRef(current_executable, .{ .start = 0, .end = 1 });
 
+        const entrypoint_block = new_executable.value.getEntrypointBlock();
         var token = try vm.heap.getAllocation(
-            MethodObject.requiredSizeForCreatingTopLevelContext() +
+            MethodObject.requiredSizeForCreatingTopLevelContext(entrypoint_block) +
                 ActivationObject.requiredSizeForAllocation(0, 0),
         );
         defer token.deinit();
 
-        const toplevel_context_method = try MethodObject.createTopLevelContextForExecutable(vm, &token, new_executable, new_executable.value.getEntrypointBlock());
+        const toplevel_context_method = try MethodObject.createTopLevelContextForExecutable(vm, &token, new_executable, entrypoint_block);
         const activation_slot = try self.getNewActivationSlot(vm.allocator);
         toplevel_context_method.activateMethod(vm, &token, vm.current_actor.id, vm.lobby(), &.{}, target_location, source_range, activation_slot);
     }
