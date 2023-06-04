@@ -101,7 +101,7 @@ pub fn Clone(context: *PrimitiveContext) !ExecutionResult {
     var receiver = context.receiver.getValue();
 
     const required_memory = if (receiver.isObjectReference())
-        receiver.asObject().getSizeInMemory()
+        receiver.asObject().getSizeForCloning()
     else
         0;
 

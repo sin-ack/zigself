@@ -235,6 +235,10 @@ pub const Activation = extern struct {
         return requiredSizeForAllocation(self.getArgumentSlotCount(), self.getAssignableSlotCount());
     }
 
+    pub fn getSizeForCloning(self: Activation.Ptr) usize {
+        return self.getSizeInMemory();
+    }
+
     pub fn requiredSizeForAllocation(argument_slot_count: u8, assignable_slot_count: u8) usize {
         return @sizeOf(Activation) + (argument_slot_count + assignable_slot_count) * @sizeOf(GenericValue);
     }

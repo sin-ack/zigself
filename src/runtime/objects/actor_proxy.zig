@@ -69,6 +69,10 @@ pub const ActorProxy = extern struct {
         return requiredSizeForAllocation();
     }
 
+    pub fn getSizeForCloning(self: ActorProxy.Ptr) usize {
+        return self.getSizeInMemory();
+    }
+
     pub fn requiredSizeForAllocation() usize {
         return @sizeOf(ActorProxy);
     }

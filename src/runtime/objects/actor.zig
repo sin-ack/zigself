@@ -71,6 +71,10 @@ pub const Actor = extern struct {
         return requiredSizeForAllocation();
     }
 
+    pub fn getSizeForCloning(self: Actor.Ptr) usize {
+        return self.getSizeInMemory();
+    }
+
     /// Return the amount of bytes that this actor needs to spawn itself. Note
     /// that if spawning this actor, the activation's cost should be accounted
     /// for.

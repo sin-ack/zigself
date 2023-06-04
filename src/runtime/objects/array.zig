@@ -115,6 +115,10 @@ pub const Array = extern struct {
         return requiredSizeForAllocation(self.getSize());
     }
 
+    pub fn getSizeForCloning(self: Array.Ptr) usize {
+        return self.getSizeInMemory();
+    }
+
     pub fn requiredSizeForAllocation(size: usize) usize {
         return @sizeOf(Array) + size * @sizeOf(Value);
     }
@@ -157,6 +161,10 @@ pub const ArrayMap = extern struct {
     pub fn getSizeInMemory(self: ArrayMap.Ptr) usize {
         _ = self;
         return requiredSizeForAllocation();
+    }
+
+    pub fn getSizeForCloning(self: ArrayMap.Ptr) usize {
+        return self.getSizeInMemory();
     }
 
     pub fn requiredSizeForAllocation() usize {

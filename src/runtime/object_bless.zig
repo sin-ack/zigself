@@ -23,12 +23,7 @@ fn calculateRequiredMemoryForBlessing(allocator: Allocator, value: Value) Alloca
         fn f(ctx: Context, object: Object.Ptr) Allocator.Error!Object.Ptr {
             const gop = try ctx.seen_objects_set.getOrPut(object.getAddress());
             if (!gop.found_existing) {
-                ctx.required_memory.* += object.getSizeInMemory();
-                // XXX: If we have a ByteArray object, we also need to take its byte array memory into
-                //      consideration.
-                if (object.asType(.ByteArray)) |byte_array| {
-                    ctx.required_memory.* += byte_array.getByteArray().getSizeInMemory();
-                }
+                ctx.required_memory.* += object.getSizeForCloning();
             }
 
             return object;

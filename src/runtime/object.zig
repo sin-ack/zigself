@@ -160,10 +160,15 @@ pub const Object = extern struct {
 
     // Delegate methods
 
-    /// Get the size of this object in memory. Includes *only* the memory in object
-    /// segment.
+    /// Get the size of this object (NOT its dependencies) in memory.
     pub fn getSizeInMemory(self: Ptr) usize {
         return self.delegate(usize, "getSizeInMemory", .{});
+    }
+
+    /// Get the size required for cloning this object (including all private
+    /// dependencies it has).
+    pub fn getSizeForCloning(self: Ptr) usize {
+        return self.delegate(usize, "getSizeForCloning", .{});
     }
 
     /// Return whether this object can be finalized.

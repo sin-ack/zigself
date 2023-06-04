@@ -41,7 +41,7 @@ pub const ByteArray = extern struct {
 
     /// Create a byte array object with an existing byte array.
     pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, actor_id: u31, byte_array: VMByteArray) ByteArray.Ptr {
-        const size = requiredSizeForAllocation(null);
+        const size = requiredSizeForSelfAllocation();
         var memory_area = token.allocate(.Object, size);
         var self = @ptrCast(ByteArray.Ptr, memory_area);
         self.init(actor_id, map_map, byte_array);
@@ -87,7 +87,11 @@ pub const ByteArray = extern struct {
 
     pub fn getSizeInMemory(self: ByteArray.Ptr) usize {
         _ = self;
-        return requiredSizeForAllocation(null);
+        return requiredSizeForSelfAllocation();
+    }
+
+    pub fn getSizeForCloning(self: ByteArray.Ptr) usize {
+        return requiredSizeForAllocation(self.getLength());
     }
 
     pub fn canFinalize(self: ByteArray.Ptr) bool {
@@ -113,15 +117,15 @@ pub const ByteArray = extern struct {
         return string_traits.lookupByHash(vm, selector_hash);
     }
 
-    /// Call with null if the byte array object has already been allocated.
-    pub fn requiredSizeForAllocation(length: ?usize) usize {
-        const required_size = @sizeOf(ByteArray);
+    /// Return the size for allocating just this object.
+    pub fn requiredSizeForSelfAllocation() usize {
+        return @sizeOf(ByteArray);
+    }
 
-        if (length) |l| {
-            return required_size + VMByteArray.requiredSizeForAllocation(l);
-        }
-
-        return required_size;
+    /// Return the size for allocating this object and the byte array it
+    /// represents.
+    pub fn requiredSizeForAllocation(length: usize) usize {
+        return requiredSizeForSelfAllocation() + VMByteArray.requiredSizeForAllocation(length);
     }
 
     pub fn humanReadableName() []const u8 {

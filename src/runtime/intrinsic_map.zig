@@ -83,6 +83,10 @@ pub fn IntrinsicMap(comptime MapT: type, comptime object_type: ObjectType) type 
             return requiredSizeForAllocation();
         }
 
+        pub fn getSizeForCloning(self: Ptr) usize {
+            return self.getSizeInMemory();
+        }
+
         pub fn canFinalize(self: Ptr) bool {
             _ = self;
             // TODO: The user should be able to let themselves be finalized.
@@ -157,6 +161,10 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
         pub fn getSizeInMemory(self: Ptr) usize {
             _ = self;
             return requiredSizeForAllocation();
+        }
+
+        pub fn getSizeForCloning(self: Ptr) usize {
+            return self.getSizeInMemory();
         }
 
         pub fn canFinalize(self: Ptr) bool {

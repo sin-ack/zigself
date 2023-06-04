@@ -258,6 +258,10 @@ pub const MethodMap = extern struct {
         return requiredSizeForAllocation(self.base_map.slots.information.slot_count);
     }
 
+    pub fn getSizeForCloning(self: MethodMap.Ptr) usize {
+        return self.getSizeInMemory();
+    }
+
     pub fn requiredSizeForAllocation(slot_count: u32) usize {
         return @sizeOf(MethodMap) + slot_count * @sizeOf(Slot);
     }

@@ -64,6 +64,10 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
             return requiredSizeForAllocation(self.getMap().getAssignableSlotCount());
         }
 
+        pub fn getSizeForCloning(self: ObjectT.Ptr) usize {
+            return self.getSizeInMemory();
+        }
+
         /// Return the amount of bytes required to create this object.
         pub fn requiredSizeForAllocation(assignable_slot_count: u8) usize {
             return @sizeOf(ObjectT) + assignable_slot_count * @sizeOf(Value);
@@ -564,6 +568,10 @@ pub const SlotsMap = extern struct {
 
     pub fn getSizeInMemory(self: SlotsMap.Ptr) usize {
         return requiredSizeForAllocation(self.information.slot_count);
+    }
+
+    pub fn getSizeForCloning(self: SlotsMap.Ptr) usize {
+        return self.getSizeInMemory();
     }
 
     /// Return the size required for the whole map with the given slot count.

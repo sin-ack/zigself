@@ -143,6 +143,10 @@ pub const Managed = extern struct {
         return requiredSizeForAllocation();
     }
 
+    pub fn getSizeForCloning(self: Managed.Ptr) usize {
+        return self.getSizeInMemory();
+    }
+
     pub fn requiredSizeForAllocation() usize {
         return @sizeOf(Managed);
     }

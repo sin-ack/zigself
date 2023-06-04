@@ -128,6 +128,10 @@ pub const Map = extern struct {
         return self.delegate(usize, "getSizeInMemory", .{});
     }
 
+    pub fn getSizeForCloning(self: Map.Ptr) usize {
+        return self.delegate(usize, "getSizeForCloning", .{});
+    }
+
     pub fn clone(self: Map.Ptr, token: *Heap.AllocationToken, actor_id: u31) Allocator.Error!Map.Ptr {
         _ = actor_id;
 
@@ -178,6 +182,10 @@ pub const Map = extern struct {
     pub fn getSizeInMemoryMapMap(self: Map.Ptr) usize {
         _ = self;
         return requiredSizeForAllocatingMapMap();
+    }
+
+    pub fn getSizeForCloningMapMap(self: Map.Ptr) usize {
+        return self.getSizeInMemory();
     }
 
     pub fn canFinalizeMapMap(self: Map.Ptr) bool {
