@@ -253,4 +253,12 @@ pub const MethodMap = extern struct {
 
         return new_map;
     }
+
+    pub fn getSizeInMemory(self: MethodMap.Ptr) usize {
+        return requiredSizeForAllocation(self.base_map.slots.information.slot_count);
+    }
+
+    pub fn requiredSizeForAllocation(slot_count: u32) usize {
+        return @sizeOf(MethodMap) + slot_count * @sizeOf(Slot);
+    }
 };

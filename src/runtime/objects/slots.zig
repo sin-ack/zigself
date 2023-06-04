@@ -465,7 +465,7 @@ pub const Slots = extern struct {
 pub fn SlotsLikeMapBase(comptime MapT: type) type {
     return struct {
         fn getSlotMemory(self: MapT.Ptr) stage2_compat.HeapSlice(u8, .Mutable) {
-            const total_object_size = getSizeInMemory(self);
+            const total_object_size = MapT.getSizeInMemory(self);
             const map_memory = @ptrCast([*]align(@alignOf(u64)) u8, self);
             return map_memory[@sizeOf(MapT)..total_object_size];
         }
@@ -491,15 +491,6 @@ pub fn SlotsLikeMapBase(comptime MapT: type) type {
 
         pub fn setAssignableSlotCount(self: MapT.Ptr, count: u8) void {
             asSlotsMap(self).information.assignable_slot_count = count;
-        }
-
-        pub fn getSizeInMemory(self: MapT.Ptr) usize {
-            return requiredSizeForAllocation(asSlotsMap(self).information.slot_count);
-        }
-
-        /// Return the size required for the whole map with the given slot count.
-        pub fn requiredSizeForAllocation(slot_count: u32) usize {
-            return @sizeOf(MapT) + slot_count * @sizeOf(Slot);
         }
 
         fn asSlotsMap(self: MapT.Ptr) SlotsMap.Ptr {
@@ -569,5 +560,14 @@ pub const SlotsMap = extern struct {
         _ = self;
         _ = allocator;
         @panic("Attempted to call SlotsMap.finalize");
+    }
+
+    pub fn getSizeInMemory(self: SlotsMap.Ptr) usize {
+        return requiredSizeForAllocation(self.information.slot_count);
+    }
+
+    /// Return the size required for the whole map with the given slot count.
+    pub fn requiredSizeForAllocation(slot_count: u32) usize {
+        return @sizeOf(SlotsMap) + slot_count * @sizeOf(Slot);
     }
 };

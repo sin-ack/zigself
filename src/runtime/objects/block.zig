@@ -246,4 +246,12 @@ pub const BlockMap = extern struct {
 
         return new_map;
     }
+
+    pub fn getSizeInMemory(self: BlockMap.Ptr) usize {
+        return requiredSizeForAllocation(self.base_map.slots.information.slot_count);
+    }
+
+    pub fn requiredSizeForAllocation(slot_count: u32) usize {
+        return @sizeOf(BlockMap) + slot_count * @sizeOf(Slot);
+    }
 };
