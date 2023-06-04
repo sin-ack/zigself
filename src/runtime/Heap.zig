@@ -18,6 +18,7 @@ const ActivationStack = Activation.ActivationStack;
 
 const GC_DEBUG = debug.GC_DEBUG;
 const GC_TOKEN_DEBUG = debug.GC_TOKEN_DEBUG;
+const GC_TOKEN_ALLOCATION_DEBUG = debug.GC_TOKEN_ALLOCATION_DEBUG;
 const GC_TRACK_SOURCE_DEBUG = debug.GC_TRACK_SOURCE_DEBUG;
 const REMEMBERED_SET_DEBUG = debug.REMEMBERED_SET_DEBUG;
 const HEAP_HANDLE_MISS_DEBUG = debug.HEAP_HANDLE_MISS_DEBUG;
@@ -82,6 +83,7 @@ pub const AllocationToken = struct {
         }
 
         self.bytes_left -= bytes;
+        if (GC_TOKEN_ALLOCATION_DEBUG) std.debug.print("AllocationToken.allocate: {}/{} bytes allocated (requested {})\n", .{ self.total_bytes - self.bytes_left, self.total_bytes, bytes });
         // NOTE: The only error this can raise is allocation failure during lazy allocation
         //       which eden does not do.
         return self.heap.eden.allocateInSegment(self.heap.allocator, segment, bytes) catch unreachable;

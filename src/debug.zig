@@ -8,6 +8,8 @@ pub const SLOTS_LOOKUP_DEBUG = false;
 pub const GC_DEBUG = false;
 /// Debugging of allocation token requests.
 pub const GC_TOKEN_DEBUG = false;
+/// Debugging of every single allocation using an AllocationToken.
+pub const GC_TOKEN_ALLOCATION_DEBUG = false;
 /// Debugging of which addresses called track and then didn't untrack the object.
 pub const GC_TRACK_SOURCE_DEBUG = false;
 /// Debugging of functions related to older generation objects pointing to newer
