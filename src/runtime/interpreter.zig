@@ -422,6 +422,20 @@ fn performPrimitiveSend(
     );
 }
 
+/// If the receiver is an object, write the receiver-method pair into the
+/// current activation's inline cache.
+fn writeIntoInlineCache(
+    actor: *Actor,
+    receiver: Value,
+    method: MethodObject.Ptr,
+) void {
+    if (!receiver.isObjectReference())
+        return;
+
+    const current_activation = actor.activation_stack.getCurrent();
+    current_activation.writeIntoInlineCache(receiver.asObject(), method);
+}
+
 /// Sends a message to the given receiver, returning the result as a normal
 /// completion if it can be immediately resolved; if the message send must
 /// create a new activation, pushes the activation onto the stack and returns
@@ -474,6 +488,8 @@ pub fn sendMessage(
         .Regular => |lookup_result| {
             if (lookup_result.isObjectReference()) {
                 if (lookup_result.asObject().asType(.Method)) |method| {
+                    writeIntoInlineCache(actor, receiver, method);
+
                     const argument_count = method.getArgumentSlotCount();
                     const argument_slice = actor.argument_stack.lastNItems(argument_count);
 

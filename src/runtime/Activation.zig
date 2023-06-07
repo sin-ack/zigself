@@ -9,6 +9,7 @@ const Allocator = std.mem.Allocator;
 const Actor = @import("./Actor.zig");
 const value = @import("./value.zig");
 const Value = value.Value;
+const Object = @import("object.zig").Object;
 const bytecode = @import("./bytecode.zig");
 const SourceRange = @import("./SourceRange.zig");
 const IntegerValue = value.IntegerValue;
@@ -105,6 +106,21 @@ pub fn advanceInstruction(self: *Self) u32 {
 /// Resets the instruction index of this activation.
 pub fn restart(self: *Self) void {
     self.pc = 0;
+}
+
+/// Write the given receiver-method pair into the appropriate offset of the
+/// activation object's inline cache (stored in the map).
+pub fn writeIntoInlineCache(
+    self: *Self,
+    receiver: Object.Ptr,
+    method: MethodObject.Ptr,
+) void {
+    const activation_object = self.activation_object.get();
+    // NOTE: For the time being, we are wasting memory by allocating an
+    //       equally-sized inline cache for the bytecode block of the
+    //       activation; in the future we will map each send instruction to
+    //       an offset within the cache and shrink it drastically.
+    activation_object.writeIntoInlineCacheAtOffset(self.pc, receiver, method);
 }
 
 pub fn format(

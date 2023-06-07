@@ -8,11 +8,13 @@ const Allocator = std.mem.Allocator;
 const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
 const Value = value_import.Value;
+const Object = @import("../object.zig").Object;
 const MapType = @import("map.zig").MapType;
 const bytecode = @import("../bytecode.zig");
 const SlotsMap = @import("slots.zig").SlotsMap;
 const ArrayMap = @import("./array.zig").ArrayMap;
 const ArrayObject = @import("./array.zig").Array;
+const MethodObject = @import("./method.zig").Method;
 const value_import = @import("../value.zig");
 const PointerValue = value_import.PointerValue;
 const stage2_compat = @import("../../utility/stage2_compat.zig");
@@ -114,5 +116,16 @@ pub const ExecutableMap = extern struct {
         var required_size = ArrayMap.requiredSizeForAllocation();
         required_size += ArrayObject.requiredSizeForAllocation(block.getLength() * 2);
         return required_size;
+    }
+
+    // --- Inline cache operations ---
+
+    pub fn writeIntoInlineCacheAtOffset(self: ExecutableMap.Ptr, offset: usize, object: Object.Ptr, method: MethodObject.Ptr) void {
+        const inline_cache = self.inline_cache.get();
+        std.debug.assert(offset < inline_cache.getSize() / 2);
+
+        const inline_cache_array = self.inline_cache.get().getValues();
+        inline_cache_array[offset * 2] = object.map;
+        inline_cache_array[(offset * 2) + 1] = method.asValue();
     }
 };

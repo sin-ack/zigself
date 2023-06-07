@@ -9,6 +9,7 @@ const Map = map_import.Map;
 const Slot = @import("../slot.zig").Slot;
 const Heap = @import("../Heap.zig");
 const slots = @import("slots.zig");
+const Object = @import("../object.zig").Object;
 const MapType = map_import.MapType;
 const bytecode = @import("../bytecode.zig");
 const BlockMap = @import("block.zig").BlockMap;
@@ -16,6 +17,7 @@ const MethodMap = @import("method.zig").MethodMap;
 const map_import = @import("map.zig");
 const SlotsObject = slots.Slots;
 const GenericValue = value_import.Value;
+const MethodObject = @import("method.zig").Method;
 const value_import = @import("../value.zig");
 const object_lookup = @import("../object_lookup.zig");
 const stage2_compat = @import("../../utility/stage2_compat.zig");
@@ -149,6 +151,10 @@ pub const Activation = extern struct {
             .Method => self.getMethodMap().base_map.block.get(),
             .Block => self.getBlockMap().base_map.block.get(),
         };
+    }
+
+    pub fn writeIntoInlineCacheAtOffset(self: Activation.Ptr, offset: usize, object: Object.Ptr, method: MethodObject.Ptr) void {
+        self.dispatch("writeIntoInlineCacheAtOffset", .{ offset, object, method });
     }
 
     // --- Slots and slot values ---

@@ -9,6 +9,7 @@ const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
 const Slot = @import("../slot.zig").Slot;
 const slots = @import("slots.zig");
+const Object = @import("../object.zig").Object;
 const bytecode = @import("../bytecode.zig");
 const ByteArray = @import("../ByteArray.zig");
 const Activation = @import("../Activation.zig");
@@ -272,5 +273,9 @@ pub const MethodMap = extern struct {
         var required_memory = requiredSizeForSelfAllocation(slot_count);
         required_memory += ExecutableMap.requiredSizeForAllocation(bytecode_block);
         return required_memory;
+    }
+
+    pub fn writeIntoInlineCacheAtOffset(self: MethodMap.Ptr, offset: usize, object: Object.Ptr, method: Method.Ptr) void {
+        self.base_map.writeIntoInlineCacheAtOffset(offset, object, method);
     }
 };

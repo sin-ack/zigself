@@ -11,10 +11,12 @@ const Heap = @import("../Heap.zig");
 const debug = @import("../../debug.zig");
 const slots = @import("slots.zig");
 const Value = value_import.Value;
+const Object = @import("../object.zig").Object;
 const bytecode = @import("../bytecode.zig");
 const Activation = @import("../Activation.zig");
 const SlotsObject = slots.Slots;
 const SourceRange = @import("../SourceRange.zig");
+const MethodObject = @import("method.zig").Method;
 const value_import = @import("../value.zig");
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
 const stage2_compat = @import("../../utility/stage2_compat.zig");
@@ -265,5 +267,9 @@ pub const BlockMap = extern struct {
         var required_memory = requiredSizeForSelfAllocation(slot_count);
         required_memory += ExecutableMap.requiredSizeForAllocation(bytecode_block);
         return required_memory;
+    }
+
+    pub fn writeIntoInlineCacheAtOffset(self: BlockMap.Ptr, offset: usize, object: Object.Ptr, method: MethodObject.Ptr) void {
+        self.base_map.writeIntoInlineCacheAtOffset(offset, object, method);
     }
 };
