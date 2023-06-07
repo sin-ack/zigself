@@ -128,11 +128,11 @@ pub const Activation = extern struct {
     // --- Slot counts ---
 
     pub fn getAssignableSlotCount(self: Activation.Ptr) u8 {
-        return self.dispatch("getAssignableSlotCount");
+        return self.dispatch("getAssignableSlotCount", .{});
     }
 
     pub fn getArgumentSlotCount(self: Activation.Ptr) u8 {
-        return self.dispatch("getArgumentSlotCount");
+        return self.dispatch("getArgumentSlotCount", .{});
     }
 
     // --- Map forwarding ---
@@ -154,7 +154,7 @@ pub const Activation = extern struct {
     // --- Slots and slot values ---
 
     pub fn getSlots(self: Activation.Ptr) Slot.Slice {
-        return self.dispatch("getSlots");
+        return self.dispatch("getSlots", .{});
     }
 
     /// Return a slice of `GenericValue`s for the assignable slots that are after the
@@ -265,10 +265,10 @@ pub const Activation = extern struct {
         return @typeInfo(@TypeOf(@field(MethodMap, fn_name))).Fn.return_type.?;
     }
 
-    fn dispatch(self: Activation.Ptr, comptime fn_name: []const u8) DispatchReturn(fn_name) {
+    fn dispatch(self: Activation.Ptr, comptime fn_name: []const u8, args: anytype) DispatchReturn(fn_name) {
         return switch (self.getActivationType()) {
-            .Method => @call(.auto, @field(MethodMap, fn_name), .{self.getMethodMap()}),
-            .Block => @call(.auto, @field(BlockMap, fn_name), .{self.getBlockMap()}),
+            .Method => @call(.auto, @field(MethodMap, fn_name), .{self.getMethodMap()} ++ args),
+            .Block => @call(.auto, @field(BlockMap, fn_name), .{self.getBlockMap()} ++ args),
         };
     }
 };
