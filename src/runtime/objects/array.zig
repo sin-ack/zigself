@@ -22,6 +22,7 @@ pub const Array = extern struct {
     object: Object align(@alignOf(u64)),
 
     pub const Ptr = stage2_compat.HeapPtr(Array, .Mutable);
+    pub const Type = .Array;
     pub const Value = value_import.ObjectValue(Array);
 
     /// Create a new array with the given values and filling extra items with

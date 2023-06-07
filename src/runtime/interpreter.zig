@@ -422,6 +422,20 @@ fn performPrimitiveSend(
     );
 }
 
+/// If the receiver is an object, write the receiver-method pair into the
+/// current activation's inline cache.
+fn writeIntoInlineCache(
+    actor: *Actor,
+    receiver: Value,
+    method: MethodObject.Ptr,
+) void {
+    if (!receiver.isObjectReference())
+        return;
+
+    const current_activation = actor.activation_stack.getCurrent();
+    current_activation.writeIntoInlineCache(receiver.asObject(), method);
+}
+
 /// Sends a message to the given receiver, returning the result as a normal
 /// completion if it can be immediately resolved; if the message send must
 /// create a new activation, pushes the activation onto the stack and returns
@@ -474,6 +488,8 @@ pub fn sendMessage(
         .Regular => |lookup_result| {
             if (lookup_result.isObjectReference()) {
                 if (lookup_result.asObject().asType(.Method)) |method| {
+                    writeIntoInlineCache(actor, receiver, method);
+
                     const argument_count = method.getArgumentSlotCount();
                     const argument_slice = actor.argument_stack.lastNItems(argument_count);
 
@@ -734,15 +750,15 @@ fn createMethod(
             argument_slot_count += 1;
     }
 
+    const block = executable.value.getBlock(block_index);
     var token = try vm.heap.getAllocation(
-        MethodMap.requiredSizeForAllocation(total_slot_count) +
+        MethodMap.requiredSizeForAllocation(block, total_slot_count) +
             MethodObject.requiredSizeForAllocation(total_assignable_slot_count),
     );
     defer token.deinit();
 
-    const block = executable.value.getBlock(block_index);
     var method_map = try MethodMap.create(
-        vm.getMapMap(),
+        vm,
         &token,
         argument_slot_count,
         total_slot_count,
@@ -803,13 +819,13 @@ fn createBlock(
     std.debug.assert(nonlocal_return_target_activation.get(actor.activation_stack).?.nonlocal_return_target_activation == null);
 
     var token = try vm.heap.getAllocation(
-        BlockMap.requiredSizeForAllocation(total_slot_count) +
+        BlockMap.requiredSizeForAllocation(block, total_slot_count) +
             BlockObject.requiredSizeForAllocation(total_assignable_slot_count),
     );
     defer token.deinit();
 
     var block_map = try BlockMap.create(
-        vm.getMapMap(),
+        vm,
         &token,
         argument_slot_count,
         total_slot_count,

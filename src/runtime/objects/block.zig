@@ -11,10 +11,12 @@ const Heap = @import("../Heap.zig");
 const debug = @import("../../debug.zig");
 const slots = @import("slots.zig");
 const Value = value_import.Value;
+const Object = @import("../object.zig").Object;
 const bytecode = @import("../bytecode.zig");
 const Activation = @import("../Activation.zig");
 const SlotsObject = slots.Slots;
 const SourceRange = @import("../SourceRange.zig");
+const MethodObject = @import("method.zig").Method;
 const value_import = @import("../value.zig");
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
 const stage2_compat = @import("../../utility/stage2_compat.zig");
@@ -182,7 +184,7 @@ pub const BlockMap = extern struct {
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
-        map_map: Map.Ptr,
+        vm: *VirtualMachine,
         token: *Heap.AllocationToken,
         argument_slot_count: u8,
         total_slot_count: u32,
@@ -191,11 +193,11 @@ pub const BlockMap = extern struct {
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
     ) !BlockMap.Ptr {
-        const size = BlockMap.requiredSizeForAllocation(total_slot_count);
+        const size = BlockMap.requiredSizeForSelfAllocation(total_slot_count);
 
         var memory_area = token.allocate(.Object, size);
         var self = @ptrCast(BlockMap.Ptr, memory_area);
-        self.init(map_map, argument_slot_count, total_slot_count, parent_activation, nonlocal_return_target_activation, block, executable);
+        self.init(vm, token, argument_slot_count, total_slot_count, parent_activation, nonlocal_return_target_activation, block, executable);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
@@ -203,7 +205,8 @@ pub const BlockMap = extern struct {
 
     fn init(
         self: BlockMap.Ptr,
-        map_map: Map.Ptr,
+        vm: *VirtualMachine,
+        token: *Heap.AllocationToken,
         argument_slot_count: u8,
         total_slot_count: u32,
         parent_activation: Activation.ActivationRef,
@@ -211,7 +214,7 @@ pub const BlockMap = extern struct {
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
     ) void {
-        self.base_map.init(.Block, map_map, argument_slot_count, total_slot_count, block, executable);
+        self.base_map.allocateAndInit(vm, token, .Block, argument_slot_count, total_slot_count, block, executable);
         self.parent_activation = parent_activation;
         self.nonlocal_return_target_activation = nonlocal_return_target_activation;
     }
@@ -231,7 +234,7 @@ pub const BlockMap = extern struct {
 
     pub fn clone(self: BlockMap.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken) !BlockMap.Ptr {
         const new_map = try create(
-            vm.getMapMap(),
+            vm,
             token,
             self.getArgumentSlotCount(),
             self.base_map.slots.information.slot_count,
@@ -248,14 +251,25 @@ pub const BlockMap = extern struct {
     }
 
     pub fn getSizeInMemory(self: BlockMap.Ptr) usize {
-        return requiredSizeForAllocation(self.base_map.slots.information.slot_count);
+        return requiredSizeForSelfAllocation(self.base_map.slots.information.slot_count);
     }
 
     pub fn getSizeForCloning(self: BlockMap.Ptr) usize {
-        return self.getSizeInMemory();
+        return requiredSizeForAllocation(self.base_map.block.get(), self.base_map.slots.information.slot_count);
     }
 
-    pub fn requiredSizeForAllocation(slot_count: u32) usize {
+    /// Return the size required for allocating just the map itself.
+    pub fn requiredSizeForSelfAllocation(slot_count: u32) usize {
         return @sizeOf(BlockMap) + slot_count * @sizeOf(Slot);
+    }
+
+    pub fn requiredSizeForAllocation(bytecode_block: *bytecode.Block, slot_count: u32) usize {
+        var required_memory = requiredSizeForSelfAllocation(slot_count);
+        required_memory += ExecutableMap.requiredSizeForAllocation(bytecode_block);
+        return required_memory;
+    }
+
+    pub fn writeIntoInlineCacheAtOffset(self: BlockMap.Ptr, offset: usize, object: Object.Ptr, method: MethodObject.Ptr) void {
+        self.base_map.writeIntoInlineCacheAtOffset(offset, object, method);
     }
 };

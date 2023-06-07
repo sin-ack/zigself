@@ -9,6 +9,7 @@ const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
 const Slot = @import("../slot.zig").Slot;
 const slots = @import("slots.zig");
+const Object = @import("../object.zig").Object;
 const bytecode = @import("../bytecode.zig");
 const ByteArray = @import("../ByteArray.zig");
 const Activation = @import("../Activation.zig");
@@ -103,14 +104,14 @@ pub const Method = extern struct {
     ) !Method.Ptr {
         const toplevel_context_method_map = blk: {
             const toplevel_context_name = ByteArray.createFromString(token, toplevel_context_string);
-            break :blk try MethodMap.create(vm.getMapMap(), token, 0, 0, false, toplevel_context_name, block, executable);
+            break :blk try MethodMap.create(vm, token, 0, 0, false, toplevel_context_name, block, executable);
         };
         return create(token, vm.current_actor.id, toplevel_context_method_map, &.{});
     }
 
-    pub fn requiredSizeForCreatingTopLevelContext() usize {
+    pub fn requiredSizeForCreatingTopLevelContext(block: *bytecode.Block) usize {
         return ByteArray.requiredSizeForAllocation(toplevel_context_string.len) +
-            MethodMap.requiredSizeForAllocation(0) +
+            MethodMap.requiredSizeForAllocation(block, 0) +
             Method.requiredSizeForAllocation(0);
     }
 
@@ -177,7 +178,7 @@ pub const MethodMap = extern struct {
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
-        map_map: Map.Ptr,
+        vm: *VirtualMachine,
         token: *Heap.AllocationToken,
         argument_slot_count: u8,
         total_slot_count: u32,
@@ -186,11 +187,11 @@ pub const MethodMap = extern struct {
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
     ) !MethodMap.Ptr {
-        const size = MethodMap.requiredSizeForAllocation(total_slot_count);
+        const size = MethodMap.requiredSizeForSelfAllocation(total_slot_count);
 
         var memory_area = token.allocate(.Object, size);
         var self = @ptrCast(MethodMap.Ptr, memory_area);
-        self.init(map_map, argument_slot_count, total_slot_count, is_inline_method, method_name, block, executable);
+        self.init(vm, token, argument_slot_count, total_slot_count, is_inline_method, method_name, block, executable);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
@@ -198,7 +199,8 @@ pub const MethodMap = extern struct {
 
     fn init(
         self: MethodMap.Ptr,
-        map_map: Map.Ptr,
+        vm: *VirtualMachine,
+        token: *Heap.AllocationToken,
         argument_slot_count: u8,
         total_slot_count: u32,
         is_inline_method: bool,
@@ -206,7 +208,7 @@ pub const MethodMap = extern struct {
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
     ) void {
-        self.base_map.init(.Method, map_map, argument_slot_count, total_slot_count, block, executable);
+        self.base_map.allocateAndInit(vm, token, .Method, argument_slot_count, total_slot_count, block, executable);
         self.setInlineMethod(is_inline_method);
         self.method_name = method_name.asValue();
     }
@@ -238,7 +240,7 @@ pub const MethodMap = extern struct {
 
     pub fn clone(self: MethodMap.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken) !MethodMap.Ptr {
         const new_map = try create(
-            vm.getMapMap(),
+            vm,
             token,
             self.getArgumentSlotCount(),
             self.base_map.slots.information.slot_count,
@@ -255,14 +257,25 @@ pub const MethodMap = extern struct {
     }
 
     pub fn getSizeInMemory(self: MethodMap.Ptr) usize {
-        return requiredSizeForAllocation(self.base_map.slots.information.slot_count);
+        return requiredSizeForSelfAllocation(self.base_map.slots.information.slot_count);
     }
 
     pub fn getSizeForCloning(self: MethodMap.Ptr) usize {
-        return self.getSizeInMemory();
+        return requiredSizeForAllocation(self.base_map.block.get(), self.base_map.slots.information.slot_count);
     }
 
-    pub fn requiredSizeForAllocation(slot_count: u32) usize {
+    /// Return the size required for allocating just the map itself.
+    pub fn requiredSizeForSelfAllocation(slot_count: u32) usize {
         return @sizeOf(MethodMap) + slot_count * @sizeOf(Slot);
+    }
+
+    pub fn requiredSizeForAllocation(bytecode_block: *bytecode.Block, slot_count: u32) usize {
+        var required_memory = requiredSizeForSelfAllocation(slot_count);
+        required_memory += ExecutableMap.requiredSizeForAllocation(bytecode_block);
+        return required_memory;
+    }
+
+    pub fn writeIntoInlineCacheAtOffset(self: MethodMap.Ptr, offset: usize, object: Object.Ptr, method: Method.Ptr) void {
+        self.base_map.writeIntoInlineCacheAtOffset(offset, object, method);
     }
 };

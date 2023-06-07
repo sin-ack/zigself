@@ -9,6 +9,7 @@ const Map = map_import.Map;
 const Slot = @import("../slot.zig").Slot;
 const Heap = @import("../Heap.zig");
 const slots = @import("slots.zig");
+const Object = @import("../object.zig").Object;
 const MapType = map_import.MapType;
 const bytecode = @import("../bytecode.zig");
 const BlockMap = @import("block.zig").BlockMap;
@@ -16,6 +17,7 @@ const MethodMap = @import("method.zig").MethodMap;
 const map_import = @import("map.zig");
 const SlotsObject = slots.Slots;
 const GenericValue = value_import.Value;
+const MethodObject = @import("method.zig").Method;
 const value_import = @import("../value.zig");
 const object_lookup = @import("../object_lookup.zig");
 const stage2_compat = @import("../../utility/stage2_compat.zig");
@@ -128,11 +130,11 @@ pub const Activation = extern struct {
     // --- Slot counts ---
 
     pub fn getAssignableSlotCount(self: Activation.Ptr) u8 {
-        return self.dispatch("getAssignableSlotCount");
+        return self.dispatch("getAssignableSlotCount", .{});
     }
 
     pub fn getArgumentSlotCount(self: Activation.Ptr) u8 {
-        return self.dispatch("getArgumentSlotCount");
+        return self.dispatch("getArgumentSlotCount", .{});
     }
 
     // --- Map forwarding ---
@@ -151,10 +153,14 @@ pub const Activation = extern struct {
         };
     }
 
+    pub fn writeIntoInlineCacheAtOffset(self: Activation.Ptr, offset: usize, object: Object.Ptr, method: MethodObject.Ptr) void {
+        self.dispatch("writeIntoInlineCacheAtOffset", .{ offset, object, method });
+    }
+
     // --- Slots and slot values ---
 
     pub fn getSlots(self: Activation.Ptr) Slot.Slice {
-        return self.dispatch("getSlots");
+        return self.dispatch("getSlots", .{});
     }
 
     /// Return a slice of `GenericValue`s for the assignable slots that are after the
@@ -265,10 +271,10 @@ pub const Activation = extern struct {
         return @typeInfo(@TypeOf(@field(MethodMap, fn_name))).Fn.return_type.?;
     }
 
-    fn dispatch(self: Activation.Ptr, comptime fn_name: []const u8) DispatchReturn(fn_name) {
+    fn dispatch(self: Activation.Ptr, comptime fn_name: []const u8, args: anytype) DispatchReturn(fn_name) {
         return switch (self.getActivationType()) {
-            .Method => @call(.auto, @field(MethodMap, fn_name), .{self.getMethodMap()}),
-            .Block => @call(.auto, @field(BlockMap, fn_name), .{self.getBlockMap()}),
+            .Method => @call(.auto, @field(MethodMap, fn_name), .{self.getMethodMap()} ++ args),
+            .Block => @call(.auto, @field(BlockMap, fn_name), .{self.getBlockMap()} ++ args),
         };
     }
 };
