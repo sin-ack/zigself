@@ -108,10 +108,27 @@ pub fn restart(self: *Self) void {
     self.pc = 0;
 }
 
+/// Try to see if the current slot for the inline cache is filled and matches
+/// the receiver's map; if so, return the matching method object. Invalidate the
+/// inline cache entry and return null otherwise.
+pub fn getOrInvalidateMethodFromInlineCacheForReceiver(
+    self: *Self,
+    vm: *VirtualMachine,
+    receiver: Object.Ptr,
+) ?MethodObject.Ptr {
+    const activation_object = self.activation_object.get();
+    // NOTE: For the time being, we are wasting memory by allocating an
+    //       equally-sized inline cache for the bytecode block of the
+    //       activation; in the future we will map each send instruction to
+    //       an offset within the cache and shrink it drastically.
+    return activation_object.getOrInvalidateMethodFromInlineCacheAtOffsetForReceiver(vm, self.pc, receiver);
+}
+
 /// Write the given receiver-method pair into the appropriate offset of the
 /// activation object's inline cache (stored in the map).
 pub fn writeIntoInlineCache(
     self: *Self,
+    vm: *VirtualMachine,
     receiver: Object.Ptr,
     method: MethodObject.Ptr,
 ) void {
@@ -120,7 +137,7 @@ pub fn writeIntoInlineCache(
     //       equally-sized inline cache for the bytecode block of the
     //       activation; in the future we will map each send instruction to
     //       an offset within the cache and shrink it drastically.
-    activation_object.writeIntoInlineCacheAtOffset(self.pc, receiver, method);
+    activation_object.writeIntoInlineCacheAtOffset(vm, self.pc, receiver, method);
 }
 
 pub fn format(

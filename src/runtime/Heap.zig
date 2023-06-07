@@ -403,7 +403,7 @@ const Space = struct {
     /// order to evacuate all the objects to a higher generation.
     tenure_target: ?*Space = null,
     /// The name of this space.
-    name: [*:0]const u8,
+    name: []const u8,
 
     /// A link node for a newer generation space to scan in order to update
     /// references from the newer space to the older one.
@@ -412,7 +412,7 @@ const Space = struct {
         previous: ?*const NewerGenerationLink,
     };
 
-    pub fn lazyInit(heap: *Self, comptime name: [*:0]const u8, size: usize) Space {
+    pub fn lazyInit(heap: *Self, comptime name: []const u8, size: usize) Space {
         return Space{
             .heap = heap,
             .name = name,
@@ -422,7 +422,7 @@ const Space = struct {
         };
     }
 
-    pub fn init(heap: *Self, allocator: Allocator, comptime name: [*:0]const u8, size: usize) !Space {
+    pub fn init(heap: *Self, allocator: Allocator, comptime name: []const u8, size: usize) !Space {
         var self = lazyInit(heap, name, size);
         try self.allocateMemory(allocator);
         return self;
@@ -1037,4 +1037,74 @@ test "link an object to another and perform scavenge" {
     // Get the value we stored and compare it
     var referenced_object_value = new_referenced_object.getMap().getSlotByName("actual").?.value;
     try std.testing.expectEqual(@as(u64, 0xDEADBEEF), referenced_object_value.asUnsignedInteger());
+}
+
+fn HeapAddress(comptime T: type) type {
+    return struct {
+        heap: *const Self,
+        address: T,
+
+        fn spaceNameIfAddressWithin(self: @This(), space: *const Space) ?[]const u8 {
+            const memory_start = @ptrToInt(space.memory.ptr);
+            const memory_end = @ptrToInt(space.memory.ptr + space.memory.len);
+            const address = @ptrToInt(self.address);
+
+            if (address >= memory_start and address < memory_end)
+                return @as([]const u8, space.name);
+            return null;
+        }
+
+        fn spaceName(self: @This()) []const u8 {
+            if (self.spaceNameIfAddressWithin(&self.heap.eden)) |name|
+                return name;
+            if (self.spaceNameIfAddressWithin(&self.heap.from_space)) |name|
+                return name;
+            if (self.spaceNameIfAddressWithin(&self.heap.to_space)) |name|
+                return name;
+            if (self.spaceNameIfAddressWithin(&self.heap.old_space)) |name|
+                return name;
+            @panic("!!! This address isn't within the heap!");
+        }
+
+        fn spaceOffsetIfAddressWithin(self: @This(), space: *const Space) ?usize {
+            const memory_start = @ptrToInt(space.memory.ptr);
+            const memory_end = @ptrToInt(space.memory.ptr + space.memory.len);
+            const address = @ptrToInt(self.address);
+
+            if (address >= memory_start and address < memory_end)
+                return address - memory_start;
+            return null;
+        }
+
+        fn spaceOffset(self: @This()) usize {
+            if (self.spaceOffsetIfAddressWithin(&self.heap.eden)) |offset|
+                return offset;
+            if (self.spaceOffsetIfAddressWithin(&self.heap.from_space)) |offset|
+                return offset;
+            if (self.spaceOffsetIfAddressWithin(&self.heap.to_space)) |offset|
+                return offset;
+            if (self.spaceOffsetIfAddressWithin(&self.heap.old_space)) |offset|
+                return offset;
+            @panic("!!! This address isn't within the heap!");
+        }
+
+        pub fn format(
+            self: @This(),
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = fmt;
+
+            try writer.writeByte('[');
+            try writer.writeAll(self.spaceName());
+            try writer.writeByte('+');
+            try std.fmt.formatInt(self.spaceOffset(), 10, .lower, options, writer);
+            try writer.writeByte(']');
+        }
+    };
+}
+
+pub fn asHeapAddress(self: *const Self, value: anytype) HeapAddress(@TypeOf(value)) {
+    return .{ .heap = self, .address = value };
 }

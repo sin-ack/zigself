@@ -153,8 +153,12 @@ pub const Activation = extern struct {
         };
     }
 
-    pub fn writeIntoInlineCacheAtOffset(self: Activation.Ptr, offset: usize, object: Object.Ptr, method: MethodObject.Ptr) void {
-        self.dispatch("writeIntoInlineCacheAtOffset", .{ offset, object, method });
+    pub fn getOrInvalidateMethodFromInlineCacheAtOffsetForReceiver(self: Activation.Ptr, vm: *VirtualMachine, offset: usize, receiver: Object.Ptr) ?MethodObject.Ptr {
+        return self.dispatch("getOrInvalidateMethodFromInlineCacheAtOffsetForReceiver", .{ vm, offset, receiver });
+    }
+
+    pub fn writeIntoInlineCacheAtOffset(self: Activation.Ptr, vm: *VirtualMachine, offset: usize, receiver: Object.Ptr, method: MethodObject.Ptr) void {
+        self.dispatch("writeIntoInlineCacheAtOffset", .{ vm, offset, receiver, method });
     }
 
     // --- Slots and slot values ---

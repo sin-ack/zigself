@@ -422,18 +422,54 @@ fn performPrimitiveSend(
     );
 }
 
+/// Try to see if the current slot for the inline cache is filled and matches
+/// the receiver's map; if so, return the matching method object. Invalidate the
+/// inline cache entry and return null otherwise.
+fn getOrInvalidateMethodFromInlineCacheForReceiver(
+    vm: *VirtualMachine,
+    actor: *Actor,
+    receiver: Value,
+) ?MethodObject.Ptr {
+    if (!receiver.isObjectReference()) {
+        // std.debug.print("MISS because not object ref\n", .{});
+        return null;
+    }
+    var real_receiver = receiver;
+    if (receiver.asObject().asType(.Activation)) |activation| {
+        real_receiver = activation.findActivationReceiver();
+    }
+    if (!real_receiver.isObjectReference()) {
+        // std.debug.print("MISS because not object ref\n", .{});
+        return null;
+    }
+
+    const current_activation = actor.activation_stack.getCurrent();
+    return current_activation.getOrInvalidateMethodFromInlineCacheForReceiver(vm, real_receiver.asObject());
+}
+
 /// If the receiver is an object, write the receiver-method pair into the
 /// current activation's inline cache.
 fn writeIntoInlineCache(
+    vm: *VirtualMachine,
     actor: *Actor,
     receiver: Value,
     method: MethodObject.Ptr,
 ) void {
-    if (!receiver.isObjectReference())
+    if (!receiver.isObjectReference()) {
+        // std.debug.print("NOWR because not object ref\n", .{});
         return;
+    }
+    var real_receiver = receiver;
+    if (receiver.asObject().asType(.Activation)) |activation| {
+        real_receiver = activation.findActivationReceiver();
+    }
+    if (!real_receiver.isObjectReference()) {
+        // std.debug.print("NOWR because not object ref\n", .{});
+        return;
+    }
 
     const current_activation = actor.activation_stack.getCurrent();
-    current_activation.writeIntoInlineCache(receiver.asObject(), method);
+    current_activation.writeIntoInlineCache(vm, real_receiver.asObject(), method);
 }
 
 /// Sends a message to the given receiver, returning the result as a normal
@@ -484,11 +520,27 @@ pub fn sendMessage(
 
     actor.ensureCanRead(receiver, source_range);
 
+    if (getOrInvalidateMethodFromInlineCacheForReceiver(vm, actor, receiver)) |method| {
+        const argument_count = method.getArgumentSlotCount();
+        const argument_slice = actor.argument_stack.lastNItems(argument_count);
+
+        // Advance the instruction for the activation that will be returned to.
+        _ = actor.activation_stack.getCurrent().advanceInstruction();
+
+        try executeMethod(vm, actor, receiver, method, argument_slice, target_location, source_range);
+
+        actor.argument_stack.popNItems(argument_count);
+        // Bump the argument stack height of the (now current) activation since
+        // we've now popped this activation's items off it.
+        actor.activation_stack.getCurrent().stack_snapshot.bumpArgumentHeight(actor);
+        return null;
+    }
+
     return switch (receiver.lookup(vm, message_name)) {
         .Regular => |lookup_result| {
             if (lookup_result.isObjectReference()) {
                 if (lookup_result.asObject().asType(.Method)) |method| {
-                    writeIntoInlineCache(actor, receiver, method);
+                    writeIntoInlineCache(vm, actor, receiver, method);
 
                     const argument_count = method.getArgumentSlotCount();
                     const argument_slice = actor.argument_stack.lastNItems(argument_count);

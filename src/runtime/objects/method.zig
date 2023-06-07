@@ -275,7 +275,11 @@ pub const MethodMap = extern struct {
         return required_memory;
     }
 
-    pub fn writeIntoInlineCacheAtOffset(self: MethodMap.Ptr, offset: usize, object: Object.Ptr, method: Method.Ptr) void {
-        self.base_map.writeIntoInlineCacheAtOffset(offset, object, method);
+    pub fn getOrInvalidateMethodFromInlineCacheAtOffsetForReceiver(self: MethodMap.Ptr, vm: *VirtualMachine, offset: usize, receiver: Object.Ptr) ?Method.Ptr {
+        return self.base_map.getOrInvalidateMethodFromInlineCacheAtOffsetForReceiver(vm, offset, receiver);
+    }
+
+    pub fn writeIntoInlineCacheAtOffset(self: MethodMap.Ptr, vm: *VirtualMachine, offset: usize, object: Object.Ptr, method: Method.Ptr) void {
+        self.base_map.writeIntoInlineCacheAtOffset(vm, offset, object, method);
     }
 };

@@ -19,6 +19,7 @@ const value_import = @import("../value.zig");
 const PointerValue = value_import.PointerValue;
 const stage2_compat = @import("../../utility/stage2_compat.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
+const value_inspector = @import("../value_inspector.zig");
 const RefCountedValue = value_import.RefCountedValue;
 
 /// An "executable map" is one that contains a reference to executable code.
@@ -120,12 +121,41 @@ pub const ExecutableMap = extern struct {
 
     // --- Inline cache operations ---
 
-    pub fn writeIntoInlineCacheAtOffset(self: ExecutableMap.Ptr, offset: usize, object: Object.Ptr, method: MethodObject.Ptr) void {
+    pub fn getOrInvalidateMethodFromInlineCacheAtOffsetForReceiver(
+        self: ExecutableMap.Ptr,
+        vm: *VirtualMachine,
+        offset: usize,
+        receiver: Object.Ptr,
+    ) ?MethodObject.Ptr {
         const inline_cache = self.inline_cache.get();
         std.debug.assert(offset < inline_cache.getSize() / 2);
 
         const inline_cache_array = self.inline_cache.get().getValues();
-        inline_cache_array[offset * 2] = object.map;
+        if (inline_cache_array[offset * 2].data != receiver.map.data) {
+            // std.debug.print("MISS  expected={} got={}\n", .{ vm.heap.asHeapAddress(receiver.map.asObject()), vm.heap.asHeapAddress(inline_cache_array[offset * 2].asObject()) });
+            inline_cache_array[offset * 2] = vm.nil();
+            inline_cache_array[(offset * 2) + 1] = vm.nil();
+            return null;
+        }
+
+        const method = inline_cache_array[(offset * 2) + 1].asObject().mustBeType(.Method);
+        // std.debug.print("HIT   receiver.map={} method={} (\"{s}\")\n", .{ vm.heap.asHeapAddress(receiver.map.asObject()), vm.heap.asHeapAddress(method), method.getMap().method_name.asByteArray().getValues() });
+        // std.debug.print("      ", .{});
+        // value_inspector.inspectValue(.Inline, vm, receiver.asValue()) catch unreachable;
+        // std.debug.print("\n", .{});
+        return method;
+    }
+
+    pub fn writeIntoInlineCacheAtOffset(self: ExecutableMap.Ptr, vm: *VirtualMachine, offset: usize, receiver: Object.Ptr, method: MethodObject.Ptr) void {
+        if (vm.getMapMap().asValue().data == receiver.map.data)
+            return;
+
+        const inline_cache = self.inline_cache.get();
+        std.debug.assert(offset < inline_cache.getSize() / 2);
+
+        const inline_cache_array = self.inline_cache.get().getValues();
+        inline_cache_array[offset * 2] = receiver.map;
         inline_cache_array[(offset * 2) + 1] = method.asValue();
+        // std.debug.print("WRITE receiver.map={} method={} (\"{s}\")\n", .{ vm.heap.asHeapAddress(receiver.map.asObject()), vm.heap.asHeapAddress(method), method.getMap().method_name.asByteArray().getValues() });
     }
 };
