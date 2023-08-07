@@ -92,7 +92,7 @@ pub const Object = extern struct {
     pub const ActorID = u31;
     pub const Reachability = enum(u1) { Local, Global };
     pub const ObjectInformation = packed struct(u64) {
-        object_marker: ObjectMarker = @enumToInt(Value.ValueType.ObjectMarker),
+        object_marker: ObjectMarker = @intFromEnum(Value.ValueType.ObjectMarker),
         object_type: ObjectType,
         // This can be used by downstream objects to store extra data.
         //
@@ -108,14 +108,17 @@ pub const Object = extern struct {
     fn delegate(self: Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
         return switch (self.object_information.object_type) {
             .ForwardedObject => unreachable,
-            inline else => |t| @call(.auto, @field(ObjectT(t), name), .{@ptrCast(ObjectT(t).Ptr, self)} ++ args),
+            inline else => |t| {
+                const self_ptr: ObjectT(t).Ptr = @ptrCast(self);
+                return @call(.auto, @field(ObjectT(t), name), .{self_ptr} ++ args);
+            },
         };
     }
 
     /// Cast the given address to an object.
     pub fn fromAddress(address: [*]u64) Ptr {
-        const as_object = @ptrCast(Ptr, address);
-        if (as_object.object_information.object_marker != @enumToInt(Value.ValueType.ObjectMarker)) {
+        const as_object: Ptr = @ptrCast(address);
+        if (as_object.object_information.object_marker != @intFromEnum(Value.ValueType.ObjectMarker)) {
             std.debug.panic("!!! Object.fromAddress got an address ({*}) that does NOT contain an object marker ({x})!", .{ address, address[0] });
         }
 
@@ -130,7 +133,7 @@ pub const Object = extern struct {
             return null;
         }
 
-        return @ptrCast(ObjectT(object_type).Ptr, self);
+        return @ptrCast(self);
     }
 
     /// Return the object as the given type, panicking in safe release modes if
@@ -145,12 +148,12 @@ pub const Object = extern struct {
             std.debug.panic("!!! mustBeType tried to cast a {*} of type '{s}' to type '{s}'!", .{ self, @tagName(self.object_information.object_type), @tagName(object_type) });
         }
 
-        return @ptrCast(ObjectT(object_type).Ptr, self);
+        return @ptrCast(self);
     }
 
     /// Return the address of this object.
     pub fn getAddress(self: Ptr) [*]u64 {
-        return @ptrCast([*]u64, self);
+        return @ptrCast(self);
     }
 
     /// Return this object as a Value.
@@ -193,9 +196,10 @@ pub const Object = extern struct {
             inline else => |t| {
                 if (!@hasDecl(ObjectT(t), "clone")) unreachable;
 
-                const result_or_error = @ptrCast(ObjectT(t).Ptr, self).clone(vm, token, actor_id);
+                const self_ptr: ObjectT(t).Ptr = @ptrCast(self);
+                const result_or_error = self_ptr.clone(vm, token, actor_id);
                 const result = if (@typeInfo(@TypeOf(result_or_error)) == .ErrorUnion) try result_or_error else result_or_error;
-                return @ptrCast(Object.Ptr, result);
+                return @ptrCast(result);
             },
         };
     }

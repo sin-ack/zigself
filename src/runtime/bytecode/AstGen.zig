@@ -129,7 +129,8 @@ fn generateObject(self: *AstGen, executable: *Executable, block: *Block, object:
     try block.addInstruction(executable.allocator, .SourceRange, .Nil, object.range);
 
     const object_location = self.allocateRegister();
-    try block.addInstruction(executable.allocator, .CreateObject, object_location, .{ .slot_count = @intCast(u32, object.slots.len) });
+    const slot_count: u32 = @intCast(object.slots.len);
+    try block.addInstruction(executable.allocator, .CreateObject, object_location, .{ .slot_count = slot_count });
 
     if (std.debug.runtime_safety)
         try block.addInstruction(executable.allocator, .VerifySlotSentinel, .Nil, {});
@@ -146,8 +147,9 @@ fn generateBlock(self: *AstGen, executable: *Executable, block: *Block, block_no
 
     const block_index = try self.generateSlotsAndCodeCommon(executable, block, block_node.slots, block_node.statements.value.statements);
     const block_location = self.allocateRegister();
+    const slot_count: u32 = @intCast(block_node.slots.len);
     try block.addInstruction(executable.allocator, .CreateBlock, block_location, .{
-        .slot_count = @intCast(u32, block_node.slots.len),
+        .slot_count = slot_count,
         .block_index = block_index,
     });
 
@@ -172,9 +174,10 @@ fn generateMethod(self: *AstGen, executable: *Executable, block: *Block, method_
     }
 
     const method_location = self.allocateRegister();
+    const slot_count: u32 = @intCast(method.slots.len);
     try block.addInstruction(executable.allocator, .CreateMethod, method_location, .{
         .method_name_location = method_name_location,
-        .slot_count = @intCast(u32, method.slots.len),
+        .slot_count = slot_count,
         .block_index = block_index,
     });
 
@@ -276,7 +279,10 @@ fn generateNumber(self: *AstGen, executable: *Executable, block: *Block, number:
 
     const number_location = self.allocateRegister();
     switch (number.value) {
-        .Integer => |i| try block.addInstruction(executable.allocator, .CreateInteger, number_location, @intCast(i62, i)),
+        .Integer => |i| {
+            const payload: i62 = @intCast(i);
+            try block.addInstruction(executable.allocator, .CreateInteger, number_location, payload);
+        },
         .FloatingPoint => |f| try block.addInstruction(executable.allocator, .CreateFloatingPoint, number_location, f),
     }
 

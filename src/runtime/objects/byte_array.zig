@@ -43,7 +43,7 @@ pub const ByteArray = extern struct {
     pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, actor_id: u31, byte_array: VMByteArray) ByteArray.Ptr {
         const size = requiredSizeForSelfAllocation();
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(ByteArray.Ptr, memory_area);
+        var self: ByteArray.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map_map, byte_array);
 
         return self;
@@ -61,7 +61,7 @@ pub const ByteArray = extern struct {
     }
 
     pub fn asObjectAddress(self: ByteArray.Ptr) [*]u64 {
-        return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+        return @ptrCast(@alignCast(self));
     }
 
     pub fn asValue(self: ByteArray.Ptr) GenericValue {

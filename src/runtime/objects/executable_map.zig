@@ -62,10 +62,12 @@ pub const ExecutableMap = extern struct {
     }
 
     pub fn getArgumentSlotCount(self: ExecutableMap.Ptr) u8 {
-        return @ptrCast(*ExecutableInformation, &self.slots.information.extra).argument_slot_count;
+        const executable_information: *ExecutableInformation = @ptrCast(&self.slots.information.extra);
+        return executable_information.argument_slot_count;
     }
 
     fn setArgumentSlotCount(self: ExecutableMap.Ptr, count: u8) void {
-        @ptrCast(*ExecutableInformation, &self.slots.information.extra).argument_slot_count = count;
+        const executable_information: *ExecutableInformation = @ptrCast(&self.slots.information.extra);
+        executable_information.argument_slot_count = count;
     }
 };

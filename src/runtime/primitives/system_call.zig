@@ -29,7 +29,7 @@ fn callFailureBlock(
     errno: std.os.system.E,
     block: Value,
 ) !ExecutionResult {
-    const errno_int = @enumToInt(errno);
+    const errno_int = @intFromEnum(errno);
     const errno_value = Value.fromInteger(errno_int);
 
     try context.actor.argument_stack.push(context.vm.allocator, errno_value);
@@ -70,10 +70,10 @@ pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
     const null_terminated_path = std.os.toPosixPath(file_path.getValues()) catch unreachable;
 
     // FIXME: Allow the user to pass permissions via the primitive.
-    const rc = std.os.system.open(&null_terminated_path, @intCast(u32, flags), @intCast(u32, 0));
+    const rc = std.os.system.open(&null_terminated_path, @intCast(flags), @as(u32, 0));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
-        const fd = @intCast(std.os.fd_t, rc);
+        const fd: std.os.fd_t = @intCast(rc);
         return makeManagedFD(context, fd, .{});
     }
 
@@ -88,7 +88,7 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: *PrimitiveContext) !Executio
     const arguments = context.getArguments("_Read:BytesInto:AtOffset:From:IfFail:");
     const bytes_to_read = try arguments.getInteger(0, .Unsigned);
     const byte_array = try arguments.getObject(1, .ByteArray);
-    const offset = try arguments.getInteger(2, .Unsigned);
+    const offset: usize = @intCast(try arguments.getInteger(2, .Unsigned));
     const fd = try arguments.getObject(3, .Managed);
     const failure_block = arguments.getValue(4);
 
@@ -110,7 +110,7 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: *PrimitiveContext) !Executio
         ));
     }
 
-    if (byte_array.getValues().len - @intCast(usize, offset) < bytes_to_read) {
+    if (byte_array.getValues().len - offset < bytes_to_read) {
         return ExecutionResult.completion(try Completion.initRuntimeError(
             context.vm,
             context.source_range,
@@ -120,11 +120,11 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: *PrimitiveContext) !Executio
     }
 
     const fd_value = FileDescriptor.fromValue(fd.value).fd;
-    const rc = std.os.system.read(fd_value, byte_array.getValues().ptr + @intCast(usize, offset), @intCast(usize, bytes_to_read));
+    const rc = std.os.system.read(fd_value, byte_array.getValues().ptr + offset, @intCast(bytes_to_read));
 
     const errno = std.os.system.getErrno(rc);
     return switch (errno) {
-        .SUCCESS => ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intCast(usize, rc)))),
+        .SUCCESS => ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intCast(rc)))),
         .AGAIN => blk: {
             if (context.vm.isInRegularActor()) {
                 context.actor.yield_reason = .Blocked;
@@ -170,7 +170,7 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: *PrimitiveContext) !Executi
         ));
     }
 
-    if (byte_array.getValues().len - @intCast(usize, offset) < bytes_to_write) {
+    if (byte_array.getValues().len - offset < bytes_to_write) {
         return ExecutionResult.completion(try Completion.initRuntimeError(
             context.vm,
             context.source_range,
@@ -180,11 +180,11 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: *PrimitiveContext) !Executi
     }
 
     const fd_value = FileDescriptor.fromValue(fd.value).fd;
-    const rc = std.os.system.write(fd_value, byte_array.getValues().ptr + @intCast(usize, offset), @intCast(usize, bytes_to_write));
+    const rc = std.os.system.write(fd_value, byte_array.getValues().ptr + offset, @intCast(bytes_to_write));
 
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
-        return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intCast(usize, rc))));
+        return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intCast(rc))));
     }
 
     return try callFailureBlock(context, errno, failure_block);
@@ -219,7 +219,7 @@ pub fn Exit(context: *PrimitiveContext) !ExecutionResult {
     const status_code = try arguments.getInteger(0, .Unsigned);
 
     // The ultimate in garbage collection.
-    std.os.exit(@intCast(u8, status_code));
+    std.os.exit(@intCast(status_code));
 }
 
 /// The maximum amount of pollfd structures that can be on the stack before
@@ -297,18 +297,18 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
 
         poll_fds[i] = .{
             .fd = fd_value.fd,
-            .events = @intCast(i16, event_flags.asInteger()),
+            .events = @intCast(event_flags.asInteger()),
             .revents = 0,
         };
     }
 
-    const rc = std.os.system.poll(poll_fds.ptr, @intCast(u32, fds.getSize()), @intCast(i32, timeout_ms));
+    const rc = std.os.system.poll(poll_fds.ptr, @intCast(fds.getSize()), @intCast(timeout_ms));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
         for (poll_fds, 0..) |pollfd, i| {
-            event_values[i] = Value.fromInteger(@intCast(i64, pollfd.revents));
+            event_values[i] = Value.fromInteger(@intCast(pollfd.revents));
         }
-        return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intCast(usize, rc))));
+        return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intCast(rc))));
     }
 
     return try callFailureBlock(context, errno, failure_block);
@@ -329,10 +329,10 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
 
     // FIXME: Do not directly intCast here
     const hints = std.os.addrinfo{
-        .family = @intCast(i32, family),
-        .socktype = @intCast(i32, socket_type),
-        .protocol = @intCast(i32, protocol),
-        .flags = std.c.AI.NUMERICSERV | @intCast(i32, flags),
+        .family = @intCast(family),
+        .socktype = @intCast(socket_type),
+        .protocol = @intCast(protocol),
+        .flags = std.c.AI.NUMERICSERV | @as(i32, @intCast(flags)),
 
         .addrlen = 0,
         .addr = null,
@@ -347,7 +347,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
 
         if (host.isObjectReference()) {
             if (host.asObject().asType(.ByteArray)) |host_byte_array| {
-                break :node_c try std.cstr.addNullByte(context.vm.allocator, host_byte_array.getValues());
+                break :node_c try context.vm.allocator.dupeZ(u8, host_byte_array.getValues());
             }
         }
 
@@ -366,7 +366,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     var result_ptr: ?*std.os.addrinfo = undefined;
     const rc = std.os.system.getaddrinfo(if (node_c) |s| s.ptr else null, service_c, &hints, &result_ptr);
     switch (rc) {
-        @intToEnum(std.os.system.EAI, 0) => {},
+        @as(std.os.system.EAI, @enumFromInt(0)) => {},
 
         // FIXME: Handle errors
         .ADDRFAMILY,
@@ -436,16 +436,16 @@ pub fn SocketWithFamily_Type_Protocol_IfFail(context: *PrimitiveContext) !Execut
 
     // FIXME: Check before casting
     // FIXME: SOCK_NONBLOCK and SOCK_CLOEXEC only works on Linux! Make a fallback.
-    var full_socket_type = @intCast(c_uint, socket_type) | std.os.SOCK.CLOEXEC;
+    var full_socket_type = @as(c_uint, @intCast(socket_type)) | std.os.SOCK.CLOEXEC;
 
     if (context.vm.isInRegularActor()) {
         full_socket_type |= std.os.SOCK.NONBLOCK;
     }
 
-    const rc = std.os.system.socket(@intCast(c_uint, family), full_socket_type, @intCast(c_uint, protocol));
+    const rc = std.os.system.socket(@intCast(family), full_socket_type, @intCast(protocol));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
-        var fd = @intCast(std.os.fd_t, rc);
+        var fd: std.os.fd_t = @intCast(rc);
         return makeManagedFD(context, fd, .{});
     }
 
@@ -472,8 +472,7 @@ pub fn BindFD_ToSockaddrBytes_IfFail(context: *PrimitiveContext) !ExecutionResul
     const sockaddr_bytes: []const u8 = sockaddr_object.getValues();
 
     // FIXME: Check before casting
-    const sockaddr = std.os.system.sockaddr;
-    const rc = std.os.system.bind(fd.fd, @ptrCast(*const sockaddr, @alignCast(@alignOf(sockaddr), sockaddr_bytes.ptr)), @intCast(u32, sockaddr_bytes.len));
+    const rc = std.os.system.bind(fd.fd, @ptrCast(@alignCast(sockaddr_bytes.ptr)), @intCast(sockaddr_bytes.len));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
         return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
@@ -500,7 +499,7 @@ pub fn ListenOnFD_WithBacklog_IfFail(context: *PrimitiveContext) !ExecutionResul
 
     // FIXME: Check before casting
     const fd = FileDescriptor.fromValue(fd_object.value);
-    const rc = std.os.system.listen(fd.fd, @intCast(c_uint, backlog));
+    const rc = std.os.system.listen(fd.fd, @intCast(backlog));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
         return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
@@ -531,7 +530,7 @@ pub fn AcceptFromFD_IfFail(context: *PrimitiveContext) !ExecutionResult {
     const errno = std.os.system.getErrno(rc);
     return switch (errno) {
         .SUCCESS => {
-            const new_fd_value = @intCast(std.os.fd_t, rc);
+            const new_fd_value: std.os.fd_t = @intCast(rc);
             _ = std.os.fcntl(new_fd_value, std.os.F.SETFD, std.os.FD_CLOEXEC) catch unreachable;
 
             if (context.vm.isInRegularActor()) {

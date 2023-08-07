@@ -39,7 +39,7 @@ pub const Array = extern struct {
         const size = requiredSizeForAllocation(map.getSize());
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(Array.Ptr, memory_area);
+        var self: Array.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map, values, filler);
 
         return self;
@@ -54,7 +54,7 @@ pub const Array = extern struct {
             .map = map.asValue(),
         };
 
-        const values_to_copy = values[0..std.math.min(values.len, map.getSize())];
+        const values_to_copy = values[0..@min(values.len, map.getSize())];
         @memcpy(self.getValues()[0..values_to_copy.len], values_to_copy);
 
         if (map.getSize() > values.len) {
@@ -63,7 +63,7 @@ pub const Array = extern struct {
     }
 
     pub fn asObjectAddress(self: Array.Ptr) [*]u64 {
-        return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+        return @ptrCast(@alignCast(self));
     }
 
     pub fn asValue(self: Array.Ptr) GenericValue {
@@ -102,10 +102,10 @@ pub const Array = extern struct {
     }
 
     pub fn getValues(self: Array.Ptr) []GenericValue {
-        const object_memory = @ptrCast([*]u8, self);
+        const object_memory: [*]u8 = @ptrCast(self);
         const start_of_items = object_memory + @sizeOf(Array);
 
-        return std.mem.bytesAsSlice(GenericValue, start_of_items[0 .. self.getSize() * @sizeOf(GenericValue)]);
+        return @alignCast(std.mem.bytesAsSlice(GenericValue, start_of_items[0 .. self.getSize() * @sizeOf(GenericValue)]));
     }
 
     pub fn clone(self: Array.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) Array.Ptr {
@@ -141,7 +141,7 @@ pub const ArrayMap = extern struct {
         const memory_size = requiredSizeForAllocation();
 
         var memory_area = token.allocate(.Object, memory_size);
-        var self = @ptrCast(ArrayMap.Ptr, memory_area);
+        var self: ArrayMap.Ptr = @ptrCast(memory_area);
         self.init(map_map, size);
 
         return self;
@@ -153,11 +153,11 @@ pub const ArrayMap = extern struct {
     }
 
     pub fn asValue(self: ArrayMap.Ptr) GenericValue {
-        return GenericValue.fromObjectAddress(@ptrCast([*]u64, @alignCast(@alignOf(u64), self)));
+        return GenericValue.fromObjectAddress(@ptrCast(@alignCast(self)));
     }
 
     pub fn getSize(self: ArrayMap.Ptr) usize {
-        return @intCast(usize, self.size.get());
+        return @intCast(self.size.get());
     }
 
     pub fn getSizeInMemory(self: ArrayMap.Ptr) usize {

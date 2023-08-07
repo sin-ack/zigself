@@ -146,7 +146,7 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
                 return error.GetArgumentFailure;
             }
 
-            return @intCast(u64, value_as_integer);
+            return @intCast(value_as_integer);
         }
 
         // TODO: Figure out why stage2 explodes with this function being inline

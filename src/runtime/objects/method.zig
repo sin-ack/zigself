@@ -45,10 +45,10 @@ pub const Method = extern struct {
             );
         }
 
-        const size = Method.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len));
+        const size = Method.requiredSizeForAllocation(@intCast(assignable_slot_values.len));
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(Method.Ptr, memory_area);
+        var self: Method.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map);
         @memcpy(self.getAssignableSlots(), assignable_slot_values);
 
@@ -189,7 +189,7 @@ pub const MethodMap = extern struct {
         const size = MethodMap.requiredSizeForAllocation(total_slot_count);
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(MethodMap.Ptr, memory_area);
+        var self: MethodMap.Ptr = @ptrCast(memory_area);
         self.init(map_map, argument_slot_count, total_slot_count, is_inline_method, method_name, block, executable);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
@@ -212,11 +212,13 @@ pub const MethodMap = extern struct {
     }
 
     fn setInlineMethod(self: MethodMap.Ptr, is_inline_method: bool) void {
-        @ptrCast(*MethodInformation, &self.base_map.slots.map.map_information.extra).is_inline = is_inline_method;
+        const method_info: *MethodInformation = @ptrCast(&self.base_map.slots.map.map_information.extra);
+        method_info.is_inline = is_inline_method;
     }
 
     fn isInlineMethod(self: MethodMap.Ptr) bool {
-        return @ptrCast(*MethodInformation, &self.base_map.slots.map.map_information.extra).is_inline;
+        const method_info: *MethodInformation = @ptrCast(&self.base_map.slots.map.map_information.extra);
+        return method_info.is_inline;
     }
 
     pub fn expectsActivationObjectAsReceiver(self: MethodMap.Ptr) bool {

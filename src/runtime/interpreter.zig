@@ -91,7 +91,7 @@ pub const InterpreterContext = struct {
 };
 
 pub fn execute(context: *InterpreterContext) InterpreterError!ExecutionResult {
-    try specialized_executors[@enumToInt(context.block.getOpcode(context.instructionIndex()))](context);
+    try specialized_executors[@intFromEnum(context.block.getOpcode(context.instructionIndex()))](context);
     return context.result.?;
 }
 
@@ -152,7 +152,7 @@ pub fn executeSpecialized(comptime opcode: bytecode.Instruction.Opcode) OpcodeHa
             if (context.result != null) return;
 
             const new_index = context.activation.advanceInstruction();
-            return @call(.always_tail, specialized_executors[@enumToInt(context.block.getOpcode(new_index))], .{context});
+            return @call(.always_tail, specialized_executors[@intFromEnum(context.block.getOpcode(new_index))], .{context});
         }
     }.execute;
 }
@@ -316,7 +316,7 @@ fn opcodePushRegisters(context: *InterpreterContext) InterpreterError!void {
     var iterator = context.block.getTypedPayload(context.instructionIndex(), .PushRegisters).iterator(.{});
     while (iterator.next()) |clobbered_register| {
         // FIXME: Remove manual register number adjustment!
-        const register = bytecode.RegisterLocation.fromInt(@intCast(u32, clobbered_register + 2));
+        const register = bytecode.RegisterLocation.fromInt(@intCast(clobbered_register + 2));
         try context.actor.saved_register_stack.push(context.vm.allocator, .{ .register = register, .value = context.vm.readRegister(register) });
     }
 }
@@ -576,7 +576,7 @@ fn executeBlock(
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
-    const message_name = try vm.getOrCreateBlockMessageName(@intCast(u8, arguments.len));
+    const message_name = try vm.getOrCreateBlockMessageName(@intCast(arguments.len));
     var block = block_receiver;
 
     var required_memory = ActivationObject.requiredSizeForAllocation(
@@ -688,7 +688,7 @@ fn createObject(
     var total_assignable_slot_count: u8 = 0;
     for (slots, 0..) |slot, i| {
         total_slot_count += slot.requiredSlotSpace(slots[0..i]);
-        total_assignable_slot_count += @intCast(u8, slot.requiredAssignableSlotValueSpace(slots[0..i]));
+        total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots[0..i]));
     }
 
     var token = try vm.heap.getAllocation(
@@ -726,7 +726,7 @@ fn createMethod(
     var argument_slot_count: u8 = 0;
     for (slots, 0..) |slot, i| {
         total_slot_count += slot.requiredSlotSpace(slots[0..i]);
-        total_assignable_slot_count += @intCast(u8, slot.requiredAssignableSlotValueSpace(slots[0..i]));
+        total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots[0..i]));
 
         // FIXME: This makes the assumption that argument slots are
         //        never overwritten.
@@ -777,7 +777,7 @@ fn createBlock(
     var argument_slot_count: u8 = 0;
     for (slots, 0..) |slot, i| {
         total_slot_count += slot.requiredSlotSpace(slots[0..i]);
-        total_assignable_slot_count += @intCast(u8, slot.requiredAssignableSlotValueSpace(slots[0..i]));
+        total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots[0..i]));
 
         // FIXME: This makes the assumption that argument slots are
         //        never overwritten.

@@ -45,7 +45,7 @@ fn addIntervalForRegister(self: *Liveness, allocator: Allocator, location: astco
         }
     }
 
-    try self.intervals.append(allocator, .{ .start = @intCast(u32, start), .end = @intCast(u32, end) });
+    try self.intervals.append(allocator, .{ .start = @intCast(start), .end = @intCast(end) });
 }
 
 fn instructionReferencesRegister(inst: astcode.Instruction, location: astcode.RegisterLocation) bool {

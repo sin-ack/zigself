@@ -107,8 +107,8 @@ fn Block(comptime InstructionT: type, comptime access_mode: AccessMode) type {
             try self.instructions.append(allocator, undefined);
 
             return switch (access_mode) {
-                .ByField => @intCast(u32, self.instructions.len - 1),
-                .ByInstruction => @intCast(u32, self.instructions.items.len - 1),
+                .ByField => @intCast(self.instructions.len - 1),
+                .ByInstruction => @intCast(self.instructions.items.len - 1),
             };
         }
 

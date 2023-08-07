@@ -72,15 +72,16 @@ pub const Activation = extern struct {
         const size = requiredSizeForAllocation(argument_slot_count, assignable_slot_count);
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(Activation.Ptr, memory_area);
+        var self: Activation.Ptr = @ptrCast(memory_area);
         self.init(map_type, actor_id, map, receiver);
 
         // NOTE: Inlining getAssignableSlots here in order to avoid multiple
         //       dynamic dispatches.
         const activation_header_size = @sizeOf(Activation);
+        const aligned_memory_area: [*]align(@alignOf(u64)) u8 = @ptrCast(memory_area);
         const assignable_slots = std.mem.bytesAsSlice(
             GenericValue,
-            @ptrCast([*]align(@alignOf(u64)) u8, memory_area)[activation_header_size..size],
+            aligned_memory_area[activation_header_size..size],
         );
 
         @memcpy(assignable_slots[0..argument_slot_count], arguments);
@@ -118,11 +119,13 @@ pub const Activation = extern struct {
 
     pub const ActivationType = enum(u1) { Method, Block };
     pub fn getActivationType(self: Activation.Ptr) ActivationType {
-        return @ptrCast(*ActivationInformation, &self.slots.object.object_information.extra).activation_type;
+        const activation_information: *ActivationInformation = @ptrCast(&self.slots.object.object_information.extra);
+        return activation_information.activation_type;
     }
 
     fn setActivationType(self: Activation.Ptr, comptime activation_type: ActivationType) void {
-        @ptrCast(*ActivationInformation, &self.slots.object.object_information.extra).activation_type = activation_type;
+        const activation_information: *ActivationInformation = @ptrCast(&self.slots.object.object_information.extra);
+        activation_information.activation_type = activation_type;
     }
 
     // --- Slot counts ---
@@ -161,12 +164,12 @@ pub const Activation = extern struct {
     /// Activation object header.
     fn getAssignableSlots(self: Activation.Ptr) []GenericValue {
         const activation_header_size = @sizeOf(Activation);
-        const object_memory = @ptrCast([*]u8, self);
+        const object_memory: [*]u8 = @ptrCast(self);
 
-        return std.mem.bytesAsSlice(
+        return @alignCast(std.mem.bytesAsSlice(
             GenericValue,
             object_memory[activation_header_size..self.getSizeInMemory()],
-        );
+        ));
     }
 
     fn getArgumentSlots(self: Activation.Ptr) []GenericValue {
@@ -183,7 +186,7 @@ pub const Activation = extern struct {
     pub fn getAssignableSlotValue(self: Activation.Ptr, slot: Slot) *GenericValue {
         std.debug.assert(slot.isAssignable());
 
-        const offset = @intCast(usize, slot.value.asUnsignedInteger());
+        const offset: usize = @intCast(slot.value.asUnsignedInteger());
         return if (slot.isArgument())
             &self.getArgumentSlots()[offset]
         else
@@ -225,7 +228,7 @@ pub const Activation = extern struct {
             }
         }
 
-        std.debug.assert(@ptrToInt(object.getAddress()) != @ptrToInt(self));
+        std.debug.assert(@intFromPtr(object.getAddress()) != @intFromPtr(self));
         return object.asValue();
     }
 

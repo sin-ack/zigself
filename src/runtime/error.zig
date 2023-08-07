@@ -21,7 +21,7 @@ fn writeTraceForFrame(message_name: []const u8, source_range: SourceRange) void 
 
     writer.writeByteNTimes(' ', range.start.column - 1) catch unreachable;
     if (range.start.line == range.end.line) {
-        writer.writeByteNTimes('^', std.math.max(1, range.end.column - range.start.column)) catch unreachable;
+        writer.writeByteNTimes('^', @max(1, range.end.column - range.start.column)) catch unreachable;
     } else {
         writer.writeByteNTimes('^', source_line.len - range.start.column + 1) catch unreachable;
         writer.writeByteNTimes('.', 3) catch unreachable;
@@ -39,9 +39,9 @@ pub fn printTraceFromActivationStackUntil(stack: []Activation, first_source_rang
 
     var called_from = first_source_range;
 
-    var i = @intCast(isize, stack.len - 1);
+    var i: isize = @intCast(stack.len - 1);
     while (i >= 0) : (i -= 1) {
-        const activation_ptr = &stack[@intCast(usize, i)];
+        const activation_ptr = &stack[@intCast(i)];
 
         if (until) |until_ptr| {
             if (until_ptr == activation_ptr) break;

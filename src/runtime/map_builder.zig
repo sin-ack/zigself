@@ -58,7 +58,7 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
             // NOTE: Method and block maps do not count the argument slot count
             //       towards their assignable slot counts, because the argument
             //       slot values don't exist on the method and block objects.
-            self.map.setAssignableSlotCount(@intCast(u8, self.assignable_slot_index));
+            self.map.setAssignableSlotCount(@intCast(self.assignable_slot_index));
         }
 
         pub fn createObject(self: *Self, current_actor_id: u31) ObjectType.Ptr {

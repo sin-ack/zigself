@@ -63,7 +63,7 @@ pub fn allocateRegister(
 
     self.clobbered_registers.set(free_register.?);
     // FIXME: Remove manual register number adjustment!
-    const register = LowcodeRegisterLocation.fromInt(@intCast(u32, free_register.? + 2));
+    const register = LowcodeRegisterLocation.fromInt(@intCast(free_register.? + 2));
     try self.insertActiveInterval(allocator, register, interval);
     try self.allocated_registers.put(allocator, ast_register, register);
 

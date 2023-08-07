@@ -46,10 +46,10 @@ pub const Block = extern struct {
             );
         }
 
-        const size = Block.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len));
+        const size = Block.requiredSizeForAllocation(@intCast(assignable_slot_values.len));
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(Block.Ptr, memory_area);
+        var self: Block.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map);
         @memcpy(self.getAssignableSlots(), assignable_slot_values);
 
@@ -194,7 +194,7 @@ pub const BlockMap = extern struct {
         const size = BlockMap.requiredSizeForAllocation(total_slot_count);
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(BlockMap.Ptr, memory_area);
+        var self: BlockMap.Ptr = @ptrCast(memory_area);
         self.init(map_map, argument_slot_count, total_slot_count, parent_activation, nonlocal_return_target_activation, block, executable);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);

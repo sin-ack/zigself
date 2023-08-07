@@ -36,29 +36,31 @@ pub const Value = packed struct {
     /// Create a new Value object from the given object address.
     pub inline fn fromObjectAddress(address: [*]u64) Value {
         // Must be 8-byte aligned
-        std.debug.assert((@ptrToInt(address) & 0b111) == 0);
-        return .{ .data = @ptrToInt(address) | @enumToInt(ValueType.ObjectReference) };
+        std.debug.assert((@intFromPtr(address) & 0b111) == 0);
+        return .{ .data = @intFromPtr(address) | @intFromEnum(ValueType.ObjectReference) };
     }
 
     /// Create a new Value object from an integer literal.
     pub inline fn fromInteger(integer: i64) Value {
         std.debug.assert((@as(i64, -1) << 62) < integer and integer < (@as(i64, 1) << 62));
-        return .{ .data = @bitCast(u64, integer << 2) | @enumToInt(ValueType.Integer) };
+        const data: u64 = @bitCast(integer << 2);
+        return .{ .data = data | @intFromEnum(ValueType.Integer) };
     }
 
     /// Create a new Value object from an unsigned integer literal.
     pub inline fn fromUnsignedInteger(integer: u64) Value {
         std.debug.assert(integer < (@as(u64, 1) << 62));
-        return .{ .data = (integer << 2) | @enumToInt(ValueType.Integer) };
+        return .{ .data = (integer << 2) | @intFromEnum(ValueType.Integer) };
     }
 
     pub inline fn fromFloatingPoint(floating_point: f64) Value {
-        return .{ .data = (@bitCast(u64, floating_point) & ~ValueMarkerMask) | @enumToInt(ValueType.FloatingPoint) };
+        const floating_point_as_int: u64 = @bitCast(floating_point);
+        return .{ .data = (floating_point_as_int & ~ValueMarkerMask) | @intFromEnum(ValueType.FloatingPoint) };
     }
 
     /// Return the type of this value.
     pub inline fn getType(self: Value) ValueType {
-        return @intToEnum(ValueType, self.data & ValueMarkerMask);
+        return @enumFromInt(self.data & ValueMarkerMask);
     }
 
     /// Return whether this value is an integer.
@@ -79,7 +81,8 @@ pub const Value = packed struct {
     /// Return this value as an integer.
     pub inline fn asInteger(self: Value) i64 {
         std.debug.assert(self.isInteger());
-        return @bitCast(i64, self.data) >> 2;
+        const data: i64 = @bitCast(self.data);
+        return data >> 2;
     }
 
     /// Return this value as an unsigned integer.
@@ -91,13 +94,14 @@ pub const Value = packed struct {
     /// Return this value as a floating point number.
     pub inline fn asFloatingPoint(self: Value) f64 {
         std.debug.assert(self.isFloatingPoint());
-        return @bitCast(f64, self.data & ~ValueMarkerMask);
+        return @bitCast(self.data & ~ValueMarkerMask);
     }
 
     /// Return the object address stored in this object as a pointer.
     pub inline fn asObjectAddress(self: Value) [*]u64 {
         std.debug.assert(self.isObjectReference());
-        return @intToPtr([*]u64, @intCast(usize, self.data & ~ValueMarkerMask));
+        const address: usize = @intCast(self.data & ~ValueMarkerMask);
+        return @ptrFromInt(address);
     }
 
     /// Return the object the address of which is stored in this value.
@@ -181,11 +185,11 @@ pub fn PointerValueAlignment(comptime T: type, comptime alignment: ?u29) type {
         const Self = @This();
 
         pub fn init(value: PointerT) Self {
-            return .{ .value = Value.fromUnsignedInteger(@ptrToInt(value)) };
+            return .{ .value = Value.fromUnsignedInteger(@intFromPtr(value)) };
         }
 
         pub fn get(self: Self) PointerT {
-            return @intToPtr(PointerT, @intCast(usize, self.value.asUnsignedInteger()));
+            return @ptrFromInt(self.value.asUnsignedInteger());
         }
     };
 }

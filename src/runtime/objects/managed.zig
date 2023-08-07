@@ -41,12 +41,13 @@ pub const FileDescriptor = packed struct(u62) {
     }
 
     pub fn fromValue(value: GenericValue) FileDescriptor {
-        const raw_value = value.asUnsignedInteger();
-        return @bitCast(FileDescriptor, @intCast(u62, raw_value));
+        const raw_value: u62 = @intCast(value.asUnsignedInteger());
+        return @bitCast(raw_value);
     }
 
     pub fn toValue(self: FileDescriptor) GenericValue {
-        return GenericValue.fromUnsignedInteger(@bitCast(u62, self));
+        const self_as_int: u62 = @bitCast(self);
+        return GenericValue.fromUnsignedInteger(self_as_int);
     }
 
     pub fn close(self: *FileDescriptor) void {
@@ -77,7 +78,7 @@ pub const Managed = extern struct {
 
     pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, actor_id: u31, managed_type: ManagedType, value: GenericValue) !Managed.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
-        const self = @ptrCast(Managed.Ptr, memory_area);
+        const self: Managed.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map_map, managed_type, value);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
@@ -97,11 +98,11 @@ pub const Managed = extern struct {
     }
 
     fn setManagedType(self: Managed.Ptr, managed_type: ManagedType) void {
-        self.object.object_information.extra = @enumToInt(managed_type);
+        self.object.object_information.extra = @intFromEnum(managed_type);
     }
 
     pub fn getManagedType(self: Managed.Ptr) ManagedType {
-        return @intToEnum(ManagedType, self.object.object_information.extra);
+        return @enumFromInt(self.object.object_information.extra);
     }
 
     pub fn canFinalize(self: Managed.Ptr) bool {
@@ -131,7 +132,7 @@ pub const Managed = extern struct {
     }
 
     pub fn asObjectAddress(self: Managed.Ptr) [*]u64 {
-        return @ptrCast([*]u64, self);
+        return @ptrCast(self);
     }
 
     pub fn asValue(self: Managed.Ptr) GenericValue {
