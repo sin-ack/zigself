@@ -29,7 +29,7 @@ fn calculateRequiredMemoryForBlessing(allocator: Allocator, value: Value) Alloca
 
             return object;
         }
-    }.f) catch |err| return @errSetCast(Allocator.Error, err);
+    }.f) catch |err| return @as(Allocator.Error, @errSetCast(err));
 
     return required_memory;
 }
@@ -52,7 +52,7 @@ fn copyObjectGraphForNewActor(vm: *VirtualMachine, token: *Heap.AllocationToken,
             gop.value_ptr.* = new_object.getAddress();
             return new_object;
         }
-    }.f) catch |err| return @errSetCast(Allocator.Error, err);
+    }.f) catch |err| return @as(Allocator.Error, @errSetCast(err));
 }
 
 pub fn bless(vm: *VirtualMachine, heap: *Heap, actor_id: u31, const_value: Value) !Value {

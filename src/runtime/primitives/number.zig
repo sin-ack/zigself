@@ -94,7 +94,7 @@ pub fn IntShl(context: *PrimitiveContext) !ExecutionResult {
             // FIXME: These functions should be passed i62s in the first place,
             // but doing that requires making Value.fromInteger return 62-bit
             // integers.
-            const result: i64 = (receiver << @intCast(u6, term)) & ((@as(i64, 1) << 62) - 1);
+            const result: i64 = (receiver << @as(u6, @intCast(term))) & ((@as(i64, 1) << 62) - 1);
             return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(result)));
         }
     }.op);
@@ -117,7 +117,7 @@ pub fn IntShr(context: *PrimitiveContext) !ExecutionResult {
             // FIXME: These functions should be passed i62s in the first place,
             // but doing that requires making Value.fromInteger return 62-bit
             // integers.
-            const result: i64 = (receiver >> @intCast(u6, term)) & ((@as(i64, 1) << 62) - 1);
+            const result: i64 = (receiver >> @as(u6, @intCast(term))) & ((@as(i64, 1) << 62) - 1);
             return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(result)));
         }
     }.op);

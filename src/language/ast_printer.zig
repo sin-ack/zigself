@@ -250,7 +250,7 @@ pub fn dumpString(self: *Self, string: AST.StringNode) void {
     self.indent();
 
     self.setStem(.Last);
-    self.print("content: \"{s}", .{string.value[0..std.math.min(200, string.value.len)]});
+    self.print("content: \"{s}", .{string.value[0..@min(200, string.value.len)]});
     if (string.value.len > 200) {
         std.debug.print("...", .{});
     }

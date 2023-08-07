@@ -71,7 +71,7 @@ pub fn IntrinsicMap(comptime MapT: type, comptime object_type: ObjectType) type 
         // defined by the user.
 
         pub fn asAddress(self: Ptr) [*]u64 {
-            return @ptrCast([*]u64, self);
+            return @ptrCast(self);
         }
 
         pub fn asValue(self: Ptr) value.Value {
@@ -130,7 +130,7 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
 
         pub fn create(token: *Heap.AllocationToken, map: MapT.Ptr, actor_id: u31) Ptr {
             const memory = token.allocate(.Object, requiredSizeForAllocation());
-            const self = @ptrCast(Ptr, memory);
+            const self: Ptr = @ptrCast(memory);
 
             self.init(map, actor_id);
             return self;
@@ -147,7 +147,7 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
         }
 
         pub fn asAddress(self: Ptr) [*]u64 {
-            return @ptrCast([*]u64, self);
+            return @ptrCast(self);
         }
 
         pub fn asValue(self: Ptr) value.Value {
@@ -155,7 +155,7 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
         }
 
         pub fn getMap(self: Ptr) MapT.Ptr {
-            return @ptrCast(MapT.Ptr, self.object.map.asObject().mustBeType(.Map));
+            return @ptrCast(self.object.map.asObject().mustBeType(.Map));
         }
 
         pub fn getSizeInMemory(self: Ptr) usize {

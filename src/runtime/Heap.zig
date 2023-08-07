@@ -194,7 +194,8 @@ fn freeHandle(self: *Self, handle: *?[*]u64) void {
         }
     }
 
-    self.most_recent_handle_index = @intCast(@TypeOf(self.most_recent_handle_index), @divExact(@ptrToInt(handle) - @ptrToInt(&self.handles), @sizeOf([*]u64))) -% 1;
+    const new_most_recent_handle_index: @TypeOf(self.most_recent_handle_index) = @intCast(@divExact(@intFromPtr(handle) - @intFromPtr(&self.handles), @sizeOf([*]u64)));
+    self.most_recent_handle_index = new_most_recent_handle_index -% 1;
     handle.* = null;
 }
 
@@ -206,7 +207,7 @@ pub fn track(self: *Self, value: Value) !Tracked {
         handle.* = value.asObjectAddress();
 
         // XXX: The handle cannot be null at this point.
-        const nonnull_handle = @ptrCast(*[*]u64, handle);
+        const nonnull_handle: *[*]u64 = @ptrCast(handle);
 
         if (GC_TRACK_SOURCE_DEBUG) {
             const address = @returnAddress();
@@ -229,7 +230,7 @@ pub fn untrack(self: *Self, tracked: Tracked) void {
         }
 
         // XXX: The handle dies here, so this is alright.
-        self.freeHandle(@ptrCast(*?[*]u64, tracked.value.Object));
+        self.freeHandle(@ptrCast(tracked.value.Object));
     }
 }
 
@@ -751,8 +752,6 @@ const Space = struct {
         // Looks like the scavenge didn't give us enough memory. Let's attempt a
         // tenure.
         if (self.tenure_target) |tenure_target| {
-            const tenure_target_previous_free_memory = tenure_target.freeMemory();
-
             if (GC_DEBUG) std.debug.print("Space.collectGarbage: Attempting to tenure to {s}\n", .{tenure_target.name});
             try self.cheneyCommon(allocator, tenure_target, newer_generation_link);
 
@@ -764,8 +763,9 @@ const Space = struct {
             }
 
             if (GC_DEBUG) {
-                const tenure_target_current_free_memory = tenure_target.freeMemory();
-                const free_memory_diff = @intCast(isize, tenure_target_previous_free_memory) - @intCast(isize, tenure_target_current_free_memory);
+                const tenure_target_previous_free_memory: isize = @intCast(tenure_target.freeMemory());
+                const tenure_target_current_free_memory: isize = @intCast(tenure_target.freeMemory());
+                const free_memory_diff = tenure_target_previous_free_memory - tenure_target_current_free_memory;
 
                 std.debug.print("Space.collectGarbage: Successfully tenured, {} bytes now free in {s}.\n", .{ self.freeMemory(), self.name });
                 if (free_memory_diff < 0) {
@@ -793,17 +793,17 @@ const Space = struct {
     }
 
     fn objectSegmentContains(self: *Space, address: [*]u64) bool {
-        const start_of_object_segment = @ptrToInt(self.object_segment.ptr);
-        const end_of_object_segment = @ptrToInt(self.object_segment.ptr + self.object_segment.len);
-        const address_value = @ptrToInt(address);
+        const start_of_object_segment = @intFromPtr(self.object_segment.ptr);
+        const end_of_object_segment = @intFromPtr(self.object_segment.ptr + self.object_segment.len);
+        const address_value = @intFromPtr(address);
 
         return address_value >= start_of_object_segment and address_value < end_of_object_segment;
     }
 
     fn byteArraySegmentContains(self: *Space, address: [*]u64) bool {
-        const start_of_byte_array_segment = @ptrToInt(self.byte_array_segment.ptr);
-        const end_of_byte_array_segment = @ptrToInt(self.byte_array_segment.ptr + self.byte_array_segment.len);
-        const address_value = @ptrToInt(address);
+        const start_of_byte_array_segment = @intFromPtr(self.byte_array_segment.ptr);
+        const end_of_byte_array_segment = @intFromPtr(self.byte_array_segment.ptr + self.byte_array_segment.len);
+        const address_value = @intFromPtr(address);
 
         return address_value >= start_of_byte_array_segment and address_value < end_of_byte_array_segment;
     }
@@ -817,10 +817,12 @@ const Space = struct {
         const size_in_words = @divExact(size, @sizeOf(u64));
         const current_object_segment_offset = self.object_segment.len;
         self.object_segment.len += size_in_words;
-        const start_of_object = @ptrCast([*]u64, &self.object_segment[current_object_segment_offset]);
+        const start_of_object: [*]u64 = @ptrCast(&self.object_segment[current_object_segment_offset]);
 
-        if (builtin.mode == .Debug)
-            @memset(@ptrCast([*]align(@alignOf(u64)) u8, start_of_object)[0..size], UninitializedHeapScrubByte);
+        if (builtin.mode == .Debug) {
+            const start_of_object_aligned: [*]align(@alignOf(u64)) u8 = @ptrCast(start_of_object);
+            @memset(start_of_object_aligned[0..size], UninitializedHeapScrubByte);
+        }
 
         return start_of_object;
     }
@@ -835,8 +837,10 @@ const Space = struct {
         self.byte_array_segment.ptr -= size_in_words;
         self.byte_array_segment.len += size_in_words;
 
-        if (builtin.mode == .Debug)
-            @memset(@ptrCast([*]align(@alignOf(u64)) u8, self.byte_array_segment.ptr)[0..size], UninitializedHeapScrubByte);
+        if (builtin.mode == .Debug) {
+            const array_segment_ptr_aligned: [*]align(@alignOf(u64)) u8 = @ptrCast(self.byte_array_segment.ptr);
+            @memset(array_segment_ptr_aligned[0..size], UninitializedHeapScrubByte);
+        }
 
         return self.byte_array_segment.ptr;
     }

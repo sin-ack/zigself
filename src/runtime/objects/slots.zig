@@ -44,7 +44,7 @@ pub fn SlotsLikeObjectBase(comptime ObjectT: type) type {
     return struct {
         /// Return the address of the current object.
         pub fn asObjectAddress(self: ObjectT.Ptr) [*]u64 {
-            return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+            return @ptrCast(@alignCast(self));
         }
 
         /// Return this object as a value.
@@ -78,13 +78,13 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
         /// outside; use getAssignableSlotValue instead.
         pub fn getAssignableSlots(self: ObjectT.Ptr) stage2_compat.HeapSlice(Value, .Mutable) {
             const object_size = @sizeOf(ObjectT);
-            const object_memory = @ptrCast([*]u8, self);
+            const object_memory: [*]u8 = @ptrCast(self);
             const assignable_slot_count = ObjectT.getMap(self).getAssignableSlotCount();
 
-            return std.mem.bytesAsSlice(
+            return @alignCast(std.mem.bytesAsSlice(
                 Value,
                 object_memory[object_size .. object_size + assignable_slot_count * @sizeOf(Value)],
-            );
+            ));
         }
 
         /// Return the assignable slot value for this slot.
@@ -92,7 +92,7 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
             std.debug.assert(slot.isAssignable());
             std.debug.assert(!slot.isArgument());
 
-            return &getAssignableSlots(self)[@intCast(usize, slot.value.asUnsignedInteger())];
+            return &getAssignableSlots(self)[@intCast(slot.value.asUnsignedInteger())];
         }
 
         /// Return a shallow copy of this object.
@@ -190,10 +190,10 @@ pub const Slots = extern struct {
             );
         }
 
-        const size = Slots.requiredSizeForAllocation(@intCast(u8, assignable_slot_values.len));
+        const size = Slots.requiredSizeForAllocation(@intCast(assignable_slot_values.len));
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(Slots.Ptr, memory_area);
+        var self: Slots.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map);
         @memcpy(self.getAssignableSlots(), assignable_slot_values);
 
@@ -314,7 +314,7 @@ pub const Slots = extern struct {
         //        via an argument.
         const map_map = self.object.map.asObject().map.asObject().mustBeType(.Map);
         // Let's allocate a new map with the target slot count.
-        var new_map = SlotsMap.create(map_map, token, @intCast(u32, merge_info.slots));
+        var new_map = SlotsMap.create(map_map, token, @intCast(merge_info.slots));
         var map_builder = new_map.getMapBuilder(token);
 
         const the_context = .{
@@ -379,9 +379,9 @@ pub const Slots = extern struct {
 
         var required_size: usize = 0;
         if (map_needs_change)
-            required_size += SlotsMap.requiredSizeForAllocation(@intCast(u32, merge_info.slots));
+            required_size += SlotsMap.requiredSizeForAllocation(@intCast(merge_info.slots));
         if (object_needs_change)
-            required_size += Slots.requiredSizeForAllocation(@intCast(u8, merge_info.assignable_slot_values));
+            required_size += Slots.requiredSizeForAllocation(@intCast(merge_info.assignable_slot_values));
 
         return required_size;
     }
@@ -427,7 +427,8 @@ pub const Slots = extern struct {
         }, struct {
             fn callback(context: CallbackContext, object: Slots.Ptr, slot: Slot) !void {
                 context.slots.* += slot.requiredSlotSpace(context.merged_slots.items);
-                context.assignable_slot_values.* = @intCast(usize, @intCast(isize, context.assignable_slot_values.*) +
+                const context_assignable_slot_values: isize = @intCast(context.assignable_slot_values.*);
+                context.assignable_slot_values.* = @intCast(context_assignable_slot_values +
                     slot.requiredAssignableSlotValueSpace(context.merged_slots.items));
                 try context.merged_slots.append(slot);
 
@@ -471,7 +472,7 @@ pub fn SlotsLikeMapBase(comptime MapT: type) type {
     return struct {
         fn getSlotMemory(self: MapT.Ptr) stage2_compat.HeapSlice(u8, .Mutable) {
             const total_object_size = MapT.getSizeInMemory(self);
-            const map_memory = @ptrCast([*]align(@alignOf(u64)) u8, self);
+            const map_memory: [*]align(@alignOf(u64)) u8 = @ptrCast(self);
             return map_memory[@sizeOf(MapT)..total_object_size];
         }
 
@@ -480,7 +481,7 @@ pub fn SlotsLikeMapBase(comptime MapT: type) type {
         }
 
         pub fn asObjectAddress(self: MapT.Ptr) [*]u64 {
-            return @ptrCast([*]u64, self);
+            return @ptrCast(self);
         }
 
         pub fn asValue(self: MapT.Ptr) Value {
@@ -499,7 +500,7 @@ pub fn SlotsLikeMapBase(comptime MapT: type) type {
         }
 
         fn asSlotsMap(self: MapT.Ptr) SlotsMap.Ptr {
-            return @ptrCast(SlotsMap.Ptr, self);
+            return @ptrCast(self);
         }
 
         pub fn getMapBuilder(self: MapT.Ptr, token: *Heap.AllocationToken) MapBuilder(MapT, MapT.ObjectType) {
@@ -517,7 +518,7 @@ pub const SlotsMap = extern struct {
     pub const Ptr = stage2_compat.HeapPtr(SlotsMap, .Mutable);
     pub const ObjectType = Slots;
     const SlotInformation = packed struct(u64) {
-        marker: u2 = @enumToInt(Value.ValueType.Integer),
+        marker: u2 = @intFromEnum(Value.ValueType.Integer),
         padding: u6 = 0,
         assignable_slot_count: u8 = 0,
         // Maps inheriting from this map can use this area for extra information.
@@ -534,7 +535,7 @@ pub const SlotsMap = extern struct {
         const size = SlotsMap.requiredSizeForAllocation(slot_count);
 
         var memory_area = token.allocate(.Object, size);
-        var self = @ptrCast(SlotsMap.Ptr, memory_area);
+        var self: SlotsMap.Ptr = @ptrCast(memory_area);
         self.init(slot_count, map_map);
 
         return self;

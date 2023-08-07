@@ -50,7 +50,7 @@ pub const Map = extern struct {
 
     pub const Ptr = stage2_compat.HeapPtr(Map, .Mutable);
     const MapInformation = packed struct(u64) {
-        marker: u2 = @enumToInt(Value.ValueType.Integer),
+        marker: u2 = @intFromEnum(Value.ValueType.Integer),
         map_type: MapType,
         /// Data placed here won't be touched by the base map object, and can be
         /// used by more specialized maps.
@@ -73,7 +73,7 @@ pub const Map = extern struct {
     }
 
     pub fn asAddress(self: Map.Ptr) [*]u64 {
-        return @ptrCast([*]u64, self);
+        return @ptrCast(self);
     }
 
     pub fn asValue(self: Map.Ptr) Value {
@@ -85,7 +85,10 @@ pub const Map = extern struct {
         return switch (self.map_information.map_type) {
             // Breaks the cycle.
             .MapMap => @call(.auto, @field(Map, name ++ "MapMap"), .{self} ++ args),
-            inline else => |t| @call(.auto, @field(MapT(t), name), .{@ptrCast(MapT(t).Ptr, self)} ++ args),
+            inline else => |t| {
+                const self_ptr: MapT(t).Ptr = @ptrCast(self);
+                return @call(.auto, @field(MapT(t), name), .{self_ptr} ++ args);
+            },
         };
     }
 
@@ -95,7 +98,7 @@ pub const Map = extern struct {
             return null;
         }
 
-        return @ptrCast(MapT(map_type).Ptr, self);
+        return @ptrCast(self);
     }
 
     /// Return the map as the given type, panicking in safe release modes if
@@ -110,7 +113,7 @@ pub const Map = extern struct {
             std.debug.panic("!!! mustBeType tried to cast a {*} of type '{s}' to type '{s}'!", .{ self, @tagName(self.map_information.map_type), @tagName(map_type) });
         }
 
-        return @ptrCast(MapT(map_type).Ptr, self);
+        return @ptrCast(self);
     }
 
     // Delegated functions
@@ -141,9 +144,10 @@ pub const Map = extern struct {
             inline else => |t| {
                 if (!@hasDecl(MapT(t), "clone")) unreachable;
 
-                const result_or_error = @ptrCast(MapT(t).Ptr, self).clone(vm, token);
+                const map_ptr: MapT(t).Ptr = @ptrCast(self);
+                const result_or_error = map_ptr.clone(vm, token);
                 const result = if (@typeInfo(@TypeOf(result_or_error)) == .ErrorUnion) try result_or_error else result_or_error;
-                return @ptrCast(Map.Ptr, result);
+                return @ptrCast(result);
             },
         };
     }
@@ -168,9 +172,9 @@ pub const Map = extern struct {
         const size = requiredSizeForAllocatingMapMap();
         var memory_area = token.allocate(.Object, size);
 
-        var map_map = @ptrCast(Map.Ptr, memory_area);
+        var map_map: Map.Ptr = @ptrCast(memory_area);
         // A defined undefined value.
-        map_map.init(.MapMap, @intToPtr(Map.Ptr, 0x13370));
+        map_map.init(.MapMap, @ptrFromInt(0x13370));
 
         // FIXME: This is kinda crude. Let's give ourselves a way to set this
         //        after-the-fact without reaching into the header of the object.

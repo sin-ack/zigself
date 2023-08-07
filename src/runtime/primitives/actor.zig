@@ -423,7 +423,7 @@ pub fn ActorYieldReason(context: *PrimitiveContext) !ExecutionResult {
     const arguments = context.getArguments("_ActorResume");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Actor);
     const actor = receiver.getActor();
-    return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@enumToInt(actor.yield_reason))));
+    return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intFromEnum(actor.yield_reason))));
 }
 
 /// Yield this actor.

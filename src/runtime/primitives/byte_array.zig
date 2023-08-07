@@ -16,7 +16,7 @@ const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 pub fn ByteArraySize(context: *PrimitiveContext) !ExecutionResult {
     const arguments = context.getArguments("_ByteArraySize");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
-    return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(@intCast(i64, receiver.getValues().len))));
+    return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(@intCast(receiver.getValues().len))));
 }
 
 /// Return a byte at the given (integer) position of the receiver, which is a
@@ -38,7 +38,7 @@ pub fn ByteAt(context: *PrimitiveContext) !ExecutionResult {
         ));
     }
 
-    return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(values[@intCast(usize, position)])));
+    return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(values[@intCast(position)])));
 }
 
 /// Place the second argument at the position given by the first argument on the
@@ -71,7 +71,7 @@ pub fn ByteAt_Put(context: *PrimitiveContext) !ExecutionResult {
         ));
     }
 
-    values[@intCast(usize, position)] = @intCast(u8, new_value);
+    values[@intCast(position)] = @intCast(new_value);
     return ExecutionResult.completion(Completion.initNormal(receiver.asValue()));
 }
 
@@ -97,7 +97,7 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
     const filler = filler_contents[0];
 
     var token = try context.vm.heap.getAllocation(
-        ByteArrayObject.requiredSizeForAllocation(@intCast(usize, size)),
+        ByteArrayObject.requiredSizeForAllocation(@intCast(size)),
     );
     defer token.deinit();
 
@@ -106,8 +106,8 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
 
     var values = receiver.getValues();
 
-    const new_byte_array = ByteArray.createUninitialized(&token, @intCast(usize, size));
-    const bytes_to_copy = @intCast(usize, std.math.min(size, values.len));
+    const new_byte_array = ByteArray.createUninitialized(&token, @intCast(size));
+    const bytes_to_copy: usize = @intCast(@min(size, values.len));
     @memcpy(new_byte_array.getValues()[0..bytes_to_copy], values[0..bytes_to_copy]);
 
     if (size > values.len) {

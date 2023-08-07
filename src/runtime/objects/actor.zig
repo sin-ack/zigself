@@ -35,7 +35,7 @@ pub const Actor = extern struct {
 
     pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, genesis_actor_id: u31, actor: *VMActor, context: GenericValue) !Actor.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
-        const self = @ptrCast(Actor.Ptr, memory_area);
+        const self: Actor.Ptr = @ptrCast(memory_area);
         self.init(genesis_actor_id, map_map, actor, context);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
@@ -55,7 +55,7 @@ pub const Actor = extern struct {
     }
 
     pub fn asObjectAddress(self: Actor.Ptr) [*]u64 {
-        return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+        return @ptrCast(@alignCast(self));
     }
 
     pub fn asValue(self: Actor.Ptr) GenericValue {

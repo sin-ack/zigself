@@ -27,11 +27,11 @@ pub const RegisterLocation = enum(u32) {
     }
 
     pub fn fromIndexAllowNil(index: u32) RegisterLocation {
-        return @intToEnum(RegisterLocation, index);
+        return @enumFromInt(index);
     }
 
     pub fn registerOffset(self: RegisterLocation) u32 {
-        const offset = @enumToInt(self);
+        const offset = @intFromEnum(self);
         std.debug.assert(offset > 0);
         return offset - 1;
     }
@@ -44,6 +44,6 @@ pub const RegisterLocation = enum(u32) {
     ) !void {
         _ = fmt;
         try writer.writeByte('%');
-        try std.fmt.formatInt(@enumToInt(loc), 10, .lower, options, writer);
+        try std.fmt.formatInt(@intFromEnum(loc), 10, .lower, options, writer);
     }
 };

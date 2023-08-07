@@ -31,7 +31,7 @@ pub const ActorProxy = extern struct {
     /// Create the Actor object without sending a message to it.
     pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, current_actor_id: u31, actor_object: Actor.Ptr) ActorProxy.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
-        const self = @ptrCast(ActorProxy.Ptr, memory_area);
+        const self: ActorProxy.Ptr = @ptrCast(memory_area);
         self.init(current_actor_id, map_map, actor_object);
         return self;
     }
@@ -48,7 +48,7 @@ pub const ActorProxy = extern struct {
     }
 
     pub fn asObjectAddress(self: ActorProxy.Ptr) [*]u64 {
-        return @ptrCast([*]u64, @alignCast(@alignOf(u64), self));
+        return @ptrCast(@alignCast(self));
     }
 
     pub fn asValue(self: ActorProxy.Ptr) GenericValue {

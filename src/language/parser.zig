@@ -1223,7 +1223,7 @@ fn parseFloatingPoint(self: *Self) ParseError!AST.NumberNode {
         switch (state) {
             .Integer => switch (c) {
                 '0'...'9' => {
-                    result = (result * 10) + @intToFloat(f64, c - '0');
+                    result = (result * 10) + @as(f64, @floatFromInt(c - '0'));
                 },
                 '.' => {
                     state = .Fraction;
@@ -1246,8 +1246,8 @@ fn parseFloatingPoint(self: *Self) ParseError!AST.NumberNode {
         }
     }
 
-    var divisor = std.math.pow(f64, 10.0, @intToFloat(f64, fraction_counter));
-    result += @intToFloat(f64, fraction) / divisor;
+    var divisor = std.math.pow(f64, 10.0, @as(f64, @floatFromInt(fraction_counter)));
+    result += @as(f64, @floatFromInt(fraction)) / divisor;
 
     const node = AST.NumberNode{
         .value = .{ .FloatingPoint = result },

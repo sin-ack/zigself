@@ -58,7 +58,7 @@ fn Executable(comptime BlockT: type) type {
             const block_index = self.blocks.items.len;
             try self.blocks.append(self.allocator, block);
 
-            return @intCast(u32, block_index);
+            return @intCast(block_index);
         }
 
         pub fn getBlock(self: *Self, index: u32) *Block {

@@ -25,7 +25,7 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
     const size = try arguments.getInteger(0, .Unsigned);
     if (try context.wouldOverflow(usize, size, "size")) |result| return result;
 
-    const required_memory = array_object.ArrayMap.requiredSizeForAllocation() + array_object.Array.requiredSizeForAllocation(@intCast(usize, size));
+    const required_memory = array_object.ArrayMap.requiredSizeForAllocation() + array_object.Array.requiredSizeForAllocation(@intCast(size));
     var token = try context.vm.heap.getAllocation(required_memory);
     defer token.deinit();
 
@@ -37,7 +37,7 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
         const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
         const filler = arguments.getValue(1);
 
-        const new_array_map = array_object.ArrayMap.create(context.vm.getMapMap(), &token, @intCast(usize, size));
+        const new_array_map = array_object.ArrayMap.create(context.vm.getMapMap(), &token, @intCast(size));
         const new_array = array_object.Array.createWithValues(&token, context.actor.id, new_array_map, receiver.getValues(), filler);
         return ExecutionResult.completion(Completion.initNormal(new_array.asValue()));
     }
@@ -70,7 +70,7 @@ pub fn ArrayAt(context: *PrimitiveContext) !ExecutionResult {
         );
     }
 
-    return ExecutionResult.completion(Completion.initNormal(array_values[@intCast(usize, position)]));
+    return ExecutionResult.completion(Completion.initNormal(array_values[@intCast(position)]));
 }
 
 /// Place the object in the second argument to the integer position in the first
@@ -107,7 +107,7 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
         );
     }
 
-    array_values[@intCast(usize, position)] = new_value;
+    array_values[@intCast(position)] = new_value;
 
     if (receiver.object.object_information.reachability == .Global) {
         // Mark the object graph of new_value as globally reachable

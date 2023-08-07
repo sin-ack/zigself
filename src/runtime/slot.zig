@@ -118,7 +118,7 @@ const SlotProperties = packed struct {
     }
 
     pub fn getHash(self: SlotProperties) u32 {
-        return @intCast(u32, self.properties.asUnsignedInteger() >> 30);
+        return @intCast(self.properties.asUnsignedInteger() >> 30);
     }
 };
 
@@ -225,7 +225,7 @@ pub const Slot = packed struct {
             std.debug.assert(self.properties.isIndexAssigned());
         }
 
-        return @intCast(u8, self.value.asUnsignedInteger());
+        return @intCast(self.value.asUnsignedInteger());
     }
 
     pub fn getHash(self: Slot) u32 {
@@ -390,7 +390,7 @@ pub const Slot = packed struct {
 
             if (previous_slot.isAssignable()) {
                 const overwritten_assignable_slot_index = previous_slot.value.asUnsignedInteger();
-                _ = assignable_slot_values.orderedRemove(@intCast(usize, overwritten_assignable_slot_index));
+                _ = assignable_slot_values.orderedRemove(@intCast(overwritten_assignable_slot_index));
 
                 // Go through all the previous slots, and subtract 1 from all
                 // the slots which have assignable slot indices larger than the
@@ -438,12 +438,12 @@ pub const Slot = packed struct {
         } else if (self.isArgument()) {
             std.debug.assert(argument_slot_index.* < AstGen.MaximumArguments);
 
-            _ = current_slot_ptr.assignIndex(@intCast(u8, argument_slot_index.*));
+            _ = current_slot_ptr.assignIndex(@intCast(argument_slot_index.*));
             argument_slot_index.* += 1;
         } else if (self.isAssignable()) {
             std.debug.assert(assignable_slot_index.* + argument_slot_index.* < AstGen.MaximumAssignableSlots);
 
-            const value = current_slot_ptr.assignIndex(@intCast(u8, assignable_slot_index.*));
+            const value = current_slot_ptr.assignIndex(@intCast(assignable_slot_index.*));
             assignable_slot_values.appendAssumeCapacity(value);
             assignable_slot_index.* += 1;
         }

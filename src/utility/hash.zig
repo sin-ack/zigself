@@ -114,5 +114,5 @@ pub fn stringHash(string: []const u8) u32 {
         power = if (i < powers.len - 1) powers[i + 1] else ((power * P) % M);
     }
 
-    return @intCast(u32, hash_value);
+    return @intCast(hash_value);
 }

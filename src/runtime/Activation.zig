@@ -152,9 +152,9 @@ pub const ActivationStack = struct {
         }
 
         const current_activation = self.getCurrent();
-        std.debug.assert(@ptrToInt(current_activation) >= @ptrToInt(activation));
+        std.debug.assert(@intFromPtr(current_activation) >= @intFromPtr(activation));
 
-        const distance = @divExact(@ptrToInt(current_activation) - @ptrToInt(activation), @sizeOf(Self));
+        const distance = @divExact(@intFromPtr(current_activation) - @intFromPtr(activation), @sizeOf(Self));
         var current_depth = self.getDepth();
         const target_depth = current_depth - distance;
         while (current_depth != target_depth) : (current_depth -= 1) {
@@ -190,15 +190,15 @@ pub const ActivationStack = struct {
         const start_of_slice = self.stack.items.ptr;
         const end_of_slice = start_of_slice + self.stack.items.len;
 
-        return @ptrToInt(activation) >= @ptrToInt(start_of_slice) and
-            @ptrToInt(activation) < @ptrToInt(end_of_slice);
+        return @intFromPtr(activation) >= @intFromPtr(start_of_slice) and
+            @intFromPtr(activation) < @intFromPtr(end_of_slice);
     }
 
     pub fn offsetOf(self: ActivationStack, activation: *Self) usize {
         std.debug.assert(self.isActivationWithin(activation));
 
         const start_of_slice = self.stack.items.ptr;
-        return @divExact(@ptrToInt(activation) - @ptrToInt(start_of_slice), @sizeOf(Self));
+        return @divExact(@intFromPtr(activation) - @intFromPtr(start_of_slice), @sizeOf(Self));
     }
 
     pub fn pushEntrypointActivation(self: *ActivationStack, vm: *VirtualMachine, new_executable: bytecode.Executable.Ref) !void {
@@ -247,13 +247,13 @@ pub const ActivationRef = packed struct {
 
     pub fn init(activation: *Self, stack: ActivationStack) ActivationRef {
         return .{
-            .offset = IntegerValue(.Unsigned).init(@intCast(u64, stack.offsetOf(activation))),
+            .offset = IntegerValue(.Unsigned).init(@intCast(stack.offsetOf(activation))),
             .saved_id = IntegerValue(.Unsigned).init(activation.activation_id),
         };
     }
 
     fn getPointer(self: ActivationRef, stack: ActivationStack) *Self {
-        return &stack.stack.items[@intCast(usize, self.offset.get())];
+        return &stack.stack.items[@intCast(self.offset.get())];
     }
 
     pub fn isAlive(self: ActivationRef, stack: ActivationStack) bool {
