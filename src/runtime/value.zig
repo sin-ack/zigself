@@ -189,7 +189,8 @@ pub fn PointerValueAlignment(comptime T: type, comptime alignment: ?u29) type {
         }
 
         pub fn get(self: Self) PointerT {
-            return @ptrFromInt(self.value.asUnsignedInteger());
+            const self_int: usize = @intCast(self.value.asUnsignedInteger());
+            return @ptrFromInt(self_int);
         }
     };
 }
