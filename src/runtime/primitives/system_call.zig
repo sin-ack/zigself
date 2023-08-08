@@ -16,6 +16,7 @@ const FileDescriptor = @import("../objects/managed.zig").FileDescriptor;
 const ByteArrayObject = @import("../objects/byte_array.zig").ByteArray;
 const value_inspector = @import("../value_inspector.zig");
 const addrinfo_object = @import("../objects/intrinsic/addrinfo.zig");
+const exceedsBoundsOf = @import("../../utility/bounds_check.zig").exceedsBoundsOf;
 const AddrInfoObject = addrinfo_object.AddrInfo;
 const AddrInfoMap = addrinfo_object.AddrInfoMap;
 
@@ -88,7 +89,16 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: *PrimitiveContext) !Executio
     const arguments = context.getArguments("_Read:BytesInto:AtOffset:From:IfFail:");
     const bytes_to_read = try arguments.getInteger(0, .Unsigned);
     const byte_array = try arguments.getObject(1, .ByteArray);
-    const offset: usize = @intCast(try arguments.getInteger(2, .Unsigned));
+    const offset_int = try arguments.getInteger(2, .Unsigned);
+    if (exceedsBoundsOf(offset_int, usize)) {
+        return ExecutionResult.completion(try Completion.initRuntimeError(
+            context.vm,
+            context.source_range,
+            "Offset argument is larger than the maximum value allowed by your platform ({})",
+            .{std.math.maxInt(usize)},
+        ));
+    }
+    const offset: usize = @intCast(offset_int);
     const fd = try arguments.getObject(3, .Managed);
     const failure_block = arguments.getValue(4);
 
@@ -148,7 +158,16 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: *PrimitiveContext) !Executi
     const arguments = context.getArguments("_Write:BytesFrom:AtOffset:Into:IfFail:");
     const bytes_to_write = try arguments.getInteger(0, .Unsigned);
     const byte_array = try arguments.getObject(1, .ByteArray);
-    const offset = try arguments.getInteger(2, .Unsigned);
+    const offset_int = try arguments.getInteger(2, .Unsigned);
+    if (exceedsBoundsOf(offset_int, usize)) {
+        return ExecutionResult.completion(try Completion.initRuntimeError(
+            context.vm,
+            context.source_range,
+            "Offset argument is larger than the maximum value allowed by your platform ({})",
+            .{std.math.maxInt(usize)},
+        ));
+    }
+    const offset: usize = @intCast(offset_int);
     const fd = try arguments.getObject(3, .Managed);
     const failure_block = arguments.getValue(4);
 

@@ -20,6 +20,7 @@ const value_import = @import("../value.zig");
 const object_lookup = @import("../object_lookup.zig");
 const stage2_compat = @import("../../utility/stage2_compat.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
+const exceedsBoundsOf = @import("../../utility/bounds_check.zig").exceedsBoundsOf;
 const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;
 
 /// An activation object, which is just a slots object but with an extra
@@ -186,7 +187,10 @@ pub const Activation = extern struct {
     pub fn getAssignableSlotValue(self: Activation.Ptr, slot: Slot) *GenericValue {
         std.debug.assert(slot.isAssignable());
 
-        const offset: usize = @intCast(slot.value.asUnsignedInteger());
+        const offset_int = slot.value.asUnsignedInteger();
+        std.debug.assert(!exceedsBoundsOf(offset_int, usize));
+
+        const offset: usize = @intCast(offset_int);
         return if (slot.isArgument())
             &self.getArgumentSlots()[offset]
         else
