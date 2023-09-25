@@ -24,9 +24,11 @@ pub const ObjectType = enum(u22) {
     Actor,
     ActorProxy,
     Map,
-    ForwardedObject,
     // Intrinsic objects
     AddrInfo,
+    // This is a special object type that overwrites the current object when the
+    // garbage collector copies the object to a new location.
+    ForwardedObject,
 };
 
 /// A registry of object types. Objects within this array will be encoded into
