@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  run-tests:
+  all-debug-compile-only:
     runs-on: ubuntu-latest
 
     steps:
