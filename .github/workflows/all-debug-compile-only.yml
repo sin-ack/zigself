@@ -1,0 +1,29 @@
+# A workflow that checks that the debug options haven't bitrotted.
+name: Compile with all debug options
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+  workflow_dispatch:
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2.1.1
+        with:
+          version: 0.12.0-dev.817+54e7f58fc
+
+      - name: Enable all debug flags
+        run: |
+          sed -i 's/false;/true;/' src/debug.zig
+
+      - name: Compile the project
+        run: zig build
