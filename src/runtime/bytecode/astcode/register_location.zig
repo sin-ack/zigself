@@ -8,17 +8,15 @@ pub const RegisterLocation = enum(u32) {
     Nil,
     _,
 
+    // "%0"
+    pub const ZeroLabel: []const u8 = "  ";
+
     pub fn isFinite() bool {
         return false;
     }
 
     pub fn isNothing(self: RegisterLocation) bool {
         return self == .Nil;
-    }
-
-    pub fn zeroLabel() []const u8 {
-        // "%0"
-        return "  ";
     }
 
     pub fn fromIndex(index: u32) RegisterLocation {

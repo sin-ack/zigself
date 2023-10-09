@@ -19,17 +19,15 @@ pub const RegisterLocation = enum {
     pub const GeneralPurposeRegisterCount = 8;
     pub const BitSet = std.StaticBitSet(GeneralPurposeRegisterCount);
 
+    // "%r0"
+    pub const ZeroLabel: []const u8 = "   ";
+
     pub fn isFinite() bool {
         return true;
     }
 
     pub fn isNothing(self: RegisterLocation) bool {
         return self == .zero;
-    }
-
-    pub fn zeroLabel() []const u8 {
-        // "%r0"
-        return "   ";
     }
 
     /// Return the offset of the register for its register set.

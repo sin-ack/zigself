@@ -123,7 +123,7 @@ pub const Managed = extern struct {
         _ = vm;
         _ = previously_visited;
 
-        if (LOOKUP_DEBUG) std.debug.print("Managed.lookup: Looking at a managed object type: {}\n", .{self.asManaged().getManagedType()});
+        if (LOOKUP_DEBUG) std.debug.print("Managed.lookup: Looking at a managed object type: {}\n", .{self.getManagedType()});
         if (selector_hash.regular == object_lookup.value_hash) {
             return object_lookup.LookupResult{ .Regular = self.value };
         }

@@ -319,8 +319,8 @@ pub fn rememberObjectReference(self: *Self, referrer: Value, target: Value) !voi
 
 pub fn printTrackLocationCounts(self: *Self) void {
     const debug_info = std.debug.getSelfDebugInfo() catch unreachable;
-    const stderr = std.io.getStdErr().writer();
-    const tty_config = std.debug.detectTTYConfig();
+    const stderr = std.io.getStdErr();
+    const tty_config = std.io.tty.detectConfig(stderr);
 
     var address_counts = std.AutoArrayHashMap(usize, usize).init(self.allocator);
     defer address_counts.deinit();
@@ -338,7 +338,7 @@ pub fn printTrackLocationCounts(self: *Self) void {
     std.debug.print("Leftover trackings:\n", .{});
     var count_it = address_counts.iterator();
     while (count_it.next()) |entry| {
-        std.debug.printSourceAtAddress(debug_info, stderr, entry.key_ptr.*, tty_config) catch unreachable;
+        std.debug.printSourceAtAddress(debug_info, stderr.writer(), entry.key_ptr.*, tty_config) catch unreachable;
         std.debug.print("Count: {}\n\n", .{entry.value_ptr.*});
     }
 }

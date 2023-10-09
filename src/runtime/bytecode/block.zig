@@ -127,11 +127,11 @@ fn Block(comptime InstructionT: type, comptime access_mode: AccessMode) type {
             writer: anytype,
         ) !void {
             var it = block.iterator();
-            while (it) |inst| {
+            while (it.next()) |inst| {
                 if (!inst.target.isNothing())
                     try std.fmt.format(writer, "{} = ", .{inst.target})
                 else
-                    try writer.writeAll(Instruction.RegisterLocation.zeroLabel() ++ "   ");
+                    try writer.writeAll(Instruction.RegisterLocation.ZeroLabel ++ "   ");
 
                 try inst.format(fmt, options, writer);
                 try writer.writeByte('\n');

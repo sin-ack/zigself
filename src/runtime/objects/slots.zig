@@ -127,7 +127,7 @@ pub fn slotsLookup(
 
     // Direct lookup
     for (object.getSlots()) |slot| {
-        if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing slot \"{s}\" (hash {x}) vs. our hash {x}\n", .{ slot.name.asByteArray().getValues(), slot.getHash(), selector_hash });
+        if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing slot \"{s}\" (hash {x}) vs. our hash {}\n", .{ slot.name.asByteArray().getValues(), slot.getHash(), selector_hash });
         const slot_hash = slot.getHash();
         if (slot.isAssignable()) {
             if (selector_hash.assignment_target) |assignment_target_hash| {
