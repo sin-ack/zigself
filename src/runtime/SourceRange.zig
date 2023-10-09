@@ -43,7 +43,8 @@ pub fn copy(self: Self) Self {
 pub fn getLocationRange(self: Self) LocationRange {
     return .{
         .start = self.executable.value.definition_script.value.offsetToLocation(self.range.start),
-        .end = self.executable.value.definition_script.value.offsetToLocation(self.range.end),
+        // NOTE: Source ranges are end-exclusive.
+        .end = self.executable.value.definition_script.value.offsetToLocation(self.range.end - 1),
     };
 }
 
