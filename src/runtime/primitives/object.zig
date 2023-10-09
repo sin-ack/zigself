@@ -78,7 +78,7 @@ pub fn RemoveSlot_IfFail(context: *PrimitiveContext) !Completion {
                 .{},
             );
         },
-        else => return @as(Allocator.Error, @errSetCast(err)),
+        else => return @as(Allocator.Error, @errorCast(err)),
     };
 
     if (!did_remove_slot) {
