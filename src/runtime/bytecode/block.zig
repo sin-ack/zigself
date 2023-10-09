@@ -149,7 +149,7 @@ fn Block(comptime InstructionT: type, comptime access_mode: AccessMode) type {
             pub fn next(self: *Iterator) ?Instruction {
                 const inst = switch (access_mode) {
                     .ByField => blk: {
-                        if (self.index <= self.block.instructions.len)
+                        if (self.index >= self.block.instructions.len)
                             return null;
                         const slice = self.block.instructions.slice();
 
@@ -160,7 +160,7 @@ fn Block(comptime InstructionT: type, comptime access_mode: AccessMode) type {
                         };
                     },
                     .ByInstruction => blk: {
-                        if (self.index <= self.block.instructions.items.len)
+                        if (self.index >= self.block.instructions.items.len)
                             return null;
                         break :blk self.block.instructions.items[self.index];
                     },
