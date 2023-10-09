@@ -71,9 +71,12 @@ std traits integer _AddSlots: (|
         ].
     ).
 
-    "FIXME: This is a naive implementation. Allocate the byte array in one go
-            by counting the digits."
-    asString = (| output. value. negative |
+    asStringBase: base = (|
+        characterValues = '0123456789abcdefghijklmnopqrstuvwxyz'.
+        output. value. negative.
+    |
+        (base < 0) || [base > 36] ifTrue: [_Error: 'Base outside valid range'].
+
         = 0 ifTrue: [ ^ '0' ].
 
         output: ''.
@@ -86,15 +89,20 @@ std traits integer _AddSlots: (|
         ].
 
         [ value > 0 ] whileTrue: [| char <- ' '. digit |
-            digit: value % 10.
-            char at: 0 Put: 48 + digit.
+            digit: value % base.
+            "FIXME: Instead of doing this calculate the logarithm of the integer."
+            char at: 0 Put: characterValues at: digit.
             output: output, char.
-            value: value / 10.
+            value: value / base.
         ].
 
         output: output reverse.
         negative ifTrue: [ '-', output ] False: output.
     ).
+
+
+    asString = (asStringBase: 10).
+    asHexString = (asStringBase: 16).
 
     "Return the 32-bit 'hash' of this integer."
     hash = (&& 0xFFFFFFFF).
