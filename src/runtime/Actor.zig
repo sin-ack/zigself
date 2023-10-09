@@ -237,7 +237,6 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
                 .Completion => |completion| switch (completion.data) {
                     .Normal => {},
                     .RuntimeError => return ActorResult{ .Completion = completion },
-                    else => unreachable,
                 },
             }
 
@@ -257,39 +256,22 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
 /// Execute the activation stack of this actor until the given activation (or if
 /// `until` is null, until all activations have been resolved).
 pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?Activation.ActivationRef) !ActorResult {
-    var activation = self.activation_stack.getCurrent();
-    var activation_object = activation.activation_object.get();
-    var executable = activation_object.getDefinitionExecutable();
-    var block = activation_object.getBytecodeBlock();
+    var context = interpreter.InterpreterContext.init(vm, self, until);
 
     while (true) {
-        var context = interpreter.InterpreterContext{
-            .vm = vm,
-            .actor = self,
-            .last_activation_ref = until,
-            .activation = activation,
-            .executable = executable,
-            .block = block,
-        };
-
         const execution_result = try interpreter.execute(&context);
 
         switch (execution_result) {
+            // These should've been handled by the interpreter.
+            .ActivationChange, .Restart => unreachable,
             .ActorSwitch => {
                 return ActorResult{ .ActorSwitch = {} };
-            },
-            .ActivationChange => {
-                activation = self.activation_stack.getCurrent();
-                activation_object = activation.activation_object.get();
-                executable = activation_object.getDefinitionExecutable();
-                block = activation_object.getBytecodeBlock();
             },
             .Completion => |completion| {
                 switch (completion.data) {
                     // If a normal completion is returned, then the last activation
                     // has been exited and a result is reached.
                     .Normal, .RuntimeError => return ActorResult{ .Completion = completion },
-                    .Restart => activation.restart(),
                 }
             },
         }

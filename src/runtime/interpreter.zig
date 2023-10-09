@@ -40,18 +40,26 @@ const EXECUTION_DEBUG = debug.EXECUTION_DEBUG;
 pub const ExecutionResult = union(enum) {
     /// The current actor has been switched.
     ActorSwitch,
-    /// An activation has been entered or exited (but not the last activation).
+    /// The current activation has changed. This will be handled at the
+    /// interpreter layer.
     ActivationChange,
+    /// The current activation should be restarted. This will be handled at the
+    /// interpreter layer.
+    Restart,
     /// A completion happened. Either the last activation was exited (in which
     /// case the a Normal completion is returned), or a runtime error was raised.
     Completion: Completion,
+
+    pub fn actorSwitch() ExecutionResult {
+        return .{ .ActorSwitch = {} };
+    }
 
     pub fn activationChange() ExecutionResult {
         return .{ .ActivationChange = {} };
     }
 
-    pub fn actorSwitch() ExecutionResult {
-        return .{ .ActorSwitch = {} };
+    pub fn restart() ExecutionResult {
+        return .{ .Restart = {} };
     }
 
     pub fn completion(c: Completion) ExecutionResult {
@@ -69,29 +77,69 @@ pub const InterpreterContext = struct {
     /// runtime. If this activation is exited with Return or NonlocalReturn,
     /// the interpreter finishes running.
     last_activation_ref: ?Activation.ActivationRef,
-    /// The activation that's currently executing.
-    activation: *Activation,
-    /// The executable the current activation's method/block was defined in.
-    executable: bytecode.Executable.Ref,
-    /// The bytecode block for the current activation. Each activation
-    /// corresponds to exactly one block.
-    block: *const bytecode.Block,
+
+    /// The context specific to the current activation. These are expensive to
+    /// obtain per-instruction, so are cached.
+    activation_context: ActivationContext = undefined,
 
     /// The result of the currently executed instruction. If this is set, the
     /// interpreter will exit after the instruction is handled.
     result: ?ExecutionResult = null,
 
-    pub fn sourceRange(self: InterpreterContext) SourceRange {
-        return SourceRange.initNoRef(self.executable, self.actor.range);
+    const ActivationContext = struct {
+        /// The executable the current activation's method/block was defined in.
+        executable: bytecode.Executable.Ref,
+        /// The bytecode block for the current activation. Each activation
+        /// corresponds to exactly one block.
+        block: *const bytecode.Block,
+    };
+
+    pub fn init(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activation.ActivationRef) InterpreterContext {
+        var context = InterpreterContext{
+            .vm = vm,
+            .actor = actor,
+            .last_activation_ref = last_activation_ref,
+        };
+        context.refreshActivationContext();
+
+        return context;
     }
 
-    pub fn instructionIndex(self: InterpreterContext) u32 {
-        return self.activation.pc;
+    pub fn getSourceRange(self: *InterpreterContext) SourceRange {
+        return SourceRange.initNoRef(self.getDefinitionExecutable(), self.actor.range);
+    }
+
+    pub fn getCurrentActivation(self: InterpreterContext) *Activation {
+        return self.actor.activation_stack.getCurrent();
+    }
+
+    pub fn getInstructionIndex(self: InterpreterContext) u32 {
+        return self.getCurrentActivation().instruction_index;
+    }
+
+    pub fn getCurrentActivationObject(self: InterpreterContext) ActivationObject.Ptr {
+        return self.getCurrentActivation().activation_object.get();
+    }
+
+    pub fn getDefinitionExecutable(self: *InterpreterContext) bytecode.Executable.Ref {
+        return self.activation_context.executable;
+    }
+
+    pub fn getCurrentBytecodeBlock(self: *InterpreterContext) *const bytecode.Block {
+        return self.activation_context.block;
+    }
+
+    pub fn refreshActivationContext(self: *InterpreterContext) void {
+        const activation_object = self.getCurrentActivationObject();
+        self.activation_context = .{
+            .executable = activation_object.getDefinitionExecutable(),
+            .block = activation_object.getBytecodeBlock(),
+        };
     }
 };
 
 pub fn execute(context: *InterpreterContext) InterpreterError!ExecutionResult {
-    try specialized_executors[@intFromEnum(context.block.getOpcode(context.instructionIndex()))](context);
+    try specialized_executors[@intFromEnum(context.getCurrentBytecodeBlock().getOpcode(context.getInstructionIndex()))](context);
     return context.result.?;
 }
 
@@ -140,19 +188,37 @@ pub fn executeSpecialized(comptime opcode: bytecode.Instruction.Opcode) OpcodeHa
     return struct {
         fn execute(context: *InterpreterContext) InterpreterError!void {
             if (EXECUTION_DEBUG) {
+                const block = context.getCurrentBytecodeBlock();
                 const inst = bytecode.Instruction{
-                    .target = context.block.getTargetLocation(context.instructionIndex()),
-                    .opcode = context.block.getOpcode(context.instructionIndex()),
-                    .payload = context.block.getPayload(context.instructionIndex()),
+                    .target = block.getTargetLocation(context.getInstructionIndex()),
+                    .opcode = block.getOpcode(context.getInstructionIndex()),
+                    .payload = block.getPayload(context.getInstructionIndex()),
                 };
-                std.debug.print("[#{} {s}] Executing: {} = {}\n", .{ context.actor.id, context.executable.value.definition_script.value.file_path, inst.target, inst });
+                std.debug.print("[#{} {s}] Executing: {} = {}\n", .{ context.actor.id, context.getDefinitionExecutable().value.definition_script.value.file_path, inst.target, inst });
             }
 
             try @call(.always_inline, opcodeHandler(opcode), .{context});
-            if (context.result != null) return;
 
-            const new_index = context.activation.advanceInstruction();
-            return @call(.always_tail, specialized_executors[@intFromEnum(context.block.getOpcode(new_index))], .{context});
+            const new_instruction_index = new_instruction_index: {
+                if (context.result) |result| {
+                    switch (result) {
+                        .ActivationChange => {
+                            context.refreshActivationContext();
+                            context.result = null;
+                            break :new_instruction_index context.getInstructionIndex();
+                        },
+                        .Restart => {
+                            context.result = null;
+                            break :new_instruction_index context.getCurrentActivation().restart();
+                        },
+                        else => return,
+                    }
+                } else {
+                    break :new_instruction_index context.getCurrentActivation().advanceInstruction();
+                }
+            };
+
+            return @call(.always_tail, specialized_executors[@intFromEnum(context.getCurrentBytecodeBlock().getOpcode(new_instruction_index))], .{context});
         }
     }.execute;
 }
@@ -160,31 +226,44 @@ pub fn executeSpecialized(comptime opcode: bytecode.Instruction.Opcode) OpcodeHa
 // --- Opcode handlers ---
 
 fn opcodeSend(context: *InterpreterContext) InterpreterError!void {
-    const payload = context.block.getTypedPayload(context.instructionIndex(), .Send);
+    const block = context.getCurrentBytecodeBlock();
+    const index = context.getInstructionIndex();
+
+    const payload = block.getTypedPayload(index, .Send);
     const receiver = context.vm.readRegister(payload.receiver_location);
-    context.result = try performSend(context.vm, context.actor, receiver, payload.message_name, context.block.getTargetLocation(context.instructionIndex()), context.sourceRange());
+    context.result = try performSend(context.vm, context.actor, receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodeSelfSend(context: *InterpreterContext) InterpreterError!void {
-    const payload = context.block.getTypedPayload(context.instructionIndex(), .SelfSend);
+    const block = context.getCurrentBytecodeBlock();
+    const index = context.getInstructionIndex();
+
+    const payload = block.getTypedPayload(index, .SelfSend);
     const receiver = context.actor.activation_stack.getCurrent().activation_object.value;
-    context.result = try performSend(context.vm, context.actor, receiver, payload.message_name, context.block.getTargetLocation(context.instructionIndex()), context.sourceRange());
+    context.result = try performSend(context.vm, context.actor, receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodePrimSend(context: *InterpreterContext) InterpreterError!void {
-    const payload = context.block.getTypedPayload(context.instructionIndex(), .PrimSend);
+    const block = context.getCurrentBytecodeBlock();
+    const index = context.getInstructionIndex();
+
+    const payload = block.getTypedPayload(index, .PrimSend);
     const receiver = context.vm.readRegister(payload.receiver_location);
-    context.result = try performPrimitiveSend(context.vm, context.actor, receiver, payload.message_name, context.block.getTargetLocation(context.instructionIndex()), context.sourceRange());
+    context.result = try performPrimitiveSend(context.vm, context.actor, receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodeSelfPrimSend(context: *InterpreterContext) InterpreterError!void {
-    const payload = context.block.getTypedPayload(context.instructionIndex(), .SelfPrimSend);
+    const block = context.getCurrentBytecodeBlock();
+    const index = context.getInstructionIndex();
+
+    const payload = block.getTypedPayload(index, .SelfPrimSend);
     const receiver = context.actor.activation_stack.getCurrent().activation_object.get().findActivationReceiver();
-    context.result = try performPrimitiveSend(context.vm, context.actor, receiver, payload.message_name, context.block.getTargetLocation(context.instructionIndex()), context.sourceRange());
+
+    context.result = try performPrimitiveSend(context.vm, context.actor, receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodePushConstantSlot(context: *InterpreterContext) InterpreterError!void {
-    const payload = context.block.getTypedPayload(context.instructionIndex(), .PushConstantSlot);
+    const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushConstantSlot);
     const name_value = context.vm.readRegister(payload.name_location);
     const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
     const value = context.vm.readRegister(payload.value_location);
@@ -193,7 +272,7 @@ fn opcodePushConstantSlot(context: *InterpreterContext) InterpreterError!void {
 }
 
 fn opcodePushAssignableSlot(context: *InterpreterContext) InterpreterError!void {
-    const payload = context.block.getTypedPayload(context.instructionIndex(), .PushAssignableSlot);
+    const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushAssignableSlot);
     const name_value = context.vm.readRegister(payload.name_location);
     const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
     const value = context.vm.readRegister(payload.value_location);
@@ -202,7 +281,7 @@ fn opcodePushAssignableSlot(context: *InterpreterContext) InterpreterError!void 
 }
 
 fn opcodePushArgumentSlot(context: *InterpreterContext) InterpreterError!void {
-    const payload = context.block.getTypedPayload(context.instructionIndex(), .PushArgumentSlot);
+    const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushArgumentSlot);
     const name_value = context.vm.readRegister(payload.name_location);
     const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
 
@@ -210,7 +289,7 @@ fn opcodePushArgumentSlot(context: *InterpreterContext) InterpreterError!void {
 }
 
 fn opcodePushInheritedSlot(context: *InterpreterContext) InterpreterError!void {
-    const payload = context.block.getTypedPayload(context.instructionIndex(), .PushInheritedSlot);
+    const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushInheritedSlot);
     const name_value = context.vm.readRegister(payload.name_location);
     const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
     const value = context.vm.readRegister(payload.value_location);
@@ -219,59 +298,76 @@ fn opcodePushInheritedSlot(context: *InterpreterContext) InterpreterError!void {
 }
 
 fn opcodeCreateInteger(context: *InterpreterContext) InterpreterError!void {
-    context.vm.writeRegister(context.block.getTargetLocation(context.instructionIndex()), Value.fromInteger(context.block.getTypedPayload(context.instructionIndex(), .CreateInteger)));
+    const block = context.getCurrentBytecodeBlock();
+    const index = context.getInstructionIndex();
+    context.vm.writeRegister(block.getTargetLocation(index), Value.fromInteger(block.getTypedPayload(index, .CreateInteger)));
 }
 
 fn opcodeCreateFloatingPoint(context: *InterpreterContext) InterpreterError!void {
-    context.vm.writeRegister(context.block.getTargetLocation(context.instructionIndex()), Value.fromFloatingPoint(context.block.getTypedPayload(context.instructionIndex(), .CreateFloatingPoint)));
+    const block = context.getCurrentBytecodeBlock();
+    const index = context.getInstructionIndex();
+    context.vm.writeRegister(block.getTargetLocation(index), Value.fromFloatingPoint(block.getTypedPayload(index, .CreateFloatingPoint)));
 }
 
 fn opcodeCreateByteArray(context: *InterpreterContext) InterpreterError!void {
-    const payload = context.block.getTypedPayload(context.instructionIndex(), .CreateByteArray);
+    const block = context.getCurrentBytecodeBlock();
+    const index = context.getInstructionIndex();
+
+    const payload = block.getTypedPayload(index, .CreateByteArray);
     var token = try context.vm.heap.getAllocation(ByteArrayObject.requiredSizeForAllocation(payload.len));
     defer token.deinit();
 
     const byte_array = ByteArrayObject.createWithValues(context.vm.getMapMap(), &token, context.actor.id, payload);
-    context.vm.writeRegister(context.block.getTargetLocation(context.instructionIndex()), byte_array.asValue());
+    context.vm.writeRegister(block.getTargetLocation(index), byte_array.asValue());
 }
 
 fn opcodeCreateObject(context: *InterpreterContext) InterpreterError!void {
+    const block = context.getCurrentBytecodeBlock();
+    const index = context.getInstructionIndex();
+
     try createObject(
         context.vm,
         context.actor,
-        context.block.getTypedPayload(context.instructionIndex(), .CreateObject).slot_count,
-        context.block.getTargetLocation(context.instructionIndex()),
+        block.getTypedPayload(index, .CreateObject).slot_count,
+        block.getTargetLocation(index),
     );
 }
 
 fn opcodeCreateMethod(context: *InterpreterContext) InterpreterError!void {
-    const payload = context.block.getTypedPayload(context.instructionIndex(), .CreateMethod);
+    const block = context.getCurrentBytecodeBlock();
+    const index = context.getInstructionIndex();
+
+    const payload = block.getTypedPayload(index, .CreateMethod);
     const method_name_byte_array = context.vm.readRegister(payload.method_name_location).asObject().mustBeType(.ByteArray).getByteArray();
+
     try createMethod(
         context.vm,
         context.actor,
-        context.executable,
+        context.getDefinitionExecutable(),
         method_name_byte_array,
         payload.slot_count,
         payload.block_index,
-        context.block.getTargetLocation(context.instructionIndex()),
+        block.getTargetLocation(index),
     );
 }
 
 fn opcodeCreateBlock(context: *InterpreterContext) InterpreterError!void {
-    const payload = context.block.getTypedPayload(context.instructionIndex(), .CreateBlock);
+    const block = context.getCurrentBytecodeBlock();
+    const index = context.getInstructionIndex();
+
+    const payload = block.getTypedPayload(index, .CreateBlock);
     try createBlock(
         context.vm,
         context.actor,
-        context.executable,
+        context.getDefinitionExecutable(),
         payload.slot_count,
         payload.block_index,
-        context.block.getTargetLocation(context.instructionIndex()),
+        block.getTargetLocation(index),
     );
 }
 
 fn opcodeReturn(context: *InterpreterContext) InterpreterError!void {
-    const value = context.vm.readRegister(context.block.getTypedPayload(context.instructionIndex(), .Return).value_location);
+    const value = context.vm.readRegister(context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .Return).value_location);
     context.vm.writeRegister(.ret, value);
 
     if (context.actor.exitCurrentActivation(context.vm, context.last_activation_ref) == .LastActivation) {
@@ -283,14 +379,14 @@ fn opcodeReturn(context: *InterpreterContext) InterpreterError!void {
 }
 
 fn opcodeNonlocalReturn(context: *InterpreterContext) InterpreterError!void {
-    const value = context.vm.readRegister(context.block.getTypedPayload(context.instructionIndex(), .NonlocalReturn).value_location);
+    const value = context.vm.readRegister(context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .NonlocalReturn).value_location);
     context.vm.writeRegister(.ret, value);
 
     const current_activation = context.actor.activation_stack.getCurrent();
     // FIXME: Better name
     const target_activation_ref = current_activation.nonlocal_return_target_activation.?;
     const target_activation = target_activation_ref.get(context.actor.activation_stack) orelse {
-        context.result = ExecutionResult.completion(try Completion.initRuntimeError(context.vm, context.sourceRange(), "Attempted to non-local return to non-existent activation", .{}));
+        context.result = ExecutionResult.completion(try Completion.initRuntimeError(context.vm, context.getSourceRange(), "Attempted to non-local return to non-existent activation", .{}));
         return;
     };
 
@@ -303,7 +399,7 @@ fn opcodeNonlocalReturn(context: *InterpreterContext) InterpreterError!void {
 }
 
 fn opcodePushArg(context: *InterpreterContext) InterpreterError!void {
-    var argument = context.vm.readRegister(context.block.getTypedPayload(context.instructionIndex(), .PushArg).argument_location);
+    var argument = context.vm.readRegister(context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushArg).argument_location);
     if (argument.isObjectReference()) {
         if (argument.asObject().asType(.Activation)) |activation| {
             argument = activation.findActivationReceiver();
@@ -313,7 +409,7 @@ fn opcodePushArg(context: *InterpreterContext) InterpreterError!void {
 }
 
 fn opcodePushRegisters(context: *InterpreterContext) InterpreterError!void {
-    var iterator = context.block.getTypedPayload(context.instructionIndex(), .PushRegisters).iterator(.{});
+    var iterator = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushRegisters).iterator(.{});
     while (iterator.next()) |clobbered_register| {
         // FIXME: Remove manual register number adjustment!
         const register = bytecode.RegisterLocation.fromInt(@intCast(clobbered_register + 2));
@@ -326,7 +422,7 @@ fn opcodeSetMethodInline(context: *InterpreterContext) InterpreterError!void {
 }
 
 fn opcodeSourceRange(context: *InterpreterContext) InterpreterError!void {
-    context.actor.range = context.block.getTypedPayload(context.instructionIndex(), .SourceRange);
+    context.actor.range = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .SourceRange);
 }
 
 fn opcodePushArgumentSentinel(context: *InterpreterContext) InterpreterError!void {
@@ -403,7 +499,6 @@ fn performPrimitiveSend(
         }
 
         switch (primitive_result) {
-            .ActorSwitch, .ActivationChange => return primitive_result,
             .Completion => |completion| {
                 if (completion.isNormal()) {
                     vm.writeRegister(target_location, completion.data.Normal);
@@ -412,6 +507,7 @@ fn performPrimitiveSend(
 
                 return ExecutionResult.completion(completion);
             },
+            else => return primitive_result,
         }
 
         return null;

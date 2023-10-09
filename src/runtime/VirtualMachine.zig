@@ -338,7 +338,6 @@ pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
                         self.current_actor.unwindStacks();
                         return null;
                     },
-                    else => unreachable,
                 }
             },
         }

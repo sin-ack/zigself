@@ -51,7 +51,7 @@ created_from: SourceRange,
 
 /// The index of the instruction that is currently being executed (the "program
 /// counter").
-pc: u32 = 0,
+instruction_index: u32 = 0,
 
 const Self = @This();
 
@@ -98,13 +98,14 @@ pub fn definitionExecutable(self: Self) bytecode.Executable.Ref {
 }
 
 pub fn advanceInstruction(self: *Self) u32 {
-    self.pc += 1;
-    return self.pc;
+    self.instruction_index += 1;
+    return self.instruction_index;
 }
 
-/// Resets the instruction index of this activation.
-pub fn restart(self: *Self) void {
-    self.pc = 0;
+/// Resets the instruction index of this activation, and returns the new value.
+pub fn restart(self: *Self) u32 {
+    self.instruction_index = 0;
+    return 0;
 }
 
 pub fn format(
@@ -116,10 +117,10 @@ pub fn format(
     _ = fmt;
     _ = options;
     const creator_message_byte_array = activation.creator_message.asByteArray();
-    try std.fmt.format(writer, "Activation{{ '{s}' created from {}, pc = {}, target_location = {} }}", .{
+    try std.fmt.format(writer, "Activation{{ '{s}' created from {}, instruction_index = {}, target_location = {} }}", .{
         creator_message_byte_array.getValues(),
         activation.created_from,
-        activation.pc,
+        activation.instruction_index,
         activation.target_location,
     });
 }

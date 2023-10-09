@@ -20,9 +20,6 @@ pub const CompletionData = union(enum) {
     Normal: Value,
     /// A runtime error.
     RuntimeError: RuntimeErrorCompletionData,
-    /// A completion telling the current method or block to restart its execution
-    /// from the first statement.
-    Restart: void,
 };
 
 /// The data that's required to perform a runtime error return.
@@ -47,15 +44,10 @@ pub fn initRuntimeError(vm: *VirtualMachine, source_range: SourceRange, comptime
     return Self{ .data = .{ .RuntimeError = .{ .message = error_message, .source_range = source_range.copy() } } };
 }
 
-/// Creates a restart completion.
-pub fn initRestart() Self {
-    return .{ .data = .{ .Restart = {} } };
-}
-
 /// Deinitializes values in this completion as necessary.
 pub fn deinit(self: *Self, vm: *VirtualMachine) void {
     switch (self.data) {
-        .Normal, .Restart => {},
+        .Normal => {},
         .RuntimeError => |*err| {
             vm.allocator.free(err.message);
             err.source_range.deinit();

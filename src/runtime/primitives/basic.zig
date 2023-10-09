@@ -204,5 +204,5 @@ pub fn Error(context: *PrimitiveContext) !ExecutionResult {
 /// This primitive is intended to be used internally only.
 pub fn Restart(context: *PrimitiveContext) !ExecutionResult {
     _ = context;
-    return ExecutionResult.completion(Completion.initRestart());
+    return ExecutionResult.restart();
 }

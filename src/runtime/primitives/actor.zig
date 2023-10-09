@@ -180,7 +180,6 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
                 );
             },
             .RuntimeError => return ExecutionResult.completion(completion),
-            else => unreachable,
         }
     }
 
@@ -239,7 +238,6 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
                     // FIXME: What is a sensible return value here?
                     return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
                 },
-                else => unreachable,
             }
         },
     };
@@ -346,7 +344,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     // instruction, which will be the instruction that's before the current one
     // (because we advance the pc in each of the aforementioned primitives).
     const genesis_current_activation = genesis_actor.activation_stack.getCurrent();
-    const genesis_pc_before_last = genesis_current_activation.pc - 1;
+    const genesis_pc_before_last = genesis_current_activation.instruction_index - 1;
     const genesis_activation_object = genesis_current_activation.activation_object.get();
     const genesis_definition_block = genesis_activation_object.getBytecodeBlock();
     const genesis_inst_before_last_target = genesis_definition_block.getTargetLocation(genesis_pc_before_last);
