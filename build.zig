@@ -12,6 +12,8 @@ pub fn build(b: *std.build.Builder) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const zig_args_dependency = b.dependency("zig_args", .{}).module("args");
+
     const exe = b.addExecutable(.{
         .name = "self",
         .root_source_file = .{ .path = "src/main.zig" },
@@ -20,9 +22,7 @@ pub fn build(b: *std.build.Builder) void {
     });
     exe.linkLibC();
     b.installArtifact(exe);
-    exe.addAnonymousModule("zig-args", .{
-        .source_file = .{ .path = "./vendor/zig-args/args.zig" },
-    });
+    exe.addModule("zig-args", zig_args_dependency);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());

@@ -27,7 +27,7 @@ Earlier and later versions may work but there are no guarantees.
 
 ## Building zigSelf
 
-1. Clone the repository with submodules: `git clone --recurse-submodules https://github.com/sin-ack/zigself`
+1. Clone the repository: `git clone https://github.com/sin-ack/zigself`
 2. Run the code: `zig build run -- examples/fibonacci.self`
 
 That's it! If you want to build a release version, you can build one with

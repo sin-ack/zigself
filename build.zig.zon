@@ -1,0 +1,11 @@
+.{
+    .name = "zigself",
+    .version = "0.0.0",
+
+    .dependencies = .{
+        .zig_args = .{
+            .url = "https://github.com/MasterQ32/zig-args/archive/7989929d055ef7618e60de84cc54644046516fdb.tar.gz",
+            .hash = "12207752d975a7f5d7cc65662ed1c6b117da8dec6d1bd7af9a39e1b65d90bf86e833",
+        },
+    },
+}
