@@ -1096,7 +1096,9 @@ fn parseInteger(self: *Self) ParseError!AST.NumberNode {
                 'b', 'B' => {
                     state = .Binary;
                 },
-                '0'...'9' => unreachable,
+                '0' => {},
+                '_' => {},
+                '1'...'9' => unreachable,
                 else => break,
             },
             .Decimal => switch (c) {
@@ -1117,6 +1119,7 @@ fn parseInteger(self: *Self) ParseError!AST.NumberNode {
                     }
                     integer = add_result[0];
                 },
+                '_' => {},
                 else => break,
             },
             .Hexadecimal => switch (c) {
@@ -1154,6 +1157,7 @@ fn parseInteger(self: *Self) ParseError!AST.NumberNode {
                     }
                     integer = add_result[0];
                 },
+                '_' => {},
                 else => break,
             },
             .Octal => switch (c) {
@@ -1175,6 +1179,7 @@ fn parseInteger(self: *Self) ParseError!AST.NumberNode {
                     integer = add_result[0];
                 },
                 '8', '9' => unreachable,
+                '_' => {},
                 else => break,
             },
             .Binary => switch (c) {
@@ -1196,6 +1201,7 @@ fn parseInteger(self: *Self) ParseError!AST.NumberNode {
                     integer = add_result[0];
                 },
                 '2'...'9' => unreachable,
+                '_' => {},
                 else => break,
             },
         }

@@ -337,8 +337,12 @@ pub fn next(self: *Self) Token {
                 'b', 'B' => {
                     state = .Binary;
                 },
+                // Allow 00... since it will just become a 0.
+                '0' => {},
+                // Allow things like 0_0, which make for nice easter eggs.
+                '_' => {},
                 // It is invalid to have a number like 0123.
-                '0'...'9' => {
+                '1'...'9' => {
                     token.tag = .Invalid;
                     break;
                 },
@@ -357,6 +361,7 @@ pub fn next(self: *Self) Token {
                     token.tag = .FloatingPoint;
                 },
                 '0'...'9' => {},
+                '_' => {},
                 else => break,
             },
             .LessThan => switch (c) {
@@ -394,10 +399,12 @@ pub fn next(self: *Self) Token {
             },
             .Hexadecimal => switch (c) {
                 '0'...'9', 'a'...'f', 'A'...'F' => {},
+                '_' => {},
                 else => break,
             },
             .Octal => switch (c) {
                 '0'...'7' => {},
+                '_' => {},
                 '8', '9' => {
                     token.tag = .Invalid;
                     break;
@@ -406,6 +413,7 @@ pub fn next(self: *Self) Token {
             },
             .Binary => switch (c) {
                 '0', '1' => {},
+                '_' => {},
                 '2'...'9' => {
                     token.tag = .Invalid;
                     break;
@@ -424,6 +432,7 @@ pub fn next(self: *Self) Token {
             },
             .Fraction => switch (c) {
                 '0'...'9' => {},
+                '_' => {},
                 else => break,
             },
         }
