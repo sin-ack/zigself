@@ -156,14 +156,11 @@ fn generateBlock(self: *AstGen, executable: *Executable, block: *Block, block_no
     return block_location;
 }
 
-fn generateMethod(self: *AstGen, executable: *Executable, block: *Block, method_name: []const u8, method: *ast.ObjectNode) AstGenError!RegisterLocation {
+fn generateMethod(self: *AstGen, executable: *Executable, block: *Block, method_name_location: RegisterLocation, method: *ast.ObjectNode) AstGenError!RegisterLocation {
     self.method_execution_depth += 1;
     defer self.method_execution_depth -= 1;
 
     const block_index = try self.generateSlotsAndCodeCommon(executable, block, method.slots, method.statements.value.statements, method.range);
-
-    const method_name_location = self.allocateRegister();
-    try block.addInstruction(executable.allocator, .CreateByteArray, method_name_location, method_name, method.range);
 
     if (self.method_execution_depth > 1) {
         try block.addInstruction(executable.allocator, .SetMethodInline, .Nil, {}, method.range);
@@ -320,6 +317,9 @@ fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots
         try block.addInstruction(executable.allocator, .PushSlotSentinel, .Nil, {}, source_range);
 
     for (slots) |slot| {
+        const slot_name_location = self.allocateRegister();
+        try block.addInstruction(executable.allocator, .CreateByteArray, slot_name_location, slot.name, slot.range);
+
         const slot_value_location = blk: {
             if (slot.value) |value| {
                 if (value == .Object) {
@@ -332,7 +332,7 @@ fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots
                     }
 
                     if (value.Object.statements.value.statements.len > 0 or has_argument)
-                        break :blk try self.generateMethod(executable, block, slot.name, value.Object);
+                        break :blk try self.generateMethod(executable, block, slot_name_location, value.Object);
                 }
 
                 break :blk try self.generateExpression(executable, block, value);
@@ -340,9 +340,6 @@ fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots
 
             break :blk RegisterLocation.Nil;
         };
-
-        const slot_name_location = self.allocateRegister();
-        try block.addInstruction(executable.allocator, .CreateByteArray, slot_name_location, slot.name, slot.range);
 
         if (slot.is_inherited) {
             std.debug.assert(!slot.is_mutable);
