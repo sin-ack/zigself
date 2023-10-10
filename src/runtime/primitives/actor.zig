@@ -8,15 +8,24 @@ const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const Value = @import("../value.zig").Value;
 const bless = @import("../object_bless.zig");
-const Completion = @import("../Completion.zig");
 const ActorObject = @import("../objects/actor.zig").Actor;
 const SourceRange = @import("../SourceRange.zig");
+const stack_trace = @import("../stack_trace.zig");
 const MethodObject = @import("../objects/method.zig").Method;
-const runtime_error = @import("../error.zig");
+const RuntimeError = @import("../RuntimeError.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
-const ExecutionResult = @import("../interpreter.zig").ExecutionResult;
+const ExecutionResult = @import("../execution_result.zig").ExecutionResult;
 const ActorProxyObject = @import("../objects/actor_proxy.zig").ActorProxy;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
+
+const FindActorMethodResult = union(enum) {
+    /// The actor method was found.
+    Method: MethodObject.Ptr,
+    /// Another kind of value has resolved from the lookup.
+    Value: Value,
+    /// An error has occurred.
+    RuntimeError: RuntimeError,
+};
 
 /// Find the given selector as a method suitable for spawning an actor.
 ///
@@ -27,45 +36,52 @@ fn findActorMethod(
     source_range: SourceRange,
     receiver: Value,
     selector: []const u8,
-    out_method: **MethodObject,
-) !?Completion {
-    const method = method: {
-        switch (receiver.lookup(vm, selector)) {
-            .Nothing => {
-                return try Completion.initRuntimeError(vm, source_range, "Unknown selector '{s}'", .{selector});
-            },
-            .Assignment => {
-                return try Completion.initRuntimeError(vm, source_range, "Spawning actor with non-unary method '{s}' not permitted", .{selector});
-            },
-            .Regular => |lookup_result| {
-                if (lookup_result.isObjectReference()) {
-                    if (lookup_result.asObject().asType(.Method)) |lookup_result_as_method| {
-                        if (lookup_result_as_method.getArgumentSlotCount() != 0) {
-                            return try Completion.initRuntimeError(vm, source_range, "Spawning actor with non-unary method '{s}' not permitted", .{selector});
-                        }
-
-                        break :method lookup_result_as_method;
+) !FindActorMethodResult {
+    return switch (receiver.lookup(vm, selector)) {
+        .Nothing => FindActorMethodResult{ .RuntimeError = try RuntimeError.initFormatted(
+            vm,
+            source_range,
+            "Unknown selector '{s}'",
+            .{selector},
+        ) },
+        .Assignment => FindActorMethodResult{ .RuntimeError = try RuntimeError.initFormatted(
+            vm,
+            source_range,
+            "Spawning actor with non-unary method '{s}' not permitted",
+            .{selector},
+        ) },
+        .Regular => |lookup_result| blk: {
+            if (lookup_result.isObjectReference()) {
+                if (lookup_result.asObject().asType(.Method)) |lookup_result_as_method| {
+                    if (lookup_result_as_method.getArgumentSlotCount() != 0) {
+                        break :blk FindActorMethodResult{ .RuntimeError = try RuntimeError.initFormatted(
+                            vm,
+                            source_range,
+                            "Spawning actor with non-unary method '{s}' not permitted",
+                            .{selector},
+                        ) };
                     }
+
+                    break :blk FindActorMethodResult{ .Method = lookup_result_as_method };
                 }
+            }
 
-                return Completion.initNormal(lookup_result);
-            },
-            .ActorMessage => {
-                return try Completion.initRuntimeError(vm, source_range, "Spawning actor by sending message to actor proxy not permitted", .{});
-            },
-        }
+            break :blk FindActorMethodResult{ .Value = lookup_result };
+        },
+        .ActorMessage => FindActorMethodResult{ .RuntimeError = RuntimeError.initLiteral(
+            source_range,
+            "Spawning actor by sending message to actor proxy not permitted",
+        ) },
     };
-
-    out_method.* = method;
-    return null;
 }
 
 /// Create a new actor which then becomes the genesis actor.
 pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
     if (context.vm.isInActorMode()) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "_Genesis: sent while the VM is in actor mode", .{}),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "_Genesis: sent while the VM is in actor mode",
+        ));
     }
 
     const arguments = context.getArguments("_Genesis:");
@@ -75,20 +91,17 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
     // FIXME: We should perhaps allow any object to be the genesis actor
     //        context, so blocks can also work for example.
     if (!(receiver.isObjectReference() and receiver.asObject().object_information.object_type == .Slots)) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected receiver of _Genesis: to be a slots object", .{}),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "Expected receiver of _Genesis: to be a slots object",
+        ));
     }
 
     var method: *MethodObject = undefined;
-    if (try findActorMethod(
-        context.vm,
-        context.source_range,
-        receiver,
-        selector,
-        &method,
-    )) |completion| {
-        return ExecutionResult.completion(completion);
+    switch (try findActorMethod(context.vm, context.source_range, receiver, selector)) {
+        .Method => |m| method = m,
+        .Value => |value| return ExecutionResult.resolve(value),
+        .RuntimeError => |err| return ExecutionResult.runtimeError(err),
     }
 
     var token = token: {
@@ -129,7 +142,7 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
     context.vm.setGenesisActor(genesis_actor);
     context.vm.switchToActor(genesis_actor);
 
-    return ExecutionResult.actorSwitch();
+    return ExecutionResult.yield();
 }
 
 /// Spawn a new actor by creating an Actor and its associated actor context
@@ -138,9 +151,10 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
 /// it to the result location of the primitive.
 pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     if (!context.vm.isInActorMode()) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorSpawn: sent while the VM is not in actor mode", .{}),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "_ActorSpawn: sent while the VM is not in actor mode",
+        ));
     }
 
     const arguments = context.getArguments("_ActorSpawn:");
@@ -152,35 +166,25 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     // FIXME: We should perhaps allow any object to receive a message context,
     //        so blocks can also work for example.
     if (!(receiver.isObjectReference() and receiver.asObject().object_information.object_type == .Slots)) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "Expected receiver of _ActorSpawn: to be a slots object", .{}),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "Expected receiver of _ActorSpawn: to be a slots object",
+        ));
     }
 
     // NOTE: Need to advance the current actor to the next instruction to be returned to after the this actor exits.
     _ = context.actor.activation_stack.getCurrent().advanceInstruction();
 
     var spawn_method: *MethodObject = undefined;
-    if (try findActorMethod(
-        context.vm,
-        context.source_range,
-        receiver,
-        spawn_selector,
-        &spawn_method,
-    )) |completion| {
-        switch (completion.data) {
-            .Normal => {
-                return ExecutionResult.completion(
-                    try Completion.initRuntimeError(
-                        context.vm,
-                        context.source_range,
-                        "The actor spawn message pointed to a non-method slot. This is not allowed as the spawned actor does not own that value.",
-                        .{},
-                    ),
-                );
-            },
-            .RuntimeError => return ExecutionResult.completion(completion),
-        }
+    switch (try findActorMethod(context.vm, context.source_range, receiver, spawn_selector)) {
+        .Method => |m| spawn_method = m,
+        .Value => {
+            return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+                context.source_range,
+                "The actor spawn message pointed to a non-method slot. This is not allowed as the spawned actor does not own that value.",
+            ));
+        },
+        .RuntimeError => |err| return ExecutionResult.runtimeError(err),
     }
 
     var token = token: {
@@ -210,35 +214,32 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     var actor_result = try context.actor.executeUntil(context.vm, before_spawn_method_activation_ref);
     // This object is owned by the actor that requested the spawn.
     var new_actor_context = switch (actor_result) {
-        .ActorSwitch => {
-            return ExecutionResult.completion(
-                try Completion.initRuntimeError(context.vm, context.source_range, "The actor spawn activation caused an actor switch", .{}),
-            );
+        .Switched => {
+            return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+                context.source_range,
+                "The actor spawn activation caused an actor switch",
+            ));
         },
-        .Completion => |*completion| value: {
-            defer completion.deinit(context.vm);
+        .Finished => |value| value,
+        .RuntimeError => |*err| {
+            defer err.deinit(context.vm.allocator);
 
-            switch (completion.data) {
-                .Normal => |value| break :value value,
-                .RuntimeError => |err| {
-                    context.vm.switchToActor(genesis_actor);
+            context.vm.switchToActor(genesis_actor);
 
-                    // Refresh activation pointer
-                    before_spawn_method_activation = before_spawn_method_activation_ref.get(context.actor.activation_stack).?;
+            // Refresh activation pointer
+            before_spawn_method_activation = before_spawn_method_activation_ref.get(context.actor.activation_stack).?;
 
-                    if (!context.vm.silent_errors) {
-                        std.debug.print("Received error at top level while spawning actor: {s}\n", .{err.message});
-                        runtime_error.printTraceFromActivationStackUntil(context.actor.activation_stack.getStack(), err.source_range, before_spawn_method_activation);
-                    }
-
-                    context.actor.activation_stack.restoreTo(before_spawn_method_activation);
-                    context.vm.restoreStackSnapshot(stack_snapshot);
-
-                    context.actor.yield_reason = .RuntimeError;
-                    // FIXME: What is a sensible return value here?
-                    return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
-                },
+            if (!context.vm.silent_errors) {
+                std.debug.print("Received error at top level while spawning actor: {s}\n", .{err.getMessage()});
+                stack_trace.printTraceFromActivationStackUntil(context.actor.activation_stack.getStack(), err.source_range, before_spawn_method_activation);
             }
+
+            context.actor.activation_stack.restoreTo(before_spawn_method_activation);
+            context.vm.restoreStackSnapshot(stack_snapshot);
+
+            context.actor.yield_reason = .RuntimeError;
+            // FIXME: What is a sensible return value here?
+            return ExecutionResult.resolve(context.vm.nil());
         },
     };
 
@@ -250,26 +251,18 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
             break :entrypoint_selector message_value.get().getValues();
         }
 
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(
-                context.vm,
-                context.source_range,
-                "The actor did not set an entrypoint selector during its spawn activation",
-                .{},
-            ),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "The actor did not set an entrypoint selector during its spawn activation",
+        ));
     };
 
     var entrypoint_method: *MethodObject = undefined;
 
-    if (try findActorMethod(
-        context.vm,
-        context.source_range,
-        receiver,
-        entrypoint_selector,
-        &entrypoint_method,
-    )) |completion| {
-        return ExecutionResult.completion(completion);
+    switch (try findActorMethod(context.vm, context.source_range, receiver, entrypoint_selector)) {
+        .Method => |m| entrypoint_method = m,
+        .Value => |value| return ExecutionResult.resolve(value),
+        .RuntimeError => |err| return ExecutionResult.runtimeError(err),
     }
 
     context.actor.entrypoint_selector = null;
@@ -351,7 +344,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
     genesis_actor.writeRegister(genesis_inst_before_last_target, new_actor.actor_object.value);
 
-    return ExecutionResult.actorSwitch();
+    return ExecutionResult.yield();
 }
 
 /// Sets the actor's entrypoint selector, which is the message that is sent to
@@ -359,24 +352,26 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 /// for its resuming).
 pub fn ActorSetEntrypoint(context: *PrimitiveContext) !ExecutionResult {
     if (!context.vm.isInActorMode()) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorSetEntrypoint: sent outside of actor mode", .{}),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "_ActorSetEntrypoint: sent outside of actor mode",
+        ));
     }
 
     const arguments = context.getArguments("_ActorSetEntrypoint:");
     const entrypoint_selector_name = try arguments.getObject(0, .ByteArray);
 
     context.actor.entrypoint_selector = .{ .value = entrypoint_selector_name.asValue() };
-    return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
+    return ExecutionResult.resolve(context.vm.nil());
 }
 
 /// Resume the activation from where it last left off.
 pub fn ActorResume(context: *PrimitiveContext) !ExecutionResult {
     if (!context.vm.isInGenesisActor()) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorResume sent outside of the genesis actor", .{}),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "_ActorResume sent outside of the genesis actor",
+        ));
     }
 
     const arguments = context.getArguments("_ActorResume");
@@ -395,17 +390,19 @@ pub fn ActorResume(context: *PrimitiveContext) !ExecutionResult {
     switch (actor.yield_reason) {
         .None, .Yielded, .Blocked, .ActorSpawned => {
             context.vm.switchToActor(actor);
-            return ExecutionResult.actorSwitch();
+            return ExecutionResult.yield();
         },
         .RuntimeError => {
-            return ExecutionResult.completion(
-                try Completion.initRuntimeError(context.vm, context.source_range, "Attempting to resume actor with error", .{}),
-            );
+            return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+                context.source_range,
+                "Attempting to resume actor with error",
+            ));
         },
         .Dead => {
-            return ExecutionResult.completion(
-                try Completion.initRuntimeError(context.vm, context.source_range, "Attempting to resume dead actor", .{}),
-            );
+            return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+                context.source_range,
+                "Attempting to raise the dead from the grave",
+            ));
         },
     }
 }
@@ -413,45 +410,49 @@ pub fn ActorResume(context: *PrimitiveContext) !ExecutionResult {
 /// Return the reason this actor has yielded.
 pub fn ActorYieldReason(context: *PrimitiveContext) !ExecutionResult {
     if (!context.vm.isInGenesisActor()) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorYieldReason sent outside of the genesis actor", .{}),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "_ActorYieldReason sent outside of the genesis actor",
+        ));
     }
 
     const arguments = context.getArguments("_ActorResume");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Actor);
     const actor = receiver.getActor();
-    return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intFromEnum(actor.yield_reason))));
+    return ExecutionResult.resolve(Value.fromUnsignedInteger(@intFromEnum(actor.yield_reason)));
 }
 
 /// Yield this actor.
 pub fn ActorYield(context: *PrimitiveContext) !ExecutionResult {
     if (!context.vm.isInRegularActor()) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorYield sent outside of a regular actor", .{}),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "_ActorYield sent outside of a regular actor",
+        ));
     }
 
     _ = context.actor.activation_stack.getCurrent().advanceInstruction();
     context.actor.yield_reason = .Yielded;
     context.vm.switchToActor(context.vm.genesis_actor.?);
 
-    return ExecutionResult.actorSwitch();
+    return ExecutionResult.yield();
 }
 
 /// Return the current actor's sender. Raise a runtime error if the actor
 /// doesn't have a sender (isn't in a message).
 pub fn ActorSender(context: *PrimitiveContext) !ExecutionResult {
     if (!context.vm.isInRegularActor()) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorSender sent outside of a regular actor", .{}),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "_ActorSender sent outside of a regular actor",
+        ));
     }
 
     if (context.actor.message_sender == null) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorSender sent outside of a message", .{}),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "_ActorSender sent outside of a message",
+        ));
     }
 
     // FIXME: It would be nice to use a single actor proxy instead of spawning
@@ -464,16 +465,17 @@ pub fn ActorSender(context: *PrimitiveContext) !ExecutionResult {
     const actor_object = context.actor.message_sender.?.get();
     const actor_proxy = ActorProxyObject.create(context.vm.getMapMap(), &token, context.actor.id, actor_object);
 
-    return ExecutionResult.completion(Completion.initNormal(actor_proxy.asValue()));
+    return ExecutionResult.resolve(actor_proxy.asValue());
 }
 
 /// Return the managed file descriptor object that the actor is blocked on.
 /// If the actor's yield reason isn't Blocked, then raise a runtime error.
 pub fn ActorBlockedFD(context: *PrimitiveContext) !ExecutionResult {
     if (!context.vm.isInGenesisActor()) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorBlockedFD sent outside of the genesis actor", .{}),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "_ActorBlockedFD sent outside of the genesis actor",
+        ));
     }
 
     const arguments = context.getArguments("_ActorBlockedFD");
@@ -481,10 +483,11 @@ pub fn ActorBlockedFD(context: *PrimitiveContext) !ExecutionResult {
     const actor = actor_object.getActor();
 
     if (actor.yield_reason != .Blocked) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(context.vm, context.source_range, "_ActorBlockedFD sent to an actor that wasn't blocked", .{}),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "_ActorBlockedFD sent to an actor that wasn't blocked",
+        ));
     }
 
-    return ExecutionResult.completion(Completion.initNormal(actor.blocked_fd.?.value));
+    return ExecutionResult.resolve(actor.blocked_fd.?.value);
 }

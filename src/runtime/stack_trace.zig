@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 

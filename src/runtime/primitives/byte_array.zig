@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -7,16 +7,16 @@ const Allocator = std.mem.Allocator;
 
 const Value = @import("../value.zig").Value;
 const ByteArray = @import("../ByteArray.zig");
-const Completion = @import("../Completion.zig");
+const RuntimeError = @import("../RuntimeError.zig");
 const ByteArrayObject = @import("../objects/byte_array.zig").ByteArray;
-const ExecutionResult = @import("../interpreter.zig").ExecutionResult;
+const ExecutionResult = @import("../execution_result.zig").ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 /// Return the size of the byte vector in bytes.
 pub fn ByteArraySize(context: *PrimitiveContext) !ExecutionResult {
     const arguments = context.getArguments("_ByteArraySize");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
-    return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(@intCast(receiver.getValues().len))));
+    return ExecutionResult.resolve(Value.fromInteger(@intCast(receiver.getValues().len)));
 }
 
 /// Return a byte at the given (integer) position of the receiver, which is a
@@ -30,7 +30,7 @@ pub fn ByteAt(context: *PrimitiveContext) !ExecutionResult {
 
     const values = receiver.getValues();
     if (position >= values.len) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
+        return ExecutionResult.runtimeError(try RuntimeError.initFormatted(
             context.vm,
             context.source_range,
             "Argument passed to _ByteAt: is out of bounds for this receiver (passed {d}, size {d})",
@@ -38,7 +38,7 @@ pub fn ByteAt(context: *PrimitiveContext) !ExecutionResult {
         ));
     }
 
-    return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(values[@intCast(position)])));
+    return ExecutionResult.resolve(Value.fromInteger(values[@intCast(position)]));
 }
 
 /// Place the second argument at the position given by the first argument on the
@@ -54,7 +54,7 @@ pub fn ByteAt_Put(context: *PrimitiveContext) !ExecutionResult {
     var values = receiver.getValues();
 
     if (position >= values.len) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
+        return ExecutionResult.runtimeError(try RuntimeError.initFormatted(
             context.vm,
             context.source_range,
             "First argument passed to _ByteAt:Put: is out of bounds for this receiver (passed {d}, size {d})",
@@ -63,16 +63,14 @@ pub fn ByteAt_Put(context: *PrimitiveContext) !ExecutionResult {
     }
 
     if (new_value > 255) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "New value passed to _ByteAt:Put: cannot be cast to a byte",
-            .{},
         ));
     }
 
     values[@intCast(position)] = @intCast(new_value);
-    return ExecutionResult.completion(Completion.initNormal(receiver.asValue()));
+    return ExecutionResult.resolve(receiver.asValue());
 }
 
 /// Copy the byte vector receiver with a new size. Extra space is filled
@@ -86,11 +84,9 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
 
     const filler_contents = filler_byte_array.getValues();
     if (filler_contents.len != 1) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Filler argument to _ByteArrayCopySize:FillingExtrasWith: must have a length of 1",
-            .{},
         ));
     }
 
@@ -115,7 +111,7 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
     }
 
     const byte_array_object = ByteArrayObject.create(context.vm.getMapMap(), &token, context.actor.id, new_byte_array);
-    return ExecutionResult.completion(Completion.initNormal(byte_array_object.asValue()));
+    return ExecutionResult.resolve(byte_array_object.asValue());
 }
 
 /// Return whether the receiver byte array is equal to the argument.
@@ -128,16 +124,16 @@ pub fn ByteArrayEq(context: *PrimitiveContext) !ExecutionResult {
 
     if (argument.isObjectReference()) {
         if (argument.asObject().asType(.ByteArray)) |byte_array| {
-            return ExecutionResult.completion(Completion.initNormal(
+            return ExecutionResult.resolve(
                 if (std.mem.eql(u8, receiver.getValues(), byte_array.getValues()))
                     context.vm.getTrue()
                 else
                     context.vm.getFalse(),
-            ));
+            );
         }
     }
 
-    return ExecutionResult.completion(Completion.initNormal(context.vm.getFalse()));
+    return ExecutionResult.resolve(context.vm.getFalse());
 }
 
 pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
@@ -166,5 +162,5 @@ pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
     @memcpy(new_byte_array.getValues()[receiver_size..], argument.getValues());
 
     const byte_array_object = ByteArrayObject.create(context.vm.getMapMap(), &token, context.actor.id, new_byte_array);
-    return ExecutionResult.completion(Completion.initNormal(byte_array_object.asValue()));
+    return ExecutionResult.resolve(byte_array_object.asValue());
 }

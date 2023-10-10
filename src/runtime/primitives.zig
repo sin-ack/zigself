@@ -11,13 +11,12 @@ const Value = value_import.Value;
 const Actor = @import("./Actor.zig");
 const object = @import("./object.zig");
 const bytecode = @import("./bytecode.zig");
-const Completion = @import("./Completion.zig");
 const SourceRange = @import("./SourceRange.zig");
+const RuntimeError = @import("./RuntimeError.zig");
 const value_import = @import("./value.zig");
 const stage2_compat = @import("../utility/stage2_compat.zig");
-const runtime_error = @import("./error.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
-const ExecutionResult = @import("./interpreter.zig").ExecutionResult;
+const ExecutionResult = @import("./execution_result.zig").ExecutionResult;
 const IntegerValueSignedness = value_import.IntegerValueSignedness;
 
 const basic_primitives = @import("./primitives/basic.zig");
@@ -76,7 +75,11 @@ pub const PrimitiveContext = struct {
         if (@bitSizeOf(ArgumentType) >= @bitSizeOf(TargetType)) return null;
 
         if (argument > std.math.maxInt(TargetType)) {
-            return try ExecutionResult.completion(Completion.initRuntimeError(self.vm, self.source_range, argument_name ++ " argument must be less than {} bits wide", .{@bitSizeOf(TargetType)}));
+            return ExecutionResult.runtimeError(RuntimeError.initFormattedComptime(
+                self.source_range,
+                argument_name ++ " argument must be less than {} bits wide",
+                .{@bitSizeOf(TargetType)},
+            ));
         }
 
         return null;
@@ -113,8 +116,8 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
 
         fn getArgumentMessage(comptime index: isize) []const u8 {
             return switch (index) {
-                PrimitiveContext.Receiver => " receiver of ",
-                0...std.math.maxInt(isize) => std.fmt.comptimePrint(" argument {} of ", .{index + 1}),
+                PrimitiveContext.Receiver => "receiver of",
+                0...std.math.maxInt(isize) => std.fmt.comptimePrint("argument {} of", .{index + 1}),
                 else => unreachable,
             };
         }
@@ -124,11 +127,10 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
             const value = self.getValue(index);
 
             if (!value.isInteger()) {
-                self.context.get_argument_error = ExecutionResult.completion(try Completion.initRuntimeError(
-                    self.context.vm,
+                self.context.get_argument_error = ExecutionResult.runtimeError(RuntimeError.initFormattedComptime(
                     self.context.source_range,
-                    "Expected integer for" ++ getArgumentMessage(index) ++ primitive_name,
-                    .{},
+                    "Expected integer for {s} {s}",
+                    .{ getArgumentMessage(index), primitive_name },
                 ));
                 return error.GetArgumentFailure;
             }
@@ -137,11 +139,10 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
             if (signedness == .Signed) return value_as_integer;
 
             if (value_as_integer < 0) {
-                self.context.get_argument_error = ExecutionResult.completion(try Completion.initRuntimeError(
-                    self.context.vm,
+                self.context.get_argument_error = ExecutionResult.runtimeError(RuntimeError.initFormattedComptime(
                     self.context.source_range,
-                    "Expected positive integer for" ++ getArgumentMessage(index) ++ primitive_name,
-                    .{},
+                    "Expected positive integer for {s} {s}",
+                    .{ getArgumentMessage(index), primitive_name },
                 ));
                 return error.GetArgumentFailure;
             }
@@ -158,11 +159,10 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
                     return cast_object;
             }
 
-            self.context.get_argument_error = ExecutionResult.completion(try Completion.initRuntimeError(
-                self.context.vm,
+            self.context.get_argument_error = ExecutionResult.runtimeError(RuntimeError.initFormattedComptime(
                 self.context.source_range,
-                "Expected " ++ object.ObjectT(object_type).humanReadableName() ++ " for" ++ getArgumentMessage(index) ++ primitive_name,
-                .{},
+                "Expected {s} for {s} {s}",
+                .{ object.ObjectT(object_type).humanReadableName(), getArgumentMessage(index), primitive_name },
             ));
             return error.GetArgumentFailure;
         }
@@ -208,12 +208,12 @@ const PrimitiveSpec = struct {
 fn makeDisabledPrimitive(comptime primitive_name: []const u8) PrimitiveFunction {
     return struct {
         fn PrimitiveDisabled(context: *PrimitiveContext) PrimitiveError!ExecutionResult {
-            return ExecutionResult.completion(
-                try Completion.initRuntimeError(
+            return ExecutionResult.runtimeError(
+                RuntimeError.initFormattedComptime(
                     context.vm,
                     context.source_range,
-                    "_" ++ primitive_name ++ " is disabled on this target",
-                    .{},
+                    "_{s} is disabled on this target",
+                    .{primitive_name},
                 ),
             );
         }

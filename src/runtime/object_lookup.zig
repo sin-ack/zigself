@@ -6,17 +6,11 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const hash = @import("../utility/hash.zig");
-const Slot = @import("slot.zig");
-const debug = @import("../debug.zig");
 const Value = @import("value.zig").Value;
 const Object = @import("object.zig").Object;
-const Completion = @import("Completion.zig");
 const ActorObject = @import("objects/actor.zig").Actor;
 const MethodObject = @import("objects/method.zig").Method;
 const VirtualMachine = @import("VirtualMachine.zig");
-
-const SLOTS_LOOKUP_DEBUG = debug.SLOTS_LOOKUP_DEBUG;
-const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
 pub const VisitedValueLink = struct { previous: ?*const VisitedValueLink = null, value: Value };
 
@@ -80,87 +74,3 @@ pub const SelectorHash = struct {
         return object.lookup(vm, self, previously_visited);
     }
 };
-
-// fn lookupInternal(
-//     self: Object,
-//     vm: *VirtualMachine,
-//     selector_hash: SelectorHash,
-//     previously_visited: ?*const VisitedValueLink,
-// ) LookupResult {
-//     switch (self.header.getObjectType()) {
-//         .ForwardingReference, .Map, .Method => unreachable,
-//         .Slots => {
-//         },
-//         .Activation => {
-//             const slots_lookup_result = slotsLookup(vm, Object.Activation, self.asActivationObject(), selector_hash, previously_visited);
-//             if (slots_lookup_result != .Nothing) return slots_lookup_result;
-
-//             // Receiver lookup
-//             return self.asActivationObject().receiver.lookupByHash(vm, selector_hash);
-//         },
-//         .Block => {
-//             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits block\n", .{});
-//             // NOTE: executeMessage will handle the execution of the block itself.
-//             const block_traits = vm.block_traits.getValue();
-//             if (selector_hash.regular == parent_hash)
-//                 return LookupResult{ .Regular = block_traits };
-
-//             return block_traits.lookupByHash(vm, selector_hash);
-//         },
-//         .Array => {
-//             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits array\n", .{});
-//             const array_traits = vm.array_traits.getValue();
-//             if (selector_hash.regular == parent_hash)
-//                 return LookupResult{ .Regular = array_traits };
-
-//             return array_traits.lookupByHash(vm, selector_hash);
-//         },
-//         .ByteArray => {
-//             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at traits string\n", .{});
-//             const string_traits = vm.string_traits.getValue();
-//             if (selector_hash.regular == parent_hash)
-//                 return LookupResult{ .Regular = string_traits };
-
-//             return string_traits.lookupByHash(vm, selector_hash);
-//         },
-//         .Managed => {
-//             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at a managed object type: {}\n", .{self.asManaged().getManagedType()});
-//             if (selector_hash.regular == value_hash) {
-//                 return LookupResult{ .Regular = self.asManaged().value };
-//             }
-
-//             return nothing;
-//         },
-//         .Actor => {
-//             @panic("TODO lookup on actor objects");
-//         },
-//         .ActorProxy => {
-//             if (LOOKUP_DEBUG) std.debug.print("Object.lookupInternal: Looking at an actor proxy object\n", .{});
-//             const actor_proxy = self.asActorProxyObject();
-//             const target_actor = actor_proxy.actor_object.get();
-//             return switch (target_actor.context.lookupByHash(vm, selector_hash)) {
-//                 .Nothing => nothing,
-//                 // FIXME: This should probably cause a different kind of error.
-//                 .Assignment => nothing,
-//                 .Regular => |lookup_result| blk: {
-//                     if (!(lookup_result.isObjectReference() and lookup_result.asObject().isMethodObject())) {
-//                         // NOTE: In zigSelf, all messages are async. Therefore
-//                         //       sending a message to a non-method slot will not
-//                         //       return any meaningful value to the user.
-//                         //       However it should also still be valid, so we
-//                         //       cannot return nothing here.
-//                         break :blk LookupResult{ .Regular = vm.nil() };
-//                     }
-
-//                     break :blk LookupResult{
-//                         .ActorMessage = .{
-//                             .target_actor = target_actor,
-//                             .method = lookup_result.asObject().asMethodObject(),
-//                         },
-//                     };
-//                 },
-//                 .ActorMessage => unreachable,
-//             };
-//         },
-//     }
-// }

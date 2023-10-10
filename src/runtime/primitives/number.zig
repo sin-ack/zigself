@@ -6,8 +6,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Value = @import("../value.zig").Value;
-const Completion = @import("../Completion.zig");
-const ExecutionResult = @import("../interpreter.zig").ExecutionResult;
+const RuntimeError = @import("../RuntimeError.zig");
+const ExecutionResult = @import("../execution_result.zig").ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 // FIXME: Add overflow checks here
@@ -28,7 +28,7 @@ pub fn IntAdd(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntAdd", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             _ = ctx;
-            return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(receiver + term)));
+            return ExecutionResult.resolve(Value.fromInteger(receiver + term));
         }
     }.op);
 }
@@ -38,7 +38,7 @@ pub fn IntSub(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntSub", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             _ = ctx;
-            return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(receiver - term)));
+            return ExecutionResult.resolve(Value.fromInteger(receiver - term));
         }
     }.op);
 }
@@ -48,7 +48,7 @@ pub fn IntMul(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntMul", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             _ = ctx;
-            return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(receiver * term)));
+            return ExecutionResult.resolve(Value.fromInteger(receiver * term));
         }
     }.op);
 }
@@ -59,8 +59,8 @@ pub fn IntDiv(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntDiv", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             if (term == 0)
-                return ExecutionResult.completion(try Completion.initRuntimeError(ctx.vm, ctx.source_range, "Division by zero", .{}));
-            return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(@divFloor(receiver, term))));
+                return ExecutionResult.runtimeError(RuntimeError.initLiteral(ctx.source_range, "Division by zero"));
+            return ExecutionResult.resolve(Value.fromInteger(@divFloor(receiver, term)));
         }
     }.op);
 }
@@ -71,8 +71,8 @@ pub fn IntMod(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntMod", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             if (term == 0)
-                return ExecutionResult.completion(try Completion.initRuntimeError(ctx.vm, ctx.source_range, "Modulo by zero", .{}));
-            return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(@mod(receiver, term))));
+                return ExecutionResult.runtimeError(RuntimeError.initLiteral(ctx.source_range, "Modulo by zero"));
+            return ExecutionResult.resolve(Value.fromInteger(@mod(receiver, term)));
         }
     }.op);
 }
@@ -83,19 +83,15 @@ pub fn IntShl(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntShl", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             if (term < 0 or term > 62)
-                return ExecutionResult.completion(
-                    try Completion.initRuntimeError(
-                        ctx.vm,
-                        ctx.source_range,
-                        "Argument to _IntShl: must be between 0 and 62",
-                        .{},
-                    ),
-                );
+                return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+                    ctx.source_range,
+                    "Argument to _IntShl: must be between 0 and 62",
+                ));
             // FIXME: These functions should be passed i62s in the first place,
             // but doing that requires making Value.fromInteger return 62-bit
             // integers.
             const result: i64 = (receiver << @as(u6, @intCast(term))) & ((@as(i64, 1) << 62) - 1);
-            return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(result)));
+            return ExecutionResult.resolve(Value.fromInteger(result));
         }
     }.op);
 }
@@ -106,19 +102,17 @@ pub fn IntShr(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntShr", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             if (term < 0 or term > 62)
-                return ExecutionResult.completion(
-                    try Completion.initRuntimeError(
-                        ctx.vm,
+                return ExecutionResult.runtimeError(
+                    RuntimeError.initLiteral(
                         ctx.source_range,
                         "Argument to _IntShr: must be between 0 and 62",
-                        .{},
                     ),
                 );
             // FIXME: These functions should be passed i62s in the first place,
             // but doing that requires making Value.fromInteger return 62-bit
             // integers.
             const result: i64 = (receiver >> @as(u6, @intCast(term))) & ((@as(i64, 1) << 62) - 1);
-            return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(result)));
+            return ExecutionResult.resolve(Value.fromInteger(result));
         }
     }.op);
 }
@@ -129,7 +123,7 @@ pub fn IntXor(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntXor", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             _ = ctx;
-            return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(receiver ^ term)));
+            return ExecutionResult.resolve(Value.fromInteger(receiver ^ term));
         }
     }.op);
 }
@@ -140,7 +134,7 @@ pub fn IntAnd(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntAnd", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             _ = ctx;
-            return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(receiver & term)));
+            return ExecutionResult.resolve(Value.fromInteger(receiver & term));
         }
     }.op);
 }
@@ -151,7 +145,7 @@ pub fn IntOr(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntOr", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
             _ = ctx;
-            return ExecutionResult.completion(Completion.initNormal(Value.fromInteger(receiver | term)));
+            return ExecutionResult.resolve(Value.fromInteger(receiver | term));
         }
     }.op);
 }
@@ -161,12 +155,12 @@ pub fn IntOr(context: *PrimitiveContext) !ExecutionResult {
 pub fn IntLT(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntLT", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
-            return ExecutionResult.completion(Completion.initNormal(
+            return ExecutionResult.resolve(
                 if (receiver < term)
                     ctx.vm.getTrue()
                 else
                     ctx.vm.getFalse(),
-            ));
+            );
         }
     }.op);
 }
@@ -176,12 +170,12 @@ pub fn IntLT(context: *PrimitiveContext) !ExecutionResult {
 pub fn IntGT(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntGT", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
-            return ExecutionResult.completion(Completion.initNormal(
+            return ExecutionResult.resolve(
                 if (receiver > term)
                     ctx.vm.getTrue()
                 else
                     ctx.vm.getFalse(),
-            ));
+            );
         }
     }.op);
 }
@@ -195,13 +189,13 @@ pub fn IntEq(context: *PrimitiveContext) !ExecutionResult {
     const term = arguments.getValue(0);
 
     if (!term.isInteger()) {
-        return ExecutionResult.completion(Completion.initNormal(context.vm.getFalse()));
+        return ExecutionResult.resolve(context.vm.getFalse());
     }
 
-    return ExecutionResult.completion(Completion.initNormal(
+    return ExecutionResult.resolve(
         if (receiver == term.asInteger())
             context.vm.getTrue()
         else
             context.vm.getFalse(),
-    ));
+    );
 }

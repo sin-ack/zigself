@@ -7,13 +7,14 @@ const std = @import("std");
 const Heap = @import("../Heap.zig");
 const Value = value_import.Value;
 const ByteArray = @import("../ByteArray.zig");
-const Completion = @import("../Completion.zig");
 const SlotsObject = @import("../objects/slots.zig").Slots;
 const array_object = @import("../objects/array.zig");
 const value_import = @import("../value.zig");
+const RuntimeError = @import("../RuntimeError.zig");
 const ManagedObject = @import("../objects/managed.zig").Managed;
 const FileDescriptor = @import("../objects/managed.zig").FileDescriptor;
 const ByteArrayObject = @import("../objects/byte_array.zig").ByteArray;
+const ExecutionResult = @import("../execution_result.zig").ExecutionResult;
 const value_inspector = @import("../value_inspector.zig");
 const addrinfo_object = @import("../objects/intrinsic/addrinfo.zig");
 const exceedsBoundsOf = @import("../../utility/bounds_check.zig").exceedsBoundsOf;
@@ -22,7 +23,6 @@ const AddrInfoMap = addrinfo_object.AddrInfoMap;
 
 const interpreter = @import("../interpreter.zig");
 
-const ExecutionResult = interpreter.ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 fn callFailureBlock(
@@ -34,11 +34,7 @@ fn callFailureBlock(
     const errno_value = Value.fromInteger(errno_int);
 
     try context.actor.argument_stack.push(context.vm.allocator, errno_value);
-    if (try interpreter.sendMessage(context.vm, context.actor, block, "value:", context.target_location, context.source_range)) |completion| {
-        return ExecutionResult.completion(completion);
-    }
-
-    return ExecutionResult.activationChange();
+    return try interpreter.sendMessage(context.vm, context.actor, block, "value:", context.target_location, context.source_range);
 }
 
 /// Create a managed FD out of a native FD value.
@@ -48,7 +44,7 @@ fn makeManagedFD(context: *PrimitiveContext, native_fd: std.os.fd_t, flags: File
 
     var fd = FileDescriptor.adopt(native_fd, flags);
     const managed_fd = try ManagedObject.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, fd.toValue());
-    return ExecutionResult.completion(Completion.initNormal(managed_fd.asValue()));
+    return ExecutionResult.resolve(managed_fd.asValue());
 }
 
 pub fn ManagedStdin(context: *PrimitiveContext) !ExecutionResult {
@@ -91,8 +87,7 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: *PrimitiveContext) !Executio
     const byte_array = try arguments.getObject(1, .ByteArray);
     const offset_int = try arguments.getInteger(2, .Unsigned);
     if (exceedsBoundsOf(offset_int, usize)) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initFormattedComptime(
             context.source_range,
             "Offset argument is larger than the maximum value allowed by your platform ({})",
             .{std.math.maxInt(usize)},
@@ -103,29 +98,23 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: *PrimitiveContext) !Executio
     const failure_block = arguments.getValue(4);
 
     if (fd.getManagedType() != .FileDescriptor) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Expected file descriptor as argument 4 of _Read:BytesInto:AtOffset:From:IfFail:",
-            .{},
         ));
     }
 
     if (byte_array.getValues().len < offset) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Offset argument is larger than byte array size",
-            .{},
         ));
     }
 
     if (byte_array.getValues().len - offset < bytes_to_read) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Bytes to read argument is larger than byte array size - offset",
-            .{},
         ));
     }
 
@@ -134,14 +123,14 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: *PrimitiveContext) !Executio
 
     const errno = std.os.system.getErrno(rc);
     return switch (errno) {
-        .SUCCESS => ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intCast(rc)))),
+        .SUCCESS => ExecutionResult.resolve(Value.fromUnsignedInteger(@intCast(rc))),
         .AGAIN => blk: {
             if (context.vm.isInRegularActor()) {
                 context.actor.yield_reason = .Blocked;
                 context.actor.blocked_fd = ManagedObject.Value.init(fd);
 
                 context.vm.switchToActor(context.vm.genesis_actor.?);
-                break :blk ExecutionResult.actorSwitch();
+                break :blk ExecutionResult.yield();
             }
 
             break :blk try callFailureBlock(context, errno, failure_block);
@@ -160,8 +149,7 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: *PrimitiveContext) !Executi
     const byte_array = try arguments.getObject(1, .ByteArray);
     const offset_int = try arguments.getInteger(2, .Unsigned);
     if (exceedsBoundsOf(offset_int, usize)) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initFormattedComptime(
             context.source_range,
             "Offset argument is larger than the maximum value allowed by your platform ({})",
             .{std.math.maxInt(usize)},
@@ -172,29 +160,23 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: *PrimitiveContext) !Executi
     const failure_block = arguments.getValue(4);
 
     if (fd.getManagedType() != .FileDescriptor) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Expected file descriptor as argument 4 of _Write:BytesFrom:AtOffset:Into:IfFail:",
-            .{},
         ));
     }
 
     if (byte_array.getValues().len < offset) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Offset argument is larger than byte array size",
-            .{},
         ));
     }
 
     if (byte_array.getValues().len - offset < bytes_to_write) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Bytes to write argument is larger than byte array size - offset",
-            .{},
         ));
     }
 
@@ -203,7 +185,7 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: *PrimitiveContext) !Executi
 
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
-        return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intCast(rc))));
+        return ExecutionResult.resolve(Value.fromUnsignedInteger(@intCast(rc)));
     }
 
     return try callFailureBlock(context, errno, failure_block);
@@ -216,11 +198,9 @@ pub fn Close(context: *PrimitiveContext) !ExecutionResult {
     const fd_object = try arguments.getObject(0, .Managed);
 
     if (fd_object.getManagedType() != .FileDescriptor) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Expected file descriptor as argument 1 of _Close:",
-            .{},
         ));
     }
 
@@ -229,7 +209,7 @@ pub fn Close(context: *PrimitiveContext) !ExecutionResult {
     // NOTE: Now that we closed the fd, we need to stuff this value back into
     //       the managed object as it operates independently.
     fd_object.value = fd.toValue();
-    return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
+    return ExecutionResult.resolve(context.vm.nil());
 }
 
 /// Exit with the given return code.
@@ -257,11 +237,9 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
     const failure_block = arguments.getValue(3);
 
     if (fds.getSize() != events.getSize()) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
-            "Argument 1 and 2 of _PollFDs:Events:WaitingForMS: must have the same size",
-            .{},
+            "Argument 1 and 2 of _PollFDs:Events:WaitingForMS:IfFail: must have the same size",
         ));
     }
 
@@ -273,21 +251,17 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
             }
         }
 
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
-            "Argument 1 of _PollFDs:Events:WaitingForMS: must be an array of file descriptors",
-            .{},
+            "Argument 1 of _PollFDs:Events:WaitingForMS:IfFail: must be an array of file descriptors",
         ));
     }
 
     for (events.getValues()) |event_flags| {
         if (!event_flags.isInteger()) {
-            return ExecutionResult.completion(try Completion.initRuntimeError(
-                context.vm,
+            return ExecutionResult.runtimeError(RuntimeError.initLiteral(
                 context.source_range,
-                "Argument 2 of _PollFDs:Events:WaitingForMS: must be an array of integers",
-                .{},
+                "Argument 2 of _PollFDs:Events:WaitingForMS:IfFail: must be an array of integers",
             ));
         }
     }
@@ -327,7 +301,7 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
         for (poll_fds, 0..) |pollfd, i| {
             event_values[i] = Value.fromInteger(@intCast(pollfd.revents));
         }
-        return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(@intCast(rc))));
+        return ExecutionResult.resolve(Value.fromUnsignedInteger(@intCast(rc)));
     }
 
     return try callFailureBlock(context, errno, failure_block);
@@ -370,11 +344,10 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
             }
         }
 
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initFormattedComptime(
             context.source_range,
-            "Expected nil or byte array object for argument 1 of " ++ primitive_name,
-            .{},
+            "Expected nil or byte array object for argument 1 of {s}",
+            .{primitive_name},
         ));
     };
     defer if (node_c) |str| context.vm.allocator.free(str);
@@ -442,7 +415,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
         }
     }
 
-    return ExecutionResult.completion(Completion.initNormal(result_array.asValue()));
+    return ExecutionResult.resolve(result_array.asValue());
 }
 
 /// Create a new socket with the given family, type and protocol.
@@ -479,11 +452,9 @@ pub fn BindFD_ToSockaddrBytes_IfFail(context: *PrimitiveContext) !ExecutionResul
     const failure_block = arguments.getValue(2);
 
     if (fd_object.getManagedType() != .FileDescriptor) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Expected file descriptor as argument 1 of _BindFD:ToSockaddrBytes:IfFail:",
-            .{},
         ));
     }
 
@@ -494,7 +465,7 @@ pub fn BindFD_ToSockaddrBytes_IfFail(context: *PrimitiveContext) !ExecutionResul
     const rc = std.os.system.bind(fd.fd, @ptrCast(@alignCast(sockaddr_bytes.ptr)), @intCast(sockaddr_bytes.len));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
-        return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
+        return ExecutionResult.resolve(context.vm.nil());
     }
 
     return try callFailureBlock(context, errno, failure_block);
@@ -508,11 +479,9 @@ pub fn ListenOnFD_WithBacklog_IfFail(context: *PrimitiveContext) !ExecutionResul
     const failure_block = arguments.getValue(2);
 
     if (fd_object.getManagedType() != .FileDescriptor) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Expected file descriptor as argument 1 of _BindFD:ToSockaddrBytes:IfFail:",
-            .{},
         ));
     }
 
@@ -521,7 +490,7 @@ pub fn ListenOnFD_WithBacklog_IfFail(context: *PrimitiveContext) !ExecutionResul
     const rc = std.os.system.listen(fd.fd, @intCast(backlog));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
-        return ExecutionResult.completion(Completion.initNormal(context.vm.nil()));
+        return ExecutionResult.resolve(context.vm.nil());
     }
 
     return try callFailureBlock(context, errno, failure_block);
@@ -535,11 +504,9 @@ pub fn AcceptFromFD_IfFail(context: *PrimitiveContext) !ExecutionResult {
     const failure_block = arguments.getValue(1);
 
     if (fd_object.getManagedType() != .FileDescriptor) {
-        return ExecutionResult.completion(try Completion.initRuntimeError(
-            context.vm,
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Expected file descriptor as argument 1 of _AcceptFromFD:IfFail:",
-            .{},
         ));
     }
 
@@ -564,7 +531,7 @@ pub fn AcceptFromFD_IfFail(context: *PrimitiveContext) !ExecutionResult {
                 context.actor.blocked_fd = ManagedObject.Value.init(fd_object);
 
                 context.vm.switchToActor(context.vm.genesis_actor.?);
-                break :blk ExecutionResult.actorSwitch();
+                break :blk ExecutionResult.yield();
             }
 
             break :blk callFailureBlock(context, errno, failure_block);

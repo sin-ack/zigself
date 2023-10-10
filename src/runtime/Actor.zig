@@ -12,12 +12,12 @@ const Value = value_import.Value;
 const Stack = @import("./stack.zig").Stack;
 const Range = @import("../language/Range.zig");
 const bytecode = @import("./bytecode.zig");
-const Completion = @import("./Completion.zig");
 const Activation = @import("./Activation.zig");
 const ActorObject = @import("objects/actor.zig").Actor;
 const interpreter = @import("./interpreter.zig");
 const SourceRange = @import("./SourceRange.zig");
 const MethodObject = @import("objects/method.zig").Method;
+const RuntimeError = @import("RuntimeError.zig");
 const value_import = @import("./value.zig");
 const ManagedObject = @import("objects/managed.zig").Managed;
 const VirtualMachine = @import("./VirtualMachine.zig");
@@ -104,8 +104,21 @@ pub const SavedRegister = struct {
 
 /// The result of actor execution.
 pub const ActorResult = union(enum) {
-    ActorSwitch,
-    Completion: Completion,
+    /// The current actor has switched.
+    Switched,
+    /// This actor has finished with a value.
+    Finished: Value,
+    /// An unrecoverable runtime error occurred.
+    RuntimeError: RuntimeError,
+
+    pub fn deinit(self: ActorResult, allocator: Allocator) void {
+        switch (self) {
+            .Switched,
+            .Finished,
+            => {},
+            .RuntimeError => |e| e.deinit(allocator),
+        }
+    }
 };
 
 /// The reason this actor has yielded.
@@ -229,15 +242,13 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
             self.message_sender = node.data.sender;
 
             switch (try self.executeUntil(vm, current_activation_ref)) {
-                .ActorSwitch => {
+                .Switched => {
                     return ActorResult{
-                        .Completion = try Completion.initRuntimeError(vm, node.data.source_range, "Actor message caused actor switch", .{}),
+                        .RuntimeError = RuntimeError.initLiteral(node.data.source_range, "Actor message caused actor switch"),
                     };
                 },
-                .Completion => |completion| switch (completion.data) {
-                    .Normal => {},
-                    .RuntimeError => return ActorResult{ .Completion = completion },
-                },
+                .Finished => {},
+                .RuntimeError => |e| return ActorResult{ .RuntimeError = e },
             }
 
             std.debug.assert(self.activation_stack.getCurrent() == current_activation_ref.get(self.activation_stack).?);
@@ -257,27 +268,7 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
 /// `until` is null, until all activations have been resolved).
 pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?Activation.ActivationRef) !ActorResult {
     var context = interpreter.InterpreterContext.init(vm, self, until);
-
-    while (true) {
-        const execution_result = try interpreter.execute(&context);
-
-        switch (execution_result) {
-            // These should've been handled by the interpreter.
-            .ActivationChange, .Restart => unreachable,
-            .ActorSwitch => {
-                return ActorResult{ .ActorSwitch = {} };
-            },
-            .Completion => |completion| {
-                switch (completion.data) {
-                    // If a normal completion is returned, then the last activation
-                    // has been exited and a result is reached.
-                    .Normal, .RuntimeError => return ActorResult{ .Completion = completion },
-                }
-            },
-        }
-    }
-
-    unreachable;
+    return try interpreter.execute(&context);
 }
 
 pub const ActivationExitState = enum { LastActivation, NotLastActivation };

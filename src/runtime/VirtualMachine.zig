@@ -19,7 +19,7 @@ const ByteArray = @import("./ByteArray.zig");
 const ActorObject = @import("objects/actor.zig").Actor;
 const SlotsObject = slots_object.Slots;
 const slots_object = @import("objects/slots.zig");
-const runtime_error = @import("./error.zig");
+const stack_trace = @import("./stack_trace.zig");
 const RegisterLocation = @import("./bytecode.zig").RegisterLocation;
 
 /// The allocator object that will be used throughout the virtual machine's
@@ -275,70 +275,65 @@ pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
 
         var actor_result = try self.current_actor.execute(self);
         switch (actor_result) {
-            .ActorSwitch => continue,
-            .Completion => |*completion| {
-                defer completion.deinit(self);
+            .Switched => continue,
+            .Finished => |value| {
+                self.current_actor.unwindStacks();
 
-                switch (completion.data) {
-                    .Normal => |value| {
-                        self.current_actor.unwindStacks();
-
-                        if (self.current_actor == self.global_actor) {
-                            return value;
-                        }
-
-                        if (self.genesis_actor) |genesis_actor| {
-                            if (self.current_actor == genesis_actor) {
-                                self.global_actor.writeRegister(current_actor_target_location, value);
-                                self.genesis_actor = null;
-                                self.switchToActor(self.global_actor);
-                            } else {
-                                self.current_actor.yield_reason = .Dead;
-                                if (!self.unregisterRegularActor(self.current_actor))
-                                    @panic("!!! Actor {*} was not registered as a regular actor while dying!");
-                                // FIXME: Write something meaningful to the
-                                //        return location of _ActorResume for the
-                                //        genesis actor.
-                                self.switchToActor(genesis_actor);
-                            }
-                        }
-                    },
-                    .RuntimeError => |err| {
-                        if (self.isInRegularActor()) {
-                            if (!self.silent_errors) {
-                                std.debug.print("Actor received error at top level: {s}\n", .{err.message});
-                                runtime_error.printTraceFromActivationStack(self.current_actor.activation_stack.getStack(), err.source_range);
-                            }
-
-                            const actor = self.current_actor;
-                            // FIXME: In the future we will want to hang onto
-                            //        the regular actor in order to obtain debug
-                            //        information from it.
-                            if (!self.unregisterRegularActor(actor))
-                                @panic("!!! Actor {*} was not registered as a regular actor while receiving a runtime error!");
-
-                            actor.yield_reason = .RuntimeError;
-                            // FIXME: Write something meaningful to the return
-                            //        location of _ActorResume for the genesis
-                            //        actor.
-                            self.switchToActor(self.genesis_actor.?);
-                            continue;
-                        }
-
-                        if (!self.silent_errors) {
-                            std.debug.print("Received error at top level: {s}\n", .{err.message});
-                            runtime_error.printTraceFromActivationStack(self.current_actor.activation_stack.getStack(), err.source_range);
-                        }
-
-                        self.switchToActor(self.global_actor);
-                        // Clean up the genesis actor in case more code is run
-                        // in the VM later on.
-                        self.genesis_actor = null;
-
-                        self.current_actor.unwindStacks();
-                        return null;
-                    },
+                if (self.current_actor == self.global_actor) {
+                    return value;
                 }
+
+                if (self.genesis_actor) |genesis_actor| {
+                    if (self.current_actor == genesis_actor) {
+                        self.global_actor.writeRegister(current_actor_target_location, value);
+                        self.genesis_actor = null;
+                        self.switchToActor(self.global_actor);
+                    } else {
+                        self.current_actor.yield_reason = .Dead;
+                        if (!self.unregisterRegularActor(self.current_actor))
+                            std.debug.panic("!!! Actor {*} was not registered as a regular actor while dying!", .{self.current_actor});
+                        // FIXME: Write something meaningful to the return
+                        //        location of _ActorResume for the genesis
+                        //        actor.
+                        self.switchToActor(genesis_actor);
+                    }
+                }
+            },
+            .RuntimeError => |*err| {
+                defer err.deinit(self.allocator);
+
+                if (self.isInRegularActor()) {
+                    if (!self.silent_errors) {
+                        std.debug.print("Actor received error at top level: {s}\n", .{err.getMessage()});
+                        stack_trace.printTraceFromActivationStack(self.current_actor.activation_stack.getStack(), err.source_range);
+                    }
+
+                    const actor = self.current_actor;
+                    // FIXME: In the future we will want to hang onto the
+                    //        regular actor in order to obtain debug information
+                    //        from it.
+                    if (!self.unregisterRegularActor(actor))
+                        std.debug.print("!!! Actor {*} was not registered as a regular actor while receiving a runtime error!", .{actor});
+
+                    actor.yield_reason = .RuntimeError;
+                    // FIXME: Write something meaningful to the return location
+                    //        of _ActorResume for the genesis actor.
+                    self.switchToActor(self.genesis_actor.?);
+                    continue;
+                }
+
+                if (!self.silent_errors) {
+                    std.debug.print("Received error at top level: {s}\n", .{err.getMessage()});
+                    stack_trace.printTraceFromActivationStack(self.current_actor.activation_stack.getStack(), err.source_range);
+                }
+
+                self.switchToActor(self.global_actor);
+                // Clean up the genesis actor in case more code is run in the VM
+                // later on.
+                self.genesis_actor = null;
+
+                self.current_actor.unwindStacks();
+                return null;
             },
         }
     }

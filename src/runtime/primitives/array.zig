@@ -9,9 +9,9 @@ const Heap = @import("../Heap.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig").Object;
 const traversal = @import("../object_traversal.zig");
-const Completion = @import("../Completion.zig");
 const array_object = @import("../objects/array.zig");
-const ExecutionResult = @import("../interpreter.zig").ExecutionResult;
+const RuntimeError = @import("../RuntimeError.zig");
+const ExecutionResult = @import("../execution_result.zig").ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 /// Copy the receiver array and create a new one with the size given as the
@@ -32,14 +32,14 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
     if (size == 0) {
         const array_map = array_object.ArrayMap.create(context.vm.getMapMap(), &token, 0);
         const array = array_object.Array.createWithValues(&token, context.actor.id, array_map, &[_]Value{}, null);
-        return ExecutionResult.completion(Completion.initNormal(array.asValue()));
+        return ExecutionResult.resolve(array.asValue());
     } else {
         const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
         const filler = arguments.getValue(1);
 
         const new_array_map = array_object.ArrayMap.create(context.vm.getMapMap(), &token, @intCast(size));
         const new_array = array_object.Array.createWithValues(&token, context.actor.id, new_array_map, receiver.getValues(), filler);
-        return ExecutionResult.completion(Completion.initNormal(new_array.asValue()));
+        return ExecutionResult.resolve(new_array.asValue());
     }
 }
 
@@ -47,7 +47,7 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
 pub fn ArraySize(context: *PrimitiveContext) !ExecutionResult {
     const arguments = context.getArguments("_ArraySize");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
-    return ExecutionResult.completion(Completion.initNormal(Value.fromUnsignedInteger(receiver.getSize())));
+    return ExecutionResult.resolve(Value.fromUnsignedInteger(receiver.getSize()));
 }
 
 /// Return the value at the given position of the receiver array. If the given
@@ -60,8 +60,8 @@ pub fn ArrayAt(context: *PrimitiveContext) !ExecutionResult {
 
     const array_values = receiver.getValues();
     if (position >= array_values.len) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(
+        return ExecutionResult.runtimeError(
+            try RuntimeError.initFormatted(
                 context.vm,
                 context.source_range,
                 "Position passed to _ArrayAt: is out of bounds (position: {d}, size: {d})",
@@ -70,7 +70,7 @@ pub fn ArrayAt(context: *PrimitiveContext) !ExecutionResult {
         );
     }
 
-    return ExecutionResult.completion(Completion.initNormal(array_values[@intCast(position)]));
+    return ExecutionResult.resolve(array_values[@intCast(position)]);
 }
 
 /// Place the object in the second argument to the integer position in the first
@@ -85,20 +85,16 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
     if (try context.wouldOverflow(usize, position, "position")) |result| return result;
 
     if (!context.actor.canWriteTo(context.receiver.getValue())) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(
-                context.vm,
-                context.source_range,
-                "_ArrayAt:Put: receiver is not writable for actor",
-                .{},
-            ),
-        );
+        return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+            context.source_range,
+            "_ArrayAt:Put: receiver is not writable for actor",
+        ));
     }
 
     const array_values = receiver.getValues();
     if (position >= array_values.len) {
-        return ExecutionResult.completion(
-            try Completion.initRuntimeError(
+        return ExecutionResult.runtimeError(
+            try RuntimeError.initFormatted(
                 context.vm,
                 context.source_range,
                 "Position passed to _ArrayAt:Put: is out of bounds (position: {d}, size: {d})",
@@ -124,5 +120,5 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
     // value stored in it, let's add the array object to the remembered set.
     try context.vm.heap.rememberObjectReference(receiver.asValue(), new_value);
 
-    return ExecutionResult.completion(Completion.initNormal(receiver.asValue()));
+    return ExecutionResult.resolve(receiver.asValue());
 }

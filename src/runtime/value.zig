@@ -12,7 +12,6 @@ const debug = @import("../debug.zig");
 const Object = @import("object.zig").Object;
 const RefPtr = @import("../utility/ref_counted.zig").RefPtr;
 const ByteArray = @import("./ByteArray.zig");
-const Completion = @import("./Completion.zig");
 const LookupResult = object_lookup.LookupResult;
 const SelectorHash = object_lookup.SelectorHash;
 const object_lookup = @import("object_lookup.zig");
