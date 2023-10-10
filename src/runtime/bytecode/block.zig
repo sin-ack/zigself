@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const instruction = @import("./instruction.zig");
+const Range = @import("../../language/Range.zig");
 
 const AccessMode = enum { ByField, ByInstruction };
 fn Block(comptime InstructionT: type, comptime access_mode: AccessMode) type {
@@ -47,11 +48,13 @@ fn Block(comptime InstructionT: type, comptime access_mode: AccessMode) type {
             comptime opcode: Instruction.Opcode,
             target: Instruction.RegisterLocation,
             payload: opcode.PayloadT(),
+            source_range: Range,
         ) !void {
             try self.instructions.append(allocator, .{
                 .target = target,
                 .opcode = opcode,
                 .payload = @unionInit(Instruction.Payload, opcode.payloadField(), payload),
+                .source_range = source_range,
             });
         }
 
@@ -62,11 +65,13 @@ fn Block(comptime InstructionT: type, comptime access_mode: AccessMode) type {
             comptime opcode: Instruction.Opcode,
             target: Instruction.RegisterLocation,
             payload: opcode.PayloadT(),
+            source_range: Range,
         ) void {
             const inst = Instruction{
                 .target = target,
                 .opcode = opcode,
                 .payload = @unionInit(Instruction.Payload, opcode.payloadField(), payload),
+                .source_range = source_range,
             };
 
             switch (access_mode) {
@@ -93,6 +98,13 @@ fn Block(comptime InstructionT: type, comptime access_mode: AccessMode) type {
             return switch (access_mode) {
                 .ByField => self.instructions.items(.payload)[index],
                 .ByInstruction => self.instructions.items[index].payload,
+            };
+        }
+
+        pub fn getSourceRange(self: Self, index: u32) Range {
+            return switch (access_mode) {
+                .ByField => self.instructions.items(.source_range)[index],
+                .ByInstruction => self.instructions.items[index].source_range,
             };
         }
 

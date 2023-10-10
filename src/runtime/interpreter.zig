@@ -143,7 +143,6 @@ fn opcodeHandler(comptime opcode: bytecode.Instruction.Opcode) OpcodeHandler {
         .PushArg => opcodePushArg,
         .PushRegisters => opcodePushRegisters,
         .SetMethodInline => opcodeSetMethodInline,
-        .SourceRange => opcodeSourceRange,
         .PushArgumentSentinel => opcodePushArgumentSentinel,
         .PushSlotSentinel => opcodePushSlotSentinel,
         .VerifyArgumentSentinel => opcodeVerifyArgumentSentinel,
@@ -174,6 +173,7 @@ pub fn makeSpecializedExecutor(comptime opcode: bytecode.Instruction.Opcode) Exe
                 std.debug.print("[#{} {s}] Executing: {} = {}\n", .{ context.actor.id, context.getDefinitionExecutable().value.definition_script.value.file_path, inst.target, inst });
             }
 
+            context.actor.range = context.getCurrentBytecodeBlock().getSourceRange(context.getInstructionIndex());
             const result = try @call(.always_inline, opcodeHandler(opcode), .{context});
             const new_instruction_index = new_instruction_index: {
                 switch (result) {
@@ -404,11 +404,6 @@ fn opcodePushRegisters(context: *InterpreterContext) InterpreterError!ExecutionR
 
 fn opcodeSetMethodInline(context: *InterpreterContext) InterpreterError!ExecutionResult {
     context.actor.next_method_is_inline = true;
-    return ExecutionResult.normal();
-}
-
-fn opcodeSourceRange(context: *InterpreterContext) InterpreterError!ExecutionResult {
-    context.actor.range = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .SourceRange);
     return ExecutionResult.normal();
 }
 

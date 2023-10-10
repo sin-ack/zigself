@@ -39,7 +39,7 @@ fn addIntervalForRegister(self: *Liveness, allocator: Allocator, location: astco
     var end = start;
 
     for (block.instructions.items[start + 1 ..], 0..) |inst, i| {
-        if (instructionReferencesRegister(inst, location)) {
+        if (instructionReferencesRegister(inst, location) and start + i > 0) {
             // The register died with this instruction, so it was last alive on the instruction before it.
             end = start + i - 1;
         }
@@ -79,7 +79,6 @@ fn instructionReferencesRegister(inst: astcode.Instruction, location: astcode.Re
         .CreateBlock,
         .CreateByteArray,
         .SetMethodInline,
-        .SourceRange,
         .PushArgumentSentinel,
         .PushSlotSentinel,
         .VerifyArgumentSentinel,

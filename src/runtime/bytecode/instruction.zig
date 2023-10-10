@@ -13,6 +13,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
         target: RegisterLocation,
         opcode: Opcode,
         payload: Payload,
+        source_range: Range,
 
         const Self = @This();
         pub const RegisterLocation = RegisterLocationT;
@@ -46,9 +47,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
 
             // Modifiers
             SetMethodInline,
-
-            // Source range
-            SourceRange,
 
             // Exiting an activation
             Return,
@@ -86,7 +84,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .Return => "return",
                     .NonlocalReturn => "nonlocal_return",
                     .PushArg => "push_arg",
-                    .SourceRange => "source_range",
                     .PushArgumentSentinel => "push_argument_sentinel",
                     .PushSlotSentinel => "push_slot_sentinel",
                     .VerifyArgumentSentinel => "verify_argument_sentinel",
@@ -110,7 +107,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .CreateBlock => "CreateBlock",
                     .CreateByteArray => "CreateByteArray",
                     .PushArg => "PushArg",
-                    .SourceRange => "SourceRange",
 
                     .PushArgumentSentinel, .PushSlotSentinel, .VerifyArgumentSentinel, .VerifySlotSentinel, .SetMethodInline => "None",
                 };
@@ -163,7 +159,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
                 slot_count: u32,
                 block_index: u32,
             },
-            SourceRange: Range,
             Return: struct {
                 value_location: RegisterLocation,
             },
@@ -249,11 +244,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
 
                 .PushArg => {
                     try std.fmt.format(writer, "({})", .{inst.payload.PushArg.argument_location});
-                },
-
-                .SourceRange => {
-                    const payload = inst.payload.SourceRange;
-                    try std.fmt.format(writer, "({}:{})", .{ payload.start, payload.end });
                 },
 
                 .PushArgumentSentinel,
