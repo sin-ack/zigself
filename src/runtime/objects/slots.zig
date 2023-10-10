@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -229,17 +229,11 @@ pub const Slots = extern struct {
         // with the same name should override ours.
         next_target_slot: for (target_object.getSlots()) |target_slot| {
             for (source_object.getSlots()) |source_slot| {
-                if (source_slot.isInheritedChild())
-                    continue;
-
                 if (source_slot.getHash() == target_slot.getHash()) {
                     try callback(context, source_object, source_slot);
                     continue :next_target_slot;
                 }
             }
-
-            if (target_slot.isInheritedChild())
-                continue;
 
             try callback(context, target_object, target_slot);
         }
@@ -253,38 +247,8 @@ pub const Slots = extern struct {
                 }
             }
 
-            if (source_slot.isInheritedChild())
-                continue;
-
             try callback(context, source_object, source_slot);
         }
-    }
-
-    /// Like forSlotsInMergeOrder but first calls with only inherited slots,
-    /// and then calls with no inherited slots.
-    fn forSlotsInMergeOrderWithInheritedFirst(
-        target_object: Slots.Ptr,
-        source_object: Slots.Ptr,
-        context: anytype,
-        comptime callback: fn (context: @TypeOf(context), object: Slots.Ptr, slot: Slot) Allocator.Error!void,
-    ) !void {
-        const ContextT = @TypeOf(context);
-
-        try forSlotsInMergeOrder(target_object, source_object, context, struct {
-            fn outerCallback(ctx: ContextT, object: Slots.Ptr, slot: Slot) !void {
-                if (!slot.isInherited())
-                    return;
-                try callback(ctx, object, slot);
-            }
-        }.outerCallback);
-
-        try forSlotsInMergeOrder(target_object, source_object, context, struct {
-            fn outerCallback(ctx: ContextT, object: Slots.Ptr, slot: Slot) !void {
-                if (slot.isInherited())
-                    return;
-                try callback(ctx, object, slot);
-            }
-        }.outerCallback);
     }
 
     /// Add the source slots into the target object. This operation may cause a
@@ -322,7 +286,7 @@ pub const Slots = extern struct {
             .target_object_reachability = self.object.object_information.reachability,
         };
         const Context = @TypeOf(the_context);
-        forSlotsInMergeOrderWithInheritedFirst(self, source_object, the_context, struct {
+        forSlotsInMergeOrder(self, source_object, the_context, struct {
             fn callback(context: Context, object: Slots.Ptr, slot: Slot) !void {
                 const slot_copy = slot.copy(object);
                 context.map_builder.addSlot(slot_copy);
@@ -418,7 +382,7 @@ pub const Slots = extern struct {
             source_object: Slots.Ptr,
         };
 
-        try forSlotsInMergeOrderWithInheritedFirst(target_object, source_object, CallbackContext{
+        try forSlotsInMergeOrder(target_object, source_object, CallbackContext{
             .merged_slots = &merged_slots,
             .slots = &slots,
             .assignable_slot_values = &assignable_slot_values,

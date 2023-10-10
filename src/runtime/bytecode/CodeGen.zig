@@ -1,4 +1,4 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -114,16 +114,6 @@ fn lowerInstruction(
             const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
 
             try block.addInstruction(allocator, .PushArgumentSlot, .zero, .{
-                .name_location = name_location,
-                .value_location = value_location,
-            }, inst.source_range);
-        },
-        .PushInheritedSlot => {
-            const payload = inst.payload.PushNonParentSlot;
-            const name_location = register_pool.getAllocatedRegisterFor(payload.name_location);
-            const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
-
-            try block.addInstruction(allocator, .PushInheritedSlot, .zero, .{
                 .name_location = name_location,
                 .value_location = value_location,
             }, inst.source_range);

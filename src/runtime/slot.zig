@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -26,15 +26,11 @@ const SlotProperties = packed struct {
     const ParentShift = 0;
     const AssignableShift = 1;
     const ArgumentShift = 2;
-    const InheritedShift = 3;
-    const InheritedChildShift = 4;
-    const IndexAssignedShift = 5;
+    const IndexAssignedShift = 3;
 
     const ParentBit: u62 = 1 << ParentShift;
     const AssignableBit: u62 = 1 << AssignableShift;
     const ArgumentBit: u62 = 1 << ArgumentShift;
-    const InheritedBit: u62 = 1 << InheritedShift;
-    const InheritedChildBit: u62 = 1 << InheritedChildShift;
     // Used for sanity checks.
     const IndexAssignedBit: u62 = 1 << IndexAssignedShift;
 
@@ -48,20 +44,12 @@ const SlotProperties = packed struct {
     /// Whether this slot is an argument slot. Argument slot values will only
     /// exist on activation objects.
     pub const ArgumentFlag = enum { Argument, NotArgument };
-    /// Whether this slot is inherited. Inherited slots copy their value's slots
-    /// to their holder object and update the holder object whenever the value
-    /// object has its slots changed.
-    pub const InheritedFlag = enum { Inherited, NotInherited };
-    /// Whether this slot was added to the object through an inherited slot.
-    pub const InheritedChildFlag = enum { InheritedChild, NotInheritedChild };
 
     pub fn init(
         name: []const u8,
         parent: ParentFlag,
         assignable: AssignableFlag,
         argument: ArgumentFlag,
-        inherited: InheritedFlag,
-        inherited_child: InheritedChildFlag,
     ) SlotProperties {
         const name_hash = hash.stringHash(name);
         var properties: u62 = @as(u62, name_hash) << 30;
@@ -71,10 +59,6 @@ const SlotProperties = packed struct {
             properties |= AssignableBit;
         if (argument == .Argument)
             properties |= ArgumentBit;
-        if (inherited == .Inherited)
-            properties |= InheritedBit;
-        if (inherited_child == .InheritedChild)
-            properties |= InheritedChildBit;
 
         return .{ .properties = Value.fromUnsignedInteger(properties) };
     }
@@ -89,20 +73,6 @@ const SlotProperties = packed struct {
 
     pub fn isArgument(self: SlotProperties) bool {
         return self.properties.asUnsignedInteger() & ArgumentBit > 0;
-    }
-
-    pub fn isInherited(self: SlotProperties) bool {
-        return self.properties.asUnsignedInteger() & InheritedBit > 0;
-    }
-
-    pub fn isInheritedChild(self: SlotProperties) bool {
-        return self.properties.asUnsignedInteger() & InheritedChildBit > 0;
-    }
-
-    fn setInheritedChild(self: *SlotProperties) void {
-        self.properties = Value.fromUnsignedInteger(
-            self.properties.asUnsignedInteger() | InheritedChildBit,
-        );
     }
 
     fn isIndexAssigned(self: SlotProperties) bool {
@@ -146,21 +116,16 @@ pub const Slot = packed struct {
     pub const Ptr = pointer.HeapPtr(Slot, .Mutable);
 
     pub fn initConstant(name: ByteArray, parent: SlotProperties.ParentFlag, value: Value) Slot {
-        return init(name, parent, .Constant, .NotArgument, .NotInherited, value);
+        return init(name, parent, .Constant, .NotArgument, value);
     }
 
     pub fn initAssignable(name: ByteArray, parent: SlotProperties.ParentFlag, value: Value) Slot {
-        return init(name, parent, .Assignable, .NotArgument, .NotInherited, value);
+        return init(name, parent, .Assignable, .NotArgument, value);
     }
 
     pub fn initArgument(name: ByteArray) Slot {
         // FIXME: Somehow obtain vm.nil()
-        return init(name, .NotParent, .Assignable, .Argument, .NotInherited, Value.fromUnsignedInteger(0));
-    }
-
-    pub fn initInherited(name: ByteArray, value: Value) Slot {
-        std.debug.assert(value.isObjectReference() and value.asObject().object_information.object_type == .Slots);
-        return init(name, .NotParent, .Constant, .NotArgument, .Inherited, value);
+        return init(name, .NotParent, .Assignable, .Argument, Value.fromUnsignedInteger(0));
     }
 
     fn init(
@@ -168,10 +133,9 @@ pub const Slot = packed struct {
         parent: SlotProperties.ParentFlag,
         assignable: SlotProperties.AssignableFlag,
         argument: SlotProperties.ArgumentFlag,
-        inherited: SlotProperties.InheritedFlag,
         value: Value,
     ) Slot {
-        const properties = SlotProperties.init(name.getValues(), parent, assignable, argument, inherited, .NotInheritedChild);
+        const properties = SlotProperties.init(name.getValues(), parent, assignable, argument);
 
         return .{
             .name = name.asValue(),
@@ -190,14 +154,6 @@ pub const Slot = packed struct {
 
     pub fn isArgument(self: Slot) bool {
         return self.properties.isArgument();
-    }
-
-    pub fn isInherited(self: Slot) bool {
-        return self.properties.isInherited();
-    }
-
-    pub fn isInheritedChild(self: Slot) bool {
-        return self.properties.isInheritedChild();
     }
 
     /// Assign an index to the current slot, and return the value previously
@@ -237,10 +193,6 @@ pub const Slot = packed struct {
     pub fn copy(self: Slot, holder: anytype) Slot {
         const name = self.name.asByteArray();
 
-        if (self.isInherited()) {
-            return initInherited(name, self.value);
-        }
-
         if (self.isArgument()) {
             return initArgument(name);
         }
@@ -261,24 +213,13 @@ pub const Slot = packed struct {
         @compileError("getSlotWithMyName must receive either []Slot or []const Slot as previous_slots");
     }
 
-    const TraverseInheritedSlots = enum { Traverse, DontTraverse };
     /// Return a pointer to a slot from the previous slots slice which has the
-    /// same name (hash) as this slot. If traverse_inherited_slots is Traverse,
-    /// then also looks at the slots of inherited slot values.
-    fn getSlotWithMyName(self: Slot, comptime traverse_inherited_slots: TraverseInheritedSlots, previous_slots: anytype) GetSlotWithMyNameResult(@TypeOf(previous_slots)) {
+    /// same name (hash) as this slot.
+    fn getSlotWithMyName(self: Slot, previous_slots: anytype) GetSlotWithMyNameResult(@TypeOf(previous_slots)) {
         // NOTE: Walking backwards to find the first slot that overwrote the
         //       earlier ones.
         for (previous_slots, 0..) |_, index| {
             const slot = &previous_slots[previous_slots.len - 1 - index];
-
-            if (traverse_inherited_slots == .Traverse and slot.isInherited()) {
-                const inherited_slots = slot.value.asObject().mustBeType(.Slots).getSlots();
-                for (inherited_slots, 0..) |_, inherited_index| {
-                    const inherited_slot = &inherited_slots[inherited_slots.len - 1 - inherited_index];
-                    if (self.getHash() == inherited_slot.getHash())
-                        return inherited_slot;
-                }
-            }
 
             if (self.getHash() == slot.getHash())
                 return slot;
@@ -290,31 +231,7 @@ pub const Slot = packed struct {
     /// Return how many slot spaces this slot needs on the map for its contents.
     /// Takes a slice of slots that come before this slot.
     pub fn requiredSlotSpace(self: Slot, previous_slots: Slot.ConstSlice) u32 {
-        if (self.isInherited()) {
-            // FIXME: Turn this into a runtime error instead of a panic.
-            if (self.getSlotWithMyName(.Traverse, previous_slots) != null)
-                @panic("Name collision is not allowed for inherited slots");
-
-            // 1 for the slot itself.
-            var slot_count: u32 = 1;
-
-            next_slot: for (self.value.asObject().mustBeType(.Slots).getSlots()) |inherited_slot| {
-                if (inherited_slot.isInherited()) {
-                    // We don't want to inherit the inherited slots in the inherited object.
-                    // (Try saying that 3 times fast...)
-                    continue :next_slot;
-                }
-
-                if (inherited_slot.getSlotWithMyName(.Traverse, previous_slots) != null)
-                    continue :next_slot;
-
-                slot_count += 1;
-            }
-
-            return slot_count;
-        }
-
-        return if (self.getSlotWithMyName(.Traverse, previous_slots) != null) 0 else 1;
+        return if (self.getSlotWithMyName(previous_slots) != null) 0 else 1;
     }
 
     /// Return how many assignable slot value spaces this slot needs on the
@@ -323,34 +240,8 @@ pub const Slot = packed struct {
     /// assignable slot and does not consume an assignable slot value space
     /// itself.
     pub fn requiredAssignableSlotValueSpace(self: Slot, previous_slots: Slot.ConstSlice) i32 {
-        if (self.isInherited()) {
-            // FIXME: Turn this into a runtime error instead of a panic.
-            if (self.getSlotWithMyName(.Traverse, previous_slots) != null)
-                @panic("Name collision is not allowed for inherited slots");
-
-            var slot_count: i32 = 0;
-
-            next_slot: for (self.value.asObject().mustBeType(.Slots).getSlots()) |inherited_slot| {
-                if (inherited_slot.isInherited()) {
-                    // We don't want to inherit the inherited slots in the inherited object.
-                    // (Try saying that 3 times fast...)
-                    continue :next_slot;
-                }
-
-                if (inherited_slot.getSlotWithMyName(.Traverse, previous_slots)) |previous_slot| {
-                    if (previous_slot.isAssignable() and !previous_slot.isArgument())
-                        slot_count -= 1;
-                }
-
-                if (inherited_slot.isAssignable() and !inherited_slot.isArgument())
-                    slot_count += 1;
-            }
-
-            return slot_count;
-        }
-
         var diff: i32 = 0;
-        if (self.getSlotWithMyName(.Traverse, previous_slots)) |previous_slot| {
+        if (self.getSlotWithMyName(previous_slots)) |previous_slot| {
             if (previous_slot.isAssignable() and !previous_slot.isArgument())
                 diff -= 1;
         }
@@ -374,17 +265,15 @@ pub const Slot = packed struct {
         assignable_slot_index: *usize,
         argument_slot_index: *usize,
     ) void {
+        _ = heap;
         var previous_slots = target_slots[0..slot_index.*];
         var current_slot_ptr: Slot.Ptr = undefined;
 
         // If a previous slot with the same name exists then we need to undo the
         // changes from the previous slot.
-        if (self.getSlotWithMyName(.DontTraverse, previous_slots)) |previous_slot| {
+        if (self.getSlotWithMyName(previous_slots)) |previous_slot| {
             current_slot_ptr = previous_slot;
 
-            // FIXME: Turn this into a runtime error instead of a panic.
-            if (previous_slot.isInherited())
-                @panic("Name collision is not allowed for inherited slots");
             if (previous_slot.isArgument())
                 @panic("TODO: Handle overriding of argument slots");
 
@@ -412,30 +301,7 @@ pub const Slot = packed struct {
 
         current_slot_ptr.* = self;
 
-        if (self.isInherited()) {
-            const inherited_object = self.value.asObject().mustBeType(.Slots);
-            next_slot: for (inherited_object.getSlots()) |inherited_slot| {
-                if (inherited_slot.isInherited()) {
-                    // We don't want to inherit the inherited slots in the inherited object.
-                    // (Try saying that 3 times fast...)
-                    continue :next_slot;
-                }
-
-                // Create a copy in order to fold the assignable slot value back
-                // into the slot.
-                var inherited_slot_copy = inherited_slot.copy(inherited_object);
-                inherited_slot_copy.properties.setInheritedChild();
-                inherited_slot_copy.writeContentsTo(
-                    heap,
-                    target_slots,
-                    assignable_slot_values,
-                    slot_index,
-                    assignable_slot_index,
-                    argument_slot_index,
-                );
-                previous_slots = target_slots[0..slot_index.*];
-            }
-        } else if (self.isArgument()) {
+        if (self.isArgument()) {
             std.debug.assert(argument_slot_index.* < AstGen.MaximumArguments);
 
             _ = current_slot_ptr.assignIndex(@intCast(argument_slot_index.*));

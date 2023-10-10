@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -110,10 +110,8 @@ pub const SlotNode = struct {
     is_mutable: bool,
     is_parent: bool,
     is_argument: bool,
-    is_inherited: bool,
 
     /// The ID of this slot in definition order.
-    /// Inherited slots are always hoisted to the top.
     order: usize,
 
     name: []const u8,

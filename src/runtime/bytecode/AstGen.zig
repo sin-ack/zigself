@@ -1,4 +1,4 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -343,16 +343,7 @@ fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots
             break :blk RegisterLocation.Nil;
         };
 
-        if (slot.is_inherited) {
-            std.debug.assert(!slot.is_mutable);
-            std.debug.assert(!slot.is_argument);
-            std.debug.assert(!slot.is_parent);
-
-            try block.addInstruction(executable.allocator, .PushInheritedSlot, .Nil, .{
-                .name_location = slot_name_location,
-                .value_location = slot_value_location,
-            }, slot.range);
-        } else if (slot.is_argument) {
+        if (slot.is_argument) {
             std.debug.assert(slot.is_mutable);
             std.debug.assert(!slot.is_parent);
 

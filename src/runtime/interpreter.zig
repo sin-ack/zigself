@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -131,7 +131,6 @@ fn opcodeHandler(comptime opcode: bytecode.Instruction.Opcode) OpcodeHandler {
         .PushConstantSlot => opcodePushConstantSlot,
         .PushAssignableSlot => opcodePushAssignableSlot,
         .PushArgumentSlot => opcodePushArgumentSlot,
-        .PushInheritedSlot => opcodePushInheritedSlot,
         .CreateInteger => opcodeCreateInteger,
         .CreateFloatingPoint => opcodeCreateFloatingPoint,
         .CreateByteArray => opcodeCreateByteArray,
@@ -263,16 +262,6 @@ fn opcodePushArgumentSlot(context: *InterpreterContext) InterpreterError!Executi
     const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initArgument(name_byte_array_object.getByteArray()));
-    return ExecutionResult.normal();
-}
-
-fn opcodePushInheritedSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
-    const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushInheritedSlot);
-    const name_value = context.vm.readRegister(payload.name_location);
-    const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
-    const value = context.vm.readRegister(payload.value_location);
-
-    try context.actor.slot_stack.push(context.vm.allocator, Slot.initInherited(name_byte_array_object.getByteArray(), value));
     return ExecutionResult.normal();
 }
 

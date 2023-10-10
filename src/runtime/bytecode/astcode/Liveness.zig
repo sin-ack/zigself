@@ -57,7 +57,7 @@ fn instructionReferencesRegister(inst: astcode.Instruction, location: astcode.Re
             const payload = inst.payload.PushParentableSlot;
             break :blk payload.name_location == location or payload.value_location == location;
         },
-        .PushArgumentSlot, .PushInheritedSlot => blk: {
+        .PushArgumentSlot => blk: {
             const payload = inst.payload.PushNonParentSlot;
             break :blk payload.name_location == location or payload.value_location == location;
         },

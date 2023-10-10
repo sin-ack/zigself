@@ -30,7 +30,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
             PushConstantSlot,
             PushAssignableSlot,
             PushArgumentSlot,
-            PushInheritedSlot,
 
             // Pushing to the argument stack
             PushArg,
@@ -72,7 +71,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .PushConstantSlot => "push_constant_slot",
                     .PushAssignableSlot => "push_assignable_slot",
                     .PushArgumentSlot => "push_argument_slot",
-                    .PushInheritedSlot => "push_inherited_slot",
                     .PushRegisters => "push_registers",
                     .CreateInteger => "create_integer",
                     .CreateFloatingPoint => "create_floating_point",
@@ -96,7 +94,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .Send, .PrimSend => "Send",
                     .SelfSend, .SelfPrimSend => "SelfSend",
                     .PushConstantSlot, .PushAssignableSlot => "PushParentableSlot",
-                    .PushArgumentSlot, .PushInheritedSlot => "PushNonParentSlot",
+                    .PushArgumentSlot => "PushNonParentSlot",
                     .Return, .NonlocalReturn => "Return",
 
                     .PushRegisters => "PushRegisters",
@@ -200,7 +198,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     try std.fmt.format(writer, "({}, {}, {})", .{ payload.name_location, payload.value_location, payload.is_parent });
                 },
 
-                .PushArgumentSlot, .PushInheritedSlot => {
+                .PushArgumentSlot => {
                     const payload = inst.payload.PushNonParentSlot;
                     try std.fmt.format(writer, "({}, {})", .{ payload.name_location, payload.value_location });
                 },

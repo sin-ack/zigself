@@ -52,12 +52,4 @@ std _AddSlots: (|
     actor = (|
         parent* = std traits actor.
     |).
-
-    "
-    Meant to be used with new actors. In order to create a new actor, use an
-    inherited slot like this:
-
-        base< = std actorBase.
-    "
-    actorBase = (std actor copy).
 |).

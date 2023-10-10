@@ -1,4 +1,4 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -617,15 +617,10 @@ fn parseSlotList(self: *Self, comptime slot_list_type: SlotListType, initial_ord
         .Block => true,
     };
 
-    const allow_inherited = switch (slot_list_type) {
-        .Object => true,
-        .Block => false,
-    };
-
     var order: usize = initial_order_offset;
     if (self.token_tags[self.token_index] != .Pipe) first_slot_parsing: {
         {
-            var first_slot = (try self.parseSlot(order, allow_argument, allow_inherited)) orelse break :first_slot_parsing;
+            var first_slot = (try self.parseSlot(order, allow_argument)) orelse break :first_slot_parsing;
             errdefer first_slot.deinit(self.allocator);
             try slots.append(first_slot);
             order += 1;
@@ -634,7 +629,7 @@ fn parseSlotList(self: *Self, comptime slot_list_type: SlotListType, initial_ord
         while (self.consumeToken(.Period)) |_| {
             if (!self.canParseSlot()) break;
 
-            var slot = (try self.parseSlot(order, allow_argument, allow_inherited)) orelse continue;
+            var slot = (try self.parseSlot(order, allow_argument)) orelse continue;
             errdefer slot.deinit(self.allocator);
             try slots.append(slot);
             order += 1;
@@ -647,17 +642,6 @@ fn parseSlotList(self: *Self, comptime slot_list_type: SlotListType, initial_ord
         if (self.token_tags[self.token_index] == .Pipe)
             _ = self.nextToken();
     }
-
-    // Sort inherited slots first.
-    std.mem.sort(AST.SlotNode, slots.items, void{}, struct {
-        fn lessThan(context: void, lhs: AST.SlotNode, rhs: AST.SlotNode) bool {
-            _ = context;
-
-            if (lhs.is_inherited != rhs.is_inherited)
-                return lhs.is_inherited;
-            return lhs.order < rhs.order;
-        }
-    }.lessThan);
 
     return try slots.toOwnedSlice();
 }
@@ -672,12 +656,11 @@ fn canParseSlot(self: *Self) bool {
 }
 
 const MethodMode = enum { Required, Optional, Forbidden };
-fn parseSlot(self: *Self, order: usize, allow_argument: bool, allow_inherited: bool) ParseError!?AST.SlotNode {
+fn parseSlot(self: *Self, order: usize, allow_argument: bool) ParseError!?AST.SlotNode {
     //   CommonSlots = identifier "*"? ("=" | "<-") Expression -- slot
     //               | SlotName "=" Method                     -- method
     //               | identifier                              -- default init to nil
     //   ObjectSlot = CommonSlots
-    //              | identifier "<" "=" Expression            -- inherited
     //   BlockSlot = CommonSlots
     //             | ":" identifier                            -- argument
 
@@ -686,7 +669,6 @@ fn parseSlot(self: *Self, order: usize, allow_argument: bool, allow_inherited: b
     var is_argument = false;
     var is_mutable = false;
     var is_parent = false;
-    var is_inherited = false;
 
     if (self.token_tags[self.token_index] == .Colon) {
         if (!allow_argument) {
@@ -718,21 +700,6 @@ fn parseSlot(self: *Self, order: usize, allow_argument: bool, allow_inherited: b
 
     if (method_mode == .Required) {
         if (!try self.expectToken(.Equals)) return null;
-    } else if (self.consumeToken(.LessThan)) |less_than_token| {
-        if (!allow_inherited) {
-            try self.diagnostics.reportDiagnostic(
-                .Error,
-                self.offsetToLocation(self.token_starts[less_than_token]),
-                "Inherited slots are not allowed in this slot list",
-            );
-            return null;
-        }
-
-        is_inherited = true;
-        method_mode = .Forbidden;
-
-        if (!try self.expectToken(.Equals))
-            return null;
     } else {
         if (self.consumeToken(.Asterisk)) |_| {
             is_parent = true;
@@ -747,7 +714,6 @@ fn parseSlot(self: *Self, order: usize, allow_argument: bool, allow_inherited: b
                 .is_mutable = true,
                 .is_parent = is_parent,
                 .is_argument = is_argument,
-                .is_inherited = is_inherited,
                 .order = order,
                 .name = slot_name,
                 .value = null,
@@ -834,7 +800,6 @@ fn parseSlot(self: *Self, order: usize, allow_argument: bool, allow_inherited: b
         .is_mutable = is_mutable,
         .is_parent = is_parent,
         .is_argument = is_argument,
-        .is_inherited = is_inherited,
         .order = order,
         .name = slot_name,
         .value = value,
@@ -855,7 +820,6 @@ fn createSlotNodeFromArgument(self: *Self, order: usize) ParseError!AST.SlotNode
         .is_mutable = true,
         .is_parent = false,
         .is_argument = true,
-        .is_inherited = false,
         .order = order,
         .name = identifier_copy,
         .value = null,
