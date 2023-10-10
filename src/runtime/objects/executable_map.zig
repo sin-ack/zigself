@@ -12,7 +12,7 @@ const bytecode = @import("../bytecode.zig");
 const SlotsMap = @import("slots.zig").SlotsMap;
 const value_import = @import("../value.zig");
 const PointerValue = value_import.PointerValue;
-const stage2_compat = @import("../../utility/stage2_compat.zig");
+const pointer = @import("../../utility/pointer.zig");
 const RefCountedValue = value_import.RefCountedValue;
 
 /// An "executable map" is one that contains a reference to executable code.
@@ -27,7 +27,7 @@ pub const ExecutableMap = extern struct {
     /// The executable which this map was created from.
     definition_executable_ref: RefCountedValue(bytecode.Executable) align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(ExecutableMap, .Mutable);
+    pub const Ptr = pointer.HeapPtr(ExecutableMap, .Mutable);
 
     pub const ExecutableInformation = packed struct(u16) {
         argument_slot_count: u8,

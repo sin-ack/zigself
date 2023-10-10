@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const Heap = @import("Heap.zig");
 const Value = value_import.Value;
 const value_import = @import("value.zig");
-const stage2_compat = @import("../utility/stage2_compat.zig");
+const pointer = @import("../utility/pointer.zig");
 const object_lookup = @import("object_lookup.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
 
@@ -87,7 +87,7 @@ pub const Object = extern struct {
     object_information: ObjectInformation align(@alignOf(u64)),
     map: Value align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(Object, .Mutable);
+    pub const Ptr = pointer.HeapPtr(Object, .Mutable);
 
     const ObjectMarker = u2;
     // FIXME: Define this in a more actor-central place.

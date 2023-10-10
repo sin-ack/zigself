@@ -8,7 +8,7 @@ const Heap = @import("./Heap.zig");
 const value = @import("./value.zig");
 const Value = value.Value;
 const IntegerValue = value.IntegerValue;
-const stage2_compat = @import("../utility/stage2_compat.zig");
+const pointer = @import("../utility/pointer.zig");
 
 const Self = @This();
 
@@ -67,7 +67,7 @@ pub const Header = packed struct {
     /// header.
     length: IntegerValue(.Unsigned),
 
-    pub const Ptr = stage2_compat.HeapPtr(Header, .Mutable);
+    pub const Ptr = pointer.HeapPtr(Header, .Mutable);
 
     pub fn init(self: Header.Ptr, byte_array_length: u64) void {
         self.length = IntegerValue(.Unsigned).init(@sizeOf(Header) + byte_array_length);

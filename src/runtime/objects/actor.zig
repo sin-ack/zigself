@@ -13,7 +13,7 @@ const VMActor = @import("../Actor.zig");
 const GenericValue = value_import.Value;
 const PointerValue = value_import.PointerValue;
 const value_import = @import("../value.zig");
-const stage2_compat = @import("../../utility/stage2_compat.zig");
+const pointer = @import("../../utility/pointer.zig");
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 
@@ -29,7 +29,7 @@ pub const Actor = extern struct {
     /// returns.
     context: GenericValue align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(Actor, .Mutable);
+    pub const Ptr = pointer.HeapPtr(Actor, .Mutable);
     pub const Type = .Actor;
     pub const Value = value_import.ObjectValue(Actor);
 

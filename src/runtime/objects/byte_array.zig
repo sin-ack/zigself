@@ -12,7 +12,7 @@ const Object = @import("../object.zig").Object;
 const VMByteArray = @import("../ByteArray.zig");
 const value_import = @import("../value.zig");
 const GenericValue = value_import.Value;
-const stage2_compat = @import("../../utility/stage2_compat.zig");
+const pointer = @import("../../utility/pointer.zig");
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 
@@ -22,7 +22,7 @@ pub const ByteArray = extern struct {
     object: Object align(@alignOf(u64)),
     byte_array: GenericValue align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(ByteArray, .Mutable);
+    pub const Ptr = pointer.HeapPtr(ByteArray, .Mutable);
     pub const Type = .ByteArray;
     pub const Value = value_import.ObjectValue(ByteArray);
 

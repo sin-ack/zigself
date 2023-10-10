@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const Heap = @import("../Heap.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig").Object;
-const stage2_compat = @import("../../utility/stage2_compat.zig");
+const pointer = @import("../../utility/pointer.zig");
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 
@@ -48,7 +48,7 @@ pub const Map = extern struct {
     object: Object align(@alignOf(u64)),
     map_information: MapInformation align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(Map, .Mutable);
+    pub const Ptr = pointer.HeapPtr(Map, .Mutable);
     const MapInformation = packed struct(u64) {
         marker: u2 = @intFromEnum(Value.ValueType.Integer),
         map_type: MapType,

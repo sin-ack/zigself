@@ -12,7 +12,7 @@ const Object = @import("../object.zig").Object;
 const IntegerValue = value_import.IntegerValue;
 const GenericValue = @import("../value.zig").Value;
 const value_import = @import("../value.zig");
-const stage2_compat = @import("../../utility/stage2_compat.zig");
+const pointer = @import("../../utility/pointer.zig");
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 
@@ -21,7 +21,7 @@ const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 pub const Array = extern struct {
     object: Object align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(Array, .Mutable);
+    pub const Ptr = pointer.HeapPtr(Array, .Mutable);
     pub const Value = value_import.ObjectValue(Array);
 
     /// Create a new array with the given values and filling extra items with
@@ -135,7 +135,7 @@ pub const ArrayMap = extern struct {
     map: Map align(@alignOf(u64)),
     size: IntegerValue(.Unsigned) align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(ArrayMap, .Mutable);
+    pub const Ptr = pointer.HeapPtr(ArrayMap, .Mutable);
 
     pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, size: usize) ArrayMap.Ptr {
         const memory_size = requiredSizeForAllocation();

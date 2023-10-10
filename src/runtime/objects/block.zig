@@ -17,7 +17,7 @@ const SlotsObject = slots.Slots;
 const SourceRange = @import("../SourceRange.zig");
 const value_import = @import("../value.zig");
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
-const stage2_compat = @import("../../utility/stage2_compat.zig");
+const pointer = @import("../../utility/pointer.zig");
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationObject = @import("activation.zig").Activation;
@@ -33,7 +33,7 @@ const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 pub const Block = extern struct {
     slots: SlotsObject align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(Block, .Mutable);
+    pub const Ptr = pointer.HeapPtr(Block, .Mutable);
 
     pub usingnamespace SlotsLikeObjectBase(Block);
     pub usingnamespace AssignableSlotsMixin(Block);
@@ -175,7 +175,7 @@ pub const BlockMap = extern struct {
     nonlocal_return_target_activation: Activation.ActivationRef align(@alignOf(u64)),
 
     pub const ObjectType = Block;
-    pub const Ptr = stage2_compat.HeapPtr(BlockMap, .Mutable);
+    pub const Ptr = pointer.HeapPtr(BlockMap, .Mutable);
 
     pub usingnamespace SlotsLikeMapBase(BlockMap);
 

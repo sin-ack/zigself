@@ -13,7 +13,7 @@ const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig").Object;
 const traversal = @import("../object_traversal.zig");
 const MapBuilder = @import("../map_builder.zig").MapBuilder;
-const stage2_compat = @import("../../utility/stage2_compat.zig");
+const pointer = @import("../../utility/pointer.zig");
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 
@@ -76,7 +76,7 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
         /// Return a slice of `Value`s for the assignable slots that are
         /// after the Slots object header. Should not be called from
         /// outside; use getAssignableSlotValue instead.
-        pub fn getAssignableSlots(self: ObjectT.Ptr) stage2_compat.HeapSlice(Value, .Mutable) {
+        pub fn getAssignableSlots(self: ObjectT.Ptr) pointer.HeapSlice(Value, .Mutable) {
             const object_size = @sizeOf(ObjectT);
             const object_memory: [*]u8 = @ptrCast(self);
             const assignable_slot_count = ObjectT.getMap(self).getAssignableSlotCount();
@@ -88,7 +88,7 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
         }
 
         /// Return the assignable slot value for this slot.
-        pub fn getAssignableSlotValue(self: ObjectT.Ptr, slot: Slot) stage2_compat.HeapPtr(Value, .Mutable) {
+        pub fn getAssignableSlotValue(self: ObjectT.Ptr, slot: Slot) pointer.HeapPtr(Value, .Mutable) {
             std.debug.assert(slot.isAssignable());
             std.debug.assert(!slot.isArgument());
 
@@ -177,7 +177,7 @@ pub fn slotsLookup(
 pub const Slots = extern struct {
     object: Object align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(Slots, .Mutable);
+    pub const Ptr = pointer.HeapPtr(Slots, .Mutable);
 
     pub usingnamespace SlotsLikeObjectBase(Slots);
     pub usingnamespace AssignableSlotsMixin(Slots);
@@ -470,7 +470,7 @@ pub const Slots = extern struct {
 /// usingnamespace.
 pub fn SlotsLikeMapBase(comptime MapT: type) type {
     return struct {
-        fn getSlotMemory(self: MapT.Ptr) stage2_compat.HeapSlice(u8, .Mutable) {
+        fn getSlotMemory(self: MapT.Ptr) pointer.HeapSlice(u8, .Mutable) {
             const total_object_size = MapT.getSizeInMemory(self);
             const map_memory: [*]align(@alignOf(u64)) u8 = @ptrCast(self);
             return map_memory[@sizeOf(MapT)..total_object_size];
@@ -515,7 +515,7 @@ pub const SlotsMap = extern struct {
     // Information about the slots within this map. Slots begin after this word.
     information: SlotInformation align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(SlotsMap, .Mutable);
+    pub const Ptr = pointer.HeapPtr(SlotsMap, .Mutable);
     pub const ObjectType = Slots;
     const SlotInformation = packed struct(u64) {
         marker: u2 = @intFromEnum(Value.ValueType.Integer),

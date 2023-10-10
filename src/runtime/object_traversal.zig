@@ -6,10 +6,9 @@ const Map = @import("objects/map.zig").Map;
 const Slot = @import("slot.zig").Slot;
 const Value = @import("value.zig").Value;
 const Object = @import("object.zig").Object;
-const stage2_compat = @import("../utility/stage2_compat.zig");
 
 fn TraverseObjectGraphCallback(comptime ContextT: type) type {
-    return stage2_compat.FnPtr(fn (ctx: ContextT, object: Object.Ptr) anyerror!Object.Ptr);
+    return *const fn (ctx: ContextT, object: Object.Ptr) anyerror!Object.Ptr;
 }
 
 const TraverseObjectGraphLink = struct {

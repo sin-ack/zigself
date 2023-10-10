@@ -6,7 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("Heap.zig");
-const stage2_compat = @import("../utility/stage2_compat.zig");
+const pointer = @import("../utility/pointer.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
 const object_lookup = @import("object_lookup.zig");
 const Object = @import("object.zig").Object;
@@ -64,7 +64,7 @@ pub fn IntrinsicMap(comptime MapT: type, comptime object_type: ObjectType) type 
     }
 
     return extern struct {
-        pub const Ptr = stage2_compat.HeapPtr(MapT, .Mutable);
+        pub const Ptr = pointer.HeapPtr(MapT, .Mutable);
         pub const ObjectType = IntrinsicObject(MapT, field_names, object_type);
 
         // The user is responsible for clone, since the create method is also
@@ -124,7 +124,7 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
         object: Object align(@alignOf(u64)),
 
         const Self = @This();
-        pub const Ptr = stage2_compat.HeapPtr(Self, .Mutable);
+        pub const Ptr = pointer.HeapPtr(Self, .Mutable);
         pub const Type = object_type;
         pub const Value = value.ObjectValue(Self);
 

@@ -18,7 +18,7 @@ const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
 const object_lookup = @import("../object_lookup.zig");
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
-const stage2_compat = @import("../../utility/stage2_compat.zig");
+const pointer = @import("../../utility/pointer.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationObject = @import("activation.zig").Activation;
 const SlotsLikeMapBase = slots.SlotsLikeMapBase;
@@ -30,7 +30,7 @@ const AssignableSlotsMixin = slots.AssignableSlotsMixin;
 pub const Method = extern struct {
     slots: SlotsObject align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(Method, .Mutable);
+    pub const Ptr = pointer.HeapPtr(Method, .Mutable);
     pub const Type = .Method;
     pub const Value = value_import.ObjectValue(Method);
 
@@ -164,7 +164,7 @@ pub const MethodMap = extern struct {
     /// What the method is called.
     method_name: GenericValue align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(MethodMap, .Mutable);
+    pub const Ptr = pointer.HeapPtr(MethodMap, .Mutable);
     pub const ObjectType = Method;
 
     const MethodInformation = packed struct(u32) {

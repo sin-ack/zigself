@@ -13,7 +13,7 @@ const Value = @import("./value.zig").Value;
 const AstGen = @import("./bytecode/AstGen.zig");
 const ByteArray = @import("./ByteArray.zig");
 const map_builder = @import("map_builder.zig");
-const stage2_compat = @import("../utility/stage2_compat.zig");
+const pointer = @import("../utility/pointer.zig");
 
 /// The properties of a slot. This is shared by both ProtoSlot and Slot.
 const SlotProperties = packed struct {
@@ -140,10 +140,10 @@ pub const Slot = packed struct {
     /// contain the argument slots).
     value: Value,
 
-    pub const ConstSlice = stage2_compat.HeapSlice(Slot, .Const);
-    pub const Slice = stage2_compat.HeapSlice(Slot, .Mutable);
-    pub const ConstPtr = stage2_compat.HeapPtr(Slot, .Const);
-    pub const Ptr = stage2_compat.HeapPtr(Slot, .Mutable);
+    pub const ConstSlice = pointer.HeapSlice(Slot, .Const);
+    pub const Slice = pointer.HeapSlice(Slot, .Mutable);
+    pub const ConstPtr = pointer.HeapPtr(Slot, .Const);
+    pub const Ptr = pointer.HeapPtr(Slot, .Mutable);
 
     pub fn initConstant(name: ByteArray, parent: SlotProperties.ParentFlag, value: Value) Slot {
         return init(name, parent, .Constant, .NotArgument, .NotInherited, value);

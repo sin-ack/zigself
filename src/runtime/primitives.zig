@@ -14,7 +14,6 @@ const bytecode = @import("./bytecode.zig");
 const SourceRange = @import("./SourceRange.zig");
 const RuntimeError = @import("./RuntimeError.zig");
 const value_import = @import("./value.zig");
-const stage2_compat = @import("../utility/stage2_compat.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const ExecutionResult = @import("./execution_result.zig").ExecutionResult;
 const IntegerValueSignedness = value_import.IntegerValueSignedness;
@@ -169,7 +168,7 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
     };
 }
 
-const PrimitiveFunction = stage2_compat.FnPtr(fn (context: *PrimitiveContext) PrimitiveError!ExecutionResult);
+const PrimitiveFunction = *const fn (context: *PrimitiveContext) PrimitiveError!ExecutionResult;
 
 /// A primitive specification. The `name` field specifies the exact selector the
 /// primitive uses (i.e. `DoFoo:WithBar:`, or `StringPrint`), and the `function`

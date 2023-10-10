@@ -11,7 +11,7 @@ const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
 const value_import = @import("../value.zig");
 const GenericValue = value_import.Value;
-const stage2_compat = @import("../../utility/stage2_compat.zig");
+const pointer = @import("../../utility/pointer.zig");
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 
@@ -68,7 +68,7 @@ pub const Managed = extern struct {
     object: Object align(@alignOf(u64)),
     value: GenericValue align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(Managed, .Mutable);
+    pub const Ptr = pointer.HeapPtr(Managed, .Mutable);
     pub const Type = .Managed;
     pub const Value = value_import.ObjectValue(Managed);
 

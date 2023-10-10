@@ -18,7 +18,7 @@ const SlotsObject = slots.Slots;
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
 const object_lookup = @import("../object_lookup.zig");
-const stage2_compat = @import("../../utility/stage2_compat.zig");
+const pointer = @import("../../utility/pointer.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const exceedsBoundsOf = @import("../../utility/bounds_check.zig").exceedsBoundsOf;
 const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;
@@ -29,7 +29,7 @@ pub const Activation = extern struct {
     slots: SlotsObject align(@alignOf(u64)),
     receiver: GenericValue align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(Activation, .Mutable);
+    pub const Ptr = pointer.HeapPtr(Activation, .Mutable);
     pub const Type = .Activation;
     pub const Value = value_import.ObjectValue(Activation);
 

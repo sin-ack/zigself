@@ -12,7 +12,7 @@ const Actor = @import("actor.zig").Actor;
 const Object = @import("../object.zig").Object;
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
-const stage2_compat = @import("../../utility/stage2_compat.zig");
+const pointer = @import("../../utility/pointer.zig");
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 
@@ -24,7 +24,7 @@ pub const ActorProxy = extern struct {
     /// The Actor object to proxy messages to.
     actor_object: Actor.Value align(@alignOf(u64)),
 
-    pub const Ptr = stage2_compat.HeapPtr(ActorProxy, .Mutable);
+    pub const Ptr = pointer.HeapPtr(ActorProxy, .Mutable);
     pub const Type = .ActorProxy;
     pub const Value = value_import.ObjectValue(ActorProxy);
 
