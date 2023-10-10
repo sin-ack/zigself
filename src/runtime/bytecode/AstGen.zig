@@ -79,6 +79,8 @@ fn generateScript(self: *AstGen, executable: *Executable, script_node: ast.Scrip
 
     const last_expression_location = try self.generateStatementList(executable, script_block, script_node.statements.value.statements);
     try script_block.addInstruction(executable.allocator, .Return, self.allocateRegister(), .{ .value_location = last_expression_location }, script_node.range);
+
+    script_block.seal();
 }
 
 fn generateStatementList(self: *AstGen, executable: *Executable, block: *Block, statements: []ast.ExpressionNode) AstGenError!RegisterLocation {

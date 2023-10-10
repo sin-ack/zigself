@@ -45,6 +45,7 @@ fn lowerBlock(allocator: Allocator, executable: *bytecode.lowcode.Executable, as
 
     // TODO: better source location
     low_block.setInstruction(push_registers_inst_offset, .PushRegisters, .zero, register_pool.clobbered_registers, ast_block.instructions.items[0].source_range);
+    low_block.seal();
 }
 
 fn lowerInstruction(
