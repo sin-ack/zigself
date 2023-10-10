@@ -60,12 +60,12 @@ pub fn write(self: *RegisterFile, location: RegisterLocation, value: Value) void
 
 pub fn visitValues(
     self: *RegisterFile,
-    context: anytype,
-    visitor: fn (ctx: @TypeOf(context), register: *Value) Allocator.Error!void,
+    // TODO: Write interfaces proposal for Zig
+    visitor: anytype,
 ) !void {
     for (&self.general_purpose) |*register| {
-        try visitor(context, register);
+        try visitor.visit(register);
     }
 
-    try visitor(context, &self.ret);
+    try visitor.visit(&self.ret);
 }

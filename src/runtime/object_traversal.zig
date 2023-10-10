@@ -7,10 +7,6 @@ const Slot = @import("slot.zig").Slot;
 const Value = @import("value.zig").Value;
 const Object = @import("object.zig").Object;
 
-fn TraverseObjectGraphCallback(comptime ContextT: type) type {
-    return *const fn (ctx: ContextT, object: Object.Ptr) anyerror!Object.Ptr;
-}
-
 const TraverseObjectGraphLink = struct {
     previous: ?*const @This(),
     address: [*]u64,
@@ -18,8 +14,8 @@ const TraverseObjectGraphLink = struct {
 
 fn traverseObjectGraphInner(
     value: Value,
-    context: anytype,
-    callback: TraverseObjectGraphCallback(@TypeOf(context)),
+    // TODO: Write interfaces proposal for Zig
+    visitor: anytype,
     previous_link: ?*const TraverseObjectGraphLink,
 ) anyerror!Value {
     return switch (value.getType()) {
@@ -54,7 +50,7 @@ fn traverseObjectGraphInner(
                         //       There are no cycles in this object graph, but
                         //       D is still referenced twice. Therefore D's new
                         //       address must be the same on both callback runs.
-                        const new_object = try callback(context, old_object);
+                        const new_object = try visitor.visit(old_object);
                         break :value new_object.asValue();
                     }
                 }
@@ -62,7 +58,7 @@ fn traverseObjectGraphInner(
 
             const current_link = TraverseObjectGraphLink{ .previous = previous_link, .address = old_object_address };
 
-            const new_map = try traverseObjectGraphInner(old_object.map, context, callback, &current_link);
+            const new_map = try traverseObjectGraphInner(old_object.map, visitor, &current_link);
             // FIXME: Move this switch into object delegation.
             switch (old_object_type) {
                 .ForwardedObject, .Activation, .Actor => unreachable,
@@ -73,7 +69,7 @@ fn traverseObjectGraphInner(
                     const new_object = switch (map_type) {
                         // The map-map will always be immutable.
                         .MapMap => old_object,
-                        .Slots, .Method, .Block => try callback(context, old_object),
+                        .Slots, .Method, .Block => try visitor.visit(old_object),
                         // Array maps will always be immutable, because they
                         // don't point to anything that's not globally
                         // reachable.
@@ -98,7 +94,7 @@ fn traverseObjectGraphInner(
 
                             for (slots) |*slot| {
                                 if (!slot.isAssignable()) {
-                                    slot.value = try traverseObjectGraphInner(slot.value, context, callback, &current_link);
+                                    slot.value = try traverseObjectGraphInner(slot.value, visitor, &current_link);
                                 }
                             }
                         },
@@ -108,7 +104,7 @@ fn traverseObjectGraphInner(
                     break :value new_object.asValue();
                 },
                 .Slots, .Method, .Block => {
-                    const new_object = try callback(context, old_object);
+                    const new_object = try visitor.visit(old_object);
                     new_object.map = new_map;
 
                     const assignable_slots = switch (old_object_type) {
@@ -120,24 +116,24 @@ fn traverseObjectGraphInner(
                     };
 
                     for (assignable_slots) |*v| {
-                        v.* = try traverseObjectGraphInner(v.*, context, callback, &current_link);
+                        v.* = try traverseObjectGraphInner(v.*, visitor, &current_link);
                     }
 
                     break :value new_object.asValue();
                 },
                 .Array => {
-                    const new_object = try callback(context, old_object);
+                    const new_object = try visitor.visit(old_object);
                     new_object.map = new_map;
                     const array = new_object.mustBeType(.Array);
 
                     for (array.getValues()) |*v| {
-                        v.* = try traverseObjectGraphInner(value, context, callback, &current_link);
+                        v.* = try traverseObjectGraphInner(value, visitor, &current_link);
                     }
 
                     break :value new_object.asValue();
                 },
                 .ByteArray, .ActorProxy, .Managed, .AddrInfo => {
-                    const new_object = try callback(context, old_object);
+                    const new_object = try visitor.visit(old_object);
                     new_object.map = new_map;
                     break :value new_object.asValue();
                 },
@@ -148,8 +144,8 @@ fn traverseObjectGraphInner(
 
 pub fn traverseNonGloballyReachableObjectGraph(
     value: Value,
-    context: anytype,
-    callback: TraverseObjectGraphCallback(@TypeOf(context)),
+    // TODO: Write interfaces proposal for Zig
+    visitor: anytype,
 ) anyerror!Value {
-    return try traverseObjectGraphInner(value, context, callback, null);
+    return try traverseObjectGraphInner(value, visitor, null);
 }

@@ -236,30 +236,34 @@ pub fn untrack(self: *Self, tracked: Tracked) void {
 
 pub fn visitValues(
     self: *Self,
-    context: anytype,
-    visitor: fn (ctx: @TypeOf(context), value: *Value) Allocator.Error!void,
+    // TODO: Write interfaces proposal for Zig
+    visitor: anytype,
 ) !void {
     for (&self.handles) |*handle| {
         if (handle.*) |h| {
             var handle_as_value = Value.fromObjectAddress(h);
-            try visitor(context, &handle_as_value);
+            try visitor.visit(&handle_as_value);
             handle.* = handle_as_value.asObjectAddress();
         }
     }
 
-    try self.vm.visitValues(context, visitor);
+    try self.vm.visitValues(visitor);
 }
 
 /// Go through the whole heap, updating references to the given value with the
 /// new value.
 pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) !void {
-    const VisitorContext = struct { old_value: Value, new_value: Value };
-    self.visitValues(VisitorContext{ .old_value = old_value, .new_value = new_value }, struct {
-        fn f(context: VisitorContext, value: *Value) !void {
+    const Visitor = struct {
+        old_value: Value,
+        new_value: Value,
+
+        pub fn visit(context: @This(), value: *Value) !void {
             if (value.data == context.old_value.data)
                 value.* = context.new_value;
         }
-    }.f) catch unreachable;
+    };
+
+    self.visitValues(Visitor{ .old_value = old_value, .new_value = new_value }) catch unreachable;
 
     // Finally scan each heap space and update the references.
     try self.eden.updateAllReferencesTo(self.allocator, old_value.asObjectAddress(), new_value.asObjectAddress());
@@ -560,17 +564,20 @@ const Space = struct {
         var target_object_segment_index = target_space.object_segment.len;
 
         // Visit all the values in the VM and copy any addresses.
-        const VisitorContext = struct { self: *Space, allocator: Allocator, target_space: *Space };
-        const context = VisitorContext{ .self = self, .allocator = allocator, .target_space = target_space };
-        try self.heap.visitValues(context, struct {
-            fn f(ctx: VisitorContext, value: *Value) !void {
+        const Visitor = struct {
+            self: *Space,
+            allocator: Allocator,
+            target_space: *Space,
+
+            pub fn visit(ctx: @This(), value: *Value) !void {
                 if (value.isObjectReference()) {
                     if (try ctx.self.copyAddress(ctx.allocator, value.asObjectAddress(), ctx.target_space, false)) |new_address| {
                         value.* = Value.fromObjectAddress(new_address);
                     }
                 }
             }
-        }.f);
+        };
+        try self.heap.visitValues(Visitor{ .self = self, .allocator = allocator, .target_space = target_space });
 
         {
             var remembered_set_iterator = self.remembered_set.iterator();

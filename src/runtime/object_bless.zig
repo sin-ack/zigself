@@ -12,47 +12,60 @@ const traversal = @import("object_traversal.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
 
 const SeenObjectsSet = std.AutoHashMap([*]u64, void);
+const RequiredMemoryCalculator = struct {
+    seen_objects_set: *SeenObjectsSet,
+    required_memory: *usize,
+
+    pub fn visit(self: @This(), object: Object.Ptr) Allocator.Error!Object.Ptr {
+        const gop = try self.seen_objects_set.getOrPut(object.getAddress());
+        if (!gop.found_existing) {
+            self.required_memory.* += object.getSizeForCloning();
+        }
+
+        return object;
+    }
+};
 
 fn calculateRequiredMemoryForBlessing(allocator: Allocator, value: Value) Allocator.Error!usize {
     var required_memory: usize = 0;
     var seen_objects_set = SeenObjectsSet.init(allocator);
     defer seen_objects_set.deinit();
 
-    const context = .{ .seen_objects_set = &seen_objects_set, .required_memory = &required_memory };
-    const Context = @TypeOf(context);
-    _ = traversal.traverseNonGloballyReachableObjectGraph(value, context, struct {
-        fn f(ctx: Context, object: Object.Ptr) Allocator.Error!Object.Ptr {
-            const gop = try ctx.seen_objects_set.getOrPut(object.getAddress());
-            if (!gop.found_existing) {
-                ctx.required_memory.* += object.getSizeForCloning();
-            }
-
-            return object;
-        }
-    }.f) catch |err| return @as(Allocator.Error, @errorCast(err));
+    _ = traversal.traverseNonGloballyReachableObjectGraph(
+        value,
+        RequiredMemoryCalculator{ .seen_objects_set = &seen_objects_set, .required_memory = &required_memory },
+    ) catch |err| return @as(Allocator.Error, @errorCast(err));
 
     return required_memory;
 }
 
 const CopiedObjectsMap = std.AutoHashMap([*]u64, [*]u64);
+const ObjectGraphCopier = struct {
+    copied_objects_map: *CopiedObjectsMap,
+    vm: *VirtualMachine,
+    token: *Heap.AllocationToken,
+    actor_id: u31,
+
+    pub fn visit(self: @This(), old_object: Object.Ptr) Allocator.Error!Object.Ptr {
+        const gop = try self.copied_objects_map.getOrPut(old_object.getAddress());
+        if (gop.found_existing) {
+            return Object.fromAddress(gop.value_ptr.*);
+        }
+
+        const new_object = try old_object.clone(self.vm, self.token, self.actor_id);
+        gop.value_ptr.* = new_object.getAddress();
+        return new_object;
+    }
+};
+
 fn copyObjectGraphForNewActor(vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31, value: Value) Allocator.Error!Value {
     var copied_objects_map = CopiedObjectsMap.init(token.heap.allocator);
     defer copied_objects_map.deinit();
 
-    const context = .{ .copied_objects_map = &copied_objects_map, .vm = vm, .token = token, .actor_id = actor_id };
-    const Context = @TypeOf(context);
-    return traversal.traverseNonGloballyReachableObjectGraph(value, context, struct {
-        fn f(ctx: Context, old_object: Object.Ptr) Allocator.Error!Object.Ptr {
-            const gop = try ctx.copied_objects_map.getOrPut(old_object.getAddress());
-            if (gop.found_existing) {
-                return Object.fromAddress(gop.value_ptr.*);
-            }
-
-            const new_object = try old_object.clone(ctx.vm, ctx.token, ctx.actor_id);
-            gop.value_ptr.* = new_object.getAddress();
-            return new_object;
-        }
-    }.f) catch |err| return @as(Allocator.Error, @errorCast(err));
+    return traversal.traverseNonGloballyReachableObjectGraph(
+        value,
+        ObjectGraphCopier{ .copied_objects_map = &copied_objects_map, .vm = vm, .token = token, .actor_id = actor_id },
+    ) catch |err| return @as(Allocator.Error, @errorCast(err));
 }
 
 pub fn bless(vm: *VirtualMachine, heap: *Heap, actor_id: u31, const_value: Value) !Value {

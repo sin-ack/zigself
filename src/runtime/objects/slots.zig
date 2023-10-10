@@ -221,8 +221,8 @@ pub const Slots = extern struct {
     fn forSlotsInMergeOrder(
         target_object: Slots.Ptr,
         source_object: Slots.Ptr,
-        context: anytype,
-        comptime callback: fn (context: @TypeOf(context), object: Slots.Ptr, slot: Slot) Allocator.Error!void,
+        // TODO: Write interfaces proposal for Zig
+        visitor: anytype,
     ) !void {
         // We go through all of the target object's slots first, seeing if there
         // is any slot that should override ours. Any slot in the source object
@@ -230,12 +230,12 @@ pub const Slots = extern struct {
         next_target_slot: for (target_object.getSlots()) |target_slot| {
             for (source_object.getSlots()) |source_slot| {
                 if (source_slot.getHash() == target_slot.getHash()) {
-                    try callback(context, source_object, source_slot);
+                    try visitor.visit(source_object, source_slot);
                     continue :next_target_slot;
                 }
             }
 
-            try callback(context, target_object, target_slot);
+            try visitor.visit(target_object, target_slot);
         }
 
         // We then go through all of the source object's slots, adding slots
@@ -247,7 +247,7 @@ pub const Slots = extern struct {
                 }
             }
 
-            try callback(context, source_object, source_slot);
+            try visitor.visit(source_object, source_slot);
         }
     }
 
@@ -281,13 +281,11 @@ pub const Slots = extern struct {
         var new_map = SlotsMap.create(map_map, token, @intCast(merge_info.slots));
         var map_builder = new_map.getMapBuilder(token);
 
-        const the_context = .{
-            .map_builder = &map_builder,
-            .target_object_reachability = self.object.object_information.reachability,
-        };
-        const Context = @TypeOf(the_context);
-        forSlotsInMergeOrder(self, source_object, the_context, struct {
-            fn callback(context: Context, object: Slots.Ptr, slot: Slot) !void {
+        forSlotsInMergeOrder(self, source_object, struct {
+            map_builder: *@TypeOf(map_builder),
+            target_object_reachability: @TypeOf(self.object.object_information.reachability),
+
+            pub fn visit(context: @This(), object: Slots.Ptr, slot: Slot) !void {
                 const slot_copy = slot.copy(object);
                 context.map_builder.addSlot(slot_copy);
 
@@ -295,16 +293,16 @@ pub const Slots = extern struct {
                 // then the objects pointed to in the slots must become globally
                 // reachable as well.
                 if (context.target_object_reachability == .Global) {
-                    _ = traversal.traverseNonGloballyReachableObjectGraph(slot_copy.value, {}, struct {
-                        fn f(c: void, obj: Object.Ptr) error{}!Object.Ptr {
-                            _ = c;
+                    _ = traversal.traverseNonGloballyReachableObjectGraph(slot_copy.value, struct {
+                        pub fn visit(s: @This(), obj: Object.Ptr) error{}!Object.Ptr {
+                            _ = s;
                             obj.object_information.reachability = .Global;
                             return obj;
                         }
-                    }.f) catch unreachable;
+                    }{}) catch unreachable;
                 }
             }
-        }.callback) catch unreachable;
+        }{ .map_builder = &map_builder, .target_object_reachability = self.object.object_information.reachability }) catch unreachable;
 
         // At this point, we have a map builder which has initialized our new
         // map with all the constant slots.
@@ -374,22 +372,14 @@ pub const Slots = extern struct {
         var merged_slots = std.ArrayList(Slot).init(allocator);
         defer merged_slots.deinit();
 
-        const CallbackContext = struct {
+        const MergeCalculator = struct {
             merged_slots: *std.ArrayList(Slot),
             slots: *usize,
             assignable_slot_values: *usize,
             has_updated_slots: *bool,
             source_object: Slots.Ptr,
-        };
 
-        try forSlotsInMergeOrder(target_object, source_object, CallbackContext{
-            .merged_slots = &merged_slots,
-            .slots = &slots,
-            .assignable_slot_values = &assignable_slot_values,
-            .has_updated_slots = &has_updated_slots,
-            .source_object = source_object,
-        }, struct {
-            fn callback(context: CallbackContext, object: Slots.Ptr, slot: Slot) !void {
+            fn visit(context: @This(), object: Slots.Ptr, slot: Slot) !void {
                 context.slots.* += slot.requiredSlotSpace(context.merged_slots.items);
                 const context_assignable_slot_values: isize = @intCast(context.assignable_slot_values.*);
                 context.assignable_slot_values.* = @intCast(context_assignable_slot_values +
@@ -399,7 +389,15 @@ pub const Slots = extern struct {
                 if (object == context.source_object)
                     context.has_updated_slots.* = true;
             }
-        }.callback);
+        };
+
+        try forSlotsInMergeOrder(target_object, source_object, MergeCalculator{
+            .merged_slots = &merged_slots,
+            .slots = &slots,
+            .assignable_slot_values = &assignable_slot_values,
+            .has_updated_slots = &has_updated_slots,
+            .source_object = source_object,
+        });
 
         return MergeInfo{
             .previous_slots = target_object.getSlots().len,

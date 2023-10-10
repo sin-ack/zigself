@@ -107,13 +107,13 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
 
     if (receiver.object.object_information.reachability == .Global) {
         // Mark the object graph of new_value as globally reachable
-        _ = traversal.traverseNonGloballyReachableObjectGraph(new_value, {}, struct {
-            fn f(c: void, object: Object.Ptr) error{}!Object.Ptr {
-                _ = c;
+        _ = traversal.traverseNonGloballyReachableObjectGraph(new_value, struct {
+            pub fn visit(self: @This(), object: Object.Ptr) error{}!Object.Ptr {
+                _ = self;
                 object.object_information.reachability = .Global;
                 return object;
             }
-        }.f) catch unreachable;
+        }{}) catch unreachable;
     }
 
     // Since the array object could potentially be in an older space than the

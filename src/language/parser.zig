@@ -248,6 +248,17 @@ fn parseExpression(self: *Self, precedence: MessagePrecedence) ParseError!?AST.E
     return try self.parseExpressionFromPrimary(primary, precedence, false);
 }
 
+fn emitDiagnosticIfNeeded(self: *Self, require: bool, did_send: bool) ParseError!void {
+    if (!did_send and require) {
+        try self.diagnostics.reportDiagnosticFormatted(
+            .Error,
+            self.offsetToLocation(self.token_starts[self.token_index]),
+            "Expected unary, binary or keyword message, got {s}",
+            .{self.token_tags[self.token_index].symbol()},
+        );
+    }
+}
+
 // If require_message is true then the primary must receive at least one message.
 fn parseExpressionFromPrimary(
     self: *Self,
@@ -257,19 +268,6 @@ fn parseExpressionFromPrimary(
 ) ParseError!?AST.ExpressionNode {
     var expr = primary;
     var did_send_message = false;
-
-    const emitDiagnosticIfNeeded = struct {
-        fn f(s: *Self, require: bool, did_send: bool) ParseError!void {
-            if (!did_send and require) {
-                try s.diagnostics.reportDiagnosticFormatted(
-                    .Error,
-                    s.offsetToLocation(s.token_starts[s.token_index]),
-                    "Expected unary, binary or keyword message, got {s}",
-                    .{s.token_tags[s.token_index].symbol()},
-                );
-            }
-        }
-    }.f;
 
     // Collect unary messages
     while (self.consumeToken(.Identifier)) |identifier_token| {
@@ -297,7 +295,7 @@ fn parseExpressionFromPrimary(
     }
 
     if (precedence == .Binary) {
-        try emitDiagnosticIfNeeded(self, require_message, did_send_message);
+        try self.emitDiagnosticIfNeeded(require_message, did_send_message);
         return expr;
     }
 
@@ -308,7 +306,7 @@ fn parseExpressionFromPrimary(
     }
 
     if (precedence == .Keyword) {
-        try emitDiagnosticIfNeeded(self, require_message, did_send_message);
+        try self.emitDiagnosticIfNeeded(require_message, did_send_message);
         return expr;
     }
 

@@ -360,27 +360,27 @@ pub fn writeRegister(self: *Self, location: bytecode.RegisterLocation, value: Va
 
 pub fn visitValues(
     self: *Self,
-    context: anytype,
-    visitor: fn (ctx: @TypeOf(context), value: *Value) Allocator.Error!void,
+    // TODO: Write interfaces proposal for Zig
+    visitor: anytype,
 ) !void {
-    try visitor(context, &self.actor_object.value);
+    try visitor.visit(&self.actor_object.value);
 
     // Go through the register file.
-    try self.register_file.visitValues(context, visitor);
+    try self.register_file.visitValues(visitor);
 
     if (self.entrypoint_selector) |*value|
-        try visitor(context, &value.value);
+        try visitor.visit(&value.value);
 
     if (self.blocked_fd) |*value|
-        try visitor(context, &value.value);
+        try visitor.visit(&value.value);
 
     if (self.message_sender) |*value|
-        try visitor(context, &value.value);
+        try visitor.visit(&value.value);
 
     // Go through the activation stack.
     for (self.activation_stack.getStack()) |*activation| {
-        try visitor(context, &activation.activation_object.value);
-        try visitor(context, &activation.creator_message);
+        try visitor.visit(&activation.activation_object.value);
+        try visitor.visit(&activation.creator_message);
     }
 
     // Go through the slot, argument and saved register stacks.
@@ -388,28 +388,28 @@ pub fn visitValues(
         if (std.meta.eql(SlotSentinel, slot.*))
             continue;
 
-        try visitor(context, &slot.name);
-        try visitor(context, &slot.value);
+        try visitor.visit(&slot.name);
+        try visitor.visit(&slot.value);
     }
 
     for (self.argument_stack.allItems()) |*argument| {
         if (std.meta.eql(ValueSentinel, argument.*))
             continue;
 
-        try visitor(context, argument);
+        try visitor.visit(argument);
     }
 
     for (self.saved_register_stack.allItems()) |*saved_register| {
-        try visitor(context, &saved_register.value);
+        try visitor.visit(&saved_register.value);
     }
 
     {
         var it = self.mailbox.first;
         while (it) |node| : (it = node.next) {
-            try visitor(context, &node.data.sender.value);
-            try visitor(context, &node.data.method.value);
+            try visitor.visit(&node.data.sender.value);
+            try visitor.visit(&node.data.method.value);
             for (node.data.arguments) |*argument| {
-                try visitor(context, argument);
+                try visitor.visit(argument);
             }
         }
     }

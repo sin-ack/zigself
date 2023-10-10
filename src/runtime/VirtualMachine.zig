@@ -360,15 +360,15 @@ pub fn restoreStackSnapshot(self: *Self, snapshot: Actor.StackSnapshot) void {
 
 pub fn visitValues(
     self: *Self,
-    context: anytype,
-    visitor: fn (ctx: @TypeOf(context), value: *Value) Allocator.Error!void,
+    // TODO: Write interfaces proposal for Zig
+    visitor: anytype,
 ) !void {
-    try self.global_actor.visitValues(context, visitor);
+    try self.global_actor.visitValues(visitor);
     if (self.genesis_actor) |actor|
-        try actor.visitValues(context, visitor);
+        try actor.visitValues(visitor);
 
     for (self.regular_actors.keys()) |actor|
-        try actor.visitValues(context, visitor);
+        try actor.visitValues(visitor);
 }
 
 pub fn isInActorMode(self: *Self) bool {

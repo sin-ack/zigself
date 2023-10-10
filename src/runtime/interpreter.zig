@@ -584,13 +584,13 @@ pub fn sendMessage(
                 // argument's object graph as globally reachable. This will
                 // make the whole object graph part of the global object
                 // hierarchy.
-                _ = traversal.traverseNonGloballyReachableObjectGraph(argument, {}, struct {
-                    fn f(context: void, object: Object.Ptr) error{}!Object.Ptr {
-                        _ = context;
+                _ = traversal.traverseNonGloballyReachableObjectGraph(argument, struct {
+                    pub fn visit(self: @This(), object: Object.Ptr) error{}!Object.Ptr {
+                        _ = self;
                         object.object_information.reachability = .Global;
                         return object;
                     }
-                }.f) catch unreachable;
+                }{}) catch unreachable;
             }
 
             value_ptr.* = argument;
