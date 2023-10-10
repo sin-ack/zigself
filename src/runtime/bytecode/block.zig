@@ -237,7 +237,7 @@ fn Block(comptime InstructionT: type, comptime access_mode: AccessMode) type {
                             .target = slice.items(.target)[self.index],
                             .opcode = slice.items(.opcode)[self.index],
                             .payload = slice.items(.payload)[self.index],
-                            .source_range = slice.items(.source_ranges)[self.index],
+                            .source_range = slice.items(.source_range)[self.index],
                         };
                     },
                     .ByInstruction => blk: {

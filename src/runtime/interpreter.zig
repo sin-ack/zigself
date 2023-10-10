@@ -164,10 +164,13 @@ pub fn makeSpecializedExecutor(comptime opcode: bytecode.Instruction.Opcode) Exe
         fn execute(context: *InterpreterContext) InterpreterError!void {
             if (EXECUTION_DEBUG) {
                 const block = context.getCurrentBytecodeBlock();
+                const index = context.getInstructionIndex();
+
                 const inst = bytecode.Instruction{
-                    .target = block.getTargetLocation(context.getInstructionIndex()),
-                    .opcode = block.getOpcode(context.getInstructionIndex()),
-                    .payload = block.getPayload(context.getInstructionIndex()),
+                    .target = block.getTargetLocation(index),
+                    .opcode = block.getOpcode(index),
+                    .payload = block.getPayload(index),
+                    .source_range = block.getSourceRange(index),
                 };
                 std.debug.print("[#{} {s}] Executing: {} = {}\n", .{ context.actor.id, context.getDefinitionExecutable().value.definition_script.value.file_path, inst.target, inst });
             }
