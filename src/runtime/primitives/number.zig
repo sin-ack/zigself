@@ -20,7 +20,8 @@ fn integerOpCommon(
     const arguments = context.getArguments("_" ++ primitive_name ++ ":");
     const receiver = try arguments.getInteger(PrimitiveContext.Receiver, .Signed);
     const term = try arguments.getInteger(0, .Signed);
-    return operation(context.*, receiver, term);
+
+    return @call(.always_inline, operation, .{ context.*, receiver, term });
 }
 
 /// Add two integer numbers. The returned value is an integer.
