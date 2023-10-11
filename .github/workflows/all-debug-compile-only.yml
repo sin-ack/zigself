@@ -22,8 +22,7 @@ jobs:
           version: 0.12.0-dev.817+54e7f58fc
 
       - name: Enable all debug flags
-        run: |
-          sed -i 's/false;/true;/' src/debug.zig
+        run: scripts/enable-all-debug-flags.sh
 
       - name: Compile the project
         run: zig build
