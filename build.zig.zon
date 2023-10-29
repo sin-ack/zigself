@@ -1,7 +1,7 @@
 .{
     .name = "zigself",
     .version = "0.0.0",
-
+    .paths = .{ "./src", "README.md" },
     .dependencies = .{
         .zig_args = .{
             .url = "https://github.com/MasterQ32/zig-args/archive/7989929d055ef7618e60de84cc54644046516fdb.tar.gz",

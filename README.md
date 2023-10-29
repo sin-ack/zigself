@@ -22,7 +22,7 @@ You need the Zig compiler, preferably one built with the known-good version
 commit. You can find the source code, instructions for building, and more on the
 [Zig repository](https://github.com/ziglang/zig).
 
-Latest Zig commit known to work is [`54e7f58fc`](https://github.com/ziglang/zig/commit/54e7f58fc).
+Latest Zig commit known to work is [`256ab68a9`](https://github.com/ziglang/zig/commit/256ab68a9).
 Earlier and later versions may work but there are no guarantees.
 
 ## Building zigSelf
