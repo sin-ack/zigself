@@ -50,8 +50,11 @@ fn addIntervalForRegister(self: *Liveness, allocator: Allocator, location: astco
 
 fn instructionReferencesRegister(inst: astcode.Instruction, location: astcode.RegisterLocation) bool {
     return switch (inst.opcode) {
-        .Send, .PrimSend => blk: {
+        .Send => blk: {
             break :blk inst.payload.Send.receiver_location == location;
+        },
+        .PrimSend => blk: {
+            break :blk inst.payload.PrimSend.receiver_location == location;
         },
         .PushConstantSlot, .PushAssignableSlot => blk: {
             const payload = inst.payload.PushParentableSlot;

@@ -91,8 +91,10 @@ fn Instruction(comptime RegisterLocationT: type) type {
 
             pub fn payloadField(self: Opcode) []const u8 {
                 return switch (self) {
-                    .Send, .PrimSend => "Send",
-                    .SelfSend, .SelfPrimSend => "SelfSend",
+                    .Send => "Send",
+                    .SelfSend => "SelfSend",
+                    .PrimSend => "PrimSend",
+                    .SelfPrimSend => "SelfPrimSend",
                     .PushConstantSlot, .PushAssignableSlot => "PushParentableSlot",
                     .PushArgumentSlot => "PushNonParentSlot",
                     .Return, .NonlocalReturn => "Return",
@@ -128,8 +130,17 @@ fn Instruction(comptime RegisterLocationT: type) type {
             Send: struct {
                 receiver_location: RegisterLocation,
                 message_name: []const u8,
+                send_index: u32,
             },
             SelfSend: struct {
+                message_name: []const u8,
+                send_index: u32,
+            },
+            PrimSend: struct {
+                receiver_location: RegisterLocation,
+                message_name: []const u8,
+            },
+            SelfPrimSend: struct {
                 message_name: []const u8,
             },
             PushParentableSlot: struct {
@@ -185,12 +196,20 @@ fn Instruction(comptime RegisterLocationT: type) type {
             try std.fmt.format(writer, "{s}", .{inst.opcode.toString()});
 
             switch (inst.opcode) {
-                .Send, .PrimSend => {
+                .Send => {
                     const payload = inst.payload.Send;
+                    try std.fmt.format(writer, "({}, \"{s}\") (send #{})", .{ payload.receiver_location, payload.message_name, payload.send_index });
+                },
+                .SelfSend => {
+                    const payload = inst.payload.SelfSend;
+                    try std.fmt.format(writer, "(\"{s}\") (send #{})", .{ payload.message_name, payload.send_index });
+                },
+                .PrimSend => {
+                    const payload = inst.payload.PrimSend;
                     try std.fmt.format(writer, "({}, \"{s}\")", .{ payload.receiver_location, payload.message_name });
                 },
-                .SelfSend, .SelfPrimSend => {
-                    const payload = inst.payload.SelfSend;
+                .SelfPrimSend => {
+                    const payload = inst.payload.SelfPrimSend;
                     try std.fmt.format(writer, "(\"{s}\")", .{payload.message_name});
                 },
                 .PushConstantSlot, .PushAssignableSlot => {

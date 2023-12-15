@@ -208,6 +208,7 @@ fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, messag
                 try block.addInstruction(executable.allocator, .Send, message_location, .{
                     .receiver_location = receiver_location,
                     .message_name = message.message_name,
+                    .send_index = block.makeSendIndex(),
                 }, message.range);
             }
 
@@ -220,7 +221,10 @@ fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, messag
         if (message.message_name[0] == '_') {
             try block.addInstruction(executable.allocator, .SelfPrimSend, message_location, .{ .message_name = message.message_name[1..] }, message.range);
         } else {
-            try block.addInstruction(executable.allocator, .SelfSend, message_location, .{ .message_name = message.message_name }, message.range);
+            try block.addInstruction(executable.allocator, .SelfSend, message_location, .{
+                .message_name = message.message_name,
+                .send_index = block.makeSendIndex(),
+            }, message.range);
         }
 
         break :message_location message_location;
@@ -247,7 +251,10 @@ fn generateIdentifier(self: *AstGen, executable: *Executable, block: *Block, ide
     if (identifier.value[0] == '_') {
         try block.addInstruction(executable.allocator, .SelfPrimSend, identifier_location, .{ .message_name = identifier.value[1..] }, identifier.range);
     } else {
-        try block.addInstruction(executable.allocator, .SelfSend, identifier_location, .{ .message_name = identifier.value }, identifier.range);
+        try block.addInstruction(executable.allocator, .SelfSend, identifier_location, .{
+            .message_name = identifier.value,
+            .send_index = block.makeSendIndex(),
+        }, identifier.range);
     }
 
     return identifier_location;

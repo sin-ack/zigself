@@ -63,11 +63,12 @@ fn lowerInstruction(
             try block.addInstruction(allocator, .Send, target, .{
                 .receiver_location = register_pool.getAllocatedRegisterFor(payload.receiver_location),
                 .message_name = payload.message_name,
+                .send_index = payload.send_index,
             }, inst.source_range);
         },
         .PrimSend => {
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-            const payload = inst.payload.Send;
+            const payload = inst.payload.PrimSend;
 
             try block.addInstruction(allocator, .PrimSend, target, .{
                 .receiver_location = register_pool.getAllocatedRegisterFor(payload.receiver_location),
@@ -78,11 +79,14 @@ fn lowerInstruction(
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
             const payload = inst.payload.SelfSend;
 
-            try block.addInstruction(allocator, .SelfSend, target, .{ .message_name = payload.message_name }, inst.source_range);
+            try block.addInstruction(allocator, .SelfSend, target, .{
+                .message_name = payload.message_name,
+                .send_index = payload.send_index,
+            }, inst.source_range);
         },
         .SelfPrimSend => {
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-            const payload = inst.payload.SelfSend;
+            const payload = inst.payload.SelfPrimSend;
 
             try block.addInstruction(allocator, .SelfPrimSend, target, .{ .message_name = payload.message_name }, inst.source_range);
         },

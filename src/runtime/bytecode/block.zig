@@ -13,6 +13,7 @@ const AccessMode = enum { ByField, ByInstruction };
 fn Block(comptime InstructionT: type, comptime access_mode: AccessMode) type {
     return struct {
         instructions: InstructionList = .{},
+        send_count: u32 = 0,
         sealed: if (builtin.mode == .Debug) bool else void = if (builtin.mode == .Debug) false else {},
 
         const Self = @This();
@@ -70,6 +71,17 @@ fn Block(comptime InstructionT: type, comptime access_mode: AccessMode) type {
                 self.instructions.payloads = self.instructions.multi_array.items(.payload);
                 self.instructions.source_ranges = self.instructions.multi_array.items(.source_range);
             }
+        }
+
+        /// Allocate a new send index and return it.
+        pub fn makeSendIndex(self: *Self) u32 {
+            if (builtin.mode == .Debug and self.sealed) {
+                @panic("!!! Attempting to make a send index for a block that is sealed!");
+            }
+
+            const index = self.send_count;
+            self.send_count += 1;
+            return index;
         }
 
         /// Append a new instruction.
