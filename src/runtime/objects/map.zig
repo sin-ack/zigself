@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const Heap = @import("../Heap.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig").Object;
+const context = @import("../context.zig");
 const pointer = @import("../../utility/pointer.zig");
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
@@ -57,7 +58,11 @@ pub const Map = extern struct {
         extra: u32 = 0,
     };
 
-    pub fn init(self: Map.Ptr, map_type: MapType, map_map: Map.Ptr) void {
+    pub fn init(self: Map.Ptr, map_type: MapType) void {
+        self.initWithMapMap(map_type, context.getVM().getMapMap());
+    }
+
+    pub fn initWithMapMap(self: Map.Ptr, map_type: MapType, map_map: Map.Ptr) void {
         self.object = .{
             .object_information = .{
                 .object_type = .Map,
@@ -135,7 +140,7 @@ pub const Map = extern struct {
         return self.delegate(usize, "getSizeForCloning", .{});
     }
 
-    pub fn clone(self: Map.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) Allocator.Error!Map.Ptr {
+    pub fn clone(self: Map.Ptr, token: *Heap.AllocationToken, actor_id: u31) Allocator.Error!Map.Ptr {
         _ = actor_id;
 
         // NOTE: Inlining the delegation here because we need to cast the result into the generic object type.
@@ -145,16 +150,15 @@ pub const Map = extern struct {
                 if (!@hasDecl(MapT(t), "clone")) unreachable;
 
                 const map_ptr: MapT(t).Ptr = @ptrCast(self);
-                const result_or_error = map_ptr.clone(vm, token);
+                const result_or_error = map_ptr.clone(token);
                 const result = if (@typeInfo(@TypeOf(result_or_error)) == .ErrorUnion) try result_or_error else result_or_error;
                 return @ptrCast(result);
             },
         };
     }
 
-    pub fn lookup(self: Map.Ptr, vm: *VirtualMachine, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: Map.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
         _ = self;
-        _ = vm;
         _ = selector_hash;
         _ = previously_visited;
 
@@ -174,7 +178,7 @@ pub const Map = extern struct {
 
         var map_map: Map.Ptr = @ptrCast(memory_area);
         // A defined undefined value.
-        map_map.init(.MapMap, @ptrFromInt(0x13370));
+        map_map.initWithMapMap(.MapMap, @ptrFromInt(0x13370));
 
         // FIXME: This is kinda crude. Let's give ourselves a way to set this
         //        after-the-fact without reaching into the header of the object.

@@ -31,7 +31,6 @@ pub fn ByteAt(context: *PrimitiveContext) !ExecutionResult {
     const values = receiver.getValues();
     if (position >= values.len) {
         return ExecutionResult.runtimeError(try RuntimeError.initFormatted(
-            context.vm,
             context.source_range,
             "Argument passed to _ByteAt: is out of bounds for this receiver (passed {d}, size {d})",
             .{ position, values.len },
@@ -55,7 +54,6 @@ pub fn ByteAt_Put(context: *PrimitiveContext) !ExecutionResult {
 
     if (position >= values.len) {
         return ExecutionResult.runtimeError(try RuntimeError.initFormatted(
-            context.vm,
             context.source_range,
             "First argument passed to _ByteAt:Put: is out of bounds for this receiver (passed {d}, size {d})",
             .{ position, values.len },
@@ -110,7 +108,7 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
         @memset(new_byte_array.getValues()[bytes_to_copy..], filler);
     }
 
-    const byte_array_object = ByteArrayObject.create(context.vm.getMapMap(), &token, context.actor.id, new_byte_array);
+    const byte_array_object = ByteArrayObject.create(&token, context.actor.id, new_byte_array);
     return ExecutionResult.resolve(byte_array_object.asValue());
 }
 
@@ -161,6 +159,6 @@ pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
     @memcpy(new_byte_array.getValues()[0..receiver_size], receiver.getValues());
     @memcpy(new_byte_array.getValues()[receiver_size..], argument.getValues());
 
-    const byte_array_object = ByteArrayObject.create(context.vm.getMapMap(), &token, context.actor.id, new_byte_array);
+    const byte_array_object = ByteArrayObject.create(&token, context.actor.id, new_byte_array);
     return ExecutionResult.resolve(byte_array_object.asValue());
 }

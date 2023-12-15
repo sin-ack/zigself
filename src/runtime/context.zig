@@ -8,6 +8,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
+const Heap = @import("Heap.zig");
 const Actor = @import("Actor.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
 
@@ -21,6 +22,10 @@ pub fn getVM() *VirtualMachine {
     } else {
         return vm.?;
     }
+}
+
+pub fn getHeap() *Heap {
+    return getVM().heap;
 }
 
 pub fn getActor() *Actor {

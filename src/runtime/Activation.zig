@@ -9,6 +9,7 @@ const Allocator = std.mem.Allocator;
 const Actor = @import("./Actor.zig");
 const value = @import("./value.zig");
 const Value = value.Value;
+const context = @import("context.zig");
 const bytecode = @import("./bytecode.zig");
 const SourceRange = @import("./SourceRange.zig");
 const IntegerValue = value.IntegerValue;
@@ -60,7 +61,6 @@ pub fn initInPlace(
     self: *Activation,
     activation_object: ActivationObject.Value,
     target_location: bytecode.RegisterLocation,
-    stack_snapshot: Actor.StackSnapshot,
     creator_message: Value,
     created_from: SourceRange,
 ) void {
@@ -68,7 +68,7 @@ pub fn initInPlace(
         .activation_id = newActivationID(),
         .activation_object = activation_object,
         .target_location = target_location,
-        .stack_snapshot = stack_snapshot,
+        .stack_snapshot = context.getVM().takeStackSnapshot(),
         .creator_message = creator_message,
         .created_from = created_from.copy(),
     };
@@ -202,8 +202,8 @@ pub const ActivationStack = struct {
         return @divExact(@intFromPtr(activation) - @intFromPtr(start_of_slice), @sizeOf(Activation));
     }
 
-    pub fn pushEntrypointActivation(self: *ActivationStack, vm: *VirtualMachine, new_executable: bytecode.Executable.Ref) !void {
-        try self.pushEntrypointActivationInner(vm, .zero, new_executable, new_executable);
+    pub fn pushEntrypointActivation(self: *ActivationStack, new_executable: bytecode.Executable.Ref) !void {
+        try self.pushEntrypointActivationInner(.zero, new_executable, new_executable);
     }
 
     /// Pushes an entrypoint activation for this executable, with the creation
@@ -211,32 +211,31 @@ pub const ActivationStack = struct {
     /// scripts by _RunScript, for example.
     pub fn pushSubEntrypointActivation(
         self: *ActivationStack,
-        vm: *VirtualMachine,
         target_location: bytecode.RegisterLocation,
         new_executable: bytecode.Executable.Ref,
     ) !void {
         std.debug.assert(self.getDepth() > 0);
-        try self.pushEntrypointActivationInner(vm, target_location, self.getCurrent().definitionExecutable(), new_executable);
+        try self.pushEntrypointActivationInner(target_location, self.getCurrent().definitionExecutable(), new_executable);
     }
 
     fn pushEntrypointActivationInner(
         self: *ActivationStack,
-        vm: *VirtualMachine,
         target_location: bytecode.RegisterLocation,
         current_executable: bytecode.Executable.Ref,
         new_executable: bytecode.Executable.Ref,
     ) !void {
         const source_range = SourceRange.initNoRef(current_executable, .{ .start = 0, .end = 1 });
 
+        const vm = context.getVM();
         var token = try vm.heap.getAllocation(
             MethodObject.requiredSizeForCreatingTopLevelContext() +
                 ActivationObject.requiredSizeForAllocation(0, 0),
         );
         defer token.deinit();
 
-        const toplevel_context_method = try MethodObject.createTopLevelContextForExecutable(vm, &token, new_executable, new_executable.value.getEntrypointBlock());
+        const toplevel_context_method = try MethodObject.createTopLevelContextForExecutable(&token, new_executable, new_executable.value.getEntrypointBlock());
         const activation_slot = try self.getNewActivationSlot(vm.allocator);
-        toplevel_context_method.activateMethod(vm, &token, vm.current_actor.id, vm.lobby(), &.{}, target_location, source_range, activation_slot);
+        toplevel_context_method.activateMethod(&token, context.getActor().id, vm.lobby(), &.{}, target_location, source_range, activation_slot);
     }
 };
 

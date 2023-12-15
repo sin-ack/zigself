@@ -34,7 +34,7 @@ fn callFailureBlock(
     const errno_value = Value.fromInteger(errno_int);
 
     try context.actor.argument_stack.push(context.vm.allocator, errno_value);
-    return try interpreter.sendMessage(context.vm, context.actor, block, "value:", context.target_location, context.source_range);
+    return try interpreter.sendMessage(block, "value:", context.target_location, context.source_range);
 }
 
 /// Create a managed FD out of a native FD value.
@@ -397,7 +397,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     var token = try context.vm.heap.getAllocation(required_memory);
     defer token.deinit();
 
-    const result_array_map = array_object.ArrayMap.create(context.vm.getMapMap(), &token, result_count);
+    const result_array_map = array_object.ArrayMap.create(&token, result_count);
     const result_array = array_object.Array.createWithValues(&token, context.actor.id, result_array_map, &.{}, context.vm.nil());
 
     const result_values = result_array.getValues();
@@ -408,7 +408,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
             it = result.next;
             i += 1;
         }) {
-            const addrinfo_map = AddrInfoMap.createFromAddrinfo(context.vm.getMapMap(), &token, context.actor.id, result);
+            const addrinfo_map = AddrInfoMap.createFromAddrinfo(&token, context.actor.id, result);
             const addrinfo = addrinfo_map.createObject(&token, context.actor.id);
 
             result_values[i] = addrinfo.asValue();

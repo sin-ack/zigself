@@ -8,6 +8,7 @@ const Heap = @import("Heap.zig");
 const Slot = @import("slot.zig").Slot;
 const Value = @import("value.zig").Value;
 const AstGen = @import("bytecode/AstGen.zig");
+const context = @import("context.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
 
 pub const AssignableSlotValues = std.BoundedArray(Value, AstGen.MaximumAssignableSlots);
@@ -61,14 +62,14 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
             self.map.setAssignableSlotCount(@intCast(self.assignable_slot_index));
         }
 
-        pub fn createObject(self: *Self, current_actor_id: u31) ObjectType.Ptr {
+        pub fn createObject(self: *Self) ObjectType.Ptr {
             var slot_values: [AstGen.MaximumAssignableSlots]Value = undefined;
             const slot_values_slice = slot_values[0..self.assignable_slot_index];
             self.writeAssignableSlotValuesTo(slot_values_slice);
 
             return ObjectType.create(
                 self.token,
-                current_actor_id,
+                context.getActor().id,
                 self.map,
                 slot_values_slice,
             );

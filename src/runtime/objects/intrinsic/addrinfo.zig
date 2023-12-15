@@ -24,11 +24,11 @@ pub const AddrInfoMap = extern struct {
 
     pub usingnamespace IntrinsicMap(AddrInfoMap, .AddrInfo);
 
-    pub fn createFromAddrinfo(map_map: Map.Ptr, token: *Heap.AllocationToken, actor_id: u31, addrinfo: *std.os.addrinfo) AddrInfoMap.Ptr {
+    pub fn createFromAddrinfo(token: *Heap.AllocationToken, actor_id: u31, addrinfo: *std.os.addrinfo) AddrInfoMap.Ptr {
         const sockaddr_memory: [*]u8 = @ptrCast(addrinfo.addr.?);
-        const sockaddr_bytes_object = ByteArrayObject.createWithValues(map_map, token, actor_id, sockaddr_memory[0..addrinfo.addrlen]);
+        const sockaddr_bytes_object = ByteArrayObject.createWithValues(token, actor_id, sockaddr_memory[0..addrinfo.addrlen]);
 
-        const self = create(map_map, token);
+        const self = create(token);
         self.family = Value.fromInteger(addrinfo.family);
         self.socketType = Value.fromInteger(addrinfo.socktype);
         self.protocol = Value.fromInteger(addrinfo.protocol);
@@ -38,20 +38,20 @@ pub const AddrInfoMap = extern struct {
         return self;
     }
 
-    fn create(map_map: Map.Ptr, token: *Heap.AllocationToken) AddrInfoMap.Ptr {
+    fn create(token: *Heap.AllocationToken) AddrInfoMap.Ptr {
         const memory = token.allocate(.Object, AddrInfoMap.requiredSizeForAllocation());
         const self: AddrInfoMap.Ptr = @ptrCast(memory);
 
-        self.init(map_map);
+        self.init();
         return self;
     }
 
-    fn init(self: AddrInfoMap.Ptr, map_map: Map.Ptr) void {
-        self.map.init(.AddrInfo, map_map);
+    fn init(self: AddrInfoMap.Ptr) void {
+        self.map.init(.AddrInfo);
     }
 
-    pub fn clone(self: AddrInfoMap.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken) AddrInfoMap.Ptr {
-        const new_map = create(vm.getMapMap(), token);
+    pub fn clone(self: AddrInfoMap.Ptr, token: *Heap.AllocationToken) AddrInfoMap.Ptr {
+        const new_map = create(token);
         new_map.flags = self.flags;
         new_map.family = self.family;
         new_map.socketType = self.socketType;

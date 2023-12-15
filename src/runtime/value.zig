@@ -11,6 +11,7 @@ const Heap = @import("./Heap.zig");
 const debug = @import("../debug.zig");
 const Object = @import("object.zig").Object;
 const RefPtr = @import("../utility/ref_counted.zig").RefPtr;
+const context = @import("context.zig");
 const ByteArray = @import("./ByteArray.zig");
 const LookupResult = object_lookup.LookupResult;
 const SelectorHash = object_lookup.SelectorHash;
@@ -117,27 +118,26 @@ pub const Value = packed struct {
 
     pub fn lookup(
         self: Value,
-        vm: *VirtualMachine,
         selector: []const u8,
     ) LookupResult {
         const selector_hash = SelectorHash.init(selector);
         if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up \"{s}\" (hash: {x}) on {}\n", .{ selector, selector_hash.regular, self });
 
-        return self.lookupByHash(vm, selector_hash);
+        return self.lookupByHash(selector_hash);
     }
 
     pub fn lookupByHash(
         self: Value,
-        vm: *VirtualMachine,
         selector_hash: SelectorHash,
     ) LookupResult {
         if (selector_hash.regular == object_lookup.self_hash) {
             return .{ .Regular = self };
         }
 
+        const vm = context.getVM();
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
-            .ObjectReference => selector_hash.lookupObject(vm, self.asObject()),
+            .ObjectReference => selector_hash.lookupObject(self.asObject()),
 
             .Integer => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits integer\n", .{});
@@ -145,7 +145,7 @@ pub const Value = packed struct {
                 if (selector_hash.regular == object_lookup.parent_hash)
                     return LookupResult{ .Regular = integer_traits };
 
-                return integer_traits.lookupByHash(vm, selector_hash);
+                return integer_traits.lookupByHash(selector_hash);
             },
             .FloatingPoint => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits float\n", .{});
@@ -153,19 +153,19 @@ pub const Value = packed struct {
                 if (selector_hash.regular == object_lookup.parent_hash)
                     return LookupResult{ .Regular = float_traits };
 
-                return float_traits.lookupByHash(vm, selector_hash);
+                return float_traits.lookupByHash(selector_hash);
             },
         };
     }
 
     /// Clones this value and returns a copy of it.
-    pub fn clone(self: Value, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) Value {
+    pub fn clone(self: Value, token: *Heap.AllocationToken, actor_id: u31) Value {
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
             .Integer, .FloatingPoint => Value{ .data = self.data },
             // NOTE: The only error condition that can happen here is during method and block map cloning.
             //       Since user code is unable to do this, there is no reason to propagate a try here.
-            .ObjectReference => (self.asObject().clone(vm, token, actor_id) catch unreachable).asValue(),
+            .ObjectReference => (self.asObject().clone(token, actor_id) catch unreachable).asValue(),
         };
     }
 };

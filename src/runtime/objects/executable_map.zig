@@ -38,7 +38,6 @@ pub const ExecutableMap = extern struct {
     pub fn init(
         self: ExecutableMap.Ptr,
         comptime map_type: MapType,
-        map_map: Map.Ptr,
         argument_slot_count: u8,
         total_slot_count: u32,
         block: *bytecode.Block,
@@ -46,8 +45,8 @@ pub const ExecutableMap = extern struct {
     ) void {
         std.debug.assert(argument_slot_count <= total_slot_count);
 
-        self.slots.init(total_slot_count, map_map);
-        self.slots.map.init(map_type, map_map);
+        self.slots.init(total_slot_count);
+        self.slots.map.init(map_type);
         self.setArgumentSlotCount(argument_slot_count);
 
         self.block = PointerValue(bytecode.Block).init(block);

@@ -191,7 +191,7 @@ pub const Object = extern struct {
     }
 
     /// Create a new shallow copy of this object. The map is not affected.
-    pub fn clone(self: Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) Allocator.Error!Ptr {
+    pub fn clone(self: Ptr, token: *Heap.AllocationToken, actor_id: u31) Allocator.Error!Ptr {
         // NOTE: Inlining the delegation here because we need to cast the result into the generic object type.
         return switch (self.object_information.object_type) {
             .ForwardedObject => unreachable,
@@ -199,15 +199,15 @@ pub const Object = extern struct {
                 if (!@hasDecl(ObjectT(t), "clone")) unreachable;
 
                 const self_ptr: ObjectT(t).Ptr = @ptrCast(self);
-                const result_or_error = self_ptr.clone(vm, token, actor_id);
+                const result_or_error = self_ptr.clone(token, actor_id);
                 const result = if (@typeInfo(@TypeOf(result_or_error)) == .ErrorUnion) try result_or_error else result_or_error;
                 return @ptrCast(result);
             },
         };
     }
 
-    pub fn lookup(self: Ptr, vm: *VirtualMachine, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
-        return self.delegate(object_lookup.LookupResult, "lookup", .{ vm, selector_hash, previously_visited });
+    pub fn lookup(self: Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+        return self.delegate(object_lookup.LookupResult, "lookup", .{ selector_hash, previously_visited });
     }
 
     // Forwarded objects

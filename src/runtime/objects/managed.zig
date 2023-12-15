@@ -119,8 +119,7 @@ pub const Managed = extern struct {
             },
         }
     }
-    pub fn lookup(self: Managed.Ptr, vm: *VirtualMachine, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
-        _ = vm;
+    pub fn lookup(self: Managed.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Managed.lookup: Looking at a managed object type: {}\n", .{self.getManagedType()});

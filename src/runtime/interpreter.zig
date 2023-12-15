@@ -20,6 +20,7 @@ const MethodMap = method_object.MethodMap;
 const traversal = @import("./object_traversal.zig");
 const Activation = @import("./Activation.zig");
 const primitives = @import("./primitives.zig");
+const vm_context = @import("context.zig");
 const SourceRange = @import("./SourceRange.zig");
 const BlockObject = block_object.Block;
 const SlotsObject = slots_object.Slots;
@@ -64,10 +65,10 @@ pub const InterpreterContext = struct {
         block: *const bytecode.Block,
     };
 
-    pub fn init(vm: *VirtualMachine, actor: *Actor, last_activation_ref: ?Activation.ActivationRef) InterpreterContext {
+    pub fn init(last_activation_ref: ?Activation.ActivationRef) InterpreterContext {
         var context = InterpreterContext{
-            .vm = vm,
-            .actor = actor,
+            .vm = vm_context.getVM(),
+            .actor = vm_context.getActor(),
             .last_activation_ref = last_activation_ref,
         };
         context.refreshActivationContext();
@@ -209,7 +210,7 @@ fn opcodeSend(context: *InterpreterContext) InterpreterError!ExecutionResult {
 
     const payload = block.getTypedPayload(index, .Send);
     const receiver = context.vm.readRegister(payload.receiver_location);
-    return try performSend(context.vm, context.actor, receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
+    return try performSend(receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodeSelfSend(context: *InterpreterContext) InterpreterError!ExecutionResult {
@@ -218,7 +219,7 @@ fn opcodeSelfSend(context: *InterpreterContext) InterpreterError!ExecutionResult
 
     const payload = block.getTypedPayload(index, .SelfSend);
     const receiver = context.actor.activation_stack.getCurrent().activation_object.value;
-    return try performSend(context.vm, context.actor, receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
+    return try performSend(receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodePrimSend(context: *InterpreterContext) InterpreterError!ExecutionResult {
@@ -227,7 +228,7 @@ fn opcodePrimSend(context: *InterpreterContext) InterpreterError!ExecutionResult
 
     const payload = block.getTypedPayload(index, .PrimSend);
     const receiver = context.vm.readRegister(payload.receiver_location);
-    return try performPrimitiveSend(context.vm, context.actor, receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
+    return try performPrimitiveSend(receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodeSelfPrimSend(context: *InterpreterContext) InterpreterError!ExecutionResult {
@@ -236,7 +237,7 @@ fn opcodeSelfPrimSend(context: *InterpreterContext) InterpreterError!ExecutionRe
 
     const payload = block.getTypedPayload(index, .SelfPrimSend);
     const receiver = context.actor.activation_stack.getCurrent().activation_object.get().findActivationReceiver();
-    return try performPrimitiveSend(context.vm, context.actor, receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
+    return try performPrimitiveSend(receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodePushConstantSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
@@ -290,7 +291,7 @@ fn opcodeCreateByteArray(context: *InterpreterContext) InterpreterError!Executio
     var token = try context.vm.heap.getAllocation(ByteArrayObject.requiredSizeForAllocation(payload.len));
     defer token.deinit();
 
-    const byte_array = ByteArrayObject.createWithValues(context.vm.getMapMap(), &token, context.actor.id, payload);
+    const byte_array = ByteArrayObject.createWithValues(&token, context.actor.id, payload);
     context.vm.writeRegister(block.getTargetLocation(index), byte_array.asValue());
     return ExecutionResult.normal();
 }
@@ -300,8 +301,6 @@ fn opcodeCreateObject(context: *InterpreterContext) InterpreterError!ExecutionRe
     const index = context.getInstructionIndex();
 
     try createObject(
-        context.vm,
-        context.actor,
         block.getTypedPayload(index, .CreateObject).slot_count,
         block.getTargetLocation(index),
     );
@@ -316,8 +315,6 @@ fn opcodeCreateMethod(context: *InterpreterContext) InterpreterError!ExecutionRe
     const method_name_byte_array = context.vm.readRegister(payload.method_name_location).asObject().mustBeType(.ByteArray).getByteArray();
 
     try createMethod(
-        context.vm,
-        context.actor,
         context.getDefinitionExecutable(),
         method_name_byte_array,
         payload.slot_count,
@@ -333,8 +330,6 @@ fn opcodeCreateBlock(context: *InterpreterContext) InterpreterError!ExecutionRes
 
     const payload = block.getTypedPayload(index, .CreateBlock);
     try createBlock(
-        context.vm,
-        context.actor,
         context.getDefinitionExecutable(),
         payload.slot_count,
         payload.block_index,
@@ -344,10 +339,13 @@ fn opcodeCreateBlock(context: *InterpreterContext) InterpreterError!ExecutionRes
 }
 
 fn opcodeReturn(context: *InterpreterContext) InterpreterError!ExecutionResult {
-    const value = context.vm.readRegister(context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .Return).value_location);
+    const index = context.getInstructionIndex();
+    const payload = context.getCurrentBytecodeBlock().getTypedPayload(index, .Return);
+
+    const value = context.vm.readRegister(payload.value_location);
     context.vm.writeRegister(.ret, value);
 
-    if (context.actor.exitCurrentActivation(context.vm, context.last_activation_ref) == .LastActivation) {
+    if (context.actor.exitCurrentActivation(context.last_activation_ref) == .LastActivation) {
         return ExecutionResult.resolve(context.vm.readRegister(.ret));
     }
 
@@ -355,7 +353,10 @@ fn opcodeReturn(context: *InterpreterContext) InterpreterError!ExecutionResult {
 }
 
 fn opcodeNonlocalReturn(context: *InterpreterContext) InterpreterError!ExecutionResult {
-    const value = context.vm.readRegister(context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .NonlocalReturn).value_location);
+    const index = context.getInstructionIndex();
+    const payload = context.getCurrentBytecodeBlock().getTypedPayload(index, .NonlocalReturn);
+
+    const value = context.vm.readRegister(payload.value_location);
     context.vm.writeRegister(.ret, value);
 
     const current_activation = context.actor.activation_stack.getCurrent();
@@ -365,7 +366,7 @@ fn opcodeNonlocalReturn(context: *InterpreterContext) InterpreterError!Execution
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(context.getSourceRange(), "Attempted to non-local return to non-existent activation"));
     };
 
-    if (context.actor.exitActivation(context.vm, context.last_activation_ref, target_activation) == .LastActivation) {
+    if (context.actor.exitActivation(context.last_activation_ref, target_activation) == .LastActivation) {
         return ExecutionResult.resolve(context.vm.readRegister(.ret));
     }
 
@@ -373,12 +374,16 @@ fn opcodeNonlocalReturn(context: *InterpreterContext) InterpreterError!Execution
 }
 
 fn opcodePushArg(context: *InterpreterContext) InterpreterError!ExecutionResult {
-    var argument = context.vm.readRegister(context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushArg).argument_location);
+    const index = context.getInstructionIndex();
+    const payload = context.getCurrentBytecodeBlock().getTypedPayload(index, .PushArg);
+
+    var argument = context.vm.readRegister(payload.argument_location);
     if (argument.isObjectReference()) {
         if (argument.asObject().asType(.Activation)) |activation| {
             argument = activation.findActivationReceiver();
         }
     }
+
     try context.actor.argument_stack.push(context.vm.allocator, argument);
     return ExecutionResult.normal();
 }
@@ -422,14 +427,12 @@ fn opcodeVerifySlotSentinel(context: *InterpreterContext) InterpreterError!Execu
 // --- Utility functions ---
 
 fn performSend(
-    vm: *VirtualMachine,
-    actor: *Actor,
     receiver: Value,
     message_name: []const u8,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !ExecutionResult {
-    const result = try sendMessage(vm, actor, receiver, message_name, target_location, source_range);
+    const result = try sendMessage(receiver, message_name, target_location, source_range);
     switch (result) {
         .Resolved => |v| {
             var value = v;
@@ -439,7 +442,7 @@ fn performSend(
                 }
             }
 
-            vm.writeRegister(target_location, value);
+            vm_context.getVM().writeRegister(target_location, value);
             return ExecutionResult.normal();
         },
         else => return result,
@@ -447,8 +450,6 @@ fn performSend(
 }
 
 fn performPrimitiveSend(
-    vm: *VirtualMachine,
-    actor: *Actor,
     receiver_: Value,
     message_name: []const u8,
     target_location: bytecode.RegisterLocation,
@@ -462,12 +463,14 @@ fn performPrimitiveSend(
             }
         }
 
-        const tracked_receiver = try vm.heap.track(receiver);
-        defer tracked_receiver.untrack(vm.heap);
+        const heap = vm_context.getHeap();
+        const tracked_receiver = try heap.track(receiver);
+        defer tracked_receiver.untrack(heap);
 
-        const argument_slice = actor.argument_stack.lastNItems(primitive.arity);
+        const actor = vm_context.getActor();
+        const argument_slice = vm_context.getActor().argument_stack.lastNItems(primitive.arity);
 
-        const primitive_result = try primitive.call(vm, actor, tracked_receiver, argument_slice, target_location, source_range);
+        const primitive_result = try primitive.call(tracked_receiver, argument_slice, target_location, source_range);
         if (!(primitive_result == .ActorYielded and actor.yield_reason == .Blocked)) {
             // NOTE: If the actor got blocked, it will retry the same primitive
             //       call when it gets unblocked, so we shouldn't pop values off
@@ -477,7 +480,7 @@ fn performPrimitiveSend(
 
         switch (primitive_result) {
             .Resolved => |value| {
-                vm.writeRegister(target_location, value);
+                vm_context.getVM().writeRegister(target_location, value);
                 return ExecutionResult.normal();
             },
             else => return primitive_result,
@@ -485,7 +488,7 @@ fn performPrimitiveSend(
     }
 
     return ExecutionResult.runtimeError(
-        try RuntimeError.initFormatted(vm, source_range, "Unknown primitive selector '{s}'", .{message_name}),
+        try RuntimeError.initFormatted(source_range, "Unknown primitive selector '{s}'", .{message_name}),
     );
 }
 
@@ -494,13 +497,13 @@ fn performPrimitiveSend(
 /// pushes the activation onto the stack and signals that the activation has
 /// changed. If the message send fails, returns the runtime error.
 pub fn sendMessage(
-    vm: *VirtualMachine,
-    actor: *Actor,
     receiver: Value,
     message_name: []const u8,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !ExecutionResult {
+    const actor = vm_context.getActor();
+
     // Check for block activation. Note that this isn't the same as calling a
     // method on traits block, this is actually executing the block itself via
     // the virtual method.
@@ -522,7 +525,7 @@ pub fn sendMessage(
                     // Advance the instruction for the activation that will be returned to.
                     _ = actor.activation_stack.getCurrent().advanceInstruction();
 
-                    try executeBlock(vm, actor, receiver_as_block, argument_slice, target_location, source_range);
+                    try executeBlock(receiver_as_block, argument_slice, target_location, source_range);
 
                     actor.argument_stack.popNItems(argument_count);
                     // Bump the argument stack height of the (now current)
@@ -537,7 +540,7 @@ pub fn sendMessage(
 
     actor.ensureCanRead(receiver, source_range);
 
-    return switch (receiver.lookup(vm, message_name)) {
+    return switch (receiver.lookup(message_name)) {
         .Regular => |lookup_result| {
             if (lookup_result.isObjectReference()) {
                 if (lookup_result.asObject().asType(.Method)) |method| {
@@ -547,7 +550,7 @@ pub fn sendMessage(
                     // Advance the instruction for the activation that will be returned to.
                     _ = actor.activation_stack.getCurrent().advanceInstruction();
 
-                    try executeMethod(vm, actor, receiver, method, argument_slice, target_location, source_range);
+                    try executeMethod(receiver, method, argument_slice, target_location, source_range);
 
                     actor.argument_stack.popNItems(argument_count);
                     // Bump the argument stack height of the (now current)
@@ -596,7 +599,7 @@ pub fn sendMessage(
             value_ptr.* = argument;
 
             // David will remember that.
-            try vm.heap.rememberObjectReference(object_that_has_the_assignable_slot.asValue(), argument);
+            try vm_context.getHeap().rememberObjectReference(object_that_has_the_assignable_slot.asValue(), argument);
 
             actor.argument_stack.popNItems(1);
             return ExecutionResult.resolve(receiver);
@@ -612,12 +615,13 @@ pub fn sendMessage(
             //        This is required for the time being because we don't have
             //        a better first-in-last-out (which is how messages are
             //        processed) structure yet.
+            const vm = vm_context.getVM();
             const new_arguments_slice = try vm.allocator.alloc(Value, argument_slice.len);
             errdefer vm.allocator.free(new_arguments_slice);
 
             // Blessing each argument is required so that actors don't share memory.
             for (argument_slice, 0..) |argument, i| {
-                new_arguments_slice[i] = try bless.bless(vm, vm.heap, target_actor.id, argument);
+                new_arguments_slice[i] = try bless.bless(target_actor.id, argument);
             }
 
             try target_actor.putMessageInMailbox(
@@ -631,19 +635,17 @@ pub fn sendMessage(
             actor.argument_stack.popNItems(argument_count);
             return ExecutionResult.resolve(vm.nil());
         },
-        .Nothing => ExecutionResult.runtimeError(try RuntimeError.initFormatted(vm, source_range, "Unknown selector '{s}'", .{message_name})),
+        .Nothing => ExecutionResult.runtimeError(try RuntimeError.initFormatted(source_range, "Unknown selector '{s}'", .{message_name})),
     };
 }
 
 fn executeBlock(
-    vm: *VirtualMachine,
-    actor: *Actor,
     block_receiver: BlockObject.Ptr,
     arguments: []const Value,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
-    const message_name = try vm.getOrCreateBlockMessageName(@intCast(arguments.len));
+    const message_name = try vm_context.getVM().getOrCreateBlockMessageName(@intCast(arguments.len));
     var block = block_receiver;
 
     var required_memory = ActivationObject.requiredSizeForAllocation(
@@ -652,16 +654,17 @@ fn executeBlock(
     );
     if (!message_name.exists) required_memory += message_name.requiredSize();
 
+    const heap = vm_context.getHeap();
     var token = token: {
         var tracked_block: ?Heap.Tracked = null;
-        defer if (tracked_block) |t| t.untrack(vm.heap);
+        defer if (tracked_block) |t| t.untrack(heap);
 
-        if (vm.heap.needsToGarbageCollectToProvide(required_memory)) {
-            tracked_block = try vm.heap.track(block.asValue());
+        if (heap.needsToGarbageCollectToProvide(required_memory)) {
+            tracked_block = try heap.track(block.asValue());
         }
 
         // Ensure that we won't GC by creating an activation.
-        const token = try vm.heap.getAllocation(required_memory);
+        const token = try heap.getAllocation(required_memory);
 
         if (tracked_block) |t| {
             // Refresh the pointer to the block.
@@ -672,10 +675,10 @@ fn executeBlock(
     };
     defer token.deinit();
 
+    const actor = vm_context.getActor();
     const parent_activation_object = block.getMap().parent_activation.get(actor.activation_stack).?.activation_object;
-    const activation_slot = try actor.activation_stack.getNewActivationSlot(vm.allocator);
+    const activation_slot = try actor.activation_stack.getNewActivationSlot(vm_context.getVM().allocator);
     block.activateBlock(
-        vm,
         &token,
         parent_activation_object.value,
         arguments,
@@ -687,8 +690,6 @@ fn executeBlock(
 }
 
 fn executeMethod(
-    vm: *VirtualMachine,
-    actor: *Actor,
     const_receiver: Value,
     const_method: MethodObject.Ptr,
     arguments: []const Value,
@@ -703,22 +704,23 @@ fn executeMethod(
         method.getAssignableSlotCount(),
     );
 
+    const heap = vm_context.getHeap();
     var token = token: {
         var tracked_receiver: ?Heap.Tracked = null;
         var tracked_method: ?Heap.Tracked = null;
 
         defer if (tracked_receiver) |t| {
-            tracked_method.?.untrack(vm.heap);
-            t.untrack(vm.heap);
+            tracked_method.?.untrack(heap);
+            t.untrack(heap);
         };
 
-        if (vm.heap.needsToGarbageCollectToProvide(required_memory)) {
-            tracked_receiver = try vm.heap.track(receiver_of_method);
-            tracked_method = try vm.heap.track(method.asValue());
+        if (heap.needsToGarbageCollectToProvide(required_memory)) {
+            tracked_receiver = try heap.track(receiver_of_method);
+            tracked_method = try heap.track(method.asValue());
         }
 
         // Get the allocation token for the method
-        const token = try vm.heap.getAllocation(required_memory);
+        const token = try heap.getAllocation(required_memory);
 
         if (tracked_receiver) |t| {
             // Refresh the pointers to the method and its receiver.
@@ -739,16 +741,15 @@ fn executeMethod(
         }
     }
 
-    const activation_slot = try actor.activation_stack.getNewActivationSlot(vm.allocator);
-    method.activateMethod(vm, &token, actor.id, receiver_of_method, arguments, target_location, source_range, activation_slot);
+    const activation_slot = try vm_context.getActor().activation_stack.getNewActivationSlot(vm_context.getVM().allocator);
+    method.activateMethod(&token, vm_context.getActor().id, receiver_of_method, arguments, target_location, source_range, activation_slot);
 }
 
 fn createObject(
-    vm: *VirtualMachine,
-    actor: *Actor,
     slot_count: u32,
     target_location: bytecode.RegisterLocation,
 ) !void {
+    const actor = vm_context.getActor();
     const slots = actor.slot_stack.lastNItems(slot_count);
 
     var total_slot_count: u32 = 0;
@@ -758,33 +759,32 @@ fn createObject(
         total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots[0..i]));
     }
 
-    var token = try vm.heap.getAllocation(
+    var token = try vm_context.getHeap().getAllocation(
         SlotsMap.requiredSizeForAllocation(total_slot_count) +
             SlotsObject.requiredSizeForAllocation(total_assignable_slot_count),
     );
     defer token.deinit();
 
-    var slots_map = SlotsMap.create(vm.getMapMap(), &token, total_slot_count);
+    var slots_map = SlotsMap.create(&token, total_slot_count);
     var map_builder = slots_map.getMapBuilder(&token);
 
     for (slots) |slot| {
         map_builder.addSlot(slot);
     }
 
-    const the_slots_object = map_builder.createObject(actor.id);
-    vm.writeRegister(target_location, the_slots_object.asValue());
+    const the_slots_object = map_builder.createObject();
+    vm_context.getVM().writeRegister(target_location, the_slots_object.asValue());
     actor.slot_stack.popNItems(slot_count);
 }
 
 fn createMethod(
-    vm: *VirtualMachine,
-    actor: *Actor,
     executable: bytecode.Executable.Ref,
     method_name: ByteArray,
     slot_count: u32,
     block_index: u32,
     target_location: bytecode.RegisterLocation,
 ) !void {
+    const actor = vm_context.getActor();
     defer actor.next_method_is_inline = false;
 
     const slots = actor.slot_stack.lastNItems(slot_count);
@@ -801,7 +801,7 @@ fn createMethod(
             argument_slot_count += 1;
     }
 
-    var token = try vm.heap.getAllocation(
+    var token = try vm_context.getHeap().getAllocation(
         MethodMap.requiredSizeForAllocation(total_slot_count) +
             MethodObject.requiredSizeForAllocation(total_assignable_slot_count),
     );
@@ -809,7 +809,6 @@ fn createMethod(
 
     const block = executable.value.getBlock(block_index);
     var method_map = try MethodMap.create(
-        vm.getMapMap(),
         &token,
         argument_slot_count,
         total_slot_count,
@@ -825,19 +824,18 @@ fn createMethod(
         map_builder.addSlot(slot);
     }
 
-    const method = map_builder.createObject(actor.id);
-    vm.writeRegister(target_location, method.asValue());
+    const method = map_builder.createObject();
+    vm_context.getVM().writeRegister(target_location, method.asValue());
     actor.slot_stack.popNItems(slot_count);
 }
 
 fn createBlock(
-    vm: *VirtualMachine,
-    actor: *Actor,
     executable: bytecode.Executable.Ref,
     slot_count: u32,
     block_index: u32,
     target_location: bytecode.RegisterLocation,
 ) !void {
+    const actor = vm_context.getActor();
     const slots = actor.slot_stack.lastNItems(slot_count);
     var total_slot_count: u32 = 0;
     var total_assignable_slot_count: u8 = 0;
@@ -869,14 +867,13 @@ fn createBlock(
         parent_activation.takeRef(actor.activation_stack);
     std.debug.assert(nonlocal_return_target_activation.get(actor.activation_stack).?.nonlocal_return_target_activation == null);
 
-    var token = try vm.heap.getAllocation(
+    var token = try vm_context.getHeap().getAllocation(
         BlockMap.requiredSizeForAllocation(total_slot_count) +
             BlockObject.requiredSizeForAllocation(total_assignable_slot_count),
     );
     defer token.deinit();
 
     var block_map = try BlockMap.create(
-        vm.getMapMap(),
         &token,
         argument_slot_count,
         total_slot_count,
@@ -892,7 +889,7 @@ fn createBlock(
         map_builder.addSlot(slot);
     }
 
-    const the_block_object = map_builder.createObject(actor.id);
-    vm.writeRegister(target_location, the_block_object.asValue());
+    const the_block_object = map_builder.createObject();
+    vm_context.getVM().writeRegister(target_location, the_block_object.asValue());
     actor.slot_stack.popNItems(slot_count);
 }

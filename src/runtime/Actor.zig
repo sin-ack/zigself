@@ -200,26 +200,24 @@ fn deinit(self: *Actor, allocator: Allocator) void {
 
 pub fn activateMethod(
     self: *Actor,
-    vm: *VirtualMachine,
     token: *Heap.AllocationToken,
     method: MethodObject.Ptr,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
-    return try self.activateMethodWithContext(vm, token, self.actor_object.get().context, method, target_location, source_range);
+    return try self.activateMethodWithContext(token, self.actor_object.get().context, method, target_location, source_range);
 }
 
 pub fn activateMethodWithContext(
     self: *Actor,
-    vm: *VirtualMachine,
     token: *Heap.AllocationToken,
     actor_context: Value,
     method: MethodObject.Ptr,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
-    const activation_slot = try self.activation_stack.getNewActivationSlot(vm.allocator);
-    method.activateMethod(vm, token, self.id, actor_context, &.{}, target_location, source_range, activation_slot);
+    const activation_slot = try self.activation_stack.getNewActivationSlot(context.getVM().allocator);
+    method.activateMethod(token, self.id, actor_context, &.{}, target_location, source_range, activation_slot);
 }
 
 pub fn pushContext(self: *Actor) void {
@@ -231,10 +229,11 @@ pub fn popContext(self: *Actor) void {
     std.debug.assert(popped_actor == self);
 }
 
-pub fn execute(self: *Actor, vm: *VirtualMachine) !ActorResult {
+pub fn execute(self: *Actor) !ActorResult {
     self.pushContext();
     defer self.popContext();
 
+    const vm = context.getVM();
     const current_activation_ref = self.activation_stack.getCurrent().takeRef(self.activation_stack);
 
     // Go through the mailbox and activate all the messages that have been sent
@@ -250,11 +249,11 @@ pub fn execute(self: *Actor, vm: *VirtualMachine) !ActorResult {
 
             const actor_context = self.actor_object.get().context;
             const new_activation = try self.activation_stack.getNewActivationSlot(vm.allocator);
-            method.activateMethod(vm, &token, self.id, actor_context, node.data.arguments, .zero, node.data.source_range, new_activation);
+            method.activateMethod(&token, self.id, actor_context, node.data.arguments, .zero, node.data.source_range, new_activation);
 
             self.message_sender = node.data.sender;
 
-            switch (try self.executeUntil(vm, current_activation_ref)) {
+            switch (try self.executeUntil(current_activation_ref)) {
                 .Switched => {
                     return ActorResult{
                         .RuntimeError = RuntimeError.initLiteral(node.data.source_range, "Actor message caused actor switch"),
@@ -274,22 +273,24 @@ pub fn execute(self: *Actor, vm: *VirtualMachine) !ActorResult {
     self.blocked_fd = null;
 
     // Execute the activation stack of this actor normally.
-    return try self.executeUntil(vm, null);
+    return try self.executeUntil(null);
 }
 
 /// Execute the activation stack of this actor until the given activation (or if
 /// `until` is null, until all activations have been resolved).
-pub fn executeUntil(self: *Actor, vm: *VirtualMachine, until: ?Activation.ActivationRef) !ActorResult {
-    var interpreter_context = interpreter.InterpreterContext.init(vm, self, until);
+pub fn executeUntil(self: *Actor, until: ?Activation.ActivationRef) !ActorResult {
+    _ = self;
+
+    var interpreter_context = interpreter.InterpreterContext.init(until);
     return try interpreter.execute(&interpreter_context);
 }
 
 pub const ActivationExitState = enum { LastActivation, NotLastActivation };
 
-pub fn exitCurrentActivation(self: *Actor, vm: *VirtualMachine, last_activation_ref: ?Activation.ActivationRef) ActivationExitState {
+pub fn exitCurrentActivation(self: *Actor, last_activation_ref: ?Activation.ActivationRef) ActivationExitState {
     if (ACTIVATION_EXIT_DEBUG) std.debug.print("Actor.exitCurrentActivation: Exiting this activation\n", .{});
     const current_activation = self.activation_stack.getCurrent();
-    return self.exitActivation(vm, last_activation_ref, current_activation);
+    return self.exitActivation(last_activation_ref, current_activation);
 }
 
 /// Exit the given activation and write the result of the return register to the
@@ -297,7 +298,6 @@ pub fn exitCurrentActivation(self: *Actor, vm: *VirtualMachine, last_activation_
 /// ActivationExitState.LastActivation if the last activation has been exited.
 pub fn exitActivation(
     self: *Actor,
-    vm: *VirtualMachine,
     last_activation_ref: ?Activation.ActivationRef,
     target_activation: *Activation,
 ) ActivationExitState {
@@ -325,6 +325,8 @@ pub fn exitActivation(
 
     if (last_activation == null and self.activation_stack.getDepth() == 0)
         return .LastActivation;
+
+    const vm = context.getVM();
 
     // Restore each register until the current activation's saved register stack height
     // FIXME: Factor this out

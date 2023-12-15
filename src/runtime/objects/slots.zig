@@ -96,8 +96,7 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
         }
 
         /// Return a shallow copy of this object.
-        pub fn clone(self: ObjectT.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) ObjectT.Ptr {
-            _ = vm;
+        pub fn clone(self: ObjectT.Ptr, token: *Heap.AllocationToken, actor_id: u31) ObjectT.Ptr {
             return ObjectT.create(token, actor_id, self.getMap(), getAssignableSlots(self));
         }
     };
@@ -105,7 +104,6 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
 
 /// Self Handbook, §3.3.8 The lookup algorithm
 pub fn slotsLookup(
-    vm: *VirtualMachine,
     comptime ObjectType: type,
     object: *ObjectType,
     selector_hash: object_lookup.SelectorHash,
@@ -159,7 +157,7 @@ pub fn slotsLookup(
                 slot.value;
 
             if (slot_value.isObjectReference()) {
-                const parent_lookup_result = selector_hash.chainedLookupObject(vm, slot_value.asObject(), &currently_visited);
+                const parent_lookup_result = selector_hash.chainedLookupObject(slot_value.asObject(), &currently_visited);
                 if (parent_lookup_result != .Nothing) return parent_lookup_result;
             } else {
                 @panic("FIXME: Allow integers and floating point numbers to be parent slot values (let me know of your usecase!)");
@@ -258,7 +256,7 @@ pub const Slots = extern struct {
     ///
     /// The token must have at least `self.requiredSizeForMerging(source_object)`
     /// bytes available.
-    pub fn addSlotsFrom(self: Slots.Ptr, source_object: Slots.Ptr, allocator: Allocator, token: *Heap.AllocationToken, current_actor_id: u31) !Slots.Ptr {
+    pub fn addSlotsFrom(self: Slots.Ptr, source_object: Slots.Ptr, allocator: Allocator, token: *Heap.AllocationToken) !Slots.Ptr {
         const merge_info = try self.calculateMergeOf(source_object, allocator);
 
         // If there is anything that could change any of the slots, then we need
@@ -274,11 +272,8 @@ pub const Slots = extern struct {
             return self;
         }
 
-        // FIXME: This is a rather crude way of getting the map-map. Pull in the map-map
-        //        via an argument.
-        const map_map = self.object.map.asObject().map.asObject().mustBeType(.Map);
         // Let's allocate a new map with the target slot count.
-        var new_map = SlotsMap.create(map_map, token, @intCast(merge_info.slots));
+        var new_map = SlotsMap.create(token, @intCast(merge_info.slots));
         var map_builder = new_map.getMapBuilder(token);
 
         forSlotsInMergeOrder(self, source_object, struct {
@@ -312,7 +307,7 @@ pub const Slots = extern struct {
         if (object_needs_change) {
             // We do need to create a new object, and then update all the heap
             // references to it.
-            const new_object = map_builder.createObject(current_actor_id);
+            const new_object = map_builder.createObject();
             new_object.object.object_information.reachability = self.object.object_information.reachability;
             try token.heap.updateAllReferencesTo(self.asValue(), new_object.asValue());
             return new_object;
@@ -419,8 +414,8 @@ pub const Slots = extern struct {
         @panic("Attempted to call Slots.finalize");
     }
 
-    pub fn lookup(self: Slots.Ptr, vm: *VirtualMachine, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
-        return slotsLookup(vm, Slots, self, selector_hash, previously_visited);
+    pub fn lookup(self: Slots.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+        return slotsLookup(Slots, self, selector_hash, previously_visited);
     }
 
     pub fn humanReadableName() []const u8 {
@@ -493,25 +488,42 @@ pub const SlotsMap = extern struct {
     /// Create a new slots map. Takes the amount of slots this object will have.
     ///
     /// IMPORTANT: All slots *must* be initialized right after creation.
-    pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, slot_count: u32) SlotsMap.Ptr {
+    pub fn create(token: *Heap.AllocationToken, slot_count: u32) SlotsMap.Ptr {
         const size = SlotsMap.requiredSizeForAllocation(slot_count);
 
         const memory_area = token.allocate(.Object, size);
         var self: SlotsMap.Ptr = @ptrCast(memory_area);
-        self.init(slot_count, map_map);
+        self.init(slot_count);
 
         return self;
     }
 
-    pub fn init(self: SlotsMap.Ptr, slot_count: u32, map_map: Map.Ptr) void {
-        self.map.init(.Slots, map_map);
+    pub fn createWithMapMap(map_map: Map.Ptr, token: *Heap.AllocationToken, slot_count: u32) SlotsMap.Ptr {
+        const size = SlotsMap.requiredSizeForAllocation(slot_count);
+
+        const memory_area = token.allocate(.Object, size);
+        var self: SlotsMap.Ptr = @ptrCast(memory_area);
+        self.initWithMapMap(map_map, slot_count);
+
+        return self;
+    }
+
+    pub fn init(self: SlotsMap.Ptr, slot_count: u32) void {
+        self.map.init(.Slots);
         self.information = .{
             .slot_count = slot_count,
         };
     }
 
-    pub fn clone(self: SlotsMap.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken) SlotsMap.Ptr {
-        const new_map = create(vm.getMapMap(), token, self.information.slot_count);
+    fn initWithMapMap(self: SlotsMap.Ptr, map_map: Map.Ptr, slot_count: u32) void {
+        self.map.initWithMapMap(.Slots, map_map);
+        self.information = .{
+            .slot_count = slot_count,
+        };
+    }
+
+    pub fn clone(self: SlotsMap.Ptr, token: *Heap.AllocationToken) SlotsMap.Ptr {
+        const new_map = create(token, self.information.slot_count);
 
         new_map.setAssignableSlotCount(self.getAssignableSlotCount());
         @memcpy(new_map.getSlots(), self.getSlots());

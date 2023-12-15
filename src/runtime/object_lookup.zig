@@ -66,11 +66,11 @@ pub const SelectorHash = struct {
         return .{ .regular = regular_hash, .assignment_target = assignment_target_hash };
     }
 
-    pub fn lookupObject(self: SelectorHash, vm: *VirtualMachine, object: Object.Ptr) LookupResult {
-        return self.chainedLookupObject(vm, object, null);
+    pub fn lookupObject(self: SelectorHash, object: Object.Ptr) LookupResult {
+        return self.chainedLookupObject(object, null);
     }
 
-    pub fn chainedLookupObject(self: SelectorHash, vm: *VirtualMachine, object: Object.Ptr, previously_visited: ?*const VisitedValueLink) LookupResult {
-        return object.lookup(vm, self, previously_visited);
+    pub fn chainedLookupObject(self: SelectorHash, object: Object.Ptr, previously_visited: ?*const VisitedValueLink) LookupResult {
+        return object.lookup(self, previously_visited);
     }
 };

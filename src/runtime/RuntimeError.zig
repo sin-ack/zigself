@@ -10,6 +10,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const context = @import("context.zig");
 const Activation = @import("./Activation.zig");
 const SourceRange = @import("./SourceRange.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
@@ -37,8 +38,8 @@ pub fn initLiteral(source_range: SourceRange, message: []const u8) RuntimeError 
 
 /// Create a new runtime error by formatting an error message. An error message
 /// is allocated. Copies the source range object.
-pub fn initFormatted(vm: *VirtualMachine, source_range: SourceRange, comptime fmt: []const u8, args: anytype) Allocator.Error!RuntimeError {
-    const message = try std.fmt.allocPrint(vm.allocator, fmt, args);
+pub fn initFormatted(source_range: SourceRange, comptime fmt: []const u8, args: anytype) Allocator.Error!RuntimeError {
+    const message = try std.fmt.allocPrint(context.getVM().allocator, fmt, args);
     return RuntimeError{
         .message = .{ .Formatted = message },
         .source_range = source_range.copy(),

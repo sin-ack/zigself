@@ -181,11 +181,9 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
 
         pub fn lookup(
             self: Ptr,
-            vm: *VirtualMachine,
             selector_hash: object_lookup.SelectorHash,
             previously_visited: ?*const object_lookup.VisitedValueLink,
         ) object_lookup.LookupResult {
-            _ = vm;
             _ = previously_visited;
 
             const map = self.getMap();

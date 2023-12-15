@@ -30,14 +30,14 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
     defer token.deinit();
 
     if (size == 0) {
-        const array_map = array_object.ArrayMap.create(context.vm.getMapMap(), &token, 0);
+        const array_map = array_object.ArrayMap.create(&token, 0);
         const array = array_object.Array.createWithValues(&token, context.actor.id, array_map, &[_]Value{}, null);
         return ExecutionResult.resolve(array.asValue());
     } else {
         const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
         const filler = arguments.getValue(1);
 
-        const new_array_map = array_object.ArrayMap.create(context.vm.getMapMap(), &token, @intCast(size));
+        const new_array_map = array_object.ArrayMap.create(&token, @intCast(size));
         const new_array = array_object.Array.createWithValues(&token, context.actor.id, new_array_map, receiver.getValues(), filler);
         return ExecutionResult.resolve(new_array.asValue());
     }
@@ -62,7 +62,6 @@ pub fn ArrayAt(context: *PrimitiveContext) !ExecutionResult {
     if (position >= array_values.len) {
         return ExecutionResult.runtimeError(
             try RuntimeError.initFormatted(
-                context.vm,
                 context.source_range,
                 "Position passed to _ArrayAt: is out of bounds (position: {d}, size: {d})",
                 .{ position, array_values.len },
@@ -95,7 +94,6 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
     if (position >= array_values.len) {
         return ExecutionResult.runtimeError(
             try RuntimeError.initFormatted(
-                context.vm,
                 context.source_range,
                 "Position passed to _ArrayAt:Put: is out of bounds (position: {d}, size: {d})",
                 .{ position, array_values.len },

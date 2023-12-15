@@ -5,9 +5,10 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Heap = @import("Heap.zig");
 const Value = @import("value.zig").Value;
 const Object = @import("object.zig").Object;
-const Heap = @import("Heap.zig");
+const context = @import("context.zig");
 const traversal = @import("object_traversal.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
 
@@ -42,7 +43,6 @@ fn calculateRequiredMemoryForBlessing(allocator: Allocator, value: Value) Alloca
 const CopiedObjectsMap = std.AutoHashMap([*]u64, [*]u64);
 const ObjectGraphCopier = struct {
     copied_objects_map: *CopiedObjectsMap,
-    vm: *VirtualMachine,
     token: *Heap.AllocationToken,
     actor_id: u31,
 
@@ -52,30 +52,33 @@ const ObjectGraphCopier = struct {
             return Object.fromAddress(gop.value_ptr.*);
         }
 
-        const new_object = try old_object.clone(self.vm, self.token, self.actor_id);
+        const new_object = try old_object.clone(self.token, self.actor_id);
         gop.value_ptr.* = new_object.getAddress();
         return new_object;
     }
 };
 
-fn copyObjectGraphForNewActor(vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31, value: Value) Allocator.Error!Value {
-    var copied_objects_map = CopiedObjectsMap.init(token.heap.allocator);
+fn copyObjectGraphForNewActor(allocator: Allocator, token: *Heap.AllocationToken, target_actor_id: u31, value: Value) Allocator.Error!Value {
+    var copied_objects_map = CopiedObjectsMap.init(allocator);
     defer copied_objects_map.deinit();
 
     return traversal.traverseNonGloballyReachableObjectGraph(
         value,
-        ObjectGraphCopier{ .copied_objects_map = &copied_objects_map, .vm = vm, .token = token, .actor_id = actor_id },
+        ObjectGraphCopier{ .copied_objects_map = &copied_objects_map, .token = token, .actor_id = target_actor_id },
     ) catch |err| return @as(Allocator.Error, @errorCast(err));
 }
 
-pub fn bless(vm: *VirtualMachine, heap: *Heap, actor_id: u31, const_value: Value) !Value {
+pub fn bless(target_actor_id: u31, const_value: Value) !Value {
     if (!const_value.isObjectReference())
         return const_value;
 
     var value = const_value;
 
+    const allocator = context.getVM().allocator;
+    const heap = context.getHeap();
+
     // Pass 1: Figure out the required memory for blessing this object graph.
-    const required_memory = try calculateRequiredMemoryForBlessing(heap.allocator, value);
+    const required_memory = try calculateRequiredMemoryForBlessing(allocator, value);
 
     const tracked_value = try heap.track(value);
 
@@ -90,7 +93,7 @@ pub fn bless(vm: *VirtualMachine, heap: *Heap, actor_id: u31, const_value: Value
     defer token.deinit();
 
     // Pass 2: Actually copy the objects.
-    const new_value = try copyObjectGraphForNewActor(vm, &token, actor_id, value);
+    const new_value = try copyObjectGraphForNewActor(allocator, &token, target_actor_id, value);
 
     return new_value;
 }

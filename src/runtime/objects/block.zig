@@ -11,6 +11,7 @@ const Heap = @import("../Heap.zig");
 const debug = @import("../../debug.zig");
 const slots = @import("slots.zig");
 const Value = value_import.Value;
+const context = @import("../context.zig");
 const bytecode = @import("../bytecode.zig");
 const Activation = @import("../Activation.zig");
 const SlotsObject = slots.Slots;
@@ -85,17 +86,17 @@ pub const Block = extern struct {
         @panic("Attempted to call Block.finalize");
     }
 
-    pub fn lookup(self: Block.Ptr, vm: *VirtualMachine, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: Block.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
         // NOTE: executeMessage will handle the execution of the block itself.
         _ = self;
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Block.lookup: Looking at traits block\n", .{});
-        const block_traits = vm.block_traits.getValue();
+        const block_traits = context.getVM().block_traits.getValue();
         if (selector_hash.regular == object_lookup.parent_hash)
             return object_lookup.LookupResult{ .Regular = block_traits };
 
-        return block_traits.lookupByHash(vm, selector_hash);
+        return block_traits.lookupByHash(selector_hash);
     }
 
     // --- Slot counts ---
@@ -146,7 +147,6 @@ pub const Block = extern struct {
     /// `source_range`.
     pub fn activateBlock(
         self: Block.Ptr,
-        vm: *VirtualMachine,
         token: *Heap.AllocationToken,
         receiver: Value,
         arguments: []const Value,
@@ -155,9 +155,9 @@ pub const Block = extern struct {
         created_from: SourceRange,
         out_activation: *Activation,
     ) void {
-        const activation_object = ActivationObject.create(token, vm.current_actor.id, .Block, self.slots.object.getMap(), arguments, self.getAssignableSlots(), receiver);
+        const activation_object = ActivationObject.create(token, context.getActor().id, .Block, self.slots.object.getMap(), arguments, self.getAssignableSlots(), receiver);
 
-        out_activation.initInPlace(ActivationObject.Value.init(activation_object), target_location, vm.takeStackSnapshot(), creator_message, created_from);
+        out_activation.initInPlace(ActivationObject.Value.init(activation_object), target_location, creator_message, created_from);
         out_activation.parent_activation = self.getMap().parent_activation;
         out_activation.nonlocal_return_target_activation = self.getMap().nonlocal_return_target_activation;
     }
@@ -182,7 +182,6 @@ pub const BlockMap = extern struct {
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
-        map_map: Map.Ptr,
         token: *Heap.AllocationToken,
         argument_slot_count: u8,
         total_slot_count: u32,
@@ -195,7 +194,7 @@ pub const BlockMap = extern struct {
 
         const memory_area = token.allocate(.Object, size);
         var self: BlockMap.Ptr = @ptrCast(memory_area);
-        self.init(map_map, argument_slot_count, total_slot_count, parent_activation, nonlocal_return_target_activation, block, executable);
+        self.init(argument_slot_count, total_slot_count, parent_activation, nonlocal_return_target_activation, block, executable);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
@@ -203,7 +202,6 @@ pub const BlockMap = extern struct {
 
     fn init(
         self: BlockMap.Ptr,
-        map_map: Map.Ptr,
         argument_slot_count: u8,
         total_slot_count: u32,
         parent_activation: Activation.ActivationRef,
@@ -211,7 +209,7 @@ pub const BlockMap = extern struct {
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
     ) void {
-        self.base_map.init(.Block, map_map, argument_slot_count, total_slot_count, block, executable);
+        self.base_map.init(.Block, argument_slot_count, total_slot_count, block, executable);
         self.parent_activation = parent_activation;
         self.nonlocal_return_target_activation = nonlocal_return_target_activation;
     }
@@ -229,9 +227,8 @@ pub const BlockMap = extern struct {
         return self.base_map.getArgumentSlotCount();
     }
 
-    pub fn clone(self: BlockMap.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken) !BlockMap.Ptr {
+    pub fn clone(self: BlockMap.Ptr, token: *Heap.AllocationToken) !BlockMap.Ptr {
         const new_map = try create(
-            vm.getMapMap(),
             token,
             self.getArgumentSlotCount(),
             self.base_map.slots.information.slot_count,

@@ -10,6 +10,7 @@ const Heap = @import("../Heap.zig");
 const debug = @import("../../debug.zig");
 const Actor = @import("actor.zig").Actor;
 const Object = @import("../object.zig").Object;
+const context = @import("../context.zig");
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
 const pointer = @import("../../utility/pointer.zig");
@@ -29,20 +30,20 @@ pub const ActorProxy = extern struct {
     pub const Value = value_import.ObjectValue(ActorProxy);
 
     /// Create the Actor object without sending a message to it.
-    pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, current_actor_id: u31, actor_object: Actor.Ptr) ActorProxy.Ptr {
+    pub fn create(token: *Heap.AllocationToken, current_actor_id: u31, actor_object: Actor.Ptr) ActorProxy.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
         const self: ActorProxy.Ptr = @ptrCast(memory_area);
-        self.init(current_actor_id, map_map, actor_object);
+        self.init(current_actor_id, actor_object);
         return self;
     }
 
-    fn init(self: ActorProxy.Ptr, current_actor_id: u31, map_map: Map.Ptr, actor_object: Actor.Ptr) void {
+    fn init(self: ActorProxy.Ptr, current_actor_id: u31, actor_object: Actor.Ptr) void {
         self.object = .{
             .object_information = .{
                 .object_type = .ActorProxy,
                 .actor_id = current_actor_id,
             },
-            .map = map_map.asValue(),
+            .map = context.getVM().getMapMap().asValue(),
         };
         self.actor_object = Actor.Value.init(actor_object);
     }
@@ -59,9 +60,8 @@ pub const ActorProxy = extern struct {
         return self.actor_object.get();
     }
 
-    pub fn clone(self: ActorProxy.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) ActorProxy.Ptr {
-        const map_map = vm.getMapMap();
-        return create(map_map, token, actor_id, self.getActor());
+    pub fn clone(self: ActorProxy.Ptr, token: *Heap.AllocationToken, actor_id: u31) ActorProxy.Ptr {
+        return create(token, actor_id, self.getActor());
     }
 
     pub fn getSizeInMemory(self: ActorProxy.Ptr) usize {
@@ -88,14 +88,14 @@ pub const ActorProxy = extern struct {
         @panic("Attempted to call ActorProxy.finalize");
     }
 
-    pub fn lookup(self: ActorProxy.Ptr, vm: *VirtualMachine, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: ActorProxy.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
         _ = previously_visited;
 
         // FIXME: Refactor this to not perform a method lookup in preparation of multi-threading.
         if (LOOKUP_DEBUG) std.debug.print("ActorProxy.lookup: Looking at an actor proxy object\n", .{});
 
         const target_actor = self.actor_object.get();
-        return switch (target_actor.context.lookupByHash(vm, selector_hash)) {
+        return switch (target_actor.context.lookupByHash(selector_hash)) {
             .Nothing => object_lookup.LookupResult.nothing,
             // FIXME: This should probably cause a different kind of error.
             .Assignment => object_lookup.LookupResult.nothing,
@@ -106,7 +106,7 @@ pub const ActorProxy = extern struct {
                     //       return any meaningful value to the user.
                     //       However it should also still be valid, so we
                     //       cannot return nothing here.
-                    break :blk object_lookup.LookupResult{ .Regular = vm.nil() };
+                    break :blk object_lookup.LookupResult{ .Regular = context.getVM().nil() };
                 }
 
                 break :blk object_lookup.LookupResult{

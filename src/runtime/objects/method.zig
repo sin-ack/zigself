@@ -9,6 +9,7 @@ const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
 const Slot = @import("../slot.zig").Slot;
 const slots = @import("slots.zig");
+const context = @import("../context.zig");
 const bytecode = @import("../bytecode.zig");
 const ByteArray = @import("../ByteArray.zig");
 const Activation = @import("../Activation.zig");
@@ -84,9 +85,8 @@ pub const Method = extern struct {
         @panic("Attempted to call Method.finalize");
     }
 
-    pub fn lookup(self: Method.Ptr, vm: *VirtualMachine, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: Method.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
         _ = self;
-        _ = vm;
         _ = selector_hash;
         _ = previously_visited;
         @panic("Attempted to call Method.lookup");
@@ -96,16 +96,15 @@ pub const Method = extern struct {
 
     const toplevel_context_string = "<top level>";
     pub fn createTopLevelContextForExecutable(
-        vm: *VirtualMachine,
         token: *Heap.AllocationToken,
         executable: bytecode.Executable.Ref,
         block: *bytecode.Block,
     ) !Method.Ptr {
         const toplevel_context_method_map = blk: {
             const toplevel_context_name = ByteArray.createFromString(token, toplevel_context_string);
-            break :blk try MethodMap.create(vm.getMapMap(), token, 0, 0, false, toplevel_context_name, block, executable);
+            break :blk try MethodMap.create(token, 0, 0, false, toplevel_context_name, block, executable);
         };
-        return create(token, vm.current_actor.id, toplevel_context_method_map, &.{});
+        return create(token, context.getActor().id, toplevel_context_method_map, &.{});
     }
 
     pub fn requiredSizeForCreatingTopLevelContext() usize {
@@ -136,7 +135,6 @@ pub const Method = extern struct {
     /// Copies `source_range`.
     pub fn activateMethod(
         self: Method.Ptr,
-        vm: *VirtualMachine,
         token: *Heap.AllocationToken,
         actor_id: u31,
         receiver: GenericValue,
@@ -146,7 +144,7 @@ pub const Method = extern struct {
         out_activation: *Activation,
     ) void {
         const activation_object = ActivationObject.create(token, actor_id, .Method, self.slots.object.getMap(), arguments, self.getAssignableSlots(), receiver);
-        out_activation.initInPlace(ActivationObject.Value.init(activation_object), target_location, vm.takeStackSnapshot(), self.getMap().method_name, created_from);
+        out_activation.initInPlace(ActivationObject.Value.init(activation_object), target_location, self.getMap().method_name, created_from);
     }
 
     pub fn requiredSizeForActivation(self: Method.Ptr) usize {
@@ -177,7 +175,6 @@ pub const MethodMap = extern struct {
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
-        map_map: Map.Ptr,
         token: *Heap.AllocationToken,
         argument_slot_count: u8,
         total_slot_count: u32,
@@ -190,7 +187,7 @@ pub const MethodMap = extern struct {
 
         const memory_area = token.allocate(.Object, size);
         var self: MethodMap.Ptr = @ptrCast(memory_area);
-        self.init(map_map, argument_slot_count, total_slot_count, is_inline_method, method_name, block, executable);
+        self.init(argument_slot_count, total_slot_count, is_inline_method, method_name, block, executable);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
@@ -198,7 +195,6 @@ pub const MethodMap = extern struct {
 
     fn init(
         self: MethodMap.Ptr,
-        map_map: Map.Ptr,
         argument_slot_count: u8,
         total_slot_count: u32,
         is_inline_method: bool,
@@ -206,7 +202,7 @@ pub const MethodMap = extern struct {
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
     ) void {
-        self.base_map.init(.Method, map_map, argument_slot_count, total_slot_count, block, executable);
+        self.base_map.init(.Method, argument_slot_count, total_slot_count, block, executable);
         self.setInlineMethod(is_inline_method);
         self.method_name = method_name.asValue();
     }
@@ -238,9 +234,8 @@ pub const MethodMap = extern struct {
         return self.base_map.getArgumentSlotCount();
     }
 
-    pub fn clone(self: MethodMap.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken) !MethodMap.Ptr {
+    pub fn clone(self: MethodMap.Ptr, token: *Heap.AllocationToken) !MethodMap.Ptr {
         const new_map = try create(
-            vm.getMapMap(),
             token,
             self.getArgumentSlotCount(),
             self.base_map.slots.information.slot_count,

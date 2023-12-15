@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -11,6 +11,7 @@ const Value = value_import.Value;
 const Actor = @import("./Actor.zig");
 const object = @import("./object.zig");
 const bytecode = @import("./bytecode.zig");
+const vm_context = @import("context.zig");
 const SourceRange = @import("./SourceRange.zig");
 const RuntimeError = @import("./RuntimeError.zig");
 const value_import = @import("./value.zig");
@@ -181,16 +182,14 @@ const PrimitiveSpec = struct {
 
     pub fn call(
         self: PrimitiveSpec,
-        vm: *VirtualMachine,
-        actor: *Actor,
         receiver: Heap.Tracked,
         arguments: []const Value,
         target_location: bytecode.RegisterLocation,
         source_range: SourceRange,
     ) !ExecutionResult {
         var context = PrimitiveContext{
-            .vm = vm,
-            .actor = actor,
+            .vm = vm_context.getVM(),
+            .actor = vm_context.getActor(),
             .receiver = receiver,
             .arguments = arguments,
             .target_location = target_location,
@@ -209,7 +208,6 @@ fn makeDisabledPrimitive(comptime primitive_name: []const u8) PrimitiveFunction 
         fn PrimitiveDisabled(context: *PrimitiveContext) PrimitiveError!ExecutionResult {
             return ExecutionResult.runtimeError(
                 RuntimeError.initFormattedComptime(
-                    context.vm,
                     context.source_range,
                     "_{s} is disabled on this target",
                     .{primitive_name},

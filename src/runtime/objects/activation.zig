@@ -208,12 +208,12 @@ pub const Activation = extern struct {
         @panic("Attempted to call Activation.finalize");
     }
 
-    pub fn lookup(self: Activation.Ptr, vm: *VirtualMachine, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
-        const slots_lookup_result = slots.slotsLookup(vm, Activation, self, selector_hash, previously_visited);
+    pub fn lookup(self: Activation.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+        const slots_lookup_result = slots.slotsLookup(Activation, self, selector_hash, previously_visited);
         if (slots_lookup_result != .Nothing) return slots_lookup_result;
 
         // Receiver lookup
-        return self.receiver.lookupByHash(vm, selector_hash);
+        return self.receiver.lookupByHash(selector_hash);
     }
 
     // --- Finding activation receiver ---

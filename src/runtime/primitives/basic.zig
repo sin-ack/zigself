@@ -47,7 +47,6 @@ pub fn RunScript(context: *PrimitiveContext) !ExecutionResult {
     var script = Script.createFromFilePath(context.vm.allocator, target_path) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => |e| return ExecutionResult.runtimeError(try RuntimeError.initFormatted(
-            context.vm,
             context.source_range,
             "An unexpected error was raised from script.initInPlaceFromFilePath: {s}",
             .{@errorName(e)},
@@ -82,7 +81,7 @@ pub fn RunScript(context: *PrimitiveContext) !ExecutionResult {
     // Advance the instruction for the activation that will be returned to.
     _ = context.actor.activation_stack.getCurrent().advanceInstruction();
 
-    try context.actor.activation_stack.pushSubEntrypointActivation(context.vm, context.target_location, executable);
+    try context.actor.activation_stack.pushSubEntrypointActivation(context.target_location, executable);
     return ExecutionResult.changeActivation();
 }
 
@@ -109,8 +108,6 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
     if (!did_parse_without_errors) {
         // TODO: Pass error information to the failure block.
         return try interpreter.sendMessage(
-            context.vm,
-            context.actor,
             failure_block,
             "value",
             context.target_location,
@@ -123,8 +120,6 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
             // TODO: Pass error information to the failure block.
             std.debug.print("Code generation for the script passed to _EvaluateStringIfFail: failed", .{});
             return try interpreter.sendMessage(
-                context.vm,
-                context.actor,
                 failure_block,
                 "value",
                 context.target_location,
@@ -140,11 +135,11 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
 
     const stack_snapshot = context.vm.takeStackSnapshot();
     var activation_before_script = context.actor.activation_stack.getCurrent();
-    try context.actor.activation_stack.pushSubEntrypointActivation(context.vm, context.target_location, executable);
+    try context.actor.activation_stack.pushSubEntrypointActivation(context.target_location, executable);
 
     const activation_before_script_ref = activation_before_script.takeRef(context.actor.activation_stack);
 
-    var actor_result = try context.actor.executeUntil(context.vm, activation_before_script_ref);
+    var actor_result = try context.actor.executeUntil(activation_before_script_ref);
     switch (actor_result) {
         .Switched => unreachable,
         .Finished => |value| return ExecutionResult.resolve(value),
@@ -162,8 +157,6 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
             context.vm.restoreStackSnapshot(stack_snapshot);
 
             const block_result = try interpreter.sendMessage(
-                context.vm,
-                context.actor,
                 failure_block,
                 "value",
                 context.target_location,
@@ -187,7 +180,6 @@ pub fn Error(context: *PrimitiveContext) !ExecutionResult {
     const message = try arguments.getObject(0, .ByteArray);
 
     return ExecutionResult.runtimeError(try RuntimeError.initFormatted(
-        context.vm,
         context.source_range,
         "Error raised in Self code: {s}",
         .{message.getValues()},

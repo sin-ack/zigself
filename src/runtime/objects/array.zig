@@ -9,6 +9,7 @@ const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
+const context = @import("../context.zig");
 const IntegerValue = value_import.IntegerValue;
 const GenericValue = @import("../value.zig").Value;
 const value_import = @import("../value.zig");
@@ -89,16 +90,16 @@ pub const Array = extern struct {
         @panic("Attempted to call Array.finalize");
     }
 
-    pub fn lookup(self: Array.Ptr, vm: *VirtualMachine, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: Array.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
         _ = self;
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Array.lookup: Looking at traits array\n", .{});
-        const array_traits = vm.array_traits.getValue();
+        const array_traits = context.getVM().array_traits.getValue();
         if (selector_hash.regular == object_lookup.parent_hash)
             return object_lookup.LookupResult{ .Regular = array_traits };
 
-        return array_traits.lookupByHash(vm, selector_hash);
+        return array_traits.lookupByHash(selector_hash);
     }
 
     pub fn getValues(self: Array.Ptr) []GenericValue {
@@ -108,8 +109,7 @@ pub const Array = extern struct {
         return @alignCast(std.mem.bytesAsSlice(GenericValue, start_of_items[0 .. self.getSize() * @sizeOf(GenericValue)]));
     }
 
-    pub fn clone(self: Array.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken, actor_id: u31) Array.Ptr {
-        _ = vm;
+    pub fn clone(self: Array.Ptr, token: *Heap.AllocationToken, actor_id: u31) Array.Ptr {
         return createWithValues(token, actor_id, self.getMap(), self.getValues(), null);
     }
 
@@ -137,18 +137,18 @@ pub const ArrayMap = extern struct {
 
     pub const Ptr = pointer.HeapPtr(ArrayMap, .Mutable);
 
-    pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, size: usize) ArrayMap.Ptr {
+    pub fn create(token: *Heap.AllocationToken, size: usize) ArrayMap.Ptr {
         const memory_size = requiredSizeForAllocation();
 
         const memory_area = token.allocate(.Object, memory_size);
         var self: ArrayMap.Ptr = @ptrCast(memory_area);
-        self.init(map_map, size);
+        self.init(size);
 
         return self;
     }
 
-    fn init(self: ArrayMap.Ptr, map_map: Map.Ptr, size: usize) void {
-        self.map.init(.Array, map_map);
+    fn init(self: ArrayMap.Ptr, size: usize) void {
+        self.map.init(.Array);
         self.size = IntegerValue(.Unsigned).init(@as(u64, size));
     }
 
@@ -173,8 +173,8 @@ pub const ArrayMap = extern struct {
         return @sizeOf(ArrayMap);
     }
 
-    pub fn clone(self: ArrayMap.Ptr, vm: *VirtualMachine, token: *Heap.AllocationToken) ArrayMap.Ptr {
-        return create(vm.getMapMap(), token, self.getSize());
+    pub fn clone(self: ArrayMap.Ptr, token: *Heap.AllocationToken) ArrayMap.Ptr {
+        return create(token, self.getSize());
     }
 
     pub fn canFinalize(self: ArrayMap.Ptr) bool {

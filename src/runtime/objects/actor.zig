@@ -93,9 +93,8 @@ pub const Actor = extern struct {
         self.actor.get().destroy(allocator);
     }
 
-    pub fn lookup(self: Actor.Ptr, vm: *VirtualMachine, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: Actor.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
         _ = self;
-        _ = vm;
         _ = selector_hash;
         _ = previously_visited;
 

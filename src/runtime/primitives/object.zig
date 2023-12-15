@@ -37,7 +37,7 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
     receiver = context.receiver.getValue().asObject().asType(.Slots).?;
     argument = context.arguments[0].asObject().asType(.Slots).?;
 
-    const new_object = try receiver.addSlotsFrom(argument, context.vm.allocator, &token, context.actor.id);
+    const new_object = try receiver.addSlotsFrom(argument, context.vm.allocator, &token);
     return ExecutionResult.resolve(new_object.asValue());
 }
 
@@ -106,7 +106,7 @@ pub fn Clone(context: *PrimitiveContext) !ExecutionResult {
 
     receiver = context.receiver.getValue();
 
-    return ExecutionResult.resolve(receiver.clone(context.vm, &token, context.actor.id));
+    return ExecutionResult.resolve(receiver.clone(&token, context.actor.id));
 }
 
 /// Return whether the receiver and argument are identical. Returns either

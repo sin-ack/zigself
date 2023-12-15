@@ -118,7 +118,7 @@ pub fn create(allocator: Allocator) !*VirtualMachine {
     // Before creating any objects, we first need to create the map-map.
     try self.createMapMap(&token);
 
-    const empty_map = SlotsMap.create(self.getMapMap(), &token, 0);
+    const empty_map = SlotsMap.createWithMapMap(self.getMapMap(), &token, 0);
     empty_map.map.object.object_information.reachability = .Global;
 
     self.lobby_object = try makeEmptyGloballyReachableObject(&token, empty_map);
@@ -279,14 +279,17 @@ pub fn executeEntrypointScript(self: *VirtualMachine, script: Script.Ref) !?Valu
     var entrypoint_executable = try CodeGen.lowerExecutable(self.allocator, entrypoint_ast_executable.value);
     defer entrypoint_executable.unref();
 
-    try self.current_actor.activation_stack.pushEntrypointActivation(self, entrypoint_executable);
+    // XXX: Temporary hack to make the current actor available from context.
+    self.current_actor.pushContext();
+    try self.current_actor.activation_stack.pushEntrypointActivation(entrypoint_executable);
+    self.current_actor.popContext();
 
     while (true) {
         // The location to which the actor's parent actor should have the result
         // written.
         const current_actor_target_location = self.current_actor.activation_stack.getStack()[0].target_location;
 
-        var actor_result = try self.current_actor.execute(self);
+        var actor_result = try self.current_actor.execute();
         switch (actor_result) {
             .Switched => continue,
             .Finished => |value| {
