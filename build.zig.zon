@@ -4,8 +4,8 @@
     .paths = .{ "./src", "README.md" },
     .dependencies = .{
         .zig_args = .{
-            .url = "https://github.com/MasterQ32/zig-args/archive/7989929d055ef7618e60de84cc54644046516fdb.tar.gz",
-            .hash = "12207752d975a7f5d7cc65662ed1c6b117da8dec6d1bd7af9a39e1b65d90bf86e833",
+            .url = "https://github.com/MasterQ32/zig-args/archive/3797c1473b48e445d721d40c8fbbe9a7422095ae.tar.gz",
+            .hash = "122012fa395ee8ac94592f3a535ed3899a4485e96ee3d4ec8f82c761bf304b34b870",
         },
     },
 }

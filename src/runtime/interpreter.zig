@@ -661,7 +661,7 @@ fn executeBlock(
         }
 
         // Ensure that we won't GC by creating an activation.
-        var token = try vm.heap.getAllocation(required_memory);
+        const token = try vm.heap.getAllocation(required_memory);
 
         if (tracked_block) |t| {
             // Refresh the pointer to the block.
@@ -718,7 +718,7 @@ fn executeMethod(
         }
 
         // Get the allocation token for the method
-        var token = try vm.heap.getAllocation(required_memory);
+        const token = try vm.heap.getAllocation(required_memory);
 
         if (tracked_receiver) |t| {
             // Refresh the pointers to the method and its receiver.

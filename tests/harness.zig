@@ -39,7 +39,7 @@ const Test = struct {
     }
 };
 
-fn collectTests(allocator: Allocator, directory: std.fs.IterableDir) !std.ArrayList(Test) {
+fn collectTests(allocator: Allocator, directory: std.fs.Dir) !std.ArrayList(Test) {
     var tests = std.ArrayList(Test).init(allocator);
     errdefer {
         for (tests.items) |*the_test| {
@@ -54,7 +54,7 @@ fn collectTests(allocator: Allocator, directory: std.fs.IterableDir) !std.ArrayL
     // Skip the filename
     _ = args.skip();
 
-    var first_arg = args.next();
+    const first_arg = args.next();
     if (first_arg) |first_path| {
         // We were passed at least one path, let's use them as tests to run.
         const first_basename = std.fs.path.basename(first_path);
@@ -234,11 +234,11 @@ pub fn main() !u8 {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var directory: std.fs.IterableDir = blk: {
+    var directory: std.fs.Dir = blk: {
         const cwd = std.fs.cwd();
         const source_file = @src().file;
 
-        break :blk try cwd.openIterableDir(std.fs.path.dirname(source_file) orelse ".", .{});
+        break :blk try cwd.openDir(std.fs.path.dirname(source_file) orelse ".", .{ .iterate = true });
     };
     defer directory.close();
 

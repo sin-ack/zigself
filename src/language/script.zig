@@ -42,7 +42,7 @@ pub fn destroy(self: *Self) void {
 }
 
 fn initFromFilePath(self: *Self, allocator: Allocator, file_path: []const u8) !void {
-    var file_path_copy = try allocator.dupe(u8, file_path);
+    const file_path_copy = try allocator.dupe(u8, file_path);
     errdefer allocator.free(file_path_copy);
 
     self.file_path = file_path_copy;
@@ -54,7 +54,7 @@ fn initFromFilePath(self: *Self, allocator: Allocator, file_path: []const u8) !v
 }
 
 fn initFromString(self: *Self, allocator: Allocator, running_path: []const u8, contents: []const u8) !void {
-    var file_path_copy = try allocator.dupe(u8, "<a string>");
+    const file_path_copy = try allocator.dupe(u8, "<a string>");
     errdefer allocator.free(file_path_copy);
 
     self.file_path = file_path_copy;

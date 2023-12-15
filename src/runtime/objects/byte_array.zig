@@ -42,7 +42,7 @@ pub const ByteArray = extern struct {
     /// Create a byte array object with an existing byte array.
     pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, actor_id: u31, byte_array: VMByteArray) ByteArray.Ptr {
         const size = requiredSizeForSelfAllocation();
-        var memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(.Object, size);
         var self: ByteArray.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map_map, byte_array);
 

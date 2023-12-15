@@ -266,7 +266,7 @@ pub const Slot = packed struct {
         argument_slot_index: *usize,
     ) void {
         _ = heap;
-        var previous_slots = target_slots[0..slot_index.*];
+        const previous_slots = target_slots[0..slot_index.*];
         var current_slot_ptr: Slot.Ptr = undefined;
 
         // If a previous slot with the same name exists then we need to undo the

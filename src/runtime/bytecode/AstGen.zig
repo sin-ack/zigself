@@ -60,7 +60,7 @@ fn pushRegisterID(self: *AstGen) !void {
 }
 
 fn allocateRegister(self: *AstGen) RegisterLocation {
-    var latest_id = &self.register_id_stack.items[self.register_id_stack.items.len - 1];
+    const latest_id = &self.register_id_stack.items[self.register_id_stack.items.len - 1];
     defer latest_id.* += 1;
 
     return RegisterLocation.fromIndex(latest_id.*);

@@ -43,7 +43,7 @@ fn printUsage() !void {
 pub fn main() !u8 {
     var general_purpose_allocator = Allocator{};
     defer _ = general_purpose_allocator.deinit();
-    var allocator = general_purpose_allocator.allocator();
+    const allocator = general_purpose_allocator.allocator();
 
     const arguments = zig_args.parseForCurrentProcess(ArgumentSpec, allocator, .print) catch {
         try printUsage();

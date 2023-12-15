@@ -226,7 +226,7 @@ pub const ActivationStack = struct {
         current_executable: bytecode.Executable.Ref,
         new_executable: bytecode.Executable.Ref,
     ) !void {
-        var source_range = SourceRange.initNoRef(current_executable, .{ .start = 0, .end = 1 });
+        const source_range = SourceRange.initNoRef(current_executable, .{ .start = 0, .end = 1 });
 
         var token = try vm.heap.getAllocation(
             MethodObject.requiredSizeForCreatingTopLevelContext() +

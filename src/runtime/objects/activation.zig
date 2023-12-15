@@ -72,7 +72,7 @@ pub const Activation = extern struct {
 
         const size = requiredSizeForAllocation(argument_slot_count, assignable_slot_count);
 
-        var memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(.Object, size);
         var self: Activation.Ptr = @ptrCast(memory_area);
         self.init(map_type, actor_id, map, receiver);
 

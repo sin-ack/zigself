@@ -25,7 +25,7 @@ pub fn ByteArraySize(context: *PrimitiveContext) !ExecutionResult {
 pub fn ByteAt(context: *PrimitiveContext) !ExecutionResult {
     const arguments = context.getArguments("_ByteAt:");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
-    var position = try arguments.getInteger(0, .Unsigned);
+    const position = try arguments.getInteger(0, .Unsigned);
     if (try context.wouldOverflow(usize, position, "position")) |result| return result;
 
     const values = receiver.getValues();

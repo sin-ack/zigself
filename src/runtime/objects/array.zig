@@ -38,7 +38,7 @@ pub const Array = extern struct {
 
         const size = requiredSizeForAllocation(map.getSize());
 
-        var memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(.Object, size);
         var self: Array.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map, values, filler);
 
@@ -140,7 +140,7 @@ pub const ArrayMap = extern struct {
     pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, size: usize) ArrayMap.Ptr {
         const memory_size = requiredSizeForAllocation();
 
-        var memory_area = token.allocate(.Object, memory_size);
+        const memory_area = token.allocate(.Object, memory_size);
         var self: ArrayMap.Ptr = @ptrCast(memory_area);
         self.init(map_map, size);
 

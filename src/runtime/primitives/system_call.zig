@@ -437,7 +437,7 @@ pub fn SocketWithFamily_Type_Protocol_IfFail(context: *PrimitiveContext) !Execut
     const rc = std.os.system.socket(@intCast(family), full_socket_type, @intCast(protocol));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
-        var fd: std.os.fd_t = @intCast(rc);
+        const fd: std.os.fd_t = @intCast(rc);
         return makeManagedFD(context, fd, .{});
     }
 

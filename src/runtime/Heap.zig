@@ -331,7 +331,7 @@ pub fn printTrackLocationCounts(self: *Self) void {
 
     var mapping_it = self.caller_tracked_mapping.iterator();
     while (mapping_it.next()) |entry| {
-        var result = address_counts.getOrPut(entry.value_ptr.*) catch unreachable;
+        const result = address_counts.getOrPut(entry.value_ptr.*) catch unreachable;
         if (result.found_existing) {
             result.value_ptr.* += 1;
         } else {
@@ -440,6 +440,7 @@ const Space = struct {
         //         with an undefined address, get rid of this and just use
         //         memory[0..0].
         var runtime_zero: usize = 0;
+        _ = &runtime_zero;
 
         self.lazy_allocate = false;
         self.memory = memory;
@@ -709,6 +710,7 @@ const Space = struct {
         //         with an undefined address, get rid of this and just use
         //         memory[0..0].
         var runtime_zero: usize = 0;
+        _ = &runtime_zero;
 
         // Reset this space's segments, tracked set, remembered set and
         // finalization set, as it is now effectively empty.
@@ -1006,14 +1008,14 @@ test "link an object to another and perform scavenge" {
 
     // The object being referenced
     var referenced_object_map = try Object.Map.Slots.create(heap, 1);
-    var actual_name = try ByteArray.createFromString(heap, "actual");
+    const actual_name = try ByteArray.createFromString(heap, "actual");
     referenced_object_map.getSlots()[0].initConstant(actual_name, .NotParent, Value.fromUnsignedInteger(0xDEADBEEF));
     var referenced_object = try Object.Slots.create(heap, referenced_object_map, &[_]Value{});
 
     // The "activation object", which is how we get a reference to the object in
     // the from space after the tenure is done
     var activation_object_map = try Object.Map.Slots.create(heap, 1);
-    var reference_name = try ByteArray.createFromString(heap, "reference");
+    const reference_name = try ByteArray.createFromString(heap, "reference");
     activation_object_map.getSlots()[0].initMutable(Object.Map.Slots, activation_object_map, reference_name, .NotParent);
     var activation_object = try Object.Slots.create(heap, activation_object_map, &[_]Value{referenced_object.asValue()});
 

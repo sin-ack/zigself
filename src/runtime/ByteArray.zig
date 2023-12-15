@@ -21,7 +21,7 @@ pub fn createFromString(token: *Heap.AllocationToken, string: []const u8) Self {
 }
 
 pub fn createUninitialized(token: *Heap.AllocationToken, size: usize) Self {
-    var memory_area = token.allocate(.ByteArray, requiredSizeForAllocation(size));
+    const memory_area = token.allocate(.ByteArray, requiredSizeForAllocation(size));
     var header: Header.Ptr = @ptrCast(memory_area);
 
     header.init(size);

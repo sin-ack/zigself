@@ -192,7 +192,7 @@ pub const Slots = extern struct {
 
         const size = Slots.requiredSizeForAllocation(@intCast(assignable_slot_values.len));
 
-        var memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(.Object, size);
         var self: Slots.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map);
         @memcpy(self.getAssignableSlots(), assignable_slot_values);
@@ -322,7 +322,7 @@ pub const Slots = extern struct {
         // object.
         self.object.map = map_builder.map.asValue();
         try token.heap.rememberObjectReference(self.asValue(), self.object.map);
-        var assignable_values = self.getAssignableSlots();
+        const assignable_values = self.getAssignableSlots();
         map_builder.writeAssignableSlotValuesTo(assignable_values);
         return self;
     }
@@ -496,7 +496,7 @@ pub const SlotsMap = extern struct {
     pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, slot_count: u32) SlotsMap.Ptr {
         const size = SlotsMap.requiredSizeForAllocation(slot_count);
 
-        var memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(.Object, size);
         var self: SlotsMap.Ptr = @ptrCast(memory_area);
         self.init(slot_count, map_map);
 

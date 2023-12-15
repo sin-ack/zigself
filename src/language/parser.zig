@@ -32,7 +32,7 @@ pub fn createFromFile(allocator: Allocator, file_path: []const u8) !*Self {
     const file = try cwd.openFile(file_path, .{});
     defer file.close();
 
-    var file_contents = try file.readToEndAllocOptions(allocator, std.math.maxInt(usize), null, @alignOf(u8), 0);
+    const file_contents = try file.readToEndAllocOptions(allocator, std.math.maxInt(usize), null, @alignOf(u8), 0);
     errdefer allocator.free(file_contents);
 
     var self = try allocator.create(Self);
@@ -42,7 +42,7 @@ pub fn createFromFile(allocator: Allocator, file_path: []const u8) !*Self {
 }
 
 pub fn createFromString(allocator: Allocator, contents: []const u8) !*Self {
-    var contents_copy = try allocator.dupeZ(u8, contents);
+    const contents_copy = try allocator.dupeZ(u8, contents);
     errdefer allocator.free(contents_copy);
 
     var self = try allocator.create(Self);
@@ -189,7 +189,7 @@ fn parseStatement(self: *Self, nonlocal_return_state: *NonlocalReturnState) Pars
 
     switch (nonlocal_return_state.*) {
         .WrappingThisExpr => {
-            var return_node = try self.allocator.create(AST.ReturnNode);
+            const return_node = try self.allocator.create(AST.ReturnNode);
             return_node.* = .{
                 .expression = expression,
                 .range = .{ .start = start_of_expression, .end = expression.range().end },
@@ -273,7 +273,7 @@ fn parseExpressionFromPrimary(
     while (self.consumeToken(.Identifier)) |identifier_token| {
         did_send_message = true;
 
-        var message_node = try self.allocator.create(AST.MessageNode);
+        const message_node = try self.allocator.create(AST.MessageNode);
         errdefer self.allocator.destroy(message_node);
 
         const identifier_copy = try self.getIdentifierCopy(identifier_token);
@@ -346,13 +346,13 @@ fn parseBinaryMessage(self: *Self, receiver: ?AST.ExpressionNode) ParseError!?AS
 
     var term = (try self.parseExpression(.Binary)) orelse return null;
     errdefer term.deinit(self.allocator);
-    var binary_message_copy = try self.allocator.dupe(u8, binary_message_name.constSlice());
+    const binary_message_copy = try self.allocator.dupe(u8, binary_message_name.constSlice());
     errdefer self.allocator.free(binary_message_copy);
     var arguments = try self.allocator.alloc(AST.ExpressionNode, 1);
     errdefer self.allocator.free(arguments);
     arguments[0] = term;
 
-    var message_node = try self.allocator.create(AST.MessageNode);
+    const message_node = try self.allocator.create(AST.MessageNode);
     message_node.* = .{
         .receiver = receiver,
         .message_name = binary_message_copy,
@@ -396,7 +396,7 @@ fn parseKeywordMessage(self: *Self, receiver: ?AST.ExpressionNode) ParseError!?A
 
     const end_of_last_argument = arguments.items[arguments.items.len - 1].range().end;
 
-    var message_node = try self.allocator.create(AST.MessageNode);
+    const message_node = try self.allocator.create(AST.MessageNode);
     errdefer self.allocator.destroy(message_node);
 
     message_node.* = .{
@@ -544,7 +544,7 @@ fn parseObject(self: *Self, did_use_slots: ?*bool, argument_slots: ?[]const AST.
     const end_of_object = self.token_starts[self.token_index];
 
     statements.ref();
-    var object_node = try self.allocator.create(AST.ObjectNode);
+    const object_node = try self.allocator.create(AST.ObjectNode);
     object_node.* = .{
         .slots = try slots.toOwnedSlice(),
         .statements = statements,
@@ -583,7 +583,7 @@ fn parseBlock(self: *Self) ParseError!?*AST.BlockNode {
 
     const end_of_block = self.token_starts[self.token_index] + 1;
 
-    var block_node = try self.allocator.create(AST.BlockNode);
+    const block_node = try self.allocator.create(AST.BlockNode);
     block_node.* = .{
         .slots = slots,
         .statements = statements,
@@ -687,7 +687,7 @@ fn parseSlot(self: *Self, order: usize, allow_argument: bool) ParseError!?AST.Sl
     var arguments = std.ArrayList(AST.SlotNode).init(self.allocator);
     defer arguments.deinit();
 
-    var slot_name = blk: {
+    const slot_name = blk: {
         errdefer for (arguments.items) |*slot| {
             slot.deinit(self.allocator);
         };
@@ -773,7 +773,7 @@ fn parseSlot(self: *Self, order: usize, allow_argument: bool) ParseError!?AST.Sl
                         var statement_list = try AST.StatementList.create(self.allocator, statement_slice);
                         errdefer statement_list.unrefWithAllocator(self.allocator);
 
-                        var object_node = try self.allocator.create(AST.ObjectNode);
+                        const object_node = try self.allocator.create(AST.ObjectNode);
                         object_node.* = .{
                             .slots = &.{},
                             .statements = statement_list,
@@ -808,7 +808,7 @@ fn parseSlot(self: *Self, order: usize, allow_argument: bool) ParseError!?AST.Sl
 /// Creates an argument slot node from the current identifier.
 fn createSlotNodeFromArgument(self: *Self, order: usize) ParseError!AST.SlotNode {
     const identifier_token = self.assertToken(.Identifier);
-    var identifier_copy = try self.getIdentifierCopy(identifier_token);
+    const identifier_copy = try self.getIdentifierCopy(identifier_token);
     errdefer self.allocator.free(identifier_copy);
 
     const start_of_identifier = self.token_starts[self.token_index];
@@ -1014,7 +1014,7 @@ fn parseString(self: *Self) ParseError!?AST.StringNode {
 
 fn parseIdentifier(self: *Self) ParseError!AST.IdentifierNode {
     const identifier_token = self.assertToken(.Identifier);
-    var identifier_copy = try self.getIdentifierCopy(identifier_token);
+    const identifier_copy = try self.getIdentifierCopy(identifier_token);
     errdefer self.allocator.free(identifier_copy);
 
     const start_of_identifier = self.token_starts[identifier_token];
@@ -1214,7 +1214,7 @@ fn parseFloatingPoint(self: *Self) ParseError!AST.NumberNode {
         }
     }
 
-    var divisor = std.math.pow(f64, 10.0, @as(f64, @floatFromInt(fraction_counter)));
+    const divisor = std.math.pow(f64, 10.0, @as(f64, @floatFromInt(fraction_counter)));
     result += @as(f64, @floatFromInt(fraction)) / divisor;
 
     const node = AST.NumberNode{

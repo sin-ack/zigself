@@ -48,7 +48,7 @@ pub const Block = extern struct {
 
         const size = Block.requiredSizeForAllocation(@intCast(assignable_slot_values.len));
 
-        var memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(.Object, size);
         var self: Block.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map);
         @memcpy(self.getAssignableSlots(), assignable_slot_values);
@@ -132,7 +132,7 @@ pub const Block = extern struct {
             if (remaining_message.len == 0)
                 return false;
 
-            var with_slice = remaining_message[0..5];
+            const with_slice = remaining_message[0..5];
             if (!std.mem.eql(u8, with_slice, "With:"))
                 return false;
 
@@ -193,7 +193,7 @@ pub const BlockMap = extern struct {
     ) !BlockMap.Ptr {
         const size = BlockMap.requiredSizeForAllocation(total_slot_count);
 
-        var memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(.Object, size);
         var self: BlockMap.Ptr = @ptrCast(memory_area);
         self.init(map_map, argument_slot_count, total_slot_count, parent_activation, nonlocal_return_target_activation, block, executable);
 

@@ -108,7 +108,7 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
         var tracked_method = try context.vm.heap.track(method.asValue());
         defer tracked_method.untrack(context.vm.heap);
 
-        var token = try context.vm.heap.getAllocation(
+        const token = try context.vm.heap.getAllocation(
             method.requiredSizeForActivation() +
                 ActorObject.requiredSizeForAllocation(),
         );
@@ -191,7 +191,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         var tracked_method = try context.vm.heap.track(spawn_method.asValue());
         defer tracked_method.untrack(context.vm.heap);
 
-        var token = try context.vm.heap.getAllocation(
+        const token = try context.vm.heap.getAllocation(
             spawn_method.requiredSizeForActivation(),
         );
 
@@ -246,7 +246,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     // Refresh pointers in case the actor execution caused a GC
     receiver = context.receiver.getValue();
 
-    var entrypoint_selector = entrypoint_selector: {
+    const entrypoint_selector = entrypoint_selector: {
         if (context.actor.entrypoint_selector) |message_value| {
             break :entrypoint_selector message_value.get().getValues();
         }
@@ -278,7 +278,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         if (context.actor != genesis_actor)
             required_memory += ActorProxyObject.requiredSizeForAllocation();
 
-        var inner_token = try context.vm.heap.getAllocation(required_memory);
+        const inner_token = try context.vm.heap.getAllocation(required_memory);
 
         entrypoint_method = tracked_method.getValue().asObject().mustBeType(.Method);
         new_actor_context = tracked_new_actor_context.getValue();
@@ -322,7 +322,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         var tracked_method = try context.vm.heap.track(entrypoint_method.asValue());
         defer tracked_method.untrack(context.vm.heap);
 
-        var inner_token = try context.vm.heap.getAllocation(entrypoint_method.requiredSizeForActivation());
+        const inner_token = try context.vm.heap.getAllocation(entrypoint_method.requiredSizeForActivation());
 
         entrypoint_method = tracked_method.getValue().asObject().mustBeType(.Method);
         break :token inner_token;

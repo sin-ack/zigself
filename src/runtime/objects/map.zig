@@ -170,7 +170,7 @@ pub const Map = extern struct {
     /// Create the special map-map object.
     pub fn createMapMap(token: *Heap.AllocationToken) Value {
         const size = requiredSizeForAllocatingMapMap();
-        var memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(.Object, size);
 
         var map_map: Map.Ptr = @ptrCast(memory_area);
         // A defined undefined value.

@@ -82,7 +82,7 @@ pub fn bless(vm: *VirtualMachine, heap: *Heap, actor_id: u31, const_value: Value
     var token = token: {
         defer tracked_value.untrack(heap);
 
-        var token = try heap.getAllocation(required_memory);
+        const token = try heap.getAllocation(required_memory);
 
         value = tracked_value.getValue();
         break :token token;

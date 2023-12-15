@@ -47,7 +47,7 @@ pub const Method = extern struct {
 
         const size = Method.requiredSizeForAllocation(@intCast(assignable_slot_values.len));
 
-        var memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(.Object, size);
         var self: Method.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map);
         @memcpy(self.getAssignableSlots(), assignable_slot_values);
@@ -188,7 +188,7 @@ pub const MethodMap = extern struct {
     ) !MethodMap.Ptr {
         const size = MethodMap.requiredSizeForAllocation(total_slot_count);
 
-        var memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(.Object, size);
         var self: MethodMap.Ptr = @ptrCast(memory_area);
         self.init(map_map, argument_slot_count, total_slot_count, is_inline_method, method_name, block, executable);
 

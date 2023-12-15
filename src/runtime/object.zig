@@ -66,7 +66,7 @@ pub fn ObjectT(comptime object_type: ObjectType) type {
 // Ensure that all objects contain the Object type as their first word, either directly
 // or via another parent object.
 comptime {
-    next_object: inline for (@typeInfo(ObjectRegistry).Union.fields) |field| {
+    next_object: for (@typeInfo(ObjectRegistry).Union.fields) |field| {
         if (std.mem.eql(u8, field.name, "ForwardedObject"))
             continue :next_object;
 
