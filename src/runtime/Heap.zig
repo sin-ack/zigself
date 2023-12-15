@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -24,7 +24,7 @@ const REMEMBERED_SET_DEBUG = debug.REMEMBERED_SET_DEBUG;
 const HEAP_HANDLE_MISS_DEBUG = debug.HEAP_HANDLE_MISS_DEBUG;
 const CRASH_ON_OUT_OF_ORDER_HANDLE_FREES = debug.CRASH_ON_OUT_OF_ORDER_HANDLE_FREES;
 
-const Self = @This();
+const Heap = @This();
 const UninitializedHeapScrubByte = 0xAB;
 
 /// This is the space where newly created objects are placed. It is a fixed size
@@ -70,7 +70,7 @@ const HandleAreaSize = 32;
 
 const Segment = enum { Object, ByteArray };
 pub const AllocationToken = struct {
-    heap: *Self,
+    heap: *Heap,
     total_bytes: usize,
     bytes_left: usize,
 
@@ -98,20 +98,20 @@ pub const AllocationToken = struct {
     }
 };
 
-pub fn create(allocator: Allocator, vm: *VirtualMachine) !*Self {
-    const self = try allocator.create(Self);
+pub fn create(allocator: Allocator, vm: *VirtualMachine) !*Heap {
+    const self = try allocator.create(Heap);
     errdefer allocator.destroy(self);
 
     try self.init(allocator, vm);
     return self;
 }
 
-pub fn destroy(self: *Self) void {
+pub fn destroy(self: *Heap) void {
     self.deinit();
     self.allocator.destroy(self);
 }
 
-fn init(self: *Self, allocator: Allocator, vm: *VirtualMachine) !void {
+fn init(self: *Heap, allocator: Allocator, vm: *VirtualMachine) !void {
     var old_space = Space.lazyInit(self, "old space", InitialOldSpaceSize);
     errdefer old_space.deinit(allocator);
 
@@ -139,7 +139,7 @@ fn init(self: *Self, allocator: Allocator, vm: *VirtualMachine) !void {
     self.eden.tenure_target = &self.from_space;
 }
 
-fn deinit(self: *Self) void {
+fn deinit(self: *Heap) void {
     self.eden.deinit(self.allocator);
     self.from_space.deinit(self.allocator);
     self.to_space.deinit(self.allocator);
@@ -150,7 +150,7 @@ fn deinit(self: *Self) void {
     }
 }
 
-pub fn getAllocation(self: *Self, bytes: usize) !AllocationToken {
+pub fn getAllocation(self: *Heap, bytes: usize) !AllocationToken {
     if (GC_TOKEN_DEBUG) std.debug.print("Heap.getAllocation: Attempting to get a token of size {}\n", .{bytes});
     try self.eden.collectGarbage(self.allocator, bytes);
 
@@ -163,7 +163,7 @@ pub fn getAllocation(self: *Self, bytes: usize) !AllocationToken {
 /// Mark the given address within the heap as an object which needs to know when
 /// it is finalized. The address must've just been allocated (i.e. still in
 /// eden).
-pub fn markAddressAsNeedingFinalization(self: *Self, address: [*]u64) !void {
+pub fn markAddressAsNeedingFinalization(self: *Heap, address: [*]u64) !void {
     if (!self.eden.objectSegmentContains(address)) {
         std.debug.panic("!!! markAddressAsNeedingFinalization called on address which isn't in eden object segment", .{});
     }
@@ -171,7 +171,7 @@ pub fn markAddressAsNeedingFinalization(self: *Self, address: [*]u64) !void {
     try self.eden.addToFinalizationSet(self.allocator, address);
 }
 
-fn allocateHandle(self: *Self) *?[*]u64 {
+fn allocateHandle(self: *Heap) *?[*]u64 {
     var handle_index = self.most_recent_handle_index +% 1;
     while (handle_index != self.most_recent_handle_index) : (handle_index +%= 1) {
         const handle = &self.handles[handle_index];
@@ -187,7 +187,7 @@ fn allocateHandle(self: *Self) *?[*]u64 {
     @panic("!!! Could not find a free handle slot!");
 }
 
-fn freeHandle(self: *Self, handle: *?[*]u64) void {
+fn freeHandle(self: *Heap, handle: *?[*]u64) void {
     if (CRASH_ON_OUT_OF_ORDER_HANDLE_FREES) {
         if (handle != &self.handles[self.most_recent_handle_index]) {
             @panic("!!! Out-of-order handle free!");
@@ -201,7 +201,7 @@ fn freeHandle(self: *Self, handle: *?[*]u64) void {
 
 /// Track the given value, returning a Tracked. When a garbage collection
 /// occurs, the value will be updated with the new location.
-pub fn track(self: *Self, value: Value) !Tracked {
+pub fn track(self: *Heap, value: Value) !Tracked {
     if (value.isObjectReference()) {
         const handle = self.allocateHandle();
         handle.* = value.asObjectAddress();
@@ -223,7 +223,7 @@ pub fn track(self: *Self, value: Value) !Tracked {
 }
 
 /// Untracks the given value.
-pub fn untrack(self: *Self, tracked: Tracked) void {
+pub fn untrack(self: *Heap, tracked: Tracked) void {
     if (tracked.value == .Object) {
         if (GC_TRACK_SOURCE_DEBUG) {
             _ = self.caller_tracked_mapping.swapRemove(tracked.value.Object);
@@ -235,7 +235,7 @@ pub fn untrack(self: *Self, tracked: Tracked) void {
 }
 
 pub fn visitValues(
-    self: *Self,
+    self: *Heap,
     // TODO: Write interfaces proposal for Zig
     visitor: anytype,
 ) !void {
@@ -252,7 +252,7 @@ pub fn visitValues(
 
 /// Go through the whole heap, updating references to the given value with the
 /// new value.
-pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) !void {
+pub fn updateAllReferencesTo(self: *Heap, old_value: Value, new_value: Value) !void {
     const Visitor = struct {
         old_value: Value,
         new_value: Value,
@@ -273,7 +273,7 @@ pub fn updateAllReferencesTo(self: *Self, old_value: Value, new_value: Value) !v
 /// entry to the target object's space's remembered set. This ensures that the
 /// object in the old space gets its references properly updated when the new
 /// space gets garbage collected.
-pub fn rememberObjectReference(self: *Self, referrer: Value, target: Value) !void {
+pub fn rememberObjectReference(self: *Heap, referrer: Value, target: Value) !void {
     // FIXME: If we add an assignable slot to traits integer for instance, this
     //        will cause the assignment code to explode. What can we do there?
     std.debug.assert(referrer.isObjectReference());
@@ -321,8 +321,8 @@ pub fn rememberObjectReference(self: *Self, referrer: Value, target: Value) !voi
     try target_space.?.addToRememberedSet(self.allocator, referrer_address, referrer.asObject().getSizeInMemory());
 }
 
-pub fn printTrackLocationCounts(self: *Self) void {
-    const debug_info = std.debug.getSelfDebugInfo() catch unreachable;
+pub fn printTrackLocationCounts(self: *Heap) void {
+    const debug_info = std.debug.getHeapDebugInfo() catch unreachable;
     const stderr = std.io.getStdErr();
     const tty_config = std.io.tty.detectConfig(stderr);
 
@@ -349,7 +349,7 @@ pub fn printTrackLocationCounts(self: *Self) void {
 
 /// Return whether a garbage collection cycle would need to happen in order to
 /// provide the required amount of bytes from the heap.
-pub fn needsToGarbageCollectToProvide(self: Self, bytes: usize) bool {
+pub fn needsToGarbageCollectToProvide(self: Heap, bytes: usize) bool {
     return self.eden.freeMemory() < bytes;
 }
 
@@ -362,7 +362,7 @@ const RememberedSet = std.AutoArrayHashMapUnmanaged([*]u64, usize);
 const FinalizationSet = std.AutoArrayHashMapUnmanaged([*]u64, void);
 const Space = struct {
     /// A reference back to the heap.
-    heap: *Self,
+    heap: *Heap,
 
     /// If true, then memory is undefined, and the next time an allocation is
     /// requested the memory space should be allocated.
@@ -383,7 +383,7 @@ const Space = struct {
     /// any references that were still pointing to this space at scavenge time
     /// are transferred to the target space.
     ///
-    /// TODO: The original Self VM used "cards" (i.e. a bitmap) to mark certain
+    /// TODO: The original Heap VM used "cards" (i.e. a bitmap) to mark certain
     ///       regions of memory as pointing to a new space indiscriminate of
     ///       object size. Figure out whether that is faster than this
     ///       approach.
@@ -417,7 +417,7 @@ const Space = struct {
         previous: ?*const NewerGenerationLink,
     };
 
-    pub fn lazyInit(heap: *Self, comptime name: [*:0]const u8, size: usize) Space {
+    pub fn lazyInit(heap: *Heap, comptime name: [*:0]const u8, size: usize) Space {
         return Space{
             .heap = heap,
             .name = name,
@@ -427,7 +427,7 @@ const Space = struct {
         };
     }
 
-    pub fn init(heap: *Self, allocator: Allocator, comptime name: [*:0]const u8, size: usize) !Space {
+    pub fn init(heap: *Heap, allocator: Allocator, comptime name: [*:0]const u8, size: usize) !Space {
         var self = lazyInit(heap, name, size);
         try self.allocateMemory(allocator);
         return self;
@@ -957,7 +957,7 @@ pub const Tracked = struct {
         return Tracked{ .value = .{ .Literal = value } };
     }
 
-    pub fn untrack(self: Tracked, heap: *Self) void {
+    pub fn untrack(self: Tracked, heap: *Heap) void {
         if (self.value == .Object) {
             heap.untrack(self);
         }
@@ -974,7 +974,7 @@ pub const Tracked = struct {
 test "allocate one object's worth of space on the heap" {
     const allocator = std.testing.allocator;
 
-    var heap = try Self.create(allocator);
+    var heap = try Heap.create(allocator);
     defer heap.destroy();
 
     const eden_free_memory = heap.eden.freeMemory();
@@ -985,7 +985,7 @@ test "allocate one object's worth of space on the heap" {
 test "fill up the eden with objects and attempt to allocate one more" {
     const allocator = std.testing.allocator;
 
-    var heap = try Self.create(allocator);
+    var heap = try Heap.create(allocator);
     defer heap.destroy();
 
     const eden_free_memory = heap.eden.freeMemory();
@@ -1003,7 +1003,7 @@ test "fill up the eden with objects and attempt to allocate one more" {
 test "link an object to another and perform scavenge" {
     const allocator = std.testing.allocator;
 
-    var heap = try Self.create(allocator);
+    var heap = try Heap.create(allocator);
     defer heap.destroy();
 
     // The object being referenced

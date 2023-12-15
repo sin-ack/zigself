@@ -1,4 +1,4 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -9,7 +9,7 @@ const Token = @import("./Token.zig");
 buffer: [:0]const u8,
 offset: usize = 0,
 
-const Self = @This();
+const Tokenizer = @This();
 
 const State = enum {
     Start,
@@ -31,11 +31,11 @@ const State = enum {
     Pipe,
 };
 
-pub fn init(buffer: [:0]const u8) Self {
+pub fn init(buffer: [:0]const u8) Tokenizer {
     return .{ .buffer = buffer };
 }
 
-pub fn skipShebangFromStart(self: *Self) void {
+pub fn skipShebangFromStart(self: *Tokenizer) void {
     std.debug.assert(self.offset == 0);
 
     if (std.mem.startsWith(u8, self.buffer, "#!")) {
@@ -49,7 +49,7 @@ pub fn skipShebangFromStart(self: *Self) void {
     }
 }
 
-pub fn next(self: *Self) Token {
+pub fn next(self: *Tokenizer) Token {
     var state = State.Start;
     var token = Token{
         .tag = .EOF,

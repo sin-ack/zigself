@@ -1,4 +1,4 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -6,7 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const bytecode_block = @import("./block.zig");
-const Script = @import("../../language/script.zig");
+const Script = @import("../../language/Script.zig");
 const ref_counted = @import("../../utility/ref_counted.zig");
 
 fn Executable(comptime BlockT: type) type {

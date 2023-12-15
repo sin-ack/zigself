@@ -11,7 +11,7 @@ const Slot = @import("./slot.zig").Slot;
 const Actor = @import("./Actor.zig");
 const Value = @import("./value.zig").Value;
 const Range = @import("../language/Range.zig");
-const Script = @import("../language/script.zig");
+const Script = @import("../language/Script.zig");
 const AstGen = @import("./bytecode/AstGen.zig");
 const context = @import("context.zig");
 const CodeGen = @import("./bytecode/CodeGen.zig");
@@ -87,12 +87,12 @@ regular_actors: RegularActorSet = .{},
 // NOTE: Initialization deferred until the VM object is complete
 current_actor: *Actor = undefined,
 
-const Self = @This();
+const VirtualMachine = @This();
 const RegularActorSet = std.AutoArrayHashMapUnmanaged(*Actor, void);
 
 /// Creates the virtual machine, including the heap and the global objects.
-pub fn create(allocator: Allocator) !*Self {
-    var self = try allocator.create(Self);
+pub fn create(allocator: Allocator) !*VirtualMachine {
+    var self = try allocator.create(VirtualMachine);
     errdefer allocator.destroy(self);
 
     var heap = try Heap.create(allocator, self);
@@ -142,11 +142,11 @@ pub fn create(allocator: Allocator) !*Self {
     return self;
 }
 
-fn createMapMap(self: *Self, token: *Heap.AllocationToken) !void {
+fn createMapMap(self: *VirtualMachine, token: *Heap.AllocationToken) !void {
     self.map_map = try token.heap.track(Map.createMapMap(token));
 }
 
-pub fn getMapMap(self: Self) Map.Ptr {
+pub fn getMapMap(self: VirtualMachine) Map.Ptr {
     return self.map_map.getValue().asObject().mustBeType(.Map);
 }
 
@@ -161,7 +161,7 @@ fn makeEmptyGloballyReachableObject(token: *Heap.AllocationToken, map: SlotsMap.
     return try token.heap.track(slots.asValue());
 }
 
-pub fn destroy(self: *Self) void {
+pub fn destroy(self: *VirtualMachine) void {
     // NOTE: All actors are finalized by the actor object that they're owned
     //       by when the heap is deallocated.
     self.regular_actors.deinit(self.allocator);
@@ -189,27 +189,27 @@ pub fn destroy(self: *Self) void {
     self.allocator.destroy(self);
 }
 
-pub fn getTrue(self: Self) Value {
+pub fn getTrue(self: VirtualMachine) Value {
     return self.global_true.getValue();
 }
 
-pub fn getFalse(self: Self) Value {
+pub fn getFalse(self: VirtualMachine) Value {
     return self.global_false.getValue();
 }
 
-pub fn nil(self: Self) Value {
+pub fn nil(self: VirtualMachine) Value {
     return self.global_nil.getValue();
 }
 
-pub fn lobby(self: Self) Value {
+pub fn lobby(self: VirtualMachine) Value {
     return self.lobby_object.getValue();
 }
 
-pub fn pushContext(self: *Self) void {
+pub fn pushContext(self: *VirtualMachine) void {
     context.pushVM(self);
 }
 
-pub fn popContext(self: *Self) void {
+pub fn popContext(self: *VirtualMachine) void {
     const popped_vm = context.popVM();
     std.debug.assert(popped_vm == self);
 }
@@ -239,7 +239,7 @@ const BlockMessageNameContext = struct {
 /// if it does not exist.
 ///
 /// A block message name looks like: `value:With:With:With:...`.
-pub fn getOrCreateBlockMessageName(self: *Self, argument_count: u8) !BlockMessageNameContext {
+pub fn getOrCreateBlockMessageName(self: *VirtualMachine, argument_count: u8) !BlockMessageNameContext {
     const result = try self.block_message_names.getOrPut(self.allocator, argument_count);
     return BlockMessageNameContext{ .exists = result.found_existing, .value_ptr = result.value_ptr, .argument_count = argument_count };
 }
@@ -269,7 +269,7 @@ fn blockMessageNameLength(argument_count: u8) usize {
     return needed_space;
 }
 
-pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
+pub fn executeEntrypointScript(self: *VirtualMachine, script: Script.Ref) !?Value {
     self.pushContext();
     defer self.popContext();
 
@@ -352,27 +352,27 @@ pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
     }
 }
 
-pub fn readRegister(self: Self, location: RegisterLocation) Value {
+pub fn readRegister(self: VirtualMachine, location: RegisterLocation) Value {
     return switch (location) {
         .zero => self.nil(),
         else => self.current_actor.readRegister(location),
     };
 }
 
-pub fn writeRegister(self: *Self, location: RegisterLocation, value: Value) void {
+pub fn writeRegister(self: *VirtualMachine, location: RegisterLocation, value: Value) void {
     self.current_actor.writeRegister(location, value);
 }
 
-pub fn takeStackSnapshot(self: *Self) Actor.StackSnapshot {
+pub fn takeStackSnapshot(self: *VirtualMachine) Actor.StackSnapshot {
     return self.current_actor.takeStackSnapshot();
 }
 
-pub fn restoreStackSnapshot(self: *Self, snapshot: Actor.StackSnapshot) void {
+pub fn restoreStackSnapshot(self: *VirtualMachine, snapshot: Actor.StackSnapshot) void {
     self.current_actor.restoreStackSnapshot(snapshot);
 }
 
 pub fn visitValues(
-    self: *Self,
+    self: *VirtualMachine,
     // TODO: Write interfaces proposal for Zig
     visitor: anytype,
 ) !void {
@@ -384,15 +384,15 @@ pub fn visitValues(
         try actor.visitValues(visitor);
 }
 
-pub fn isInActorMode(self: *Self) bool {
+pub fn isInActorMode(self: *VirtualMachine) bool {
     return self.genesis_actor != null;
 }
 
-pub fn isInRegularActor(self: *Self) bool {
+pub fn isInRegularActor(self: *VirtualMachine) bool {
     return self.current_actor != self.global_actor and self.current_actor != self.genesis_actor;
 }
 
-pub fn isInGenesisActor(self: *Self) bool {
+pub fn isInGenesisActor(self: *VirtualMachine) bool {
     if (self.genesis_actor) |genesis_actor| {
         return self.current_actor == genesis_actor;
     }
@@ -400,25 +400,25 @@ pub fn isInGenesisActor(self: *Self) bool {
     return false;
 }
 
-pub fn setGenesisActor(self: *Self, actor: *Actor) void {
+pub fn setGenesisActor(self: *VirtualMachine, actor: *Actor) void {
     std.debug.assert(!self.isInActorMode());
     self.genesis_actor = actor;
 }
 
-pub fn switchToActor(self: *Self, actor: *Actor) void {
+pub fn switchToActor(self: *VirtualMachine, actor: *Actor) void {
     self.current_actor = actor;
     actor.yield_reason = .None;
 }
 
-pub fn registerRegularActor(self: *Self, actor: *Actor) !void {
+pub fn registerRegularActor(self: *VirtualMachine, actor: *Actor) !void {
     const gop = try self.regular_actors.getOrPut(self.allocator, actor);
     std.debug.assert(!gop.found_existing);
 }
 
-pub fn unregisterRegularActor(self: *Self, actor: *Actor) bool {
+pub fn unregisterRegularActor(self: *VirtualMachine, actor: *Actor) bool {
     return self.regular_actors.swapRemove(actor);
 }
 
-pub fn regularActorIsRegistered(self: Self, actor: *Actor) bool {
+pub fn regularActorIsRegistered(self: VirtualMachine, actor: *Actor) bool {
     return self.regular_actors.contains(actor);
 }

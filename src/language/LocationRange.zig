@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -6,15 +6,15 @@
 
 const std = @import("std");
 
-const Location = @import("./location.zig");
+const Location = @import("./Location.zig");
 
-const Self = @This();
+const LocationRange = @This();
 
 start: Location,
 end: Location,
 
 pub fn format(
-    range: Self,
+    range: LocationRange,
     comptime fmt: []const u8,
     options: std.fmt.FormatOptions,
     writer: anytype,

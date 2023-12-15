@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -10,30 +10,30 @@ const Value = value.Value;
 const IntegerValue = value.IntegerValue;
 const pointer = @import("../utility/pointer.zig");
 
-const Self = @This();
+const ByteArray = @This();
 
 header: Header.Ptr,
 
-pub fn createFromString(token: *Heap.AllocationToken, string: []const u8) Self {
+pub fn createFromString(token: *Heap.AllocationToken, string: []const u8) ByteArray {
     var self = createUninitialized(token, string.len);
     @memcpy(self.getValues(), string);
     return self;
 }
 
-pub fn createUninitialized(token: *Heap.AllocationToken, size: usize) Self {
+pub fn createUninitialized(token: *Heap.AllocationToken, size: usize) ByteArray {
     const memory_area = token.allocate(.ByteArray, requiredSizeForAllocation(size));
     var header: Header.Ptr = @ptrCast(memory_area);
 
     header.init(size);
 
-    return Self{ .header = header };
+    return ByteArray{ .header = header };
 }
 
-pub inline fn fromAddress(address: [*]u64) Self {
+pub inline fn fromAddress(address: [*]u64) ByteArray {
     return .{ .header = @ptrCast(address) };
 }
 
-pub fn getValues(self: Self) []u8 {
+pub fn getValues(self: ByteArray) []u8 {
     const header_size = @sizeOf(Header);
     const total_length: usize = @intCast(self.header.length.get());
 
@@ -41,15 +41,15 @@ pub fn getValues(self: Self) []u8 {
     return header[header_size..total_length];
 }
 
-pub fn getLength(self: Self) usize {
+pub fn getLength(self: ByteArray) usize {
     return @intCast(self.header.length.get() - @sizeOf(Header));
 }
 
-pub fn asValue(self: Self) Value {
+pub fn asValue(self: ByteArray) Value {
     return Value.fromObjectAddress(@ptrCast(@alignCast(self.header)));
 }
 
-pub fn getSizeInMemory(self: Self) usize {
+pub fn getSizeInMemory(self: ByteArray) usize {
     return requiredSizeForAllocation(self.getLength());
 }
 
@@ -73,7 +73,7 @@ pub const Header = packed struct {
         self.length = IntegerValue(.Unsigned).init(@sizeOf(Header) + byte_array_length);
     }
 
-    pub fn asByteVector(self: Header.Ptr) Self {
+    pub fn asByteVector(self: Header.Ptr) ByteArray {
         return .{ .header = @alignCast(self) };
     }
 };

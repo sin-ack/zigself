@@ -1,12 +1,12 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const zig_args = @import("zig-args");
 
-const Script = @import("./language/script.zig");
-const ASTPrinter = @import("./language/ast_printer.zig");
+const Script = @import("./language/Script.zig");
+const ASTPrinter = @import("./language/ASTPrinter.zig");
 
 const VirtualMachine = @import("./runtime/VirtualMachine.zig");
 

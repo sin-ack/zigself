@@ -1,10 +1,10 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 
-const Self = @This();
+const Location = @This();
 
 line: usize,
 column: usize,
@@ -15,7 +15,7 @@ line_start: usize,
 line_end: usize,
 
 pub fn format(
-    location: Self,
+    location: Location,
     comptime fmt: []const u8,
     options: std.fmt.FormatOptions,
     writer: anytype,

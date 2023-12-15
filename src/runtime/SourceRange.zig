@@ -1,4 +1,4 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -7,8 +7,6 @@ const std = @import("std");
 const Range = @import("../language/Range.zig");
 const LocationRange = @import("../language/LocationRange.zig");
 const Executable = @import("./bytecode.zig").Executable;
-
-const Self = @This();
 
 /// The executable this source range belongs to. When attempting to get a stack
 /// trace, this executable's definition script will be referenced for the source
@@ -19,8 +17,10 @@ executable: Executable.Ref,
 /// information can be obtained from the script.
 range: Range,
 
+const SourceRange = @This();
+
 /// Refs executable.
-pub fn init(executable: Executable.Ref, range: Range) Self {
+pub fn init(executable: Executable.Ref, range: Range) SourceRange {
     executable.ref();
     return initNoRef(executable, range);
 }
@@ -28,19 +28,19 @@ pub fn init(executable: Executable.Ref, range: Range) Self {
 /// Does NOT ref executable; this is intended to be used in places where a
 /// template source range is given to objects which store a copy. Calling deinit
 /// on SourceRange objects created this way is an error.
-pub fn initNoRef(executable: Executable.Ref, range: Range) Self {
+pub fn initNoRef(executable: Executable.Ref, range: Range) SourceRange {
     return .{ .executable = executable, .range = range };
 }
 
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: *SourceRange) void {
     self.executable.unref();
 }
 
-pub fn copy(self: Self) Self {
+pub fn copy(self: SourceRange) SourceRange {
     return init(self.executable, self.range);
 }
 
-pub fn getLocationRange(self: Self) LocationRange {
+pub fn getLocationRange(self: SourceRange) LocationRange {
     return .{
         .start = self.executable.value.definition_script.value.offsetToLocation(self.range.start),
         // NOTE: Source ranges are end-exclusive.
@@ -48,12 +48,12 @@ pub fn getLocationRange(self: Self) LocationRange {
     };
 }
 
-pub fn getStartLine(self: Self) ![]const u8 {
+pub fn getStartLine(self: SourceRange) ![]const u8 {
     return self.executable.value.definition_script.value.getSourceLine(self.getLocationRange().start);
 }
 
 pub fn format(
-    source_range: Self,
+    source_range: SourceRange,
     comptime fmt: []const u8,
     options: std.fmt.FormatOptions,
     writer: anytype,

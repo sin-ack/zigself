@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -6,7 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("../Heap.zig");
-const Script = @import("../../language/script.zig");
+const Script = @import("../../language/Script.zig");
 const AstGen = @import("../bytecode/AstGen.zig");
 const CodeGen = @import("../bytecode/CodeGen.zig");
 const interpreter = @import("../interpreter.zig");

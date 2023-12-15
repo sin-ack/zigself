@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const ast = @import("../../language/ast.zig");
 const debug = @import("../../debug.zig");
 const Range = @import("../../language/Range.zig");
-const Script = @import("../../language/script.zig");
+const Script = @import("../../language/Script.zig");
 const astcode = @import("./astcode.zig");
 
 const Block = astcode.Block;

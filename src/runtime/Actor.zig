@@ -70,7 +70,7 @@ range: Range = .{ .start = 0, .end = 0 },
 /// system.
 id: u31,
 
-const Self = @This();
+const Actor = @This();
 const Mailbox = std.TailQueue(Message);
 
 // Sentinel values for the stacks
@@ -90,7 +90,7 @@ pub const StackSnapshot = struct {
     /// snapshot for an activation is created while the stack still contains the
     /// arguments for the activation, meaning the stack will be higher than it
     /// actually is when the activation is entered.
-    pub fn bumpArgumentHeight(self: *StackSnapshot, actor: *Self) void {
+    pub fn bumpArgumentHeight(self: *StackSnapshot, actor: *Actor) void {
         self.argument_height = actor.argument_stack.height();
     }
 };
@@ -157,8 +157,8 @@ pub const Message = struct {
     }
 };
 
-pub fn create(vm: *VirtualMachine, token: *Heap.AllocationToken, actor_context: Value) !*Self {
-    const self = try vm.allocator.create(Self);
+pub fn create(vm: *VirtualMachine, token: *Heap.AllocationToken, actor_context: Value) !*Actor {
+    const self = try vm.allocator.create(Actor);
     errdefer vm.allocator.destroy(self);
 
     // NOTE: If we're not in actor mode, then we belong to the global actor (which is this actor for the
@@ -171,12 +171,12 @@ pub fn create(vm: *VirtualMachine, token: *Heap.AllocationToken, actor_context: 
     return self;
 }
 
-pub fn destroy(self: *Self, allocator: Allocator) void {
+pub fn destroy(self: *Actor, allocator: Allocator) void {
     self.deinit(allocator);
     allocator.destroy(self);
 }
 
-fn init(self: *Self, actor_object: ActorObject.Ptr) void {
+fn init(self: *Actor, actor_object: ActorObject.Ptr) void {
     self.* = .{
         .id = newActorID(),
         .actor_object = ActorObject.Value.init(actor_object),
@@ -185,7 +185,7 @@ fn init(self: *Self, actor_object: ActorObject.Ptr) void {
     self.register_file.init();
 }
 
-fn deinit(self: *Self, allocator: Allocator) void {
+fn deinit(self: *Actor, allocator: Allocator) void {
     self.clearMailbox(allocator);
 
     self.argument_stack.deinit(allocator);
@@ -199,7 +199,7 @@ fn deinit(self: *Self, allocator: Allocator) void {
 }
 
 pub fn activateMethod(
-    self: *Self,
+    self: *Actor,
     vm: *VirtualMachine,
     token: *Heap.AllocationToken,
     method: MethodObject.Ptr,
@@ -210,7 +210,7 @@ pub fn activateMethod(
 }
 
 pub fn activateMethodWithContext(
-    self: *Self,
+    self: *Actor,
     vm: *VirtualMachine,
     token: *Heap.AllocationToken,
     actor_context: Value,
@@ -222,16 +222,16 @@ pub fn activateMethodWithContext(
     method.activateMethod(vm, token, self.id, actor_context, &.{}, target_location, source_range, activation_slot);
 }
 
-pub fn pushContext(self: *Self) void {
+pub fn pushContext(self: *Actor) void {
     context.pushActor(self);
 }
 
-pub fn popContext(self: *Self) void {
+pub fn popContext(self: *Actor) void {
     const popped_actor = context.popActor();
     std.debug.assert(popped_actor == self);
 }
 
-pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
+pub fn execute(self: *Actor, vm: *VirtualMachine) !ActorResult {
     self.pushContext();
     defer self.popContext();
 
@@ -279,14 +279,14 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
 
 /// Execute the activation stack of this actor until the given activation (or if
 /// `until` is null, until all activations have been resolved).
-pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?Activation.ActivationRef) !ActorResult {
+pub fn executeUntil(self: *Actor, vm: *VirtualMachine, until: ?Activation.ActivationRef) !ActorResult {
     var interpreter_context = interpreter.InterpreterContext.init(vm, self, until);
     return try interpreter.execute(&interpreter_context);
 }
 
 pub const ActivationExitState = enum { LastActivation, NotLastActivation };
 
-pub fn exitCurrentActivation(self: *Self, vm: *VirtualMachine, last_activation_ref: ?Activation.ActivationRef) ActivationExitState {
+pub fn exitCurrentActivation(self: *Actor, vm: *VirtualMachine, last_activation_ref: ?Activation.ActivationRef) ActivationExitState {
     if (ACTIVATION_EXIT_DEBUG) std.debug.print("Actor.exitCurrentActivation: Exiting this activation\n", .{});
     const current_activation = self.activation_stack.getCurrent();
     return self.exitActivation(vm, last_activation_ref, current_activation);
@@ -296,7 +296,7 @@ pub fn exitCurrentActivation(self: *Self, vm: *VirtualMachine, last_activation_r
 /// register for the instruction that initiated the activation. Returns
 /// ActivationExitState.LastActivation if the last activation has been exited.
 pub fn exitActivation(
-    self: *Self,
+    self: *Actor,
     vm: *VirtualMachine,
     last_activation_ref: ?Activation.ActivationRef,
     target_activation: *Activation,
@@ -349,7 +349,7 @@ pub fn exitActivation(
     return .NotLastActivation;
 }
 
-pub fn takeStackSnapshot(self: Self) StackSnapshot {
+pub fn takeStackSnapshot(self: Actor) StackSnapshot {
     return .{
         .argument_height = self.argument_stack.height(),
         .slot_height = self.slot_stack.height(),
@@ -357,22 +357,22 @@ pub fn takeStackSnapshot(self: Self) StackSnapshot {
     };
 }
 
-pub fn restoreStackSnapshot(self: *Self, snapshot: StackSnapshot) void {
+pub fn restoreStackSnapshot(self: *Actor, snapshot: StackSnapshot) void {
     self.argument_stack.restoreTo(snapshot.argument_height);
     self.slot_stack.restoreTo(snapshot.slot_height);
     self.saved_register_stack.restoreTo(snapshot.saved_register_height);
 }
 
-pub fn readRegister(self: Self, location: bytecode.RegisterLocation) Value {
+pub fn readRegister(self: Actor, location: bytecode.RegisterLocation) Value {
     return self.register_file.read(location);
 }
 
-pub fn writeRegister(self: *Self, location: bytecode.RegisterLocation, value: Value) void {
+pub fn writeRegister(self: *Actor, location: bytecode.RegisterLocation, value: Value) void {
     self.register_file.write(location, value);
 }
 
 pub fn visitValues(
-    self: *Self,
+    self: *Actor,
     // TODO: Write interfaces proposal for Zig
     visitor: anytype,
 ) !void {
@@ -430,7 +430,7 @@ pub fn visitValues(
 
 /// Unwinds all the stacks to their starting point. Used after an error is
 /// received at the top level.
-pub fn unwindStacks(self: *Self) void {
+pub fn unwindStacks(self: *Actor) void {
     for (self.activation_stack.getStack()) |*activation| {
         activation.deinit();
     }
@@ -442,7 +442,7 @@ pub fn unwindStacks(self: *Self) void {
 }
 
 pub fn putMessageInMailbox(
-    self: *Self,
+    self: *Actor,
     allocator: Allocator,
     sender: ActorObject.Ptr,
     method: MethodObject.Ptr,
@@ -463,7 +463,7 @@ pub fn putMessageInMailbox(
 }
 
 /// Clear all items in the mailbox.
-pub fn clearMailbox(self: *Self, allocator: Allocator) void {
+pub fn clearMailbox(self: *Actor, allocator: Allocator) void {
     var it = self.mailbox.first;
     var next = it;
     while (it) |node| : (it = next) {
@@ -476,7 +476,7 @@ pub fn clearMailbox(self: *Self, allocator: Allocator) void {
     self.mailbox = .{};
 }
 
-pub fn canWriteTo(self: *Self, value: Value) bool {
+pub fn canWriteTo(self: *Actor, value: Value) bool {
     return switch (value.getType()) {
         .ObjectMarker => unreachable,
         .Integer, .FloatingPoint => true,
@@ -491,7 +491,7 @@ pub fn canWriteTo(self: *Self, value: Value) bool {
 /// Ensure that the current actor can read the given value.
 /// If the actor cannot read this value, then the VM should crash, as we shouldn't
 /// be able to reach this object in the first place.
-pub fn ensureCanRead(self: *Self, value: Value, source_range: SourceRange) void {
+pub fn ensureCanRead(self: *Actor, value: Value, source_range: SourceRange) void {
     switch (value.getType()) {
         .ObjectMarker => unreachable,
         .Integer, .FloatingPoint => {},

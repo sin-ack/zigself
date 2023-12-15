@@ -6,10 +6,10 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const AST = @import("./ast.zig");
-const Diagnostics = @import("./diagnostics.zig");
+const Diagnostics = @import("./Diagnostics.zig");
 const Tokenizer = @import("./Tokenizer.zig");
 const Token = @import("./Token.zig");
-const Location = @import("./location.zig");
+const Location = @import("./Location.zig");
 
 allocator: Allocator,
 buffer: [:0]const u8,
@@ -25,9 +25,9 @@ token_index: usize,
 line_offsets: std.ArrayListUnmanaged(usize),
 
 pub const ParseError = Allocator.Error;
-const Self = @This();
+const Parser = @This();
 
-pub fn createFromFile(allocator: Allocator, file_path: []const u8) !*Self {
+pub fn createFromFile(allocator: Allocator, file_path: []const u8) !*Parser {
     const cwd = std.fs.cwd();
     const file = try cwd.openFile(file_path, .{});
     defer file.close();
@@ -35,23 +35,23 @@ pub fn createFromFile(allocator: Allocator, file_path: []const u8) !*Self {
     const file_contents = try file.readToEndAllocOptions(allocator, std.math.maxInt(usize), null, @alignOf(u8), 0);
     errdefer allocator.free(file_contents);
 
-    var self = try allocator.create(Self);
+    var self = try allocator.create(Parser);
     errdefer allocator.destroy(self);
     try self.init(allocator, file_contents, true);
     return self;
 }
 
-pub fn createFromString(allocator: Allocator, contents: []const u8) !*Self {
+pub fn createFromString(allocator: Allocator, contents: []const u8) !*Parser {
     const contents_copy = try allocator.dupeZ(u8, contents);
     errdefer allocator.free(contents_copy);
 
-    var self = try allocator.create(Self);
+    var self = try allocator.create(Parser);
     errdefer allocator.destroy(self);
     try self.init(allocator, contents_copy, false);
     return self;
 }
 
-fn init(self: *Self, allocator: Allocator, buffer: [:0]const u8, from_file: bool) !void {
+fn init(self: *Parser, allocator: Allocator, buffer: [:0]const u8, from_file: bool) !void {
     self.* = .{
         .allocator = allocator,
         .buffer = buffer,
@@ -101,19 +101,19 @@ fn init(self: *Self, allocator: Allocator, buffer: [:0]const u8, from_file: bool
     }
 }
 
-fn deinit(self: *Self) void {
+fn deinit(self: *Parser) void {
     self.line_offsets.deinit(self.allocator);
     self.tokens.deinit(self.allocator);
     self.allocator.free(self.buffer);
     self.diagnostics.deinit();
 }
 
-pub fn destroy(self: *Self) void {
+pub fn destroy(self: *Parser) void {
     self.deinit();
     self.allocator.destroy(self);
 }
 
-pub fn parseScript(self: *Self) ParseError!AST.ScriptNode {
+pub fn parseScript(self: *Parser) ParseError!AST.ScriptNode {
     // Script = StatementList
     const statements = try self.parseStatementList(false);
     errdefer statements.unrefWithAllocator(self.allocator);
@@ -130,7 +130,7 @@ pub fn parseScript(self: *Self) ParseError!AST.ScriptNode {
     return AST.ScriptNode{ .statements = statements, .range = .{ .start = 0, .end = self.buffer.len } };
 }
 
-fn parseStatementList(self: *Self, allow_nonlocal_return: bool) ParseError!AST.StatementList.Ref {
+fn parseStatementList(self: *Parser, allow_nonlocal_return: bool) ParseError!AST.StatementList.Ref {
     // StatementList = Statement ("." Statement)* "."? | empty
 
     var statements = std.ArrayList(AST.ExpressionNode).init(self.allocator);
@@ -157,7 +157,7 @@ fn parseStatementList(self: *Self, allow_nonlocal_return: bool) ParseError!AST.S
 }
 
 const NonlocalReturnState = enum { Disallowed, Allowed, WrappingThisExpr, Parsed };
-fn parseStatement(self: *Self, nonlocal_return_state: *NonlocalReturnState) ParseError!?AST.ExpressionNode {
+fn parseStatement(self: *Parser, nonlocal_return_state: *NonlocalReturnState) ParseError!?AST.ExpressionNode {
     // Statement = "^"? Expression
     var start_of_expression = self.token_starts[self.token_index];
     if (self.consumeToken(.Cap)) |nonlocal_return_token| {
@@ -207,7 +207,7 @@ fn parseStatement(self: *Self, nonlocal_return_state: *NonlocalReturnState) Pars
     return expression;
 }
 
-fn canParseExpression(self: *Self) bool {
+fn canParseExpression(self: *Parser) bool {
     const current_tag = self.token_tags[self.token_index];
     // binary to self
     if (current_tag.isOperator())
@@ -229,7 +229,7 @@ fn canParseExpression(self: *Self) bool {
 }
 
 const MessagePrecedence = enum { Binary, Keyword, Any };
-fn parseExpression(self: *Self, precedence: MessagePrecedence) ParseError!?AST.ExpressionNode {
+fn parseExpression(self: *Parser, precedence: MessagePrecedence) ParseError!?AST.ExpressionNode {
     // Expression = KeywordSend
     //            | BinarySend
     //            | Primary UnarySend* BinarySend? KeywordSend?
@@ -248,7 +248,7 @@ fn parseExpression(self: *Self, precedence: MessagePrecedence) ParseError!?AST.E
     return try self.parseExpressionFromPrimary(primary, precedence, false);
 }
 
-fn emitDiagnosticIfNeeded(self: *Self, require: bool, did_send: bool) ParseError!void {
+fn emitDiagnosticIfNeeded(self: *Parser, require: bool, did_send: bool) ParseError!void {
     if (!did_send and require) {
         try self.diagnostics.reportDiagnosticFormatted(
             .Error,
@@ -261,7 +261,7 @@ fn emitDiagnosticIfNeeded(self: *Self, require: bool, did_send: bool) ParseError
 
 // If require_message is true then the primary must receive at least one message.
 fn parseExpressionFromPrimary(
-    self: *Self,
+    self: *Parser,
     primary: AST.ExpressionNode,
     precedence: MessagePrecedence,
     require_message: bool,
@@ -321,7 +321,7 @@ fn parseExpressionFromPrimary(
     return expr;
 }
 
-fn parseBinaryMessage(self: *Self, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
+fn parseBinaryMessage(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
     // BinarySend = binaryOp+ Expression
     std.debug.assert(self.token_tags[self.token_index].isOperator());
 
@@ -363,7 +363,7 @@ fn parseBinaryMessage(self: *Self, receiver: ?AST.ExpressionNode) ParseError!?AS
     return AST.ExpressionNode{ .Message = message_node };
 }
 
-fn parseKeywordMessage(self: *Self, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
+fn parseKeywordMessage(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
     // KeywordSend = firstKeyword Expression (restKeyword Expression)*
     const first_keyword_token = self.assertToken(.FirstKeyword);
     const start_of_message = self.token_starts[first_keyword_token];
@@ -409,7 +409,7 @@ fn parseKeywordMessage(self: *Self, receiver: ?AST.ExpressionNode) ParseError!?A
     return AST.ExpressionNode{ .Message = message_node };
 }
 
-fn parsePrimary(self: *Self) ParseError!?AST.ExpressionNode {
+fn parsePrimary(self: *Parser) ParseError!?AST.ExpressionNode {
     // Primary = Integer | FloatingPoint | Object | Block | identifier | String
     return switch (self.token_tags[self.token_index]) {
         .Integer => AST.ExpressionNode{ .Number = try self.parseInteger() },
@@ -430,7 +430,7 @@ fn parsePrimary(self: *Self) ParseError!?AST.ExpressionNode {
     };
 }
 
-fn parseSlotsObjectOrSubexpr(self: *Self, must_not_be_method: bool, did_extract_expr: ?*bool, arguments: ?[]const AST.SlotNode) ParseError!?AST.ExpressionNode {
+fn parseSlotsObjectOrSubexpr(self: *Parser, must_not_be_method: bool, did_extract_expr: ?*bool, arguments: ?[]const AST.SlotNode) ParseError!?AST.ExpressionNode {
     var did_use_slots = false;
     var object = (try self.parseObject(&did_use_slots, arguments)) orelse return null;
     errdefer object.destroy(self.allocator);
@@ -500,7 +500,7 @@ fn parseSlotsObjectOrSubexpr(self: *Self, must_not_be_method: bool, did_extract_
     return AST.ExpressionNode{ .Object = object };
 }
 
-fn parseObject(self: *Self, did_use_slots: ?*bool, argument_slots: ?[]const AST.SlotNode) ParseError!?*AST.ObjectNode {
+fn parseObject(self: *Parser, did_use_slots: ?*bool, argument_slots: ?[]const AST.SlotNode) ParseError!?*AST.ObjectNode {
     // Object = "(" SlotList<ObjectSlot>? ")"
     // Method = "(" SlotList<ObjectSlot>? StatementList ")"
     const paren_open_token = self.assertToken(.ParenOpen);
@@ -554,7 +554,7 @@ fn parseObject(self: *Self, did_use_slots: ?*bool, argument_slots: ?[]const AST.
     return object_node;
 }
 
-fn parseBlock(self: *Self) ParseError!?*AST.BlockNode {
+fn parseBlock(self: *Parser) ParseError!?*AST.BlockNode {
     // Block = "[" SlotList<BlockSlot>? StatementList "]"
     const bracket_open_token = self.assertToken(.BracketOpen);
     const start_of_block = self.token_starts[bracket_open_token];
@@ -598,7 +598,7 @@ fn parseBlock(self: *Self) ParseError!?*AST.BlockNode {
 }
 
 const SlotListType = enum { Object, Block };
-fn parseSlotList(self: *Self, comptime slot_list_type: SlotListType, initial_order_offset: usize) ParseError!?[]AST.SlotNode {
+fn parseSlotList(self: *Parser, comptime slot_list_type: SlotListType, initial_order_offset: usize) ParseError!?[]AST.SlotNode {
     // SlotList<SlotType> = "|" "|" | "|" SlotType ("." SlotType)* "."? "|"
     _ = self.assertToken(.Pipe);
 
@@ -644,7 +644,7 @@ fn parseSlotList(self: *Self, comptime slot_list_type: SlotListType, initial_ord
     return try slots.toOwnedSlice();
 }
 
-fn canParseSlot(self: *Self) bool {
+fn canParseSlot(self: *Parser) bool {
     if (self.token_tags[self.token_index].isOperator())
         return true;
     return switch (self.token_tags[self.token_index]) {
@@ -654,7 +654,7 @@ fn canParseSlot(self: *Self) bool {
 }
 
 const MethodMode = enum { Required, Optional, Forbidden };
-fn parseSlot(self: *Self, order: usize, allow_argument: bool) ParseError!?AST.SlotNode {
+fn parseSlot(self: *Parser, order: usize, allow_argument: bool) ParseError!?AST.SlotNode {
     //   CommonSlots = identifier "*"? ("=" | "<-") Expression -- slot
     //               | SlotName "=" Method                     -- method
     //               | identifier                              -- default init to nil
@@ -806,7 +806,7 @@ fn parseSlot(self: *Self, order: usize, allow_argument: bool) ParseError!?AST.Sl
 }
 
 /// Creates an argument slot node from the current identifier.
-fn createSlotNodeFromArgument(self: *Self, order: usize) ParseError!AST.SlotNode {
+fn createSlotNodeFromArgument(self: *Parser, order: usize) ParseError!AST.SlotNode {
     const identifier_token = self.assertToken(.Identifier);
     const identifier_copy = try self.getIdentifierCopy(identifier_token);
     errdefer self.allocator.free(identifier_copy);
@@ -826,7 +826,7 @@ fn createSlotNodeFromArgument(self: *Self, order: usize) ParseError!AST.SlotNode
     return slot_node;
 }
 
-fn parseSlotName(self: *Self, arguments: *std.ArrayList(AST.SlotNode), method_mode: *MethodMode) ParseError!?[]const u8 {
+fn parseSlotName(self: *Parser, arguments: *std.ArrayList(AST.SlotNode), method_mode: *MethodMode) ParseError!?[]const u8 {
     var order: usize = 0;
 
     if (self.consumeToken(.Identifier)) |identifier_token| {
@@ -916,7 +916,7 @@ fn parseSlotName(self: *Self, arguments: *std.ArrayList(AST.SlotNode), method_mo
 }
 
 const StringParseState = enum { Start, Literal, Backslash };
-fn parseString(self: *Self) ParseError!?AST.StringNode {
+fn parseString(self: *Parser) ParseError!?AST.StringNode {
     const string_token = self.assertToken(.String);
     const start_of_string = self.token_starts[string_token];
 
@@ -1012,7 +1012,7 @@ fn parseString(self: *Self) ParseError!?AST.StringNode {
     return null;
 }
 
-fn parseIdentifier(self: *Self) ParseError!AST.IdentifierNode {
+fn parseIdentifier(self: *Parser) ParseError!AST.IdentifierNode {
     const identifier_token = self.assertToken(.Identifier);
     const identifier_copy = try self.getIdentifierCopy(identifier_token);
     errdefer self.allocator.free(identifier_copy);
@@ -1028,7 +1028,7 @@ fn parseIdentifier(self: *Self) ParseError!AST.IdentifierNode {
 }
 
 const IntegerParseState = enum { Start, Zero, Decimal, Hexadecimal, Octal, Binary };
-fn parseInteger(self: *Self) ParseError!AST.NumberNode {
+fn parseInteger(self: *Parser) ParseError!AST.NumberNode {
     const number_token = self.assertToken(.Integer);
     const start_of_number = self.token_starts[number_token];
 
@@ -1177,7 +1177,7 @@ fn parseInteger(self: *Self) ParseError!AST.NumberNode {
 }
 
 const FloatingPointParseState = enum { Integer, Fraction };
-fn parseFloatingPoint(self: *Self) ParseError!AST.NumberNode {
+fn parseFloatingPoint(self: *Parser) ParseError!AST.NumberNode {
     const number_token = self.assertToken(.FloatingPoint);
     const start_of_number = self.token_starts[number_token];
 
@@ -1224,25 +1224,25 @@ fn parseFloatingPoint(self: *Self) ParseError!AST.NumberNode {
     return node;
 }
 
-fn nextToken(self: *Self) usize {
+fn nextToken(self: *Parser) usize {
     const result = self.token_index;
     self.token_index += 1;
     return result;
 }
 
-fn consumeToken(self: *Self, tag: Token.Tag) ?usize {
+fn consumeToken(self: *Parser, tag: Token.Tag) ?usize {
     if (self.token_tags[self.token_index] == tag)
         return self.nextToken();
     return null;
 }
 
-fn assertToken(self: *Self, tag: Token.Tag) usize {
+fn assertToken(self: *Parser, tag: Token.Tag) usize {
     const result = self.consumeToken(tag);
     if (result) |r| return r;
     unreachable;
 }
 
-fn expectToken(self: *Self, tag: Token.Tag) ParseError!bool {
+fn expectToken(self: *Parser, tag: Token.Tag) ParseError!bool {
     const current_tag = self.token_tags[self.token_index];
     const current_start = self.token_starts[self.token_index];
 
@@ -1261,7 +1261,7 @@ fn expectToken(self: *Self, tag: Token.Tag) ParseError!bool {
 }
 
 /// Turn an offset into a line-and-column location.
-pub fn offsetToLocation(self: Self, offset: usize) Location {
+pub fn offsetToLocation(self: Parser, offset: usize) Location {
     var line: usize = 1;
     var line_start: usize = undefined;
     var line_end: usize = undefined;
@@ -1295,7 +1295,7 @@ pub fn offsetToLocation(self: Self, offset: usize) Location {
     };
 }
 
-fn getKeywordSlice(self: Self, index: usize) []const u8 {
+fn getKeywordSlice(self: Parser, index: usize) []const u8 {
     const start = self.token_starts[index];
     const next_start = self.token_starts[index + 1];
     var end = next_start;
@@ -1304,7 +1304,7 @@ fn getKeywordSlice(self: Self, index: usize) []const u8 {
     return self.buffer[start .. end + 1];
 }
 
-fn getIdentifierSlice(self: Self, index: usize) []const u8 {
+fn getIdentifierSlice(self: Parser, index: usize) []const u8 {
     const start = self.token_starts[index];
     const next_start = self.token_starts[index + 1];
     var end = next_start - 1;
@@ -1318,7 +1318,7 @@ fn getIdentifierSlice(self: Self, index: usize) []const u8 {
     return self.buffer[start .. end + 1];
 }
 
-fn getIdentifierCopy(self: Self, index: usize) Allocator.Error![]const u8 {
+fn getIdentifierCopy(self: Parser, index: usize) Allocator.Error![]const u8 {
     const slice = self.getIdentifierSlice(index);
     return try self.allocator.dupe(u8, slice);
 }

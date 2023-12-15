@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -53,11 +53,11 @@ created_from: SourceRange,
 /// counter").
 instruction_index: u32 = 0,
 
-const Self = @This();
+const Activation = @This();
 
 /// Creates a copy of `created_from`.
 pub fn initInPlace(
-    self: *Self,
+    self: *Activation,
     activation_object: ActivationObject.Value,
     target_location: bytecode.RegisterLocation,
     stack_snapshot: Actor.StackSnapshot,
@@ -74,42 +74,42 @@ pub fn initInPlace(
     };
 }
 
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: *Activation) void {
     self.created_from.deinit();
 }
 
-pub fn takeRef(self: *Self, stack: ActivationStack) ActivationRef {
+pub fn takeRef(self: *Activation, stack: ActivationStack) ActivationRef {
     return ActivationRef.init(self, stack);
 }
 
 /// Return the result of the `self` message for the current context.
-pub fn selfObject(self: Self) ActivationObject.Value {
+pub fn selfObject(self: Activation) ActivationObject.Value {
     return self.activation_object;
 }
 
 /// Return the executable that this activation was created from.
-pub fn creationExecutable(self: Self) bytecode.Executable.Ref {
+pub fn creationExecutable(self: Activation) bytecode.Executable.Ref {
     return self.created_from.executable;
 }
 
 /// Return the executable that this activation's method or block is defined in.
-pub fn definitionExecutable(self: Self) bytecode.Executable.Ref {
+pub fn definitionExecutable(self: Activation) bytecode.Executable.Ref {
     return self.activation_object.get().getDefinitionExecutable();
 }
 
-pub fn advanceInstruction(self: *Self) u32 {
+pub fn advanceInstruction(self: *Activation) u32 {
     self.instruction_index += 1;
     return self.instruction_index;
 }
 
 /// Resets the instruction index of this activation, and returns the new value.
-pub fn restart(self: *Self) u32 {
+pub fn restart(self: *Activation) u32 {
     self.instruction_index = 0;
     return 0;
 }
 
 pub fn format(
-    activation: Self,
+    activation: Activation,
     comptime fmt: []const u8,
     options: std.fmt.FormatOptions,
     writer: anytype,
@@ -126,13 +126,13 @@ pub fn format(
 }
 
 pub const ActivationStack = struct {
-    stack: std.ArrayListUnmanaged(Self) = .{},
+    stack: std.ArrayListUnmanaged(Activation) = .{},
 
     pub fn deinit(self: *ActivationStack, allocator: Allocator) void {
         self.stack.deinit(allocator);
     }
 
-    pub fn getStack(self: ActivationStack) []Self {
+    pub fn getStack(self: ActivationStack) []Activation {
         return self.stack.items;
     }
 
@@ -140,14 +140,14 @@ pub const ActivationStack = struct {
         return self.stack.items.len;
     }
 
-    pub fn getCurrent(self: ActivationStack) *Self {
+    pub fn getCurrent(self: ActivationStack) *Activation {
         const depth = self.getDepth();
         std.debug.assert(depth > 0);
         return &self.stack.items[depth - 1];
     }
 
     /// Unwinds the stack until the given activation is reached.
-    pub fn restoreTo(self: *ActivationStack, activation: *Self) void {
+    pub fn restoreTo(self: *ActivationStack, activation: *Activation) void {
         if (std.debug.runtime_safety) {
             std.debug.assert(self.isActivationWithin(activation));
         }
@@ -155,7 +155,7 @@ pub const ActivationStack = struct {
         const current_activation = self.getCurrent();
         std.debug.assert(@intFromPtr(current_activation) >= @intFromPtr(activation));
 
-        const distance = @divExact(@intFromPtr(current_activation) - @intFromPtr(activation), @sizeOf(Self));
+        const distance = @divExact(@intFromPtr(current_activation) - @intFromPtr(activation), @sizeOf(Activation));
         var current_depth = self.getDepth();
         const target_depth = current_depth - distance;
         while (current_depth != target_depth) : (current_depth -= 1) {
@@ -165,14 +165,14 @@ pub const ActivationStack = struct {
         self.stack.shrinkRetainingCapacity(target_depth);
     }
 
-    pub fn getNewActivationSlot(self: *ActivationStack, allocator: Allocator) !*Self {
+    pub fn getNewActivationSlot(self: *ActivationStack, allocator: Allocator) !*Activation {
         try self.stack.ensureUnusedCapacity(allocator, 1);
         self.stack.items.len += 1;
         const activation = &self.stack.items[self.getDepth() - 1];
         return activation;
     }
 
-    pub fn popActivation(self: *ActivationStack) *Self {
+    pub fn popActivation(self: *ActivationStack) *Activation {
         const new_depth = self.getDepth() - 1;
 
         // NOTE: We intentionally return the activation that's out of the
@@ -187,7 +187,7 @@ pub const ActivationStack = struct {
         self.stack.clearRetainingCapacity();
     }
 
-    fn isActivationWithin(self: ActivationStack, activation: *Self) bool {
+    fn isActivationWithin(self: ActivationStack, activation: *Activation) bool {
         const start_of_slice = self.stack.items.ptr;
         const end_of_slice = start_of_slice + self.stack.items.len;
 
@@ -195,11 +195,11 @@ pub const ActivationStack = struct {
             @intFromPtr(activation) < @intFromPtr(end_of_slice);
     }
 
-    pub fn offsetOf(self: ActivationStack, activation: *Self) usize {
+    pub fn offsetOf(self: ActivationStack, activation: *Activation) usize {
         std.debug.assert(self.isActivationWithin(activation));
 
         const start_of_slice = self.stack.items.ptr;
-        return @divExact(@intFromPtr(activation) - @intFromPtr(start_of_slice), @sizeOf(Self));
+        return @divExact(@intFromPtr(activation) - @intFromPtr(start_of_slice), @sizeOf(Activation));
     }
 
     pub fn pushEntrypointActivation(self: *ActivationStack, vm: *VirtualMachine, new_executable: bytecode.Executable.Ref) !void {
@@ -246,14 +246,14 @@ pub const ActivationRef = packed struct {
     offset: IntegerValue(.Unsigned),
     saved_id: IntegerValue(.Unsigned),
 
-    pub fn init(activation: *Self, stack: ActivationStack) ActivationRef {
+    pub fn init(activation: *Activation, stack: ActivationStack) ActivationRef {
         return .{
             .offset = IntegerValue(.Unsigned).init(@intCast(stack.offsetOf(activation))),
             .saved_id = IntegerValue(.Unsigned).init(activation.activation_id),
         };
     }
 
-    fn getPointer(self: ActivationRef, stack: ActivationStack) *Self {
+    fn getPointer(self: ActivationRef, stack: ActivationStack) *Activation {
         return &stack.stack.items[@intCast(self.offset.get())];
     }
 
@@ -272,7 +272,7 @@ pub const ActivationRef = packed struct {
         return true;
     }
 
-    pub fn get(self: ActivationRef, stack: ActivationStack) ?*Self {
+    pub fn get(self: ActivationRef, stack: ActivationStack) ?*Activation {
         return if (self.isAlive(stack)) self.getPointer(stack) else null;
     }
 };

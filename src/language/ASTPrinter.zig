@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -7,7 +7,12 @@ const Allocator = std.mem.Allocator;
 
 const AST = @import("./ast.zig");
 
-const Self = @This();
+indent_width: usize,
+branches: std.ArrayList(Branch),
+current_indent: usize = 0,
+is_stem: bool = false,
+
+const ASTPrinter = @This();
 
 const DARKGRAY = "\x1b[90m";
 const GRAY = "\x1b[37m";
@@ -17,43 +22,38 @@ const MAGENTA = "\x1b[35m";
 const CYAN = "\x1b[36m";
 const CLEAR = "\x1b[0m";
 
-indent_width: usize,
-branches: std.ArrayList(Branch),
-current_indent: usize = 0,
-is_stem: bool = false,
-
 const Branch = struct { indent: usize, concluded: bool };
 
-pub fn init(indent_width: usize, allocator: Allocator) Self {
+pub fn init(indent_width: usize, allocator: Allocator) ASTPrinter {
     return .{
         .indent_width = indent_width,
         .branches = std.ArrayList(Branch).init(allocator),
     };
 }
 
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: *ASTPrinter) void {
     self.branches.deinit();
 }
 
 const StemIsLast = enum { Last, NotLast };
-fn setStem(self: *Self, is_last: StemIsLast) void {
+fn setStem(self: *ASTPrinter, is_last: StemIsLast) void {
     self.is_stem = true;
     if (self.branches.items.len > 0) {
         self.branches.items[self.branches.items.len - 1].concluded = is_last == .Last;
     }
 }
 
-fn indent(self: *Self) void {
+fn indent(self: *ASTPrinter) void {
     self.branches.append(.{ .indent = self.current_indent, .concluded = false }) catch unreachable;
     self.current_indent += self.indent_width;
 }
 
-fn dedent(self: *Self) void {
+fn dedent(self: *ASTPrinter) void {
     _ = self.branches.pop();
     self.current_indent -= self.indent_width;
 }
 
-fn print(self: *Self, comptime fmt: []const u8, args: anytype) void {
+fn print(self: *ASTPrinter, comptime fmt: []const u8, args: anytype) void {
     const writer = std.io.getStdErr().writer();
     writer.writeAll(DARKGRAY) catch return;
 
@@ -83,7 +83,7 @@ fn print(self: *Self, comptime fmt: []const u8, args: anytype) void {
     std.debug.print(fmt, args);
 }
 
-pub fn dumpScript(self: *Self, script: AST.ScriptNode) void {
+pub fn dumpScript(self: *ASTPrinter, script: AST.ScriptNode) void {
     self.print(CYAN ++ "ScriptNode\n" ++ CLEAR, .{});
 
     self.indent();
@@ -94,7 +94,7 @@ pub fn dumpScript(self: *Self, script: AST.ScriptNode) void {
     self.dedent();
 }
 
-pub fn dumpExpression(self: *Self, expression: AST.ExpressionNode) void {
+pub fn dumpExpression(self: *ASTPrinter, expression: AST.ExpressionNode) void {
     self.print(CYAN ++ "ExpressionNode\n" ++ CLEAR, .{});
 
     self.indent();
@@ -112,7 +112,7 @@ pub fn dumpExpression(self: *Self, expression: AST.ExpressionNode) void {
     self.dedent();
 }
 
-pub fn dumpObject(self: *Self, object: AST.ObjectNode) void {
+pub fn dumpObject(self: *ASTPrinter, object: AST.ObjectNode) void {
     self.print(CYAN ++ "ObjectNode\n" ++ CLEAR, .{});
     self.indent();
 
@@ -137,7 +137,7 @@ pub fn dumpObject(self: *Self, object: AST.ObjectNode) void {
     self.dedent();
 }
 
-pub fn dumpSlot(self: *Self, slot: AST.SlotNode) void {
+pub fn dumpSlot(self: *ASTPrinter, slot: AST.SlotNode) void {
     const is_mutable_string: []const u8 = if (slot.is_mutable) GREEN ++ "mutable" ++ CLEAR else GRAY ++ "not mutable" ++ CLEAR;
     const is_parent_string: []const u8 = if (slot.is_parent) GREEN ++ "parent" ++ CLEAR else GRAY ++ "not parent" ++ CLEAR;
     const is_argument_string: []const u8 = if (slot.is_argument) GREEN ++ "argument" ++ CLEAR else GRAY ++ "not argument" ++ CLEAR;
@@ -164,7 +164,7 @@ pub fn dumpSlot(self: *Self, slot: AST.SlotNode) void {
     self.dedent();
 }
 
-pub fn dumpBlock(self: *Self, block: AST.BlockNode) void {
+pub fn dumpBlock(self: *ASTPrinter, block: AST.BlockNode) void {
     self.print(CYAN ++ "BlockNode\n" ++ CLEAR, .{});
     self.indent();
 
@@ -189,11 +189,11 @@ pub fn dumpBlock(self: *Self, block: AST.BlockNode) void {
     self.dedent();
 }
 
-pub fn dumpIdentifier(self: *Self, identifier: AST.IdentifierNode) void {
+pub fn dumpIdentifier(self: *ASTPrinter, identifier: AST.IdentifierNode) void {
     self.print(CYAN ++ "IdentifierNode " ++ GREEN ++ "\"{s}\"\n" ++ CLEAR, .{identifier.value});
 }
 
-pub fn dumpMessage(self: *Self, message: AST.MessageNode) void {
+pub fn dumpMessage(self: *ASTPrinter, message: AST.MessageNode) void {
     const message_type: []const u8 = blk: {
         if (message.arguments.len == 0) {
             break :blk GREEN ++ "unary" ++ CLEAR;
@@ -235,7 +235,7 @@ pub fn dumpMessage(self: *Self, message: AST.MessageNode) void {
     self.dedent();
 }
 
-pub fn dumpReturn(self: *Self, return_node: AST.ReturnNode) void {
+pub fn dumpReturn(self: *ASTPrinter, return_node: AST.ReturnNode) void {
     self.print(CYAN ++ "ReturnNode\n" ++ CLEAR, .{});
     self.indent();
 
@@ -245,7 +245,7 @@ pub fn dumpReturn(self: *Self, return_node: AST.ReturnNode) void {
     self.dedent();
 }
 
-pub fn dumpString(self: *Self, string: AST.StringNode) void {
+pub fn dumpString(self: *ASTPrinter, string: AST.StringNode) void {
     self.print(CYAN ++ "StringNode" ++ CLEAR ++ " (" ++ GREEN ++ "{}" ++ CLEAR ++ " bytes)\n", .{string.value.len});
     self.indent();
 
@@ -259,7 +259,7 @@ pub fn dumpString(self: *Self, string: AST.StringNode) void {
     self.dedent();
 }
 
-pub fn dumpNumber(self: *Self, number: AST.NumberNode) void {
+pub fn dumpNumber(self: *ASTPrinter, number: AST.NumberNode) void {
     self.print(CYAN ++ "NumberNode " ++ CLEAR, .{});
     switch (number.value) {
         .Integer => |integer| std.debug.print("{}\n", .{integer}),

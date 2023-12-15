@@ -1,4 +1,4 @@
-// Copyright (c) 2021, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -7,12 +7,12 @@ const Allocator = std.mem.Allocator;
 
 const ref_counted = @import("../utility/ref_counted.zig");
 const AST = @import("./ast.zig");
-const Parser = @import("./parser.zig");
-const Diagnostics = @import("./diagnostics.zig");
-const Location = @import("./location.zig");
+const Parser = @import("./Parser.zig");
+const Diagnostics = @import("./Diagnostics.zig");
+const Location = @import("./Location.zig");
 
-const Self = @This();
-pub const Ref = ref_counted.RefPtr(Self);
+const Script = @This();
+pub const Ref = ref_counted.RefPtr(Script);
 
 ast_root: ?AST.ScriptNode = null,
 
@@ -25,23 +25,23 @@ running_path: []const u8,
 parser: *Parser,
 
 pub fn createFromFilePath(allocator: Allocator, file_path: []const u8) !Ref {
-    const self = try allocator.create(Self);
+    const self = try allocator.create(Script);
     try self.initFromFilePath(allocator, file_path);
     return Ref.adopt(self);
 }
 
 pub fn createFromString(allocator: Allocator, running_path: []const u8, contents: []const u8) !Ref {
-    const self = try allocator.create(Self);
+    const self = try allocator.create(Script);
     try self.initFromString(allocator, running_path, contents);
     return Ref.adopt(self);
 }
 
-pub fn destroy(self: *Self) void {
+pub fn destroy(self: *Script) void {
     self.deinit();
     self.allocator.destroy(self);
 }
 
-fn initFromFilePath(self: *Self, allocator: Allocator, file_path: []const u8) !void {
+fn initFromFilePath(self: *Script, allocator: Allocator, file_path: []const u8) !void {
     const file_path_copy = try allocator.dupe(u8, file_path);
     errdefer allocator.free(file_path_copy);
 
@@ -53,7 +53,7 @@ fn initFromFilePath(self: *Self, allocator: Allocator, file_path: []const u8) !v
     try self.initCommon(allocator);
 }
 
-fn initFromString(self: *Self, allocator: Allocator, running_path: []const u8, contents: []const u8) !void {
+fn initFromString(self: *Script, allocator: Allocator, running_path: []const u8, contents: []const u8) !void {
     const file_path_copy = try allocator.dupe(u8, "<a string>");
     errdefer allocator.free(file_path_copy);
 
@@ -64,12 +64,12 @@ fn initFromString(self: *Self, allocator: Allocator, running_path: []const u8, c
     try self.initCommon(allocator);
 }
 
-fn initCommon(self: *Self, allocator: Allocator) !void {
+fn initCommon(self: *Script, allocator: Allocator) !void {
     self.ref = .{};
     self.allocator = allocator;
 }
 
-fn deinit(self: *Self) void {
+fn deinit(self: *Script) void {
     self.allocator.free(self.file_path);
     self.parser.destroy();
     if (self.ast_root) |*ast_root| {
@@ -79,7 +79,7 @@ fn deinit(self: *Self) void {
 
 /// Parse the script and expose it in `self.ast_root`. Return whether the script
 /// was parsed without any error diagnostics being generated.
-pub fn parseScript(self: *Self) !bool {
+pub fn parseScript(self: *Script) !bool {
     self.ast_root = try self.parser.parseScript();
 
     for (self.diagnostics().diagnostics.items) |diagnostic| {
@@ -91,11 +91,11 @@ pub fn parseScript(self: *Self) !bool {
     return true;
 }
 
-pub fn diagnostics(self: Self) Diagnostics {
+pub fn diagnostics(self: Script) Diagnostics {
     return self.parser.diagnostics;
 }
 
-pub fn reportDiagnostics(self: Self, writer: anytype) !void {
+pub fn reportDiagnostics(self: Script, writer: anytype) !void {
     for (self.diagnostics().diagnostics.items) |diagnostic| {
         const line = self.parser.buffer[diagnostic.location.line_start..diagnostic.location.line_end];
 
@@ -106,10 +106,10 @@ pub fn reportDiagnostics(self: Self, writer: anytype) !void {
     }
 }
 
-pub fn offsetToLocation(self: Self, offset: usize) Location {
+pub fn offsetToLocation(self: Script, offset: usize) Location {
     return self.parser.offsetToLocation(offset);
 }
 
-pub fn getSourceLine(self: Self, location: Location) []const u8 {
+pub fn getSourceLine(self: Script, location: Location) []const u8 {
     return self.parser.buffer[location.line_start..location.line_end];
 }
