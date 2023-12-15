@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
+const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
 const context = @import("../context.zig");
@@ -29,7 +30,7 @@ pub const Array = extern struct {
     /// the filler value. If filler value is null, expects values to be at least
     /// as long as the size described in the map. If values is longer than the
     /// size N specified in the map, copies the first N items.
-    pub fn createWithValues(token: *Heap.AllocationToken, actor_id: u31, map: ArrayMap.Ptr, values: []GenericValue, filler: ?GenericValue) Array.Ptr {
+    pub fn createWithValues(token: *Heap.AllocationToken, actor_id: Actor.ActorID, map: ArrayMap.Ptr, values: []GenericValue, filler: ?GenericValue) Array.Ptr {
         if (filler == null and values.len < map.getSize()) {
             std.debug.panic(
                 "!!! Array.createWithValues given values slice that's too short, and no filler was given!",
@@ -46,7 +47,7 @@ pub const Array = extern struct {
         return self;
     }
 
-    fn init(self: Array.Ptr, actor_id: u31, map: ArrayMap.Ptr, values: []GenericValue, filler: ?GenericValue) void {
+    fn init(self: Array.Ptr, actor_id: Actor.ActorID, map: ArrayMap.Ptr, values: []GenericValue, filler: ?GenericValue) void {
         self.object = .{
             .object_information = .{
                 .object_type = .Array,
@@ -109,7 +110,7 @@ pub const Array = extern struct {
         return @alignCast(std.mem.bytesAsSlice(GenericValue, start_of_items[0 .. self.getSize() * @sizeOf(GenericValue)]));
     }
 
-    pub fn clone(self: Array.Ptr, token: *Heap.AllocationToken, actor_id: u31) Array.Ptr {
+    pub fn clone(self: Array.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) Array.Ptr {
         return createWithValues(token, actor_id, self.getMap(), self.getValues(), null);
     }
 

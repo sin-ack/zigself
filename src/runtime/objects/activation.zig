@@ -8,8 +8,10 @@ const Allocator = std.mem.Allocator;
 const Map = map_import.Map;
 const Slot = @import("../slot.zig").Slot;
 const Heap = @import("../Heap.zig");
+const Actor = @import("../Actor.zig");
 const slots = @import("slots.zig");
 const MapType = map_import.MapType;
+const pointer = @import("../../utility/pointer.zig");
 const bytecode = @import("../bytecode.zig");
 const BlockMap = @import("block.zig").BlockMap;
 const MethodMap = @import("method.zig").MethodMap;
@@ -18,7 +20,6 @@ const SlotsObject = slots.Slots;
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
 const object_lookup = @import("../object_lookup.zig");
-const pointer = @import("../../utility/pointer.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const exceedsBoundsOf = @import("../../utility/bounds_check.zig").exceedsBoundsOf;
 const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;
@@ -38,7 +39,7 @@ pub const Activation = extern struct {
     /// Borrows a ref from `message_script`.
     pub fn create(
         token: *Heap.AllocationToken,
-        actor_id: u31,
+        actor_id: Actor.ActorID,
         comptime map_type: MapType,
         map: Map.Ptr,
         arguments: []const GenericValue,
@@ -94,7 +95,7 @@ pub const Activation = extern struct {
     fn init(
         self: Activation.Ptr,
         comptime map_type: MapType,
-        actor_id: u31,
+        actor_id: Actor.ActorID,
         map: Map.Ptr,
         receiver: GenericValue,
     ) void {

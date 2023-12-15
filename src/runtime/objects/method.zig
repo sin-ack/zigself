@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
 const Slot = @import("../slot.zig").Slot;
+const Actor = @import("../Actor.zig");
 const slots = @import("slots.zig");
 const context = @import("../context.zig");
 const bytecode = @import("../bytecode.zig");
@@ -38,7 +39,7 @@ pub const Method = extern struct {
     pub usingnamespace SlotsLikeObjectBase(Method);
     pub usingnamespace AssignableSlotsMixin(Method);
 
-    pub fn create(token: *Heap.AllocationToken, actor_id: u31, map: MethodMap.Ptr, assignable_slot_values: []const GenericValue) Method.Ptr {
+    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, map: MethodMap.Ptr, assignable_slot_values: []const GenericValue) Method.Ptr {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -56,7 +57,7 @@ pub const Method = extern struct {
         return self;
     }
 
-    fn init(self: Method.Ptr, actor_id: u31, map: MethodMap.Ptr) void {
+    fn init(self: Method.Ptr, actor_id: Actor.ActorID, map: MethodMap.Ptr) void {
         self.slots.object = .{
             .object_information = .{
                 .object_type = .Method,
@@ -136,7 +137,7 @@ pub const Method = extern struct {
     pub fn activateMethod(
         self: Method.Ptr,
         token: *Heap.AllocationToken,
-        actor_id: u31,
+        actor_id: Actor.ActorID,
         receiver: GenericValue,
         arguments: []const GenericValue,
         target_location: bytecode.RegisterLocation,

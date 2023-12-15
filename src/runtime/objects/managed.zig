@@ -7,11 +7,12 @@ const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
+const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
+const pointer = @import("../../utility/pointer.zig");
 const value_import = @import("../value.zig");
 const GenericValue = value_import.Value;
-const pointer = @import("../../utility/pointer.zig");
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 
@@ -76,7 +77,7 @@ pub const Managed = extern struct {
         FileDescriptor = 0b0,
     };
 
-    pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, actor_id: u31, managed_type: ManagedType, value: GenericValue) !Managed.Ptr {
+    pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID, managed_type: ManagedType, value: GenericValue) !Managed.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
         const self: Managed.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map_map, managed_type, value);
@@ -85,7 +86,7 @@ pub const Managed = extern struct {
         return self;
     }
 
-    fn init(self: Managed.Ptr, actor_id: u31, map: Map.Ptr, managed_type: ManagedType, value: GenericValue) void {
+    fn init(self: Managed.Ptr, actor_id: Actor.ActorID, map: Map.Ptr, managed_type: ManagedType, value: GenericValue) void {
         self.object = .{
             .object_information = .{
                 .object_type = .Managed,

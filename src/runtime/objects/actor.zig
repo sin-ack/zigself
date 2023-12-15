@@ -33,7 +33,7 @@ pub const Actor = extern struct {
     pub const Type = .Actor;
     pub const Value = value_import.ObjectValue(Actor);
 
-    pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, genesis_actor_id: u31, actor: *VMActor, context: GenericValue) !Actor.Ptr {
+    pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, genesis_actor_id: VMActor.ActorID, actor: *VMActor, context: GenericValue) !Actor.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
         const self: Actor.Ptr = @ptrCast(memory_area);
         self.init(genesis_actor_id, map_map, actor, context);
@@ -42,7 +42,7 @@ pub const Actor = extern struct {
         return self;
     }
 
-    fn init(self: Actor.Ptr, genesis_actor_id: u31, actor_map: Map.Ptr, actor: *VMActor, context: GenericValue) void {
+    fn init(self: Actor.Ptr, genesis_actor_id: VMActor.ActorID, actor_map: Map.Ptr, actor: *VMActor, context: GenericValue) void {
         self.object = .{
             .object_information = .{
                 .object_type = Type,

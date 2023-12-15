@@ -7,13 +7,14 @@ const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
+const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
-const Actor = @import("actor.zig").Actor;
 const Object = @import("../object.zig").Object;
 const context = @import("../context.zig");
+const pointer = @import("../../utility/pointer.zig");
+const ActorObject = @import("actor.zig").Actor;
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
-const pointer = @import("../../utility/pointer.zig");
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 
@@ -23,21 +24,21 @@ const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 pub const ActorProxy = extern struct {
     object: Object align(@alignOf(u64)),
     /// The Actor object to proxy messages to.
-    actor_object: Actor.Value align(@alignOf(u64)),
+    actor_object: ActorObject.Value align(@alignOf(u64)),
 
     pub const Ptr = pointer.HeapPtr(ActorProxy, .Mutable);
     pub const Type = .ActorProxy;
     pub const Value = value_import.ObjectValue(ActorProxy);
 
     /// Create the Actor object without sending a message to it.
-    pub fn create(token: *Heap.AllocationToken, current_actor_id: u31, actor_object: Actor.Ptr) ActorProxy.Ptr {
+    pub fn create(token: *Heap.AllocationToken, current_actor_id: Actor.ActorID, actor_object: ActorObject.Ptr) ActorProxy.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
         const self: ActorProxy.Ptr = @ptrCast(memory_area);
         self.init(current_actor_id, actor_object);
         return self;
     }
 
-    fn init(self: ActorProxy.Ptr, current_actor_id: u31, actor_object: Actor.Ptr) void {
+    fn init(self: ActorProxy.Ptr, current_actor_id: Actor.ActorID, actor_object: ActorObject.Ptr) void {
         self.object = .{
             .object_information = .{
                 .object_type = .ActorProxy,
@@ -45,7 +46,7 @@ pub const ActorProxy = extern struct {
             },
             .map = context.getVM().getMapMap().asValue(),
         };
-        self.actor_object = Actor.Value.init(actor_object);
+        self.actor_object = ActorObject.Value.init(actor_object);
     }
 
     pub fn asObjectAddress(self: ActorProxy.Ptr) [*]u64 {
@@ -56,11 +57,11 @@ pub const ActorProxy = extern struct {
         return GenericValue.fromObjectAddress(self.asObjectAddress());
     }
 
-    pub fn getActor(self: ActorProxy.Ptr) *Actor {
+    pub fn getActor(self: ActorProxy.Ptr) *ActorObject {
         return self.actor_object.get();
     }
 
-    pub fn clone(self: ActorProxy.Ptr, token: *Heap.AllocationToken, actor_id: u31) ActorProxy.Ptr {
+    pub fn clone(self: ActorProxy.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) ActorProxy.Ptr {
         return create(token, actor_id, self.getActor());
     }
 

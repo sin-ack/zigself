@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 
 const hash = @import("../utility/hash.zig");
 const Heap = @import("./Heap.zig");
+const Actor = @import("./Actor.zig");
 const debug = @import("../debug.zig");
 const Object = @import("object.zig").Object;
 const RefPtr = @import("../utility/ref_counted.zig").RefPtr;
@@ -159,7 +160,7 @@ pub const Value = packed struct {
     }
 
     /// Clones this value and returns a copy of it.
-    pub fn clone(self: Value, token: *Heap.AllocationToken, actor_id: u31) Value {
+    pub fn clone(self: Value, token: *Heap.AllocationToken, actor_id: Actor.ActorID) Value {
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
             .Integer, .FloatingPoint => Value{ .data = self.data },

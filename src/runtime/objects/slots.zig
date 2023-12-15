@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
 const Slot = @import("../slot.zig").Slot;
+const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig").Object;
@@ -96,7 +97,7 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
         }
 
         /// Return a shallow copy of this object.
-        pub fn clone(self: ObjectT.Ptr, token: *Heap.AllocationToken, actor_id: u31) ObjectT.Ptr {
+        pub fn clone(self: ObjectT.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) ObjectT.Ptr {
             return ObjectT.create(token, actor_id, self.getMap(), getAssignableSlots(self));
         }
     };
@@ -180,7 +181,7 @@ pub const Slots = extern struct {
     pub usingnamespace SlotsLikeObjectBase(Slots);
     pub usingnamespace AssignableSlotsMixin(Slots);
 
-    pub fn create(token: *Heap.AllocationToken, actor_id: u31, map: SlotsMap.Ptr, assignable_slot_values: []const Value) Slots.Ptr {
+    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, map: SlotsMap.Ptr, assignable_slot_values: []const Value) Slots.Ptr {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -198,7 +199,7 @@ pub const Slots = extern struct {
         return self;
     }
 
-    fn init(self: Slots.Ptr, actor_id: Object.ActorID, map: SlotsMap.Ptr) void {
+    fn init(self: Slots.Ptr, actor_id: Actor.ActorID, map: SlotsMap.Ptr) void {
         self.object = .{
             .object_information = .{ .object_type = .Slots, .actor_id = actor_id },
             .map = map.asValue(),

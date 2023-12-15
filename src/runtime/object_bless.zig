@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("Heap.zig");
+const Actor = @import("Actor.zig");
 const Value = @import("value.zig").Value;
 const Object = @import("object.zig").Object;
 const context = @import("context.zig");
@@ -44,7 +45,7 @@ const CopiedObjectsMap = std.AutoHashMap([*]u64, [*]u64);
 const ObjectGraphCopier = struct {
     copied_objects_map: *CopiedObjectsMap,
     token: *Heap.AllocationToken,
-    actor_id: u31,
+    actor_id: Actor.ActorID,
 
     pub fn visit(self: @This(), old_object: Object.Ptr) Allocator.Error!Object.Ptr {
         const gop = try self.copied_objects_map.getOrPut(old_object.getAddress());
@@ -58,7 +59,7 @@ const ObjectGraphCopier = struct {
     }
 };
 
-fn copyObjectGraphForNewActor(allocator: Allocator, token: *Heap.AllocationToken, target_actor_id: u31, value: Value) Allocator.Error!Value {
+fn copyObjectGraphForNewActor(allocator: Allocator, token: *Heap.AllocationToken, target_actor_id: Actor.ActorID, value: Value) Allocator.Error!Value {
     var copied_objects_map = CopiedObjectsMap.init(allocator);
     defer copied_objects_map.deinit();
 
@@ -68,7 +69,7 @@ fn copyObjectGraphForNewActor(allocator: Allocator, token: *Heap.AllocationToken
     ) catch |err| return @as(Allocator.Error, @errorCast(err));
 }
 
-pub fn bless(target_actor_id: u31, const_value: Value) !Value {
+pub fn bless(target_actor_id: Actor.ActorID, const_value: Value) !Value {
     if (!const_value.isObjectReference())
         return const_value;
 

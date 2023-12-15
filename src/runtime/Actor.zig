@@ -68,7 +68,7 @@ range: Range = .{ .start = 0, .end = 0 },
 
 /// The ID of this actor, which determines the ownership of each object in the
 /// system.
-id: u31,
+id: ActorID,
 
 const Actor = @This();
 const Mailbox = std.TailQueue(Message);
@@ -157,13 +157,20 @@ pub const Message = struct {
     }
 };
 
+/// The ID of this actor within the current VM. The global actor is always present and 0,
+/// and all other actors are assigned an ID when they are created.
+pub const ActorID = enum(u31) {
+    Global = 0,
+    _,
+};
+
 pub fn create(vm: *VirtualMachine, token: *Heap.AllocationToken, actor_context: Value) !*Actor {
     const self = try vm.allocator.create(Actor);
     errdefer vm.allocator.destroy(self);
 
     // NOTE: If we're not in actor mode, then we belong to the global actor (which is this actor for the
     //       first call to create); otherwise, we are always owned by the genesis actor.
-    const owning_actor_id = if (vm.isInActorMode()) vm.genesis_actor.?.id else 0;
+    const owning_actor_id = if (vm.isInActorMode()) vm.genesis_actor.?.id else .Global;
 
     const actor_object = try ActorObject.create(vm.getMapMap(), token, owning_actor_id, self, actor_context);
 
@@ -484,8 +491,7 @@ pub fn canWriteTo(self: *Actor, value: Value) bool {
         .Integer, .FloatingPoint => true,
         .ObjectReference => writable: {
             const object = value.asObject();
-            // FIXME: Don't hardcode global actor ID
-            break :writable self.id == 0 or object.object_information.reachability != .Global;
+            break :writable self.id == .Global or object.object_information.reachability != .Global;
         },
     };
 }
@@ -513,8 +519,8 @@ pub fn ensureCanRead(self: *Actor, value: Value, source_range: SourceRange) void
 // FIXME: This isn't thread safe!
 var next_actor_id: u31 = 0;
 
-pub fn newActorID() u31 {
+pub fn newActorID() ActorID {
     const this_id = next_actor_id;
     next_actor_id += 1;
-    return this_id;
+    return @enumFromInt(this_id);
 }

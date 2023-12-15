@@ -154,9 +154,7 @@ fn makeEmptyGloballyReachableObject(token: *Heap.AllocationToken, map: SlotsMap.
     // NOTE: These objects will always belong to the global actor, so we hardcode the actor ID 0 to them.
     //       Otherwise we would hit a chicken-and-egg situation where the global actor needs the lobby
     //       and the lobby needs the global actor.
-    const GlobalActorID = 0;
-
-    const slots = SlotsObject.create(token, GlobalActorID, map, &.{});
+    const slots = SlotsObject.create(token, .Global, map, &.{});
     slots.object.object_information.reachability = .Global;
     return try token.heap.track(slots.asValue());
 }

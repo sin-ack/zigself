@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
+const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
 const context = @import("../context.zig");
@@ -28,20 +29,20 @@ pub const ByteArray = extern struct {
     pub const Value = value_import.ObjectValue(ByteArray);
 
     /// Create an initialized byte array object from the given values.
-    pub fn createWithValues(token: *Heap.AllocationToken, actor_id: u31, values: []const u8) ByteArray.Ptr {
+    pub fn createWithValues(token: *Heap.AllocationToken, actor_id: Actor.ActorID, values: []const u8) ByteArray.Ptr {
         const self = createUninitialized(token, actor_id, values.len);
         @memcpy(self.getValues(), values);
         return self;
     }
 
     /// Create an uninitialized byte array object with the given size.
-    pub fn createUninitialized(token: *Heap.AllocationToken, actor_id: u31, size: usize) ByteArray.Ptr {
+    pub fn createUninitialized(token: *Heap.AllocationToken, actor_id: Actor.ActorID, size: usize) ByteArray.Ptr {
         const byte_array = VMByteArray.createUninitialized(token, size);
         return create(token, actor_id, byte_array);
     }
 
     /// Create a byte array object with an existing byte array.
-    pub fn create(token: *Heap.AllocationToken, actor_id: u31, byte_array: VMByteArray) ByteArray.Ptr {
+    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, byte_array: VMByteArray) ByteArray.Ptr {
         const size = requiredSizeForSelfAllocation();
         const memory_area = token.allocate(.Object, size);
         var self: ByteArray.Ptr = @ptrCast(memory_area);
@@ -50,7 +51,7 @@ pub const ByteArray = extern struct {
         return self;
     }
 
-    fn init(self: ByteArray.Ptr, actor_id: u31, byte_array: VMByteArray) void {
+    fn init(self: ByteArray.Ptr, actor_id: Actor.ActorID, byte_array: VMByteArray) void {
         self.object = .{
             .object_information = .{
                 .object_type = .ByteArray,
@@ -81,7 +82,7 @@ pub const ByteArray = extern struct {
         return self.byte_array.asByteArray();
     }
 
-    pub fn clone(self: ByteArray.Ptr, token: *Heap.AllocationToken, actor_id: u31) ByteArray.Ptr {
+    pub fn clone(self: ByteArray.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) ByteArray.Ptr {
         return createWithValues(token, actor_id, self.getValues());
     }
 

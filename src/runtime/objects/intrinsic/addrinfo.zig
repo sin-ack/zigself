@@ -6,6 +6,7 @@ const std = @import("std");
 
 const Map = @import("../map.zig").Map;
 const Heap = @import("../../Heap.zig");
+const Actor = @import("../../Actor.zig");
 const Value = @import("../../value.zig").Value;
 const IntrinsicMap = @import("../../intrinsic_map.zig").IntrinsicMap;
 const VirtualMachine = @import("../../VirtualMachine.zig");
@@ -24,7 +25,7 @@ pub const AddrInfoMap = extern struct {
 
     pub usingnamespace IntrinsicMap(AddrInfoMap, .AddrInfo);
 
-    pub fn createFromAddrinfo(token: *Heap.AllocationToken, actor_id: u31, addrinfo: *std.os.addrinfo) AddrInfoMap.Ptr {
+    pub fn createFromAddrinfo(token: *Heap.AllocationToken, actor_id: Actor.ActorID, addrinfo: *std.os.addrinfo) AddrInfoMap.Ptr {
         const sockaddr_memory: [*]u8 = @ptrCast(addrinfo.addr.?);
         const sockaddr_bytes_object = ByteArrayObject.createWithValues(token, actor_id, sockaddr_memory[0..addrinfo.addrlen]);
 

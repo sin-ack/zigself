@@ -5,15 +5,16 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("Heap.zig");
-const pointer = @import("../utility/pointer.zig");
-const VirtualMachine = @import("VirtualMachine.zig");
-const object_lookup = @import("object_lookup.zig");
-const Object = @import("object.zig").Object;
-const value = @import("value.zig");
 const Map = @import("objects/map.zig").Map;
+const Heap = @import("Heap.zig");
 const hash = @import("../utility/hash.zig");
+const Actor = @import("Actor.zig");
+const value = @import("value.zig");
+const Object = @import("object.zig").Object;
+const pointer = @import("../utility/pointer.zig");
 const ObjectType = @import("object.zig").ObjectType;
+const object_lookup = @import("object_lookup.zig");
+const VirtualMachine = @import("VirtualMachine.zig");
 
 /// A shaped object makes it easy to define an object with well-known slots for
 /// use in primitives. The values can currently only be constants. This function
@@ -103,7 +104,7 @@ pub fn IntrinsicMap(comptime MapT: type, comptime object_type: ObjectType) type 
             return @sizeOf(MapT);
         }
 
-        pub fn createObject(self: Ptr, token: *Heap.AllocationToken, actor_id: u31) @This().ObjectType.Ptr {
+        pub fn createObject(self: Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) @This().ObjectType.Ptr {
             return @This().ObjectType.create(token, self, actor_id);
         }
     };
@@ -128,7 +129,7 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
         pub const Type = object_type;
         pub const Value = value.ObjectValue(Self);
 
-        pub fn create(token: *Heap.AllocationToken, map: MapT.Ptr, actor_id: u31) Ptr {
+        pub fn create(token: *Heap.AllocationToken, map: MapT.Ptr, actor_id: Actor.ActorID) Ptr {
             const memory = token.allocate(.Object, requiredSizeForAllocation());
             const self: Ptr = @ptrCast(memory);
 
@@ -136,7 +137,7 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
             return self;
         }
 
-        fn init(self: Ptr, map: MapT.Ptr, actor_id: u31) void {
+        fn init(self: Ptr, map: MapT.Ptr, actor_id: Actor.ActorID) void {
             self.object = .{
                 .object_information = .{
                     .object_type = object_type,

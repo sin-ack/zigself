@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("../Heap.zig");
+const Actor = @import("../Actor.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig").Object;
 const context = @import("../context.zig");
@@ -68,7 +69,7 @@ pub const Map = extern struct {
                 .object_type = .Map,
                 // NOTE: Maps are immutable, so it's fine to consider all of
                 //       them as being owned by the global actor.
-                .actor_id = 0,
+                .actor_id = .Global,
             },
             .map = map_map.asValue(),
         };
@@ -140,7 +141,7 @@ pub const Map = extern struct {
         return self.delegate(usize, "getSizeForCloning", .{});
     }
 
-    pub fn clone(self: Map.Ptr, token: *Heap.AllocationToken, actor_id: u31) Allocator.Error!Map.Ptr {
+    pub fn clone(self: Map.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) Allocator.Error!Map.Ptr {
         _ = actor_id;
 
         // NOTE: Inlining the delegation here because we need to cast the result into the generic object type.

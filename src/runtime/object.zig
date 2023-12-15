@@ -6,9 +6,10 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("Heap.zig");
+const Actor = @import("Actor.zig");
 const Value = value_import.Value;
-const value_import = @import("value.zig");
 const pointer = @import("../utility/pointer.zig");
+const value_import = @import("value.zig");
 const object_lookup = @import("object_lookup.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
 
@@ -90,8 +91,6 @@ pub const Object = extern struct {
     pub const Ptr = pointer.HeapPtr(Object, .Mutable);
 
     const ObjectMarker = u2;
-    // FIXME: Define this in a more actor-central place.
-    pub const ActorID = u31;
     pub const Reachability = enum(u1) { Local, Global };
     pub const ObjectInformation = packed struct(u64) {
         object_marker: ObjectMarker = @intFromEnum(Value.ValueType.ObjectMarker),
@@ -102,7 +101,7 @@ pub const Object = extern struct {
         //        partitioning schema in order to this becoming a spaghettified
         //        mess of "who owns what".
         extra: u8 = 0,
-        actor_id: ActorID,
+        actor_id: Actor.ActorID,
         reachability: Reachability = .Local,
     };
 
@@ -191,7 +190,7 @@ pub const Object = extern struct {
     }
 
     /// Create a new shallow copy of this object. The map is not affected.
-    pub fn clone(self: Ptr, token: *Heap.AllocationToken, actor_id: u31) Allocator.Error!Ptr {
+    pub fn clone(self: Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) Allocator.Error!Ptr {
         // NOTE: Inlining the delegation here because we need to cast the result into the generic object type.
         return switch (self.object_information.object_type) {
             .ForwardedObject => unreachable,

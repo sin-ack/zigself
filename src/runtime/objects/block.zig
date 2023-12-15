@@ -8,9 +8,11 @@ const Allocator = std.mem.Allocator;
 const Map = @import("map.zig").Map;
 const Slot = @import("../slot.zig").Slot;
 const Heap = @import("../Heap.zig");
+const Actor = @import("../Actor.zig");
+const Value = value_import.Value;
 const debug = @import("../../debug.zig");
 const slots = @import("slots.zig");
-const Value = value_import.Value;
+const pointer = @import("../../utility/pointer.zig");
 const context = @import("../context.zig");
 const bytecode = @import("../bytecode.zig");
 const Activation = @import("../Activation.zig");
@@ -18,7 +20,6 @@ const SlotsObject = slots.Slots;
 const SourceRange = @import("../SourceRange.zig");
 const value_import = @import("../value.zig");
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
-const pointer = @import("../../utility/pointer.zig");
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationObject = @import("activation.zig").Activation;
@@ -39,7 +40,7 @@ pub const Block = extern struct {
     pub usingnamespace SlotsLikeObjectBase(Block);
     pub usingnamespace AssignableSlotsMixin(Block);
 
-    pub fn create(token: *Heap.AllocationToken, actor_id: u31, map: BlockMap.Ptr, assignable_slot_values: []const Value) Block.Ptr {
+    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, map: BlockMap.Ptr, assignable_slot_values: []const Value) Block.Ptr {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -57,7 +58,7 @@ pub const Block = extern struct {
         return self;
     }
 
-    fn init(self: Block.Ptr, actor_id: u31, map: BlockMap.Ptr) void {
+    fn init(self: Block.Ptr, actor_id: Actor.ActorID, map: BlockMap.Ptr) void {
         self.slots.object = .{
             .object_information = .{
                 .object_type = .Block,
