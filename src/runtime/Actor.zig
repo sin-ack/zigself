@@ -1,4 +1,4 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -11,6 +11,7 @@ const debug = @import("../debug.zig");
 const Value = value_import.Value;
 const Stack = @import("./stack.zig").Stack;
 const Range = @import("../language/Range.zig");
+const context = @import("context.zig");
 const bytecode = @import("./bytecode.zig");
 const Activation = @import("./Activation.zig");
 const ActorObject = @import("objects/actor.zig").Actor;
@@ -212,16 +213,28 @@ pub fn activateMethodWithContext(
     self: *Self,
     vm: *VirtualMachine,
     token: *Heap.AllocationToken,
-    context: Value,
+    actor_context: Value,
     method: MethodObject.Ptr,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
     const activation_slot = try self.activation_stack.getNewActivationSlot(vm.allocator);
-    method.activateMethod(vm, token, self.id, context, &.{}, target_location, source_range, activation_slot);
+    method.activateMethod(vm, token, self.id, actor_context, &.{}, target_location, source_range, activation_slot);
+}
+
+pub fn pushContext(self: *Self) void {
+    context.pushActor(self);
+}
+
+pub fn popContext(self: *Self) void {
+    const popped_actor = context.popActor();
+    std.debug.assert(popped_actor == self);
 }
 
 pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
+    self.pushContext();
+    defer self.popContext();
+
     const current_activation_ref = self.activation_stack.getCurrent().takeRef(self.activation_stack);
 
     // Go through the mailbox and activate all the messages that have been sent
@@ -267,8 +280,8 @@ pub fn execute(self: *Self, vm: *VirtualMachine) !ActorResult {
 /// Execute the activation stack of this actor until the given activation (or if
 /// `until` is null, until all activations have been resolved).
 pub fn executeUntil(self: *Self, vm: *VirtualMachine, until: ?Activation.ActivationRef) !ActorResult {
-    var context = interpreter.InterpreterContext.init(vm, self, until);
-    return try interpreter.execute(&context);
+    var interpreter_context = interpreter.InterpreterContext.init(vm, self, until);
+    return try interpreter.execute(&interpreter_context);
 }
 
 pub const ActivationExitState = enum { LastActivation, NotLastActivation };

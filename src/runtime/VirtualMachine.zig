@@ -1,4 +1,4 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2023, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -13,6 +13,7 @@ const Value = @import("./value.zig").Value;
 const Range = @import("../language/Range.zig");
 const Script = @import("../language/script.zig");
 const AstGen = @import("./bytecode/AstGen.zig");
+const context = @import("context.zig");
 const CodeGen = @import("./bytecode/CodeGen.zig");
 const SlotsMap = slots_object.SlotsMap;
 const ByteArray = @import("./ByteArray.zig");
@@ -204,6 +205,15 @@ pub fn lobby(self: Self) Value {
     return self.lobby_object.getValue();
 }
 
+pub fn pushContext(self: *Self) void {
+    context.pushVM(self);
+}
+
+pub fn popContext(self: *Self) void {
+    const popped_vm = context.popVM();
+    std.debug.assert(popped_vm == self);
+}
+
 const BlockMessageNameContext = struct {
     exists: bool,
     value_ptr: *Heap.Tracked,
@@ -260,6 +270,9 @@ fn blockMessageNameLength(argument_count: u8) usize {
 }
 
 pub fn executeEntrypointScript(self: *Self, script: Script.Ref) !?Value {
+    self.pushContext();
+    defer self.popContext();
+
     var entrypoint_ast_executable = try AstGen.generateExecutableFromScript(self.allocator, script);
     defer entrypoint_ast_executable.unref();
 
