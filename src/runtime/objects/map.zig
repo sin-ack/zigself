@@ -43,7 +43,7 @@ pub fn MapT(comptime map_type: MapType) type {
             return field.type;
     }
 
-    unreachable;
+    @compileError("Unknown map type " ++ @tagName(map_type));
 }
 
 pub const Map = extern struct {

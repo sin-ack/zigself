@@ -61,7 +61,7 @@ pub fn ObjectT(comptime object_type: ObjectType) type {
             return field.type;
     }
 
-    unreachable;
+    @compileError("Unknown object type " ++ @tagName(object_type));
 }
 
 // Ensure that all objects contain the Object type as their first word, either directly

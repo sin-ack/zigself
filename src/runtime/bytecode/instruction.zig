@@ -119,7 +119,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
                         return field.type;
                 }
 
-                unreachable;
+                @compileError("Unknown opcode " ++ @tagName(opcode));
             }
         };
 
