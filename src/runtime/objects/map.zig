@@ -15,7 +15,7 @@ const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 
 // TODO: Unify MapType and MapRegistry once Zig stops raising false dependency loops.
-pub const MapType = enum(u30) {
+pub const MapType = enum(u6) {
     MapMap,
     Slots,
     Method,
@@ -56,7 +56,7 @@ pub const Map = extern struct {
         map_type: MapType,
         /// Data placed here won't be touched by the base map object, and can be
         /// used by more specialized maps.
-        extra: u32 = 0,
+        extra: u56 = 0,
     };
 
     pub fn init(self: Map.Ptr, map_type: MapType) void {

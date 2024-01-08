@@ -15,7 +15,7 @@ const VirtualMachine = @import("VirtualMachine.zig");
 const scoped_bits = @import("../utility/scoped_bits.zig");
 
 // TODO: Unify ObjectType and ObjectRegistry once Zig stops treating it as a dependency loop.
-pub const ObjectType = enum(u14) {
+pub const ObjectType = enum(u6) {
     Slots,
     Method,
     Block,
@@ -98,14 +98,14 @@ pub const Object = extern struct {
         object_type: ObjectType,
         // This can be used by downstream objects to store extra data.
         // Use ExtraBits to access this field.
-        extra: u16 = 0,
+        extra: u24 = 0,
         actor_id: Actor.ActorID,
         reachability: Reachability = .Local,
     };
 
     /// Reserve bits from this ScopedBits object in your downstream objects to
     /// use ObjectInformation.extra.
-    pub const ExtraBits = scoped_bits.ScopedBitsOffset(ObjectInformation, 16);
+    pub const ExtraBits = scoped_bits.ScopedBitsOffset(ObjectInformation, 8);
 
     /// Delegate to the correct method for each object type.
     fn delegate(self: Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
