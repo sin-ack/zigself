@@ -10,6 +10,7 @@ const Slot = @import("../slot.zig").Slot;
 const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const slots = @import("slots.zig");
+const Object = @import("../object.zig").Object;
 const MapType = map_import.MapType;
 const pointer = @import("../../utility/pointer.zig");
 const bytecode = @import("../bytecode.zig");
@@ -35,6 +36,9 @@ pub const Activation = extern struct {
     pub const Value = value_import.ObjectValue(Activation);
 
     pub usingnamespace SlotsLikeObjectBase(Activation);
+
+    pub const ActivationType = enum(u1) { Method, Block };
+    pub const ExtraBits = Object.ExtraBits.reserve(ActivationType);
 
     /// Borrows a ref from `message_script`.
     pub fn create(
@@ -114,20 +118,12 @@ pub const Activation = extern struct {
 
     // --- Activation type ---
 
-    const ActivationInformation = packed struct(u8) {
-        activation_type: ActivationType,
-        padding: u7,
-    };
-
-    pub const ActivationType = enum(u1) { Method, Block };
     pub fn getActivationType(self: Activation.Ptr) ActivationType {
-        const activation_information: *ActivationInformation = @ptrCast(&self.slots.object.object_information.extra);
-        return activation_information.activation_type;
+        return Activation.ExtraBits.read(self.slots.object.object_information);
     }
 
     fn setActivationType(self: Activation.Ptr, comptime activation_type: ActivationType) void {
-        const activation_information: *ActivationInformation = @ptrCast(&self.slots.object.object_information.extra);
-        activation_information.activation_type = activation_type;
+        Activation.ExtraBits.write(&self.slots.object.object_information, activation_type);
     }
 
     // --- Slot counts ---

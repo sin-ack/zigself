@@ -76,6 +76,7 @@ pub const Managed = extern struct {
     const ManagedType = enum(u8) {
         FileDescriptor = 0b0,
     };
+    pub const ExtraBits = Object.ExtraBits.reserve(ManagedType);
 
     pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID, managed_type: ManagedType, value: GenericValue) !Managed.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
@@ -99,11 +100,11 @@ pub const Managed = extern struct {
     }
 
     fn setManagedType(self: Managed.Ptr, managed_type: ManagedType) void {
-        self.object.object_information.extra = @intFromEnum(managed_type);
+        Managed.ExtraBits.write(&self.object.object_information, managed_type);
     }
 
     pub fn getManagedType(self: Managed.Ptr) ManagedType {
-        return @enumFromInt(self.object.object_information.extra);
+        return Managed.ExtraBits.read(self.object.object_information);
     }
 
     pub fn canFinalize(self: Managed.Ptr) bool {

@@ -166,10 +166,8 @@ pub const MethodMap = extern struct {
     pub const Ptr = pointer.HeapPtr(MethodMap, .Mutable);
     pub const ObjectType = Method;
 
-    const MethodInformation = packed struct(u32) {
-        is_inline: bool,
-        padding: u31 = 0,
-    };
+    const MethodInformation = packed struct(u1) { is_inline: bool };
+    pub const ExtraBits = ExecutableMap.ExtraBits.reserve(MethodInformation);
 
     pub usingnamespace SlotsLikeMapBase(MethodMap);
 
@@ -209,13 +207,11 @@ pub const MethodMap = extern struct {
     }
 
     fn setInlineMethod(self: MethodMap.Ptr, is_inline_method: bool) void {
-        const method_info: *MethodInformation = @ptrCast(&self.base_map.slots.map.map_information.extra);
-        method_info.is_inline = is_inline_method;
+        MethodMap.ExtraBits.write(&self.base_map.slots.map.object.object_information, .{ .is_inline = is_inline_method });
     }
 
     fn isInlineMethod(self: MethodMap.Ptr) bool {
-        const method_info: *MethodInformation = @ptrCast(&self.base_map.slots.map.map_information.extra);
-        return method_info.is_inline;
+        return MethodMap.ExtraBits.read(self.base_map.slots.map.object.object_information).is_inline;
     }
 
     pub fn expectsActivationObjectAsReceiver(self: MethodMap.Ptr) bool {

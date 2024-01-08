@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
 const Value = value_import.Value;
+const Object = @import("../object.zig").Object;
 const MapType = @import("map.zig").MapType;
 const bytecode = @import("../bytecode.zig");
 const SlotsMap = @import("slots.zig").SlotsMap;
@@ -29,10 +30,8 @@ pub const ExecutableMap = extern struct {
 
     pub const Ptr = pointer.HeapPtr(ExecutableMap, .Mutable);
 
-    pub const ExecutableInformation = packed struct(u16) {
-        argument_slot_count: u8,
-        padding: u8 = 0,
-    };
+    pub const ExecutableInformation = packed struct(u8) { argument_slot_count: u8 };
+    pub const ExtraBits = Object.ExtraBits.reserve(ExecutableInformation);
 
     /// Refs `script`.
     pub fn init(
@@ -61,12 +60,10 @@ pub const ExecutableMap = extern struct {
     }
 
     pub fn getArgumentSlotCount(self: ExecutableMap.Ptr) u8 {
-        const executable_information: *ExecutableInformation = @ptrCast(&self.slots.information.extra);
-        return executable_information.argument_slot_count;
+        return ExecutableMap.ExtraBits.read(self.slots.map.object.object_information).argument_slot_count;
     }
 
     fn setArgumentSlotCount(self: ExecutableMap.Ptr, count: u8) void {
-        const executable_information: *ExecutableInformation = @ptrCast(&self.slots.information.extra);
-        executable_information.argument_slot_count = count;
+        ExecutableMap.ExtraBits.write(&self.slots.map.object.object_information, .{ .argument_slot_count = count });
     }
 };

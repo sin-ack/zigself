@@ -12,6 +12,7 @@ const pointer = @import("../utility/pointer.zig");
 const value_import = @import("value.zig");
 const object_lookup = @import("object_lookup.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
+const scoped_bits = @import("../utility/scoped_bits.zig");
 
 // TODO: Unify ObjectType and ObjectRegistry once Zig stops treating it as a dependency loop.
 pub const ObjectType = enum(u14) {
@@ -96,14 +97,15 @@ pub const Object = extern struct {
         object_marker: ObjectMarker = @intFromEnum(Value.ValueType.ObjectMarker),
         object_type: ObjectType,
         // This can be used by downstream objects to store extra data.
-        //
-        // FIXME: Right now any downstream object can use this. We need a proper
-        //        partitioning schema in order to this becoming a spaghettified
-        //        mess of "who owns what".
+        // Use ExtraBits to access this field.
         extra: u16 = 0,
         actor_id: Actor.ActorID,
         reachability: Reachability = .Local,
     };
+
+    /// Reserve bits from this ScopedBits object in your downstream objects to
+    /// use ObjectInformation.extra.
+    pub const ExtraBits = scoped_bits.ScopedBitsOffset(ObjectInformation, 16);
 
     /// Delegate to the correct method for each object type.
     fn delegate(self: Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
