@@ -322,7 +322,7 @@ pub fn rememberObjectReference(self: *Heap, referrer: Value, target: Value) !voi
 }
 
 pub fn printTrackLocationCounts(self: *Heap) void {
-    const debug_info = std.debug.getHeapDebugInfo() catch unreachable;
+    const debug_info = std.debug.getSelfDebugInfo() catch unreachable;
     const stderr = std.io.getStdErr();
     const tty_config = std.io.tty.detectConfig(stderr);
 
