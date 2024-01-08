@@ -14,7 +14,7 @@ const object_lookup = @import("object_lookup.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
 
 // TODO: Unify ObjectType and ObjectRegistry once Zig stops treating it as a dependency loop.
-pub const ObjectType = enum(u22) {
+pub const ObjectType = enum(u14) {
     Slots,
     Method,
     Block,
@@ -100,7 +100,7 @@ pub const Object = extern struct {
         // FIXME: Right now any downstream object can use this. We need a proper
         //        partitioning schema in order to this becoming a spaghettified
         //        mess of "who owns what".
-        extra: u8 = 0,
+        extra: u16 = 0,
         actor_id: Actor.ActorID,
         reachability: Reachability = .Local,
     };
