@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn build(b: *std.build.Builder) void {
+pub fn build(b: *std.Build) void {
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -22,7 +22,7 @@ pub fn build(b: *std.build.Builder) void {
     });
     exe.linkLibC();
     b.installArtifact(exe);
-    exe.addModule("zig-args", zig_args_dependency);
+    exe.root_module.addImport("zig-args", zig_args_dependency);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -40,8 +40,8 @@ pub fn build(b: *std.build.Builder) void {
         .optimize = optimize,
     });
     test_harness_exe.linkLibC();
-    test_harness_exe.addAnonymousModule("zigself", .{
-        .source_file = .{ .path = "src/package.zig" },
+    test_harness_exe.root_module.addAnonymousImport("zigself", .{
+        .root_source_file = .{ .path = "src/package.zig" },
     });
 
     const test_harness_run_cmd = b.addRunArtifact(test_harness_exe);
