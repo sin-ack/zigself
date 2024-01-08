@@ -26,7 +26,7 @@ pub const MapType = enum(u30) {
 };
 
 /// A registry of map types. Works basically identically to the object registry.
-pub const MapRegistry = union(enum(u30)) {
+pub const MapRegistry = union(MapType) {
     MapMap: Map,
     Slots: @import("slots.zig").SlotsMap,
     Method: @import("method.zig").MethodMap,
