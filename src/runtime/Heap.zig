@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -13,8 +13,10 @@ const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig").Object;
 const ByteArray = @import("./ByteArray.zig");
 const Activation = @import("./Activation.zig");
+const BaseObject = @import("./base_object.zig").BaseObject;
 const VirtualMachine = @import("./VirtualMachine.zig");
 const ActivationStack = Activation.ActivationStack;
+const ForwardedObject = @import("object.zig").ForwardedObject;
 
 const GC_DEBUG = debug.GC_DEBUG;
 const GC_TOKEN_DEBUG = debug.GC_TOKEN_DEBUG;
@@ -457,8 +459,8 @@ const Space = struct {
         // Finalize everything that needs to be finalized.
         var finalization_it = self.finalization_set.iterator();
         while (finalization_it.next()) |entry| {
-            var object = Value.fromObjectAddress(entry.key_ptr.*).asObject();
-            object.finalize(allocator);
+            const base_object = Value.fromObjectAddress(entry.key_ptr.*).asBaseObject();
+            base_object.finalize(allocator);
         }
 
         self.finalization_set.deinit(allocator);
@@ -479,13 +481,14 @@ const Space = struct {
     /// for the same object to just return the new location and avoid copying
     /// again.
     fn copyObjectTo(self: *Space, allocator: Allocator, address: [*]u64, target_space: *Space) ![*]u64 {
-        const object = Object.fromAddress(address);
-        if (object.isForwarded()) {
-            const forward_address = object.getForwardAddress();
-            return forward_address;
+        const base_object = BaseObject.fromAddress(address);
+        if (base_object.asObject()) |object| {
+            if (object.asType(.ForwardedObject)) |forwarded_object| {
+                return forwarded_object.getForwardAddress();
+            }
         }
 
-        const object_size = object.getSizeInMemory();
+        const object_size = base_object.getSizeInMemory();
         std.debug.assert(object_size % @sizeOf(u64) == 0);
 
         const object_size_in_words = object_size / @sizeOf(u64);
@@ -501,7 +504,7 @@ const Space = struct {
         }
 
         // Create a forwarding reference
-        object.forwardObjectTo(new_address);
+        ForwardedObject.overwrite(base_object, new_address);
         return new_address;
     }
 
@@ -658,8 +661,8 @@ const Space = struct {
         // Notify any object who didn't make it out of this space and wanted to
         // be notified about being finalized.
         for (self.finalization_set.keys()) |address| {
-            const object = Object.fromAddress(address);
-            object.finalize(allocator);
+            const base_object = BaseObject.fromAddress(address);
+            base_object.finalize(allocator);
         }
 
         // Go through all the newer generations again, and remove or replace all
@@ -686,17 +689,22 @@ const Space = struct {
                 const object_size = entry.value_ptr.*;
 
                 if (self.objectSegmentContains(object_address)) {
-                    const object = Object.fromAddress(object_address);
+                    const base_object = BaseObject.fromAddress(object_address);
 
-                    if (object.isForwarded()) {
-                        // Yes, the object's been copied. Replace the entry in
-                        // the remembered set.
-                        const new_address = object.getForwardAddress();
-                        newer_generation_space.removeFromRememberedSet(object_address) catch unreachable;
-                        // Hopefully the object size has not changed somehow
-                        // during a GC. :^)
-                        try newer_generation_space.addToRememberedSet(allocator, new_address, object_size);
-                    } else {
+                    did_survive: {
+                        if (base_object.asObject()) |object| {
+                            if (object.asType(.ForwardedObject)) |forwarded_object| {
+                                // Yes, the object's been copied. Replace the entry in
+                                // the remembered set.
+                                const new_address = forwarded_object.getForwardAddress();
+                                newer_generation_space.removeFromRememberedSet(object_address) catch unreachable;
+                                // Hopefully the object size has not changed somehow
+                                // during a GC. :^)
+                                try newer_generation_space.addToRememberedSet(allocator, new_address, object_size);
+                                break :did_survive;
+                            }
+                        }
+
                         // No, the object didn't survive the scavenge.
                         newer_generation_space.removeFromRememberedSet(object_address) catch unreachable;
                     }

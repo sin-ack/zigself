@@ -1,14 +1,14 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Map = @import("map.zig").Map;
+const Map = @import("../map.zig").Map;
 const Value = value_import.Value;
 const Object = @import("../object.zig").Object;
-const MapType = @import("map.zig").MapType;
+const MapType = @import("../map.zig").MapType;
 const bytecode = @import("../bytecode.zig");
 const SlotsMap = @import("slots.zig").SlotsMap;
 const value_import = @import("../value.zig");
@@ -31,21 +31,22 @@ pub const ExecutableMap = extern struct {
     pub const Ptr = pointer.HeapPtr(ExecutableMap, .Mutable);
 
     pub const ExecutableInformation = packed struct(u8) { argument_slot_count: u8 };
-    pub const ExtraBits = Object.ExtraBits.reserve(ExecutableInformation);
+    pub const ExtraBits = Map.ExtraBits.reserve(ExecutableInformation);
 
     /// Refs `script`.
     pub fn init(
         self: ExecutableMap.Ptr,
         comptime map_type: MapType,
         argument_slot_count: u8,
-        total_slot_count: u32,
+        total_slot_count: u16,
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
     ) void {
-        std.debug.assert(argument_slot_count <= total_slot_count);
-
         self.slots.init(total_slot_count);
-        self.slots.map.init(map_type);
+        // FIXME: We're manually overriding the map type here. This is a hack
+        //        because the initialization of SlotsMap's own fields and the
+        //        base map initialization are currently entangled.
+        self.slots.map.getMetadata().type = map_type;
         self.setArgumentSlotCount(argument_slot_count);
 
         self.block = PointerValue(bytecode.Block).init(block);
@@ -60,10 +61,10 @@ pub const ExecutableMap = extern struct {
     }
 
     pub fn getArgumentSlotCount(self: ExecutableMap.Ptr) u8 {
-        return ExecutableMap.ExtraBits.read(self.slots.map.object.object_information).argument_slot_count;
+        return ExecutableMap.ExtraBits.read(self.slots.map.getMetadata().*).argument_slot_count;
     }
 
     fn setArgumentSlotCount(self: ExecutableMap.Ptr, count: u8) void {
-        ExecutableMap.ExtraBits.write(&self.slots.map.object.object_information, .{ .argument_slot_count = count });
+        ExecutableMap.ExtraBits.write(self.slots.map.getMetadata(), .{ .argument_slot_count = count });
     }
 };

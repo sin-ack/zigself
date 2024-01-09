@@ -1,17 +1,18 @@
-// Copyright (c) 2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2023-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Map = @import("objects/map.zig").Map;
+const Map = @import("map.zig").Map;
 const Heap = @import("Heap.zig");
 const hash = @import("../utility/hash.zig");
 const Actor = @import("Actor.zig");
 const value = @import("value.zig");
 const Object = @import("object.zig").Object;
 const pointer = @import("../utility/pointer.zig");
+const MapObject = @import("object.zig").MapObject;
 const ObjectType = @import("object.zig").ObjectType;
 const object_lookup = @import("object_lookup.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
@@ -29,11 +30,11 @@ const VirtualMachine = @import("VirtualMachine.zig");
 ///         value1: Value align(@alignOf(u64)),
 ///         value2: Value align(@alignOf(u64)),
 ///
-///         pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, ...) MyObjectMap {
+///         pub fn create(token: *Heap.AllocationToken, ...) MyObjectMap {
 ///             // Do allocation, initialization here...
 ///         }
 ///
-///         pub fn clone(self: MyObjectMap.Ptr, map_map: Map.Ptr, token: *Heap.AllocationToken) MyObjectMap.Ptr {
+///         pub fn clone(self: MyObjectMap.Ptr, token: *Heap.AllocationToken) MyObjectMap.Ptr {
 ///             return create(map_map, token, ...);
 ///         }
 ///
@@ -122,7 +123,7 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
     };
 
     return extern struct {
-        object: Object align(@alignOf(u64)),
+        object: MapObject align(@alignOf(u64)),
 
         const Self = @This();
         pub const Ptr = pointer.HeapPtr(Self, .Mutable);
@@ -133,18 +134,12 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
             const memory = token.allocate(.Object, requiredSizeForAllocation());
             const self: Ptr = @ptrCast(memory);
 
-            self.init(map, actor_id);
+            self.init(actor_id, map);
             return self;
         }
 
-        fn init(self: Ptr, map: MapT.Ptr, actor_id: Actor.ActorID) void {
-            self.object = .{
-                .object_information = .{
-                    .object_type = object_type,
-                    .actor_id = actor_id,
-                },
-                .map = map.asValue(),
-            };
+        fn init(self: Ptr, actor_id: Actor.ActorID, map: MapT.Ptr) void {
+            self.object.init(object_type, actor_id, map.asValue());
         }
 
         pub fn asAddress(self: Ptr) [*]u64 {
@@ -156,7 +151,7 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
         }
 
         pub fn getMap(self: Ptr) MapT.Ptr {
-            return @ptrCast(self.object.map.asObject().mustBeType(.Map));
+            return @ptrCast(self.object.getMap());
         }
 
         pub fn getSizeInMemory(self: Ptr) usize {

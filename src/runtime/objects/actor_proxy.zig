@@ -1,11 +1,10 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
@@ -39,13 +38,7 @@ pub const ActorProxy = extern struct {
     }
 
     fn init(self: ActorProxy.Ptr, current_actor_id: Actor.ActorID, actor_object: ActorObject.Ptr) void {
-        self.object = .{
-            .object_information = .{
-                .object_type = .ActorProxy,
-                .actor_id = current_actor_id,
-            },
-            .map = context.getVM().getMapMap().asValue(),
-        };
+        self.object.init(.ActorProxy, current_actor_id);
         self.actor_object = ActorObject.Value.init(actor_object);
     }
 
@@ -101,7 +94,7 @@ pub const ActorProxy = extern struct {
             // FIXME: This should probably cause a different kind of error.
             .Assignment => object_lookup.LookupResult.nothing,
             .Regular => |lookup_result| blk: {
-                if (!(lookup_result.isObjectReference() and lookup_result.asObject().object_information.object_type == .Method)) {
+                if (!(lookup_result.isObjectReference() and lookup_result.asObject().getMetadata().type == .Method)) {
                     // NOTE: In zigSelf, all messages are async. Therefore
                     //       sending a message to a non-method slot will not
                     //       return any meaningful value to the user.
@@ -113,7 +106,7 @@ pub const ActorProxy = extern struct {
                 break :blk object_lookup.LookupResult{
                     .ActorMessage = .{
                         .target_actor = target_actor,
-                        .method = lookup_result.asObject().mustBeType(.Method),
+                        .method = lookup_result.asObject().asType(.Method).?,
                     },
                 };
             },

@@ -7,8 +7,8 @@ const Allocator = std.mem.Allocator;
 
 const Heap = @import("../Heap.zig");
 const Value = @import("../value.zig").Value;
-const Object = @import("../object.zig").Object;
 const traversal = @import("../object_traversal.zig");
+const BaseObject = @import("../base_object.zig").BaseObject;
 const array_object = @import("../objects/array.zig");
 const RuntimeError = @import("../RuntimeError.zig");
 const ExecutionResult = @import("../execution_result.zig").ExecutionResult;
@@ -103,13 +103,13 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
 
     array_values[@intCast(position)] = new_value;
 
-    if (receiver.object.object_information.reachability == .Global) {
+    if (receiver.object.getMetadata().reachability == .Global) {
         // Mark the object graph of new_value as globally reachable
         _ = traversal.traverseNonGloballyReachableObjectGraph(new_value, struct {
-            pub fn visit(self: @This(), object: Object.Ptr) error{}!Object.Ptr {
+            pub fn visit(self: @This(), base_object: BaseObject.Ptr) error{}!BaseObject.Ptr {
                 _ = self;
-                object.object_information.reachability = .Global;
-                return object;
+                base_object.metadata.reachability = .Global;
+                return base_object;
             }
         }{}) catch unreachable;
     }

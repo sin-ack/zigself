@@ -1,11 +1,10 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
@@ -52,13 +51,7 @@ pub const ByteArray = extern struct {
     }
 
     fn init(self: ByteArray.Ptr, actor_id: Actor.ActorID, byte_array: VMByteArray) void {
-        self.object = .{
-            .object_information = .{
-                .object_type = .ByteArray,
-                .actor_id = actor_id,
-            },
-            .map = context.getVM().getMapMap().asValue(),
-        };
+        self.object.init(.ByteArray, actor_id);
         self.byte_array = byte_array.asValue();
     }
 

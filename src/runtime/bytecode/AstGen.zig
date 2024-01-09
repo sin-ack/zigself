@@ -130,7 +130,7 @@ fn generateObject(self: *AstGen, executable: *Executable, block: *Block, object:
     try self.generateSlotList(executable, block, object.slots, object.range);
 
     const object_location = self.allocateRegister();
-    const slot_count: u32 = @intCast(object.slots.len);
+    const slot_count: u16 = @intCast(object.slots.len);
     try block.addInstruction(executable.allocator, .CreateObject, object_location, .{ .slot_count = slot_count }, object.range);
 
     if (std.debug.runtime_safety)
@@ -146,7 +146,7 @@ fn generateBlock(self: *AstGen, executable: *Executable, block: *Block, block_no
 
     const block_index = try self.generateSlotsAndCodeCommon(executable, block, block_node.slots, block_node.statements.value.statements, block_node.range);
     const block_location = self.allocateRegister();
-    const slot_count: u32 = @intCast(block_node.slots.len);
+    const slot_count: u16 = @intCast(block_node.slots.len);
     try block.addInstruction(executable.allocator, .CreateBlock, block_location, .{
         .slot_count = slot_count,
         .block_index = block_index,
@@ -169,7 +169,7 @@ fn generateMethod(self: *AstGen, executable: *Executable, block: *Block, method_
     }
 
     const method_location = self.allocateRegister();
-    const slot_count: u32 = @intCast(method.slots.len);
+    const slot_count: u16 = @intCast(method.slots.len);
     try block.addInstruction(executable.allocator, .CreateMethod, method_location, .{
         .method_name_location = method_name_location,
         .slot_count = slot_count,

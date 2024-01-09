@@ -1,10 +1,10 @@
-// Copyright (c) 2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2023-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 
-const Map = @import("../map.zig").Map;
+const Map = @import("../../map.zig").Map;
 const Heap = @import("../../Heap.zig");
 const Actor = @import("../../Actor.zig");
 const Value = @import("../../value.zig").Value;

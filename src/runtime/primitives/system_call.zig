@@ -1,4 +1,4 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -43,7 +43,7 @@ fn makeManagedFD(context: *PrimitiveContext, native_fd: std.os.fd_t, flags: File
     defer token.deinit();
 
     var fd = FileDescriptor.adopt(native_fd, flags);
-    const managed_fd = try ManagedObject.create(context.vm.getMapMap(), &token, context.actor.id, .FileDescriptor, fd.toValue());
+    const managed_fd = try ManagedObject.create(&token, context.actor.id, .FileDescriptor, fd.toValue());
     return ExecutionResult.resolve(managed_fd.asValue());
 }
 
@@ -284,7 +284,7 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
     const fd_values = fds.getValues();
     const event_values = events.getValues();
     for (fd_values, 0..) |fd, i| {
-        const managed_fd = fd.asObject().mustBeType(.Managed);
+        const managed_fd = fd.asObject().asType(.Managed).?;
         const fd_value = FileDescriptor.fromValue(managed_fd.value);
         const event_flags = event_values[i];
 

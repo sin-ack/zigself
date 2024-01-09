@@ -158,14 +158,14 @@ fn Instruction(comptime RegisterLocationT: type) type {
             CreateInteger: i62,
             CreateFloatingPoint: f64,
             CreateByteArray: []const u8,
-            CreateObject: struct { slot_count: u32 },
+            CreateObject: struct { slot_count: u16 },
             CreateMethod: struct {
                 method_name_location: RegisterLocation,
-                slot_count: u32,
+                slot_count: u16,
                 block_index: u32,
             },
             CreateBlock: struct {
-                slot_count: u32,
+                slot_count: u16,
                 block_index: u32,
             },
             Return: struct {

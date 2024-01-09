@@ -230,7 +230,7 @@ pub const Slot = packed struct {
 
     /// Return how many slot spaces this slot needs on the map for its contents.
     /// Takes a slice of slots that come before this slot.
-    pub fn requiredSlotSpace(self: Slot, previous_slots: Slot.ConstSlice) u32 {
+    pub fn requiredSlotSpace(self: Slot, previous_slots: Slot.ConstSlice) u16 {
         return if (self.getSlotWithMyName(previous_slots) != null) 0 else 1;
     }
 
@@ -239,8 +239,8 @@ pub const Slot = packed struct {
     /// slot. May return a negative value if this slot overrides a previous
     /// assignable slot and does not consume an assignable slot value space
     /// itself.
-    pub fn requiredAssignableSlotValueSpace(self: Slot, previous_slots: Slot.ConstSlice) i32 {
-        var diff: i32 = 0;
+    pub fn requiredAssignableSlotValueSpace(self: Slot, previous_slots: Slot.ConstSlice) i15 {
+        var diff: i15 = 0;
         if (self.getSlotWithMyName(previous_slots)) |previous_slot| {
             if (previous_slot.isAssignable() and !previous_slot.isArgument())
                 diff -= 1;

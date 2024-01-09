@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const Heap = @import("Heap.zig");
 const Actor = @import("Actor.zig");
 const Value = @import("value.zig").Value;
-const Object = @import("object.zig").Object;
+const BaseObject = @import("base_object.zig").BaseObject;
 const context = @import("context.zig");
 const traversal = @import("object_traversal.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
@@ -18,13 +18,13 @@ const RequiredMemoryCalculator = struct {
     seen_objects_set: *SeenObjectsSet,
     required_memory: *usize,
 
-    pub fn visit(self: @This(), object: Object.Ptr) Allocator.Error!Object.Ptr {
-        const gop = try self.seen_objects_set.getOrPut(object.getAddress());
+    pub fn visit(self: @This(), base_object: BaseObject.Ptr) Allocator.Error!BaseObject.Ptr {
+        const gop = try self.seen_objects_set.getOrPut(base_object.getAddress());
         if (!gop.found_existing) {
-            self.required_memory.* += object.getSizeForCloning();
+            self.required_memory.* += base_object.getSizeForCloning();
         }
 
-        return object;
+        return base_object;
     }
 };
 
@@ -47,15 +47,15 @@ const ObjectGraphCopier = struct {
     token: *Heap.AllocationToken,
     actor_id: Actor.ActorID,
 
-    pub fn visit(self: @This(), old_object: Object.Ptr) Allocator.Error!Object.Ptr {
-        const gop = try self.copied_objects_map.getOrPut(old_object.getAddress());
+    pub fn visit(self: @This(), old_base_object: BaseObject.Ptr) Allocator.Error!BaseObject.Ptr {
+        const gop = try self.copied_objects_map.getOrPut(old_base_object.getAddress());
         if (gop.found_existing) {
-            return Object.fromAddress(gop.value_ptr.*);
+            return BaseObject.fromAddress(gop.value_ptr.*);
         }
 
-        const new_object = try old_object.clone(self.token, self.actor_id);
+        const new_object = try old_base_object.clone(self.token, self.actor_id);
         gop.value_ptr.* = new_object.getAddress();
-        return new_object;
+        return @ptrCast(new_object);
     }
 };
 

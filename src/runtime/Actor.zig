@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -172,7 +172,7 @@ pub fn create(vm: *VirtualMachine, token: *Heap.AllocationToken, actor_context: 
     //       first call to create); otherwise, we are always owned by the genesis actor.
     const owning_actor_id = if (vm.isInActorMode()) vm.genesis_actor.?.id else .Global;
 
-    const actor_object = try ActorObject.create(vm.getMapMap(), token, owning_actor_id, self, actor_context);
+    const actor_object = try ActorObject.create(token, owning_actor_id, self, actor_context);
 
     self.init(actor_object);
     return self;
@@ -491,7 +491,7 @@ pub fn canWriteTo(self: *Actor, value: Value) bool {
         .Integer, .FloatingPoint => true,
         .ObjectReference => writable: {
             const object = value.asObject();
-            break :writable self.id == .Global or object.object_information.reachability != .Global;
+            break :writable self.id == .Global or object.getMetadata().reachability != .Global;
         },
     };
 }
@@ -505,12 +505,12 @@ pub fn ensureCanRead(self: *Actor, value: Value, source_range: SourceRange) void
         .Integer, .FloatingPoint => {},
         .ObjectReference => {
             const object = value.asObject();
-            if (object.object_information.reachability != .Global and object.object_information.actor_id != self.id)
+            if (object.getMetadata().reachability != .Global and object.getMetadata().actor_id != self.id)
                 std.debug.panic(
                     "!!! Attempted to read object that is not readable for this actor!\n" ++
                         "  Object {*} owned by actor #{}\n" ++
                         "  Actor #{} is attempting to reach it at {}",
-                    .{ object, object.object_information.actor_id, self.id, source_range },
+                    .{ object, object.getMetadata().actor_id, self.id, source_range },
                 );
         },
     }

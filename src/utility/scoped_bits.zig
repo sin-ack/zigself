@@ -14,12 +14,12 @@ const std = @import("std");
 /// // A base "slots object"
 /// const Slots = extern struct {
 ///     // Object header
-///     header: Object.Header,
+///     object: Object,
 ///
 ///     const bits = ScopedBits(u62).reserve(SlotsBits);
 ///
 ///     pub fn init(self: Slots.Ptr, ...) void {
-///         Slots.bits.write(&self.header.object_information, .{ .mutable = ..., .globally_reachable = ... });
+///         Slots.bits.write(self.object.getMetadata(), .{ .mutable = ..., .globally_reachable = ... });
 ///     }
 /// };
 ///
@@ -34,12 +34,12 @@ const std = @import("std");
 ///         // Initialize the inner slots object
 ///         self.base.init(...);
 ///         // Write your own bits
-///         Block.bits.write(&self.base.header.object_information, .{ ... });
+///         Block.bits.write(self.base.object.getMetadata(), .{ ... });
 ///     }
 ///
 ///     // Read only the relevant bits
 ///     pub fn getBlockInfo(self: Block.Ptr) BlockBits {
-///         return Block.bits.read(self.base.header.object_information);
+///         return Block.bits.read(self.base.object.getMetadata().*);
 ///     }
 /// };
 /// ```
@@ -48,7 +48,12 @@ pub fn ScopedBits(comptime Source: type) type {
 }
 
 pub fn ScopedBitsOffset(comptime Source: type, comptime offset_bits: comptime_int) type {
-    return ScopedBitsDetail(Source, offset_bits, u0);
+    const SourceBackingInt = BackingIntType(Source, "source");
+    return ScopedBitsOffsetLimit(Source, offset_bits, @typeInfo(SourceBackingInt).Int.bits);
+}
+
+pub fn ScopedBitsOffsetLimit(comptime Source: type, comptime offset_bits: comptime_int, comptime limit_bits: comptime_int) type {
+    return ScopedBitsDetail(Source, offset_bits, limit_bits, u0);
 }
 
 fn BackingIntType(comptime T: type, comptime name: []const u8) type {
@@ -79,16 +84,14 @@ fn BackingIntType(comptime T: type, comptime name: []const u8) type {
     return BackingInt;
 }
 
-fn ScopedBitsDetail(comptime Source: type, comptime offset_bits: comptime_int, comptime Target: type) type {
+fn ScopedBitsDetail(comptime Source: type, comptime offset_bits: comptime_int, comptime limit_bits: comptime_int, comptime Target: type) type {
     const SourceBackingInt = BackingIntType(Source, "source");
     const TargetBackingInt = BackingIntType(Target, "target");
 
-    const source_backing_type_info = @typeInfo(SourceBackingInt);
     const target_backing_type_info = @typeInfo(TargetBackingInt);
 
-    const total_bits = source_backing_type_info.Int.bits;
     const reserved_bits = target_backing_type_info.Int.bits;
-    const remaining_bits = total_bits - offset_bits - reserved_bits;
+    const remaining_bits = limit_bits - offset_bits - reserved_bits;
 
     return struct {
         const Self = @This();
@@ -104,7 +107,7 @@ fn ScopedBitsDetail(comptime Source: type, comptime offset_bits: comptime_int, c
                 @compileError(std.fmt.comptimePrint("ScopedBits could not reserve {} bits for {} ({} bits remaining)", .{ new_bits, @typeName(NewTarget), remaining_bits }));
             }
 
-            return ScopedBitsDetail(Source, offset_bits + reserved_bits, NewTarget);
+            return ScopedBitsDetail(Source, offset_bits + reserved_bits, limit_bits, NewTarget);
         }
 
         fn castToBackingType(comptime T: type, comptime BackingT: type, value: T) BackingT {

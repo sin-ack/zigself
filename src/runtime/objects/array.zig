@@ -1,27 +1,27 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Map = @import("map.zig").Map;
+const Map = @import("../map.zig").Map;
 const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
-const Object = @import("../object.zig").Object;
 const context = @import("../context.zig");
+const pointer = @import("../../utility/pointer.zig");
+const MapObject = @import("../object.zig").MapObject;
 const IntegerValue = value_import.IntegerValue;
 const GenericValue = @import("../value.zig").Value;
 const value_import = @import("../value.zig");
-const pointer = @import("../../utility/pointer.zig");
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
 pub const Array = extern struct {
-    object: Object align(@alignOf(u64)),
+    object: MapObject align(@alignOf(u64)),
 
     pub const Ptr = pointer.HeapPtr(Array, .Mutable);
     pub const Value = value_import.ObjectValue(Array);
@@ -48,13 +48,7 @@ pub const Array = extern struct {
     }
 
     fn init(self: Array.Ptr, actor_id: Actor.ActorID, map: ArrayMap.Ptr, values: []GenericValue, filler: ?GenericValue) void {
-        self.object = .{
-            .object_information = .{
-                .object_type = .Array,
-                .actor_id = actor_id,
-            },
-            .map = map.asValue(),
-        };
+        self.object.init(.Array, actor_id, map.asValue());
 
         const values_to_copy = values[0..@min(values.len, map.getSize())];
         @memcpy(self.getValues()[0..values_to_copy.len], values_to_copy);
@@ -73,7 +67,7 @@ pub const Array = extern struct {
     }
 
     pub fn getMap(self: Array.Ptr) ArrayMap.Ptr {
-        return self.object.getMap().mustBeType(.Array);
+        return self.object.getMap().asType(.Array).?;
     }
 
     pub fn getSize(self: Array.Ptr) usize {

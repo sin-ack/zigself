@@ -1,11 +1,10 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
@@ -33,23 +32,17 @@ pub const Actor = extern struct {
     pub const Type = .Actor;
     pub const Value = value_import.ObjectValue(Actor);
 
-    pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, genesis_actor_id: VMActor.ActorID, actor: *VMActor, context: GenericValue) !Actor.Ptr {
+    pub fn create(token: *Heap.AllocationToken, genesis_actor_id: VMActor.ActorID, actor: *VMActor, context: GenericValue) !Actor.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
         const self: Actor.Ptr = @ptrCast(memory_area);
-        self.init(genesis_actor_id, map_map, actor, context);
+        self.init(genesis_actor_id, actor, context);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
     }
 
-    fn init(self: Actor.Ptr, genesis_actor_id: VMActor.ActorID, actor_map: Map.Ptr, actor: *VMActor, context: GenericValue) void {
-        self.object = .{
-            .object_information = .{
-                .object_type = Type,
-                .actor_id = genesis_actor_id,
-            },
-            .map = actor_map.asValue(),
-        };
+    fn init(self: Actor.Ptr, genesis_actor_id: VMActor.ActorID, actor: *VMActor, context: GenericValue) void {
+        self.object.init(Type, genesis_actor_id);
         self.actor = PointerValue(VMActor).init(actor);
         self.context = context;
     }

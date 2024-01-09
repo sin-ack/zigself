@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -16,7 +16,7 @@ const pointer = @import("../../utility/pointer.zig");
 const bytecode = @import("../bytecode.zig");
 const BlockMap = @import("block.zig").BlockMap;
 const MethodMap = @import("method.zig").MethodMap;
-const map_import = @import("map.zig");
+const map_import = @import("../map.zig");
 const SlotsObject = slots.Slots;
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
@@ -51,13 +51,13 @@ pub const Activation = extern struct {
         receiver: GenericValue,
     ) Activation.Ptr {
         const assignable_slot_count = switch (map_type) {
-            .Block => map.mustBeType(.Block).getAssignableSlotCount(),
-            .Method => map.mustBeType(.Method).getAssignableSlotCount(),
+            .Block => map.asType(.Block).?.getAssignableSlotCount(),
+            .Method => map.asType(.Method).?.getAssignableSlotCount(),
             else => unreachable,
         };
         const argument_slot_count = switch (map_type) {
-            .Block => map.mustBeType(.Block).getArgumentSlotCount(),
-            .Method => map.mustBeType(.Method).getArgumentSlotCount(),
+            .Block => map.asType(.Block).?.getArgumentSlotCount(),
+            .Method => map.asType(.Method).?.getArgumentSlotCount(),
             else => unreachable,
         };
 
@@ -103,32 +103,24 @@ pub const Activation = extern struct {
         map: Map.Ptr,
         receiver: GenericValue,
     ) void {
-        self.slots.object = .{
-            .object_information = .{
-                .object_type = .Activation,
-                .actor_id = actor_id,
-            },
-            .map = map.asValue(),
-        };
-
+        self.slots.object.init(.Activation, actor_id, map.asValue());
         self.setActivationType(if (map_type == .Block) ActivationType.Block else ActivationType.Method);
-
         self.receiver = receiver;
     }
 
     // --- Activation type ---
 
     pub fn getActivationType(self: Activation.Ptr) ActivationType {
-        return Activation.ExtraBits.read(self.slots.object.object_information);
+        return Activation.ExtraBits.read(self.slots.object.getMetadata().*);
     }
 
     fn setActivationType(self: Activation.Ptr, comptime activation_type: ActivationType) void {
-        Activation.ExtraBits.write(&self.slots.object.object_information, activation_type);
+        Activation.ExtraBits.write(self.slots.object.getMetadata(), activation_type);
     }
 
     // --- Slot counts ---
 
-    pub fn getAssignableSlotCount(self: Activation.Ptr) u8 {
+    pub fn getAssignableSlotCount(self: Activation.Ptr) u15 {
         return self.dispatch("getAssignableSlotCount");
     }
 
@@ -220,8 +212,8 @@ pub const Activation = extern struct {
     /// instead.
     pub fn findActivationReceiver(self: Activation.Ptr) GenericValue {
         var object = self.asValue().asObject();
-        while (object.object_information.object_type == .Activation) {
-            const receiver = object.mustBeType(.Activation).receiver;
+        while (object.asType(.Activation)) |activation| {
+            const receiver = activation.receiver;
             if (receiver.isObjectReference()) {
                 object = receiver.asObject();
             } else {
@@ -243,7 +235,7 @@ pub const Activation = extern struct {
         return self.getSizeInMemory();
     }
 
-    pub fn requiredSizeForAllocation(argument_slot_count: u8, assignable_slot_count: u8) usize {
+    pub fn requiredSizeForAllocation(argument_slot_count: u8, assignable_slot_count: u15) usize {
         return @sizeOf(Activation) + (argument_slot_count + assignable_slot_count) * @sizeOf(GenericValue);
     }
 
@@ -254,7 +246,7 @@ pub const Activation = extern struct {
             std.debug.panic("Attempted to call getMethodMap on a block activation object", .{});
         }
 
-        return self.slots.object.getMap().mustBeType(.Method);
+        return self.slots.object.getMap().asType(.Method).?;
     }
 
     fn getBlockMap(self: Activation.Ptr) BlockMap.Ptr {
@@ -262,7 +254,7 @@ pub const Activation = extern struct {
             std.debug.panic("Attempted to call getBlockMap on a method activation object", .{});
         }
 
-        return self.slots.object.getMap().mustBeType(.Block);
+        return self.slots.object.getMap().asType(.Block).?;
     }
 
     fn DispatchReturn(comptime fn_name: []const u8) type {

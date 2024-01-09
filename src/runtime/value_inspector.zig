@@ -81,31 +81,31 @@ fn inspectObject(
         }
     }
 
-    if (object.object_information.reachability == .Global) {
+    if (object.getMetadata().reachability == .Global) {
         std.debug.print("(G) ", .{});
     }
 
-    std.debug.print("(#{}) ", .{object.object_information.actor_id});
+    std.debug.print("(#{}) ", .{object.getMetadata().actor_id});
 
     // FIXME: Move this into object delegation.
-    switch (object.object_information.object_type) {
-        .ForwardedObject, .Map => unreachable,
+    switch (object.getMetadata().type) {
+        .ForwardedObject => unreachable,
         .Slots => {
-            const slots = object.mustBeType(.Slots);
+            const slots = object.asType(.Slots).?;
 
             std.debug.print("(|{s}", .{separator});
             try inspectSlots(display_type, vm, slots, indent + 2, separator, &my_link);
             printWithIndent(display_type, indent, "|)", .{});
         },
         .Activation => {
-            const activation = object.mustBeType(.Activation);
+            const activation = object.asType(.Activation).?;
 
             std.debug.print("<activation object> (|{s}", .{separator});
             try inspectSlots(display_type, vm, activation, indent + 2, separator, &my_link);
             printWithIndent(display_type, indent, "|)", .{});
         },
         .Method => {
-            const method = object.mustBeType(.Method);
+            const method = object.asType(.Method).?;
 
             std.debug.print("<method object \"{s}\"> ", .{method.getMap().method_name.asByteArray().getValues()});
 
@@ -118,7 +118,7 @@ fn inspectObject(
             }
         },
         .Block => {
-            const block = object.mustBeType(.Block);
+            const block = object.asType(.Block).?;
 
             std.debug.print("<block object> ", .{});
 
@@ -131,12 +131,12 @@ fn inspectObject(
             }
         },
         .ByteArray => {
-            const byte_array = object.mustBeType(.ByteArray);
+            const byte_array = object.asType(.ByteArray).?;
             const values = byte_array.getValues();
             std.debug.print("<byte array size: {d}> \"{s}\"", .{ values.len, values });
         },
         .Array => {
-            const array = object.mustBeType(.Array);
+            const array = object.asType(.Array).?;
             const values = array.getValues();
 
             std.debug.print("<array size: {d}> ", .{values.len});
@@ -157,7 +157,7 @@ fn inspectObject(
             }
         },
         .Managed => {
-            const managed = object.mustBeType(.Managed);
+            const managed = object.asType(.Managed).?;
             std.debug.print("<managed object: {}> ", .{managed.getManagedType()});
             try inspectValueInternal(display_type, vm, managed.value, indent, &my_link);
         },
@@ -170,7 +170,7 @@ fn inspectObject(
             std.debug.print("<actor proxy>", .{});
         },
         .AddrInfo => {
-            const addrinfo_map = object.mustBeType(.AddrInfo).getMap();
+            const addrinfo_map = object.asType(.AddrInfo).?.getMap();
 
             std.debug.print("<addrinfo> (|{s}", .{separator});
 

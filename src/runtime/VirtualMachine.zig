@@ -1,11 +1,10 @@
-// Copyright (c) 2022-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Map = @import("objects/map.zig").Map;
 const Heap = @import("./Heap.zig");
 const Slot = @import("./slot.zig").Slot;
 const Actor = @import("./Actor.zig");
@@ -34,12 +33,6 @@ heap: *Heap,
 block_message_names: std.AutoArrayHashMapUnmanaged(u8, Heap.Tracked),
 
 // --- References to global objects ---
-
-/// The map-map is what all maps point to as their map. It is a map that
-/// points to itself, making it the "prototype" of maps and aiding GC by
-/// handling the "map pointer" case for maps. Some objects also use it in place
-/// of their maps where their map would otherwise contain no useful information.
-map_map: Heap.Tracked = undefined,
 
 /// The root of the current Self world.
 lobby_object: Heap.Tracked = undefined,
@@ -105,21 +98,15 @@ pub fn create(allocator: Allocator) !*VirtualMachine {
     };
 
     var token = try heap.getAllocation(
-        // Map map
-        Map.requiredSizeForAllocatingMapMap() +
-            // Global objects
-            SlotsMap.requiredSizeForAllocation(0) +
+        // Global objects
+        SlotsMap.requiredSizeForAllocation(0) +
             (10 * SlotsObject.requiredSizeForAllocation(0)) +
             // Global actor
             ActorObject.requiredSizeForAllocation(),
     );
     defer token.deinit();
 
-    // Before creating any objects, we first need to create the map-map.
-    try self.createMapMap(&token);
-
-    const empty_map = SlotsMap.createWithMapMap(self.getMapMap(), &token, 0);
-    empty_map.map.object.object_information.reachability = .Global;
+    const empty_map = SlotsMap.create(&token, 0);
 
     self.lobby_object = try makeEmptyGloballyReachableObject(&token, empty_map);
 
@@ -142,20 +129,12 @@ pub fn create(allocator: Allocator) !*VirtualMachine {
     return self;
 }
 
-fn createMapMap(self: *VirtualMachine, token: *Heap.AllocationToken) !void {
-    self.map_map = try token.heap.track(Map.createMapMap(token));
-}
-
-pub fn getMapMap(self: VirtualMachine) Map.Ptr {
-    return self.map_map.getValue().asObject().mustBeType(.Map);
-}
-
 fn makeEmptyGloballyReachableObject(token: *Heap.AllocationToken, map: SlotsMap.Ptr) !Heap.Tracked {
     // NOTE: These objects will always belong to the global actor, so we hardcode the actor ID 0 to them.
     //       Otherwise we would hit a chicken-and-egg situation where the global actor needs the lobby
     //       and the lobby needs the global actor.
     const slots = SlotsObject.create(token, .Global, map, &.{});
-    slots.object.object_information.reachability = .Global;
+    slots.object.getMetadata().reachability = .Global;
     return try token.heap.track(slots.asValue());
 }
 

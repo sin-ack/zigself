@@ -1,11 +1,10 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Map = @import("map.zig").Map;
 const Slot = @import("../slot.zig").Slot;
 const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
@@ -59,17 +58,11 @@ pub const Block = extern struct {
     }
 
     fn init(self: Block.Ptr, actor_id: Actor.ActorID, map: BlockMap.Ptr) void {
-        self.slots.object = .{
-            .object_information = .{
-                .object_type = .Block,
-                .actor_id = actor_id,
-            },
-            .map = map.asValue(),
-        };
+        self.slots.object.init(.Block, actor_id, map.asValue());
     }
 
     pub fn getMap(self: Block.Ptr) BlockMap.Ptr {
-        return self.slots.object.getMap().mustBeType(.Block);
+        return self.slots.object.getMap().asType(.Block).?;
     }
 
     pub fn getSlots(self: Block.Ptr) Slot.Slice {
@@ -106,7 +99,7 @@ pub const Block = extern struct {
         return self.getMap().getArgumentSlotCount();
     }
 
-    pub fn getAssignableSlotCount(self: Block.Ptr) u8 {
+    pub fn getAssignableSlotCount(self: Block.Ptr) u15 {
         return self.getMap().getAssignableSlotCount();
     }
 
@@ -185,7 +178,7 @@ pub const BlockMap = extern struct {
     pub fn create(
         token: *Heap.AllocationToken,
         argument_slot_count: u8,
-        total_slot_count: u32,
+        total_slot_count: u16,
         parent_activation: Activation.ActivationRef,
         nonlocal_return_target_activation: Activation.ActivationRef,
         block: *bytecode.Block,
@@ -204,7 +197,7 @@ pub const BlockMap = extern struct {
     fn init(
         self: BlockMap.Ptr,
         argument_slot_count: u8,
-        total_slot_count: u32,
+        total_slot_count: u16,
         parent_activation: Activation.ActivationRef,
         nonlocal_return_target_activation: Activation.ActivationRef,
         block: *bytecode.Block,
@@ -232,7 +225,7 @@ pub const BlockMap = extern struct {
         const new_map = try create(
             token,
             self.getArgumentSlotCount(),
-            self.base_map.slots.information.slot_count,
+            self.getSlotCount(),
             self.parent_activation,
             self.nonlocal_return_target_activation,
             self.base_map.block.get(),
@@ -246,14 +239,14 @@ pub const BlockMap = extern struct {
     }
 
     pub fn getSizeInMemory(self: BlockMap.Ptr) usize {
-        return requiredSizeForAllocation(self.base_map.slots.information.slot_count);
+        return requiredSizeForAllocation(self.getSlotCount());
     }
 
     pub fn getSizeForCloning(self: BlockMap.Ptr) usize {
         return self.getSizeInMemory();
     }
 
-    pub fn requiredSizeForAllocation(slot_count: u32) usize {
+    pub fn requiredSizeForAllocation(slot_count: u16) usize {
         return @sizeOf(BlockMap) + slot_count * @sizeOf(Slot);
     }
 };

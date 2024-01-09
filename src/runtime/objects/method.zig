@@ -1,11 +1,10 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
 const Slot = @import("../slot.zig").Slot;
 const Actor = @import("../Actor.zig");
@@ -58,17 +57,11 @@ pub const Method = extern struct {
     }
 
     fn init(self: Method.Ptr, actor_id: Actor.ActorID, map: MethodMap.Ptr) void {
-        self.slots.object = .{
-            .object_information = .{
-                .object_type = .Method,
-                .actor_id = actor_id,
-            },
-            .map = map.asValue(),
-        };
+        self.slots.object.init(.Method, actor_id, map.asValue());
     }
 
     pub fn getMap(self: Method.Ptr) MethodMap.Ptr {
-        return self.slots.object.getMap().mustBeType(.Method);
+        return self.slots.object.getMap().asType(.Method).?;
     }
 
     pub fn getSlots(self: Method.Ptr) Slot.Slice {
@@ -126,7 +119,7 @@ pub const Method = extern struct {
         return self.getMap().getArgumentSlotCount();
     }
 
-    pub fn getAssignableSlotCount(self: Method.Ptr) u8 {
+    pub fn getAssignableSlotCount(self: Method.Ptr) u15 {
         return self.getMap().getAssignableSlotCount();
     }
 
@@ -176,7 +169,7 @@ pub const MethodMap = extern struct {
     pub fn create(
         token: *Heap.AllocationToken,
         argument_slot_count: u8,
-        total_slot_count: u32,
+        total_slot_count: u16,
         is_inline_method: bool,
         method_name: ByteArray,
         block: *bytecode.Block,
@@ -195,7 +188,7 @@ pub const MethodMap = extern struct {
     fn init(
         self: MethodMap.Ptr,
         argument_slot_count: u8,
-        total_slot_count: u32,
+        total_slot_count: u16,
         is_inline_method: bool,
         method_name: ByteArray,
         block: *bytecode.Block,
@@ -207,11 +200,11 @@ pub const MethodMap = extern struct {
     }
 
     fn setInlineMethod(self: MethodMap.Ptr, is_inline_method: bool) void {
-        MethodMap.ExtraBits.write(&self.base_map.slots.map.object.object_information, .{ .is_inline = is_inline_method });
+        MethodMap.ExtraBits.write(self.base_map.slots.map.getMetadata(), .{ .is_inline = is_inline_method });
     }
 
     fn isInlineMethod(self: MethodMap.Ptr) bool {
-        return MethodMap.ExtraBits.read(self.base_map.slots.map.object.object_information).is_inline;
+        return MethodMap.ExtraBits.read(self.base_map.slots.map.getMetadata().*).is_inline;
     }
 
     pub fn expectsActivationObjectAsReceiver(self: MethodMap.Ptr) bool {
@@ -235,7 +228,7 @@ pub const MethodMap = extern struct {
         const new_map = try create(
             token,
             self.getArgumentSlotCount(),
-            self.base_map.slots.information.slot_count,
+            self.getSlotCount(),
             self.isInlineMethod(),
             self.method_name.asByteArray(),
             self.base_map.block.get(),
@@ -249,14 +242,14 @@ pub const MethodMap = extern struct {
     }
 
     pub fn getSizeInMemory(self: MethodMap.Ptr) usize {
-        return requiredSizeForAllocation(self.base_map.slots.information.slot_count);
+        return requiredSizeForAllocation(self.getSlotCount());
     }
 
     pub fn getSizeForCloning(self: MethodMap.Ptr) usize {
         return self.getSizeInMemory();
     }
 
-    pub fn requiredSizeForAllocation(slot_count: u32) usize {
+    pub fn requiredSizeForAllocation(slot_count: u16) usize {
         return @sizeOf(MethodMap) + slot_count * @sizeOf(Slot);
     }
 };

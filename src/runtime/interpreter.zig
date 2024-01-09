@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -11,7 +11,7 @@ const debug = @import("../debug.zig");
 const Actor = @import("./Actor.zig");
 const bless = @import("./object_bless.zig");
 const Value = @import("./value.zig").Value;
-const Object = @import("./object.zig").Object;
+const BaseObject = @import("./base_object.zig").BaseObject;
 const bytecode = @import("./bytecode.zig");
 const BlockMap = block_object.BlockMap;
 const SlotsMap = slots_object.SlotsMap;
@@ -243,7 +243,7 @@ fn opcodeSelfPrimSend(context: *InterpreterContext) InterpreterError!ExecutionRe
 fn opcodePushConstantSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
     const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushConstantSlot);
     const name_value = context.vm.readRegister(payload.name_location);
-    const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
+    const name_byte_array_object = name_value.asObject().asType(.ByteArray).?;
     const value = context.vm.readRegister(payload.value_location);
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initConstant(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
@@ -253,7 +253,7 @@ fn opcodePushConstantSlot(context: *InterpreterContext) InterpreterError!Executi
 fn opcodePushAssignableSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
     const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushAssignableSlot);
     const name_value = context.vm.readRegister(payload.name_location);
-    const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
+    const name_byte_array_object = name_value.asObject().asType(.ByteArray).?;
     const value = context.vm.readRegister(payload.value_location);
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initAssignable(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
@@ -263,7 +263,7 @@ fn opcodePushAssignableSlot(context: *InterpreterContext) InterpreterError!Execu
 fn opcodePushArgumentSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
     const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushArgumentSlot);
     const name_value = context.vm.readRegister(payload.name_location);
-    const name_byte_array_object = name_value.asObject().mustBeType(.ByteArray);
+    const name_byte_array_object = name_value.asObject().asType(.ByteArray).?;
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initArgument(name_byte_array_object.getByteArray()));
     return ExecutionResult.normal();
@@ -312,7 +312,7 @@ fn opcodeCreateMethod(context: *InterpreterContext) InterpreterError!ExecutionRe
     const index = context.getInstructionIndex();
 
     const payload = block.getTypedPayload(index, .CreateMethod);
-    const method_name_byte_array = context.vm.readRegister(payload.method_name_location).asObject().mustBeType(.ByteArray).getByteArray();
+    const method_name_byte_array = context.vm.readRegister(payload.method_name_location).asObject().asType(.ByteArray).?.getByteArray();
 
     try createMethod(
         context.getDefinitionExecutable(),
@@ -582,16 +582,16 @@ pub fn sendMessage(
                 return ExecutionResult.runtimeError(RuntimeError.initLiteral(source_range, "Assignment target is not writable for actor"));
             }
 
-            if (object_that_has_the_assignable_slot.object_information.reachability == .Global) {
+            if (object_that_has_the_assignable_slot.getMetadata().reachability == .Global) {
                 // Mark every object that's not globally reachable in the
                 // argument's object graph as globally reachable. This will
                 // make the whole object graph part of the global object
                 // hierarchy.
                 _ = traversal.traverseNonGloballyReachableObjectGraph(argument, struct {
-                    pub fn visit(self: @This(), object: Object.Ptr) error{}!Object.Ptr {
+                    pub fn visit(self: @This(), base_object: BaseObject.Ptr) error{}!BaseObject.Ptr {
                         _ = self;
-                        object.object_information.reachability = .Global;
-                        return object;
+                        base_object.metadata.reachability = .Global;
+                        return base_object;
                     }
                 }{}) catch unreachable;
             }
@@ -668,7 +668,7 @@ fn executeBlock(
 
         if (tracked_block) |t| {
             // Refresh the pointer to the block.
-            block = t.getValue().asObject().mustBeType(.Block);
+            block = t.getValue().asObject().asType(.Block).?;
         }
 
         break :token token;
@@ -725,7 +725,7 @@ fn executeMethod(
         if (tracked_receiver) |t| {
             // Refresh the pointers to the method and its receiver.
             receiver_of_method = t.getValue();
-            method = tracked_method.?.getValue().asObject().mustBeType(.Method);
+            method = tracked_method.?.getValue().asObject().asType(.Method).?;
         }
 
         break :token token;
@@ -746,13 +746,13 @@ fn executeMethod(
 }
 
 fn createObject(
-    slot_count: u32,
+    slot_count: u16,
     target_location: bytecode.RegisterLocation,
 ) !void {
     const actor = vm_context.getActor();
     const slots = actor.slot_stack.lastNItems(slot_count);
 
-    var total_slot_count: u32 = 0;
+    var total_slot_count: u16 = 0;
     var total_assignable_slot_count: u8 = 0;
     for (slots, 0..) |slot, i| {
         total_slot_count += slot.requiredSlotSpace(slots[0..i]);
@@ -780,7 +780,7 @@ fn createObject(
 fn createMethod(
     executable: bytecode.Executable.Ref,
     method_name: ByteArray,
-    slot_count: u32,
+    slot_count: u16,
     block_index: u32,
     target_location: bytecode.RegisterLocation,
 ) !void {
@@ -788,7 +788,7 @@ fn createMethod(
     defer actor.next_method_is_inline = false;
 
     const slots = actor.slot_stack.lastNItems(slot_count);
-    var total_slot_count: u32 = 0;
+    var total_slot_count: u16 = 0;
     var total_assignable_slot_count: u8 = 0;
     var argument_slot_count: u8 = 0;
     for (slots, 0..) |slot, i| {
@@ -831,14 +831,14 @@ fn createMethod(
 
 fn createBlock(
     executable: bytecode.Executable.Ref,
-    slot_count: u32,
+    slot_count: u16,
     block_index: u32,
     target_location: bytecode.RegisterLocation,
 ) !void {
     const actor = vm_context.getActor();
     const slots = actor.slot_stack.lastNItems(slot_count);
-    var total_slot_count: u32 = 0;
-    var total_assignable_slot_count: u8 = 0;
+    var total_slot_count: u16 = 0;
+    var total_assignable_slot_count: u15 = 0;
     var argument_slot_count: u8 = 0;
     for (slots, 0..) |slot, i| {
         total_slot_count += slot.requiredSlotSpace(slots[0..i]);

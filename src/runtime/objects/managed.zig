@@ -1,11 +1,10 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Map = @import("map.zig").Map;
 const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
@@ -78,33 +77,27 @@ pub const Managed = extern struct {
     };
     pub const ExtraBits = Object.ExtraBits.reserve(ManagedType);
 
-    pub fn create(map_map: Map.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID, managed_type: ManagedType, value: GenericValue) !Managed.Ptr {
+    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, managed_type: ManagedType, value: GenericValue) !Managed.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
         const self: Managed.Ptr = @ptrCast(memory_area);
-        self.init(actor_id, map_map, managed_type, value);
+        self.init(actor_id, managed_type, value);
 
         try token.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
     }
 
-    fn init(self: Managed.Ptr, actor_id: Actor.ActorID, map: Map.Ptr, managed_type: ManagedType, value: GenericValue) void {
-        self.object = .{
-            .object_information = .{
-                .object_type = .Managed,
-                .actor_id = actor_id,
-            },
-            .map = map.asValue(),
-        };
+    fn init(self: Managed.Ptr, actor_id: Actor.ActorID, managed_type: ManagedType, value: GenericValue) void {
+        self.object.init(.Managed, actor_id);
         self.setManagedType(managed_type);
         self.value = value;
     }
 
     fn setManagedType(self: Managed.Ptr, managed_type: ManagedType) void {
-        Managed.ExtraBits.write(&self.object.object_information, managed_type);
+        Managed.ExtraBits.write(self.object.getMetadata(), managed_type);
     }
 
     pub fn getManagedType(self: Managed.Ptr) ManagedType {
-        return Managed.ExtraBits.read(self.object.object_information);
+        return Managed.ExtraBits.read(self.object.getMetadata().*);
     }
 
     pub fn canFinalize(self: Managed.Ptr) bool {

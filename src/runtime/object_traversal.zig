@@ -1,11 +1,12 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
-const Map = @import("objects/map.zig").Map;
+const Map = @import("map.zig").Map;
 const Slot = @import("slot.zig").Slot;
 const Value = @import("value.zig").Value;
 const Object = @import("object.zig").Object;
+const MapObject = @import("object.zig").MapObject;
 
 const TraverseObjectGraphLink = struct {
     previous: ?*const @This(),
@@ -22,12 +23,11 @@ fn traverseObjectGraphInner(
         .ObjectMarker => unreachable,
         .Integer, .FloatingPoint => value,
         .ObjectReference => value: {
-            const old_object = value.asObject();
+            const old_base_object = value.asBaseObject();
             const old_object_address = value.asObjectAddress();
-            const old_object_type = old_object.object_information.object_type;
 
             // Globally reachable objects are never traversed.
-            if (old_object.object_information.reachability == .Global)
+            if (old_base_object.metadata.reachability == .Global)
                 break :value value;
 
             {
@@ -50,35 +50,87 @@ fn traverseObjectGraphInner(
                         //       There are no cycles in this object graph, but
                         //       D is still referenced twice. Therefore D's new
                         //       address must be the same on both callback runs.
-                        const new_object = try visitor.visit(old_object);
-                        break :value new_object.asValue();
+                        const new_base_object = try visitor.visit(old_base_object);
+                        break :value new_base_object.asValue();
                     }
                 }
             }
 
             const current_link = TraverseObjectGraphLink{ .previous = previous_link, .address = old_object_address };
 
-            const new_map = try traverseObjectGraphInner(old_object.map, visitor, &current_link);
-            // FIXME: Move this switch into object delegation.
-            switch (old_object_type) {
-                .ForwardedObject, .Activation, .Actor => unreachable,
+            switch (old_base_object.metadata.type) {
+                .Object => {
+                    const old_object = old_base_object.asObject().?;
+                    const old_object_type = old_object.getMetadata().type;
+
+                    // TODO: Have a more robust way of knowing which object
+                    //       types contain a map. Maybe MapObject could hold
+                    //       a register of which object types contain a map.
+                    const new_map = switch (old_object_type) {
+                        .Slots,
+                        .Method,
+                        .Block,
+                        .Array,
+                        .AddrInfo,
+                        => try traverseObjectGraphInner(@as(MapObject.Ptr, @ptrCast(old_object)).map, visitor, &current_link),
+                        else => null,
+                    };
+                    // FIXME: Move this switch into object delegation.
+                    switch (old_object_type) {
+                        .ForwardedObject, .Activation, .Actor => unreachable,
+                        .Slots, .Method, .Block => {
+                            const new_base_object = (try visitor.visit(old_base_object)).asObject().?;
+                            @as(MapObject.Ptr, @ptrCast(new_base_object)).map = new_map.?;
+
+                            const assignable_slots = switch (old_object_type) {
+                                // FIXME: Move this to something like Object.getSlots().
+                                .Slots => new_base_object.asType(.Slots).?.getAssignableSlots(),
+                                .Method => new_base_object.asType(.Method).?.getAssignableSlots(),
+                                .Block => new_base_object.asType(.Block).?.getAssignableSlots(),
+                                else => unreachable,
+                            };
+
+                            for (assignable_slots) |*v| {
+                                v.* = try traverseObjectGraphInner(v.*, visitor, &current_link);
+                            }
+
+                            break :value new_base_object.asValue();
+                        },
+                        .Array => {
+                            const array = (try visitor.visit(old_base_object)).asObject().?.asType(.Array).?;
+                            array.object.map = new_map.?;
+
+                            for (array.getValues()) |*v| {
+                                v.* = try traverseObjectGraphInner(value, visitor, &current_link);
+                            }
+
+                            break :value array.asValue();
+                        },
+                        .AddrInfo => {
+                            const new_object = (try visitor.visit(old_base_object)).asObject().?.asType(.AddrInfo).?;
+                            new_object.object.map = new_map.?;
+                            break :value new_object.asValue();
+                        },
+                        .ByteArray, .ActorProxy, .Managed => {
+                            const new_base_object = try visitor.visit(old_base_object);
+                            break :value new_base_object.asValue();
+                        },
+                    }
+                },
                 .Map => {
-                    const old_map: Map.Ptr = old_object.mustBeType(.Map);
-                    const map_type = old_map.map_information.map_type;
+                    const old_map = old_base_object.asMap().?;
+                    const map_type = old_map.getMetadata().type;
                     // Copy the map itself if necessary
-                    const new_object = switch (map_type) {
-                        // The map-map will always be immutable.
-                        .MapMap => old_object,
-                        .Slots, .Method, .Block => try visitor.visit(old_object),
+                    const new_map = switch (map_type) {
+                        .Slots, .Method, .Block => (try visitor.visit(old_base_object)).asMap().?,
                         // Array maps will always be immutable, because they
                         // don't point to anything that's not globally
                         // reachable.
-                        .Array => old_object,
+                        .Array => old_map,
                         // TODO: This is incorrect, move object traversal
                         //       responsibility to the object type.
-                        .AddrInfo => old_object,
+                        .AddrInfo => old_map,
                     };
-                    const map: Map.Ptr = new_object.mustBeType(.Map);
 
                     // Traverse the map contents and update anything non-globally reachable
                     switch (map_type) {
@@ -88,8 +140,8 @@ fn traverseObjectGraphInner(
                                 //       traversal responsibility to the object
                                 //       type.
                                 .AddrInfo => unreachable,
-                                .MapMap, .Array => unreachable,
-                                inline else => |t| map.mustBeType(t).getSlots(),
+                                .Array => unreachable,
+                                inline else => |t| new_map.asType(t).?.getSlots(),
                             };
 
                             for (slots) |*slot| {
@@ -98,44 +150,10 @@ fn traverseObjectGraphInner(
                                 }
                             }
                         },
-                        .MapMap, .Array, .AddrInfo => {},
+                        .Array, .AddrInfo => {},
                     }
 
-                    break :value new_object.asValue();
-                },
-                .Slots, .Method, .Block => {
-                    const new_object = try visitor.visit(old_object);
-                    new_object.map = new_map;
-
-                    const assignable_slots = switch (old_object_type) {
-                        // FIXME: Move this to something like Object.getSlots().
-                        .Slots => new_object.asType(.Slots).?.getAssignableSlots(),
-                        .Method => new_object.asType(.Method).?.getAssignableSlots(),
-                        .Block => new_object.asType(.Block).?.getAssignableSlots(),
-                        else => unreachable,
-                    };
-
-                    for (assignable_slots) |*v| {
-                        v.* = try traverseObjectGraphInner(v.*, visitor, &current_link);
-                    }
-
-                    break :value new_object.asValue();
-                },
-                .Array => {
-                    const new_object = try visitor.visit(old_object);
-                    new_object.map = new_map;
-                    const array = new_object.mustBeType(.Array);
-
-                    for (array.getValues()) |*v| {
-                        v.* = try traverseObjectGraphInner(value, visitor, &current_link);
-                    }
-
-                    break :value new_object.asValue();
-                },
-                .ByteArray, .ActorProxy, .Managed, .AddrInfo => {
-                    const new_object = try visitor.visit(old_object);
-                    new_object.map = new_map;
-                    break :value new_object.asValue();
+                    break :value new_map.asValue();
                 },
             }
         },

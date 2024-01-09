@@ -1,20 +1,22 @@
-// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Map = @import("map.zig").Map;
+const Map = @import("../map.zig").Map;
 const Heap = @import("../Heap.zig");
 const Slot = @import("../slot.zig").Slot;
 const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig").Object;
-const traversal = @import("../object_traversal.zig");
-const MapBuilder = @import("../map_builder.zig").MapBuilder;
 const pointer = @import("../../utility/pointer.zig");
+const traversal = @import("../object_traversal.zig");
+const MapObject = @import("../object.zig").MapObject;
+const BaseObject = @import("../base_object.zig").BaseObject;
+const MapBuilder = @import("../map_builder.zig").MapBuilder;
 const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 
@@ -23,19 +25,19 @@ const SLOTS_LOOKUP_DEBUG = debug.SLOTS_LOOKUP_DEBUG;
 /// Information about added/changed slots when an object is merged into another.
 const MergeInfo = struct {
     previous_slots: usize,
-    previous_assignable_slot_values: usize,
+    previous_assignable_slots: usize,
     slots: usize,
-    assignable_slot_values: usize,
+    assignable_slots: usize,
     has_updated_slots: bool,
 
     pub fn hasChanges(self: MergeInfo) bool {
         return self.has_updated_slots or
             self.previous_slots != self.slots or
-            self.previous_assignable_slot_values != self.assignable_slot_values;
+            self.previous_assignable_slots != self.assignable_slots;
     }
 
     pub fn assignableSlotCountChanged(self: MergeInfo) bool {
-        return self.previous_assignable_slot_values != self.assignable_slot_values;
+        return self.previous_assignable_slots != self.assignable_slots;
     }
 };
 
@@ -70,7 +72,7 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
         }
 
         /// Return the amount of bytes required to create this object.
-        pub fn requiredSizeForAllocation(assignable_slot_count: u8) usize {
+        pub fn requiredSizeForAllocation(assignable_slot_count: u15) usize {
             return @sizeOf(ObjectT) + assignable_slot_count * @sizeOf(Value);
         }
 
@@ -106,7 +108,7 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
 /// Self Handbook, §3.3.8 The lookup algorithm
 pub fn slotsLookup(
     comptime ObjectType: type,
-    object: *ObjectType,
+    object: ObjectType.Ptr,
     selector_hash: object_lookup.SelectorHash,
     previously_visited: ?*const object_lookup.VisitedValueLink,
 ) object_lookup.LookupResult {
@@ -174,40 +176,37 @@ pub fn slotsLookup(
 /// is stored on the map, while the mutable slot values are stored on the object
 /// itself.
 pub const Slots = extern struct {
-    object: Object align(@alignOf(u64)),
+    object: MapObject align(@alignOf(u64)),
 
     pub const Ptr = pointer.HeapPtr(Slots, .Mutable);
 
     pub usingnamespace SlotsLikeObjectBase(Slots);
     pub usingnamespace AssignableSlotsMixin(Slots);
 
-    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, map: SlotsMap.Ptr, assignable_slot_values: []const Value) Slots.Ptr {
-        if (assignable_slot_values.len != map.getAssignableSlotCount()) {
+    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, map: SlotsMap.Ptr, assignable_slots: []const Value) Slots.Ptr {
+        if (assignable_slots.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
-                .{ map.getAssignableSlotCount(), assignable_slot_values.len },
+                .{ map.getAssignableSlotCount(), assignable_slots.len },
             );
         }
 
-        const size = Slots.requiredSizeForAllocation(@intCast(assignable_slot_values.len));
+        const size = Slots.requiredSizeForAllocation(@intCast(assignable_slots.len));
 
         const memory_area = token.allocate(.Object, size);
         var self: Slots.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map);
-        @memcpy(self.getAssignableSlots(), assignable_slot_values);
+        @memcpy(self.getAssignableSlots(), assignable_slots);
 
         return self;
     }
 
     fn init(self: Slots.Ptr, actor_id: Actor.ActorID, map: SlotsMap.Ptr) void {
-        self.object = .{
-            .object_information = .{ .object_type = .Slots, .actor_id = actor_id },
-            .map = map.asValue(),
-        };
+        self.object.init(.Slots, actor_id, map.asValue());
     }
 
     pub fn getMap(self: Slots.Ptr) SlotsMap.Ptr {
-        return self.object.getMap().mustBeType(.Slots);
+        return self.object.getMap().asType(.Slots).?;
     }
 
     pub fn getSlots(self: Slots.Ptr) Slot.Slice {
@@ -279,7 +278,7 @@ pub const Slots = extern struct {
 
         forSlotsInMergeOrder(self, source_object, struct {
             map_builder: *@TypeOf(map_builder),
-            target_object_reachability: @TypeOf(self.object.object_information.reachability),
+            target_object_reachability: @TypeOf(self.object.getMetadata().reachability),
 
             pub fn visit(context: @This(), object: Slots.Ptr, slot: Slot) !void {
                 const slot_copy = slot.copy(object);
@@ -290,15 +289,15 @@ pub const Slots = extern struct {
                 // reachable as well.
                 if (context.target_object_reachability == .Global) {
                     _ = traversal.traverseNonGloballyReachableObjectGraph(slot_copy.value, struct {
-                        pub fn visit(s: @This(), obj: Object.Ptr) error{}!Object.Ptr {
+                        pub fn visit(s: @This(), base_object: BaseObject.Ptr) error{}!BaseObject.Ptr {
                             _ = s;
-                            obj.object_information.reachability = .Global;
-                            return obj;
+                            base_object.metadata.reachability = .Global;
+                            return base_object;
                         }
                     }{}) catch unreachable;
                 }
             }
-        }{ .map_builder = &map_builder, .target_object_reachability = self.object.object_information.reachability }) catch unreachable;
+        }{ .map_builder = &map_builder, .target_object_reachability = self.object.getMetadata().reachability }) catch unreachable;
 
         // At this point, we have a map builder which has initialized our new
         // map with all the constant slots.
@@ -309,7 +308,7 @@ pub const Slots = extern struct {
             // We do need to create a new object, and then update all the heap
             // references to it.
             const new_object = map_builder.createObject();
-            new_object.object.object_information.reachability = self.object.object_information.reachability;
+            new_object.object.getMetadata().reachability = self.object.getMetadata().reachability;
             try token.heap.updateAllReferencesTo(self.asValue(), new_object.asValue());
             return new_object;
         }
@@ -339,7 +338,7 @@ pub const Slots = extern struct {
         if (map_needs_change)
             required_size += SlotsMap.requiredSizeForAllocation(@intCast(merge_info.slots));
         if (object_needs_change)
-            required_size += Slots.requiredSizeForAllocation(@intCast(merge_info.assignable_slot_values));
+            required_size += Slots.requiredSizeForAllocation(@intCast(merge_info.assignable_slots));
 
         return required_size;
     }
@@ -353,7 +352,7 @@ pub const Slots = extern struct {
         var slots: usize = 0;
         // usize despite requiredAssignableSlotValueSpace returning isize, as
         // this should never go negative (that'd be a bug).
-        var assignable_slot_values: usize = 0;
+        var assignable_slots: usize = 0;
         var has_updated_slots = false;
 
         // Unfortunately we need to allocate an ArrayList here, because we do
@@ -371,14 +370,14 @@ pub const Slots = extern struct {
         const MergeCalculator = struct {
             merged_slots: *std.ArrayList(Slot),
             slots: *usize,
-            assignable_slot_values: *usize,
+            assignable_slots: *usize,
             has_updated_slots: *bool,
             source_object: Slots.Ptr,
 
             fn visit(context: @This(), object: Slots.Ptr, slot: Slot) !void {
                 context.slots.* += slot.requiredSlotSpace(context.merged_slots.items);
-                const context_assignable_slot_values: isize = @intCast(context.assignable_slot_values.*);
-                context.assignable_slot_values.* = @intCast(context_assignable_slot_values +
+                const context_assignable_slots: isize = @intCast(context.assignable_slots.*);
+                context.assignable_slots.* = @intCast(context_assignable_slots +
                     slot.requiredAssignableSlotValueSpace(context.merged_slots.items));
                 try context.merged_slots.append(slot);
 
@@ -390,16 +389,16 @@ pub const Slots = extern struct {
         try forSlotsInMergeOrder(target_object, source_object, MergeCalculator{
             .merged_slots = &merged_slots,
             .slots = &slots,
-            .assignable_slot_values = &assignable_slot_values,
+            .assignable_slots = &assignable_slots,
             .has_updated_slots = &has_updated_slots,
             .source_object = source_object,
         });
 
         return MergeInfo{
             .previous_slots = target_object.getSlots().len,
-            .previous_assignable_slot_values = target_object.getMap().getAssignableSlotCount(),
+            .previous_assignable_slots = target_object.getMap().getAssignableSlotCount(),
             .slots = slots,
-            .assignable_slot_values = assignable_slot_values,
+            .assignable_slots = assignable_slots,
             .has_updated_slots = has_updated_slots,
         };
     }
@@ -446,15 +445,18 @@ pub fn SlotsLikeMapBase(comptime MapT: type) type {
             return Value.fromObjectAddress(asObjectAddress(self));
         }
 
-        /// Return the amount of assignable slots that this slot map
-        /// contains.
-        pub fn getAssignableSlotCount(self: MapT.Ptr) u8 {
-            // 255 assignable slots ought to be enough for everybody.
-            return asSlotsMap(self).information.assignable_slot_count;
+        pub fn getSlotCount(self: MapT.Ptr) u16 {
+            return asSlotsMap(self).map.getMetadata().slots;
         }
 
-        pub fn setAssignableSlotCount(self: MapT.Ptr, count: u8) void {
-            asSlotsMap(self).information.assignable_slot_count = count;
+        /// Return the amount of assignable slots that this slot map
+        /// contains.
+        pub fn getAssignableSlotCount(self: MapT.Ptr) u15 {
+            return asSlotsMap(self).map.getMetadata().assignable_slots;
+        }
+
+        pub fn setAssignableSlotCount(self: MapT.Ptr, count: u15) void {
+            asSlotsMap(self).map.getMetadata().assignable_slots = count;
         }
 
         fn asSlotsMap(self: MapT.Ptr) SlotsMap.Ptr {
@@ -470,26 +472,21 @@ pub fn SlotsLikeMapBase(comptime MapT: type) type {
 /// The map of a slots object, consisting of a series of Slots.
 pub const SlotsMap = extern struct {
     map: Map align(@alignOf(u64)),
-    // Information about the slots within this map. Slots begin after this word.
-    information: SlotInformation align(@alignOf(u64)),
+    // FIXME: We need this extra memory for forwarding addresses.
+    //        This can be removed once we reduce object marking to a single
+    //        bit, which will allow us to embed forwarding addresses in the
+    //        object header word directly.
+    unused: Value align(@alignOf(u64)),
 
     pub const Ptr = pointer.HeapPtr(SlotsMap, .Mutable);
     pub const ObjectType = Slots;
-    const SlotInformation = packed struct(u64) {
-        marker: u2 = @intFromEnum(Value.ValueType.Integer),
-        padding: u6 = 0,
-        assignable_slot_count: u8 = 0,
-        // Maps inheriting from this map can use this area for extra information.
-        extra: u16 = 0,
-        slot_count: u32,
-    };
 
     pub usingnamespace SlotsLikeMapBase(SlotsMap);
 
     /// Create a new slots map. Takes the amount of slots this object will have.
     ///
     /// IMPORTANT: All slots *must* be initialized right after creation.
-    pub fn create(token: *Heap.AllocationToken, slot_count: u32) SlotsMap.Ptr {
+    pub fn create(token: *Heap.AllocationToken, slot_count: u16) SlotsMap.Ptr {
         const size = SlotsMap.requiredSizeForAllocation(slot_count);
 
         const memory_area = token.allocate(.Object, size);
@@ -499,32 +496,14 @@ pub const SlotsMap = extern struct {
         return self;
     }
 
-    pub fn createWithMapMap(map_map: Map.Ptr, token: *Heap.AllocationToken, slot_count: u32) SlotsMap.Ptr {
-        const size = SlotsMap.requiredSizeForAllocation(slot_count);
-
-        const memory_area = token.allocate(.Object, size);
-        var self: SlotsMap.Ptr = @ptrCast(memory_area);
-        self.initWithMapMap(map_map, slot_count);
-
-        return self;
-    }
-
-    pub fn init(self: SlotsMap.Ptr, slot_count: u32) void {
+    pub fn init(self: SlotsMap.Ptr, slot_count: u16) void {
         self.map.init(.Slots);
-        self.information = .{
-            .slot_count = slot_count,
-        };
-    }
-
-    fn initWithMapMap(self: SlotsMap.Ptr, map_map: Map.Ptr, slot_count: u32) void {
-        self.map.initWithMapMap(.Slots, map_map);
-        self.information = .{
-            .slot_count = slot_count,
-        };
+        self.map.getMetadata().slots = slot_count;
+        self.unused = Value.fromUnsignedInteger(0);
     }
 
     pub fn clone(self: SlotsMap.Ptr, token: *Heap.AllocationToken) SlotsMap.Ptr {
-        const new_map = create(token, self.information.slot_count);
+        const new_map = create(token, self.map.getMetadata().slots);
 
         new_map.setAssignableSlotCount(self.getAssignableSlotCount());
         @memcpy(new_map.getSlots(), self.getSlots());
@@ -544,7 +523,7 @@ pub const SlotsMap = extern struct {
     }
 
     pub fn getSizeInMemory(self: SlotsMap.Ptr) usize {
-        return requiredSizeForAllocation(self.information.slot_count);
+        return requiredSizeForAllocation(self.map.getMetadata().slots);
     }
 
     pub fn getSizeForCloning(self: SlotsMap.Ptr) usize {
@@ -552,7 +531,7 @@ pub const SlotsMap = extern struct {
     }
 
     /// Return the size required for the whole map with the given slot count.
-    pub fn requiredSizeForAllocation(slot_count: u32) usize {
+    pub fn requiredSizeForAllocation(slot_count: u16) usize {
         return @sizeOf(SlotsMap) + slot_count * @sizeOf(Slot);
     }
 };

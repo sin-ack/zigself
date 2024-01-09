@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -6,6 +6,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
+const Map = @import("map.zig").Map;
 const hash = @import("../utility/hash.zig");
 const Heap = @import("./Heap.zig");
 const Actor = @import("./Actor.zig");
@@ -14,6 +15,7 @@ const Object = @import("object.zig").Object;
 const RefPtr = @import("../utility/ref_counted.zig").RefPtr;
 const context = @import("context.zig");
 const ByteArray = @import("./ByteArray.zig");
+const BaseObject = @import("base_object.zig").BaseObject;
 const LookupResult = object_lookup.LookupResult;
 const SelectorHash = object_lookup.SelectorHash;
 const object_lookup = @import("object_lookup.zig");
@@ -98,22 +100,30 @@ pub const Value = packed struct {
         return @bitCast(self.data & ~ValueMarkerMask);
     }
 
-    /// Return the object address stored in this object as a pointer.
+    /// Return the object address stored in this value as a pointer.
     pub inline fn asObjectAddress(self: Value) [*]u64 {
         std.debug.assert(self.isObjectReference());
         const address: usize = @intCast(self.data & ~ValueMarkerMask);
         return @ptrFromInt(address);
     }
 
+    /// Return the base object the address of which is stored in this value.
+    pub inline fn asBaseObject(self: Value) BaseObject.Ptr {
+        return BaseObject.fromAddress(self.asObjectAddress());
+    }
+
     /// Return the object the address of which is stored in this value.
     pub inline fn asObject(self: Value) Object.Ptr {
-        std.debug.assert(self.isObjectReference());
-        return Object.fromAddress(self.asObjectAddress());
+        return self.asBaseObject().asObject().?;
+    }
+
+    /// Return the map the address of which is stored in this value.
+    pub inline fn asMap(self: Value) Map.Ptr {
+        return self.asBaseObject().asMap().?;
     }
 
     /// Return the byte vector the address of which is stored in this value.
     pub inline fn asByteArray(self: Value) ByteArray {
-        std.debug.assert(self.isObjectReference());
         return ByteArray.fromAddress(self.asObjectAddress());
     }
 
@@ -277,7 +287,7 @@ pub fn ObjectValue(comptime ObjectT: type) type {
         }
 
         pub fn get(self: Self) ObjectT.Ptr {
-            return self.value.asObject().mustBeType(ObjectT.Type);
+            return self.value.asObject().asType(ObjectT.Type).?;
         }
     };
 }
