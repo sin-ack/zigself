@@ -84,7 +84,7 @@ fn inspectObject(
         std.debug.print("(G) ", .{});
     }
 
-    std.debug.print("(#{}) ", .{object.getMetadata().actor_id});
+    std.debug.print("(#{}) ", .{@intFromEnum(object.getMetadata().actor_id)});
 
     // FIXME: Move this into object delegation.
     switch (object.getMetadata().type) {
