@@ -488,7 +488,7 @@ pub fn clearMailbox(self: *Actor, allocator: Allocator) void {
 pub fn canWriteTo(self: *Actor, value: Value) bool {
     return switch (value.getType()) {
         .ObjectMarker => unreachable,
-        .Integer, .FloatingPoint => true,
+        .Integer => true,
         .ObjectReference => writable: {
             const object = value.asObject();
             break :writable self.id == .Global or object.getMetadata().reachability != .Global;
@@ -502,7 +502,7 @@ pub fn canWriteTo(self: *Actor, value: Value) bool {
 pub fn ensureCanRead(self: *Actor, value: Value, source_range: SourceRange) void {
     switch (value.getType()) {
         .ObjectMarker => unreachable,
-        .Integer, .FloatingPoint => {},
+        .Integer => {},
         .ObjectReference => {
             const object = value.asObject();
             if (object.getMetadata().reachability != .Global and object.getMetadata().actor_id != self.id)

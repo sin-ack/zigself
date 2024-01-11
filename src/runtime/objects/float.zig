@@ -11,6 +11,7 @@ const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
 const context = @import("../context.zig");
 const pointer = @import("../../utility/pointer.zig");
+const GenericValue = @import("../value.zig").Value;
 const IntegerValue = @import("../value.zig").IntegerValue;
 const object_lookup = @import("../object_lookup.zig");
 
@@ -32,7 +33,7 @@ pub const Float = extern struct {
     const ExtraBits = Object.ExtraBits.reserve(@Type(.{ .Int = .{ .bits = BottomBitCount, .signedness = .unsigned } }));
 
     /// Create a new Float from the given 64-bit float.
-    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, value: f64) !Float.Ptr {
+    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, value: f64) Float.Ptr {
         const memory_area = token.allocate(.Object, requiredSizeForAllocation());
         var self: Float.Ptr = @ptrCast(memory_area);
         self.init(actor_id, value);
@@ -57,6 +58,12 @@ pub const Float = extern struct {
         const value_bits: u64 = @bitCast(value);
         Float.ExtraBits.write(self.object.getMetadata(), @intCast(value_bits & ((1 << BottomBitCount) - 1)));
         self.top_bits = IntegerValue(.Unsigned).init(value_bits >> BottomBitCount);
+    }
+
+    // --- Casting ---
+
+    pub fn asValue(self: Float.Ptr) GenericValue {
+        return GenericValue.fromObjectAddress(@ptrCast(self));
     }
 
     // --- Object interface ---

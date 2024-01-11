@@ -32,7 +32,6 @@ pub const Value = packed struct {
     pub const ValueType = enum(u2) {
         Integer = 0b00,
         ObjectReference = 0b01,
-        FloatingPoint = 0b10,
         ObjectMarker = 0b11,
     };
 
@@ -56,11 +55,6 @@ pub const Value = packed struct {
         return .{ .data = (integer << 2) | @intFromEnum(ValueType.Integer) };
     }
 
-    pub inline fn fromFloatingPoint(floating_point: f64) Value {
-        const floating_point_as_int: u64 = @bitCast(floating_point);
-        return .{ .data = (floating_point_as_int & ~ValueMarkerMask) | @intFromEnum(ValueType.FloatingPoint) };
-    }
-
     /// Return the type of this value.
     pub inline fn getType(self: Value) ValueType {
         return @enumFromInt(self.data & ValueMarkerMask);
@@ -76,11 +70,6 @@ pub const Value = packed struct {
         return self.getType() == .ObjectReference;
     }
 
-    /// Return whether this value is a floating point number.
-    pub inline fn isFloatingPoint(self: Value) bool {
-        return self.getType() == .FloatingPoint;
-    }
-
     /// Return this value as an integer.
     pub inline fn asInteger(self: Value) i64 {
         std.debug.assert(self.isInteger());
@@ -92,12 +81,6 @@ pub const Value = packed struct {
     pub inline fn asUnsignedInteger(self: Value) u64 {
         std.debug.assert(self.isInteger());
         return self.data >> 2;
-    }
-
-    /// Return this value as a floating point number.
-    pub inline fn asFloatingPoint(self: Value) f64 {
-        std.debug.assert(self.isFloatingPoint());
-        return @bitCast(self.data & ~ValueMarkerMask);
     }
 
     /// Return the object address stored in this value as a pointer.
@@ -158,14 +141,6 @@ pub const Value = packed struct {
 
                 return integer_traits.lookupByHash(selector_hash);
             },
-            .FloatingPoint => {
-                if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits float\n", .{});
-                const float_traits = vm.float_traits.getValue();
-                if (selector_hash.regular == object_lookup.parent_hash)
-                    return LookupResult{ .Regular = float_traits };
-
-                return float_traits.lookupByHash(selector_hash);
-            },
         };
     }
 
@@ -173,7 +148,7 @@ pub const Value = packed struct {
     pub fn clone(self: Value, token: *Heap.AllocationToken, actor_id: Actor.ActorID) Value {
         return switch (self.getType()) {
             .ObjectMarker => unreachable,
-            .Integer, .FloatingPoint => Value{ .data = self.data },
+            .Integer => Value{ .data = self.data },
             // NOTE: The only error condition that can happen here is during method and block map cloning.
             //       Since user code is unable to do this, there is no reason to propagate a try here.
             .ObjectReference => (self.asObject().clone(token, actor_id) catch unreachable).asValue(),

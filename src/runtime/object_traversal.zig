@@ -21,7 +21,7 @@ fn traverseObjectGraphInner(
 ) anyerror!Value {
     return switch (value.getType()) {
         .ObjectMarker => unreachable,
-        .Integer, .FloatingPoint => value,
+        .Integer => value,
         .ObjectReference => value: {
             const old_base_object = value.asBaseObject();
             const old_object_address = value.asObjectAddress();

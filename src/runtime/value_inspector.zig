@@ -30,7 +30,6 @@ fn inspectValueInternal(
     switch (value.getType()) {
         .ObjectMarker => unreachable,
         .Integer => std.debug.print("<integer> {d}", .{value.asInteger()}),
-        .FloatingPoint => std.debug.print("<floating point> {d}", .{value.asFloatingPoint()}),
         .ObjectReference => return inspectObject(display_type, vm, value.asObject(), indent, visited_object_link),
     }
 }

@@ -11,7 +11,6 @@ const debug = @import("../debug.zig");
 const Actor = @import("./Actor.zig");
 const bless = @import("./object_bless.zig");
 const Value = @import("./value.zig").Value;
-const BaseObject = @import("./base_object.zig").BaseObject;
 const bytecode = @import("./bytecode.zig");
 const BlockMap = block_object.BlockMap;
 const SlotsMap = slots_object.SlotsMap;
@@ -19,10 +18,12 @@ const ByteArray = @import("./ByteArray.zig");
 const MethodMap = method_object.MethodMap;
 const traversal = @import("./object_traversal.zig");
 const Activation = @import("./Activation.zig");
+const BaseObject = @import("./base_object.zig").BaseObject;
 const primitives = @import("./primitives.zig");
 const vm_context = @import("context.zig");
 const SourceRange = @import("./SourceRange.zig");
 const BlockObject = block_object.Block;
+const FloatObject = @import("objects/float.zig").Float;
 const SlotsObject = slots_object.Slots;
 const slot_import = @import("./slot.zig");
 const block_object = @import("objects/block.zig");
@@ -279,7 +280,14 @@ fn opcodeCreateInteger(context: *InterpreterContext) InterpreterError!ExecutionR
 fn opcodeCreateFloatingPoint(context: *InterpreterContext) InterpreterError!ExecutionResult {
     const block = context.getCurrentBytecodeBlock();
     const index = context.getInstructionIndex();
-    context.vm.writeRegister(block.getTargetLocation(index), Value.fromFloatingPoint(block.getTypedPayload(index, .CreateFloatingPoint)));
+
+    var token = try context.vm.heap.getAllocation(FloatObject.requiredSizeForAllocation());
+    defer token.deinit();
+
+    const value = block.getTypedPayload(index, .CreateFloatingPoint);
+    const float_object = FloatObject.create(&token, context.actor.id, value);
+
+    context.vm.writeRegister(block.getTargetLocation(index), float_object.asValue());
     return ExecutionResult.normal();
 }
 
