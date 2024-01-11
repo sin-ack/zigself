@@ -111,7 +111,7 @@ fn traverseObjectGraphInner(
                             new_object.object.map = new_map.?;
                             break :value new_object.asValue();
                         },
-                        .ByteArray, .ActorProxy, .Managed => {
+                        .ByteArray, .ActorProxy, .Managed, .Float => {
                             const new_base_object = try visitor.visit(old_base_object);
                             break :value new_base_object.asValue();
                         },

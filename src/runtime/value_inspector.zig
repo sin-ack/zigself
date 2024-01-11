@@ -169,6 +169,9 @@ fn inspectObject(
             // TODO: Add more detailed inspection
             std.debug.print("<actor proxy>", .{});
         },
+        .Float => {
+            std.debug.print("<float> {}", .{object.asType(.Float).?.get()});
+        },
         .AddrInfo => {
             const addrinfo_map = object.asType(.AddrInfo).?.getMap();
 

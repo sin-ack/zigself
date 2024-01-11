@@ -25,6 +25,7 @@ pub const ObjectType = enum(u5) {
     Managed,
     Actor,
     ActorProxy,
+    Float,
     // Intrinsic objects
     AddrInfo,
     // This is a special object type that overwrites the current object when the
@@ -44,6 +45,7 @@ pub const ObjectRegistry = union(ObjectType) {
     Managed: @import("objects/managed.zig").Managed,
     Actor: @import("objects/actor.zig").Actor,
     ActorProxy: @import("objects/actor_proxy.zig").ActorProxy,
+    Float: @import("objects/float.zig").Float,
     // Intrinsic objects
     AddrInfo: @import("objects/intrinsic/addrinfo.zig").AddrInfo,
     // This is a special object type that overwrites the current object when the
