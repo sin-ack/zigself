@@ -116,7 +116,7 @@ pub fn format(
 ) !void {
     _ = fmt;
     _ = options;
-    const creator_message_byte_array = activation.creator_message.asByteArray();
+    const creator_message_byte_array = activation.creator_message.asByteArray().?;
     try std.fmt.format(writer, "Activation{{ '{s}' created from {}, instruction_index = {}, target_location = {} }}", .{
         creator_message_byte_array.getValues(),
         activation.created_from,
