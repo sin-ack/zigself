@@ -12,9 +12,10 @@ const Actor = @import("Actor.zig");
 const value = @import("value.zig");
 const Object = @import("object.zig").Object;
 const pointer = @import("../utility/pointer.zig");
+const Selector = @import("Selector.zig");
 const MapObject = @import("object.zig").MapObject;
 const ObjectType = @import("object.zig").ObjectType;
-const object_lookup = @import("object_lookup.zig");
+const LookupResult = @import("object_lookup.zig").LookupResult;
 const VirtualMachine = @import("VirtualMachine.zig");
 
 /// A shaped object makes it easy to define an object with well-known slots for
@@ -112,14 +113,14 @@ pub fn IntrinsicMap(comptime MapT: type, comptime object_type: ObjectType) type 
 }
 
 fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8, comptime object_type: ObjectType) type {
-    const field_hashes = blk: {
-        var hashes: []const u64 = &.{};
+    const field_selectors = blk: {
+        var selectors: []const Selector = &.{};
 
         inline for (field_names) |name| {
-            hashes = hashes ++ &[_]u64{hash.stringHash(name)};
+            selectors = selectors ++ &[_]Selector{Selector.fromName(name)};
         }
 
-        break :blk hashes;
+        break :blk selectors;
     };
 
     return extern struct {
@@ -177,20 +178,20 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
 
         pub fn lookup(
             self: Ptr,
-            selector_hash: object_lookup.SelectorHash,
-            previously_visited: ?*const object_lookup.VisitedValueLink,
-        ) object_lookup.LookupResult {
+            selector: Selector,
+            previously_visited: ?*const Selector.VisitedValueLink,
+        ) LookupResult {
             _ = previously_visited;
 
             const map = self.getMap();
 
-            inline for (field_hashes, 0..) |field_hash, i| {
-                if (selector_hash.regular == field_hash) {
-                    return object_lookup.LookupResult{ .Regular = @field(map, field_names[i]) };
+            inline for (field_selectors) |field_selector| {
+                if (selector.equals(field_selector)) {
+                    return LookupResult{ .Regular = @field(map, field_selector.name) };
                 }
             }
 
-            return object_lookup.LookupResult.nothing;
+            return LookupResult.nothing;
         }
 
         pub fn requiredSizeForAllocation() usize {

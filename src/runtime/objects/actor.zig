@@ -9,11 +9,12 @@ const Heap = @import("../Heap.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
 const VMActor = @import("../Actor.zig");
+const pointer = @import("../../utility/pointer.zig");
+const Selector = @import("../Selector.zig");
 const GenericValue = value_import.Value;
 const PointerValue = value_import.PointerValue;
 const value_import = @import("../value.zig");
-const pointer = @import("../../utility/pointer.zig");
-const object_lookup = @import("../object_lookup.zig");
+const LookupResult = @import("../object_lookup.zig").LookupResult;
 const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
@@ -86,9 +87,9 @@ pub const Actor = extern struct {
         self.actor.get().destroy(allocator);
     }
 
-    pub fn lookup(self: Actor.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: Actor.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         _ = self;
-        _ = selector_hash;
+        _ = selector;
         _ = previously_visited;
 
         @panic("TODO: What should lookups on actor objects do?");

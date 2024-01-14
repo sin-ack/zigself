@@ -14,10 +14,10 @@ const debug = @import("../debug.zig");
 const Object = @import("object.zig").Object;
 const RefPtr = @import("../utility/ref_counted.zig").RefPtr;
 const context = @import("context.zig");
+const Selector = @import("Selector.zig");
 const ByteArray = @import("./ByteArray.zig");
 const BaseObject = @import("base_object.zig").BaseObject;
 const LookupResult = object_lookup.LookupResult;
-const SelectorHash = object_lookup.SelectorHash;
 const object_lookup = @import("object_lookup.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
@@ -114,37 +114,26 @@ pub const Value = packed struct(u64) {
         return null;
     }
 
-    /// Perform a lookup on this value by a string selector. If your selector
-    /// is already hashed, use `lookupByHash` instead.
+    /// Perform a lookup on this value by a selector.
     pub fn lookup(
         self: Value,
-        selector: []const u8,
+        selector: Selector,
     ) LookupResult {
-        const selector_hash = SelectorHash.init(selector);
-        if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up \"{s}\" (hash: {x}) on {}\n", .{ selector, selector_hash.regular, self });
-
-        return self.lookupByHash(selector_hash);
-    }
-
-    /// Perform a lookup on this value by a selector hash.
-    pub fn lookupByHash(
-        self: Value,
-        selector_hash: SelectorHash,
-    ) LookupResult {
-        if (selector_hash.regular == object_lookup.self_hash) {
+        if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up {} on {}\n", .{ selector, self });
+        if (selector.equals(Selector.well_known.self)) {
             return .{ .Regular = self };
         }
 
         const vm = context.getVM();
         return switch (self.type) {
-            .Object => selector_hash.lookupObject(self.asObject().?),
+            .Object => selector.lookupObject(self.asObject().?),
             .Integer => {
-                if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits integer\n", .{});
+                if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up on traits integer\n", .{});
                 const integer_traits = vm.integer_traits.getValue();
-                if (selector_hash.regular == object_lookup.parent_hash)
+                if (selector.equals(Selector.well_known.parent))
                     return LookupResult{ .Regular = integer_traits };
 
-                return integer_traits.lookupByHash(selector_hash);
+                return integer_traits.lookup(selector);
             },
         };
     }

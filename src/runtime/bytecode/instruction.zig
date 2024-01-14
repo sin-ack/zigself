@@ -1,10 +1,11 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 
 const Range = @import("../../language/Range.zig");
+const Selector = @import("../Selector.zig");
 const AstcodeRegisterLocation = @import("./astcode/register_location.zig").RegisterLocation;
 const LowcodeRegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
 
@@ -129,15 +130,16 @@ fn Instruction(comptime RegisterLocationT: type) type {
 
             Send: struct {
                 receiver_location: RegisterLocation,
-                message_name: []const u8,
+                selector: Selector,
                 send_index: u32,
             },
             SelfSend: struct {
-                message_name: []const u8,
+                selector: Selector,
                 send_index: u32,
             },
             PrimSend: struct {
                 receiver_location: RegisterLocation,
+                // TODO: Only assign the primitive ID here.
                 message_name: []const u8,
             },
             SelfPrimSend: struct {
@@ -198,11 +200,11 @@ fn Instruction(comptime RegisterLocationT: type) type {
             switch (inst.opcode) {
                 .Send => {
                     const payload = inst.payload.Send;
-                    try std.fmt.format(writer, "({}, \"{s}\") (send #{})", .{ payload.receiver_location, payload.message_name, payload.send_index });
+                    try std.fmt.format(writer, "({}, {}) (send #{})", .{ payload.receiver_location, payload.selector, payload.send_index });
                 },
                 .SelfSend => {
                     const payload = inst.payload.SelfSend;
-                    try std.fmt.format(writer, "(\"{s}\") (send #{})", .{ payload.message_name, payload.send_index });
+                    try std.fmt.format(writer, "({}) (send #{})", .{ payload.selector, payload.send_index });
                 },
                 .PrimSend => {
                     const payload = inst.payload.PrimSend;

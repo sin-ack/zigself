@@ -8,6 +8,7 @@ const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const Value = @import("../value.zig").Value;
 const bless = @import("../object_bless.zig");
+const Selector = @import("../Selector.zig");
 const ActorObject = @import("../objects/actor.zig").Actor;
 const SourceRange = @import("../SourceRange.zig");
 const stack_trace = @import("../stack_trace.zig");
@@ -34,7 +35,7 @@ const FindActorMethodResult = union(enum) {
 fn findActorMethod(
     source_range: SourceRange,
     receiver: Value,
-    selector: []const u8,
+    selector: Selector,
 ) !FindActorMethodResult {
     return switch (receiver.lookup(selector)) {
         .Nothing => FindActorMethodResult{ .RuntimeError = try RuntimeError.initFormatted(
@@ -82,7 +83,8 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
 
     const arguments = context.getArguments("_Genesis:");
     var receiver = context.receiver.getValue();
-    const selector = (try arguments.getObject(0, .ByteArray)).getValues();
+    const selector_name = (try arguments.getObject(0, .ByteArray)).getValues();
+    const selector = Selector.fromName(selector_name);
 
     // FIXME: We should perhaps allow any object to be the genesis actor
     //        context, so blocks can also work for example.
@@ -155,7 +157,8 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
     const arguments = context.getArguments("_ActorSpawn:");
     var receiver = context.receiver.getValue();
-    const spawn_selector = (try arguments.getObject(0, .ByteArray)).getValues();
+    const spawn_selector_name = (try arguments.getObject(0, .ByteArray)).getValues();
+    const spawn_selector = Selector.fromName(spawn_selector_name);
 
     const genesis_actor = context.vm.genesis_actor.?;
 
@@ -242,9 +245,9 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     // Refresh pointers in case the actor execution caused a GC
     receiver = context.receiver.getValue();
 
-    const entrypoint_selector = entrypoint_selector: {
+    const entrypoint_selector_name = entrypoint_selector_name: {
         if (context.actor.entrypoint_selector) |message_value| {
-            break :entrypoint_selector message_value.get().getValues();
+            break :entrypoint_selector_name message_value.get().getValues();
         }
 
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
@@ -252,6 +255,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
             "The actor did not set an entrypoint selector during its spawn activation",
         ));
     };
+    const entrypoint_selector = Selector.fromName(entrypoint_selector_name);
 
     var entrypoint_method: *MethodObject = undefined;
 

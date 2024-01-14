@@ -10,9 +10,10 @@ const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
 const pointer = @import("../../utility/pointer.zig");
+const Selector = @import("../Selector.zig");
 const value_import = @import("../value.zig");
 const GenericValue = value_import.Value;
-const object_lookup = @import("../object_lookup.zig");
+const LookupResult = @import("../object_lookup.zig").LookupResult;
 const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
@@ -114,15 +115,15 @@ pub const Managed = extern struct {
             },
         }
     }
-    pub fn lookup(self: Managed.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: Managed.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Managed.lookup: Looking at a managed object type: {}\n", .{self.getManagedType()});
-        if (selector_hash.regular == object_lookup.value_hash) {
-            return object_lookup.LookupResult{ .Regular = self.value };
+        if (selector.equals(Selector.well_known.value)) {
+            return LookupResult{ .Regular = self.value };
         }
 
-        return object_lookup.LookupResult.nothing;
+        return LookupResult.nothing;
     }
 
     pub fn asObjectAddress(self: Managed.Ptr) [*]u64 {

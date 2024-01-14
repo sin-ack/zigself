@@ -10,6 +10,8 @@ const Slot = @import("../slot.zig").Slot;
 const Actor = @import("../Actor.zig");
 const slots = @import("slots.zig");
 const context = @import("../context.zig");
+const pointer = @import("../../utility/pointer.zig");
+const Selector = @import("../Selector.zig");
 const bytecode = @import("../bytecode.zig");
 const ByteArray = @import("../ByteArray.zig");
 const Activation = @import("../Activation.zig");
@@ -17,9 +19,8 @@ const SlotsObject = slots.Slots;
 const SourceRange = @import("../SourceRange.zig");
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
-const object_lookup = @import("../object_lookup.zig");
+const LookupResult = @import("../object_lookup.zig").LookupResult;
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
-const pointer = @import("../../utility/pointer.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationObject = @import("activation.zig").Activation;
 const SlotsLikeMapBase = slots.SlotsLikeMapBase;
@@ -79,9 +80,9 @@ pub const Method = extern struct {
         @panic("Attempted to call Method.finalize");
     }
 
-    pub fn lookup(self: Method.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: Method.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         _ = self;
-        _ = selector_hash;
+        _ = selector;
         _ = previously_visited;
         @panic("Attempted to call Method.lookup");
     }

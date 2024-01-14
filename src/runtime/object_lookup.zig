@@ -12,13 +12,6 @@ const ActorObject = @import("objects/actor.zig").Actor;
 const MethodObject = @import("objects/method.zig").Method;
 const VirtualMachine = @import("VirtualMachine.zig");
 
-pub const VisitedValueLink = struct { previous: ?*const VisitedValueLink = null, value: Value };
-
-// Well-known hashes
-pub const self_hash = hash.stringHash("self");
-pub const parent_hash = hash.stringHash("parent");
-pub const value_hash = hash.stringHash("value");
-
 /// The result of a lookup operation.
 pub const LookupResult = union(enum) {
     /// Nothing matching the selector was found.
@@ -43,34 +36,4 @@ pub const LookupResult = union(enum) {
     },
 
     pub const nothing = LookupResult{ .Nothing = {} };
-};
-
-/// The hash information of a selector.
-pub const SelectorHash = struct {
-    /// The hash of the selector itself.
-    regular: u32,
-    /// If this is not null, then this selector is of the form `foo:` and this
-    /// hash is the hash of `foo`. It is intended to be compared with assignable
-    /// slots in assignment lookups.
-    assignment_target: ?u32,
-
-    pub fn init(selector: []const u8) SelectorHash {
-        const regular_hash = hash.stringHash(selector);
-        // If the only : in this selector is at the end, then compute an
-        // assignment target hash for it.
-        const assignment_target_hash = if (std.mem.indexOfScalar(u8, selector, ':') == selector.len - 1)
-            hash.stringHash(selector[0 .. selector.len - 1])
-        else
-            null;
-
-        return .{ .regular = regular_hash, .assignment_target = assignment_target_hash };
-    }
-
-    pub fn lookupObject(self: SelectorHash, object: Object.Ptr) LookupResult {
-        return self.chainedLookupObject(object, null);
-    }
-
-    pub fn chainedLookupObject(self: SelectorHash, object: Object.Ptr, previously_visited: ?*const VisitedValueLink) LookupResult {
-        return object.lookup(self, previously_visited);
-    }
 };

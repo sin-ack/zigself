@@ -11,6 +11,7 @@ const debug = @import("../debug.zig");
 const Actor = @import("./Actor.zig");
 const bless = @import("./object_bless.zig");
 const Value = @import("./value.zig").Value;
+const Selector = @import("Selector.zig");
 const bytecode = @import("./bytecode.zig");
 const BlockMap = objects_block.BlockMap;
 const SlotsMap = objects_slots.SlotsMap;
@@ -210,7 +211,7 @@ fn opcodeSend(context: *InterpreterContext) InterpreterError!ExecutionResult {
 
     const payload = block.getTypedPayload(index, .Send);
     const receiver = context.vm.readRegister(payload.receiver_location);
-    return try performSend(receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
+    return try performSend(receiver, payload.selector, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodeSelfSend(context: *InterpreterContext) InterpreterError!ExecutionResult {
@@ -219,7 +220,7 @@ fn opcodeSelfSend(context: *InterpreterContext) InterpreterError!ExecutionResult
 
     const payload = block.getTypedPayload(index, .SelfSend);
     const receiver = context.actor.activation_stack.getCurrent().activation_object.value;
-    return try performSend(receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
+    return try performSend(receiver, payload.selector, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodePrimSend(context: *InterpreterContext) InterpreterError!ExecutionResult {
@@ -435,11 +436,11 @@ fn opcodeVerifySlotSentinel(context: *InterpreterContext) InterpreterError!Execu
 
 fn performSend(
     receiver: Value,
-    message_name: []const u8,
+    selector: Selector,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !ExecutionResult {
-    const result = try sendMessage(receiver, message_name, target_location, source_range);
+    const result = try sendMessage(receiver, selector, target_location, source_range);
     switch (result) {
         .Resolved => |v| {
             var value = v;
@@ -505,7 +506,7 @@ fn performPrimitiveSend(
 /// changed. If the message send fails, returns the runtime error.
 pub fn sendMessage(
     receiver: Value,
-    message_name: []const u8,
+    selector: Selector,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !ExecutionResult {
@@ -525,7 +526,8 @@ pub fn sendMessage(
 
         if (block_receiver.asObject()) |block_object| {
             if (block_object.asType(.Block)) |receiver_as_block| {
-                if (receiver_as_block.isCorrectMessageForBlockExecution(message_name)) {
+                // FIXME: Check hash here instead of name.
+                if (receiver_as_block.isCorrectMessageForBlockExecution(selector.name)) {
                     const argument_count = receiver_as_block.getArgumentSlotCount();
                     const argument_slice = actor.argument_stack.lastNItems(argument_count);
 
@@ -547,7 +549,7 @@ pub fn sendMessage(
 
     actor.ensureCanRead(receiver, source_range);
 
-    return switch (receiver.lookup(message_name)) {
+    return switch (receiver.lookup(selector)) {
         .Regular => |lookup_result| {
             if (lookup_result.asObject()) |lookup_result_object| {
                 if (lookup_result_object.asType(.Method)) |method| {
@@ -642,7 +644,7 @@ pub fn sendMessage(
             actor.argument_stack.popNItems(argument_count);
             return ExecutionResult.resolve(vm.nil());
         },
-        .Nothing => ExecutionResult.runtimeError(try RuntimeError.initFormatted(source_range, "Unknown selector '{s}'", .{message_name})),
+        .Nothing => ExecutionResult.runtimeError(try RuntimeError.initFormatted(source_range, "Unknown selector {}", .{selector})),
     };
 }
 

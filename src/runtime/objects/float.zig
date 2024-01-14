@@ -11,9 +11,10 @@ const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
 const context = @import("../context.zig");
 const pointer = @import("../../utility/pointer.zig");
+const Selector = @import("../Selector.zig");
 const GenericValue = @import("../value.zig").Value;
 const IntegerValue = @import("../value.zig").IntegerValue;
-const object_lookup = @import("../object_lookup.zig");
+const LookupResult = @import("../object_lookup.zig").LookupResult;
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
@@ -99,16 +100,16 @@ pub const Float = extern struct {
     }
 
     /// Perform a lookup on this object.
-    pub fn lookup(self: Float.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: Float.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         _ = self;
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Float.lookup: Looking at traits float\n", .{});
         const float_traits = context.getVM().float_traits.getValue();
-        if (selector_hash.regular == object_lookup.parent_hash)
-            return object_lookup.LookupResult{ .Regular = float_traits };
+        if (selector.equals(Selector.well_known.parent))
+            return LookupResult{ .Regular = float_traits };
 
-        return float_traits.lookupByHash(selector_hash);
+        return float_traits.lookup(selector);
     }
 
     pub fn requiredSizeForAllocation() usize {

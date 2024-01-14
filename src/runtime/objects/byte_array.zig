@@ -10,11 +10,12 @@ const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
 const context = @import("../context.zig");
+const pointer = @import("../../utility/pointer.zig");
+const Selector = @import("../Selector.zig");
 const VMByteArray = @import("../ByteArray.zig");
 const value_import = @import("../value.zig");
 const GenericValue = value_import.Value;
-const pointer = @import("../../utility/pointer.zig");
-const object_lookup = @import("../object_lookup.zig");
+const LookupResult = @import("../object_lookup.zig").LookupResult;
 const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
@@ -99,16 +100,16 @@ pub const ByteArray = extern struct {
         @panic("Attempted to call Array.finalize");
     }
 
-    pub fn lookup(self: ByteArray.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: ByteArray.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         _ = self;
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("ByteArray.lookup: Looking at traits string\n", .{});
         const string_traits = context.getVM().string_traits.getValue();
-        if (selector_hash.regular == object_lookup.parent_hash)
-            return object_lookup.LookupResult{ .Regular = string_traits };
+        if (selector.equals(Selector.well_known.parent))
+            return LookupResult{ .Regular = string_traits };
 
-        return string_traits.lookupByHash(selector_hash);
+        return string_traits.lookup(selector);
     }
 
     /// Return the size for allocating just this object.

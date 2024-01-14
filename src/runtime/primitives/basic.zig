@@ -9,6 +9,7 @@ const Heap = @import("../Heap.zig");
 const Script = @import("../../language/Script.zig");
 const AstGen = @import("../bytecode/AstGen.zig");
 const CodeGen = @import("../bytecode/CodeGen.zig");
+const Selector = @import("../Selector.zig");
 const interpreter = @import("../interpreter.zig");
 const RuntimeError = @import("../RuntimeError.zig");
 const ExecutionResult = @import("../execution_result.zig").ExecutionResult;
@@ -109,7 +110,7 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
         // TODO: Pass error information to the failure block.
         return try interpreter.sendMessage(
             failure_block,
-            "value",
+            Selector.well_known.value,
             context.target_location,
             context.source_range,
         );
@@ -121,7 +122,7 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
             std.debug.print("Code generation for the script passed to _EvaluateStringIfFail: failed", .{});
             return try interpreter.sendMessage(
                 failure_block,
-                "value",
+                Selector.well_known.value,
                 context.target_location,
                 context.source_range,
             );
@@ -158,7 +159,7 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
 
             const block_result = try interpreter.sendMessage(
                 failure_block,
-                "value",
+                Selector.well_known.value,
                 context.target_location,
                 context.source_range,
             );

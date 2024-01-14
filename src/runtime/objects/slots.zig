@@ -13,11 +13,12 @@ const debug = @import("../../debug.zig");
 const Value = @import("../value.zig").Value;
 const Object = @import("../object.zig").Object;
 const pointer = @import("../../utility/pointer.zig");
+const Selector = @import("../Selector.zig");
 const traversal = @import("../object_traversal.zig");
 const MapObject = @import("../object.zig").MapObject;
 const BaseObject = @import("../base_object.zig").BaseObject;
 const MapBuilder = @import("../map_builder.zig").MapBuilder;
-const object_lookup = @import("../object_lookup.zig");
+const LookupResult = @import("../object_lookup.zig").LookupResult;
 const VirtualMachine = @import("../VirtualMachine.zig");
 
 const SLOTS_LOOKUP_DEBUG = debug.SLOTS_LOOKUP_DEBUG;
@@ -109,44 +110,44 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
 pub fn slotsLookup(
     comptime ObjectType: type,
     object: ObjectType.Ptr,
-    selector_hash: object_lookup.SelectorHash,
-    previously_visited: ?*const object_lookup.VisitedValueLink,
-) object_lookup.LookupResult {
+    selector: Selector,
+    previously_visited: ?*const Selector.VisitedValueLink,
+) LookupResult {
     if (previously_visited) |visited| {
-        var link: ?*const object_lookup.VisitedValueLink = visited;
+        var link: ?*const Selector.VisitedValueLink = visited;
         while (link) |l| {
             if (l.value.data == object.asValue().data) {
                 // Cyclic reference
-                return object_lookup.LookupResult.nothing;
+                return LookupResult.nothing;
             }
 
             link = l.previous;
         }
     }
 
-    const currently_visited = object_lookup.VisitedValueLink{ .previous = previously_visited, .value = object.asValue() };
+    const currently_visited = Selector.VisitedValueLink{ .previous = previously_visited, .value = object.asValue() };
 
     // Direct lookup
     for (object.getSlots()) |slot| {
-        if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing slot \"{s}\" (hash {x}) vs. our hash {}\n", .{ slot.name.asByteArray().?.getValues(), slot.getHash(), selector_hash });
-        const slot_hash = slot.getHash();
+        const slot_selector = Selector.fromSlot(slot);
+        if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing selector {} vs. slot {}\n", .{ selector, slot_selector });
+
         if (slot.isAssignable()) {
-            if (selector_hash.assignment_target) |assignment_target_hash| {
-                if (slot_hash == assignment_target_hash)
-                    return object_lookup.LookupResult{
-                        .Assignment = .{
-                            .object = Object.fromAddress(object.asObjectAddress()),
-                            .value_ptr = object.getAssignableSlotValue(slot),
-                        },
-                    };
+            if (selector.canAssignTo(slot_selector)) {
+                return LookupResult{
+                    .Assignment = .{
+                        .object = Object.fromAddress(object.asObjectAddress()),
+                        .value_ptr = object.getAssignableSlotValue(slot),
+                    },
+                };
             }
 
-            if (slot_hash == selector_hash.regular)
-                return object_lookup.LookupResult{ .Regular = object.getAssignableSlotValue(slot).* };
+            if (selector.equals(slot_selector))
+                return LookupResult{ .Regular = object.getAssignableSlotValue(slot).* };
         }
 
-        if (slot_hash == selector_hash.regular)
-            return object_lookup.LookupResult{ .Regular = slot.value };
+        if (selector.equals(slot_selector))
+            return LookupResult{ .Regular = slot.value };
     }
 
     if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Could not find the slot on this object, looking at parents\n", .{});
@@ -160,7 +161,7 @@ pub fn slotsLookup(
                 slot.value;
 
             if (slot_value.asObject()) |slot_object| {
-                const parent_lookup_result = selector_hash.chainedLookupObject(slot_object, &currently_visited);
+                const parent_lookup_result = selector.chainedLookupObject(slot_object, &currently_visited);
                 if (parent_lookup_result != .Nothing) return parent_lookup_result;
             } else {
                 @panic("FIXME: Allow integers to be parent slot values (let me know of your usecase!)");
@@ -169,7 +170,7 @@ pub fn slotsLookup(
     }
 
     // Nope, not here
-    return object_lookup.LookupResult.nothing;
+    return LookupResult.nothing;
 }
 
 /// An object consisting of constant or mutable slots. The constant slot's value
@@ -414,8 +415,8 @@ pub const Slots = extern struct {
         @panic("Attempted to call Slots.finalize");
     }
 
-    pub fn lookup(self: Slots.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
-        return slotsLookup(Slots, self, selector_hash, previously_visited);
+    pub fn lookup(self: Slots.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
+        return slotsLookup(Slots, self, selector, previously_visited);
     }
 
     pub fn humanReadableName() []const u8 {

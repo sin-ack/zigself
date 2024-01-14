@@ -13,6 +13,7 @@ const slots = @import("slots.zig");
 const Object = @import("../object.zig").Object;
 const MapType = map_import.MapType;
 const pointer = @import("../../utility/pointer.zig");
+const Selector = @import("../Selector.zig");
 const bytecode = @import("../bytecode.zig");
 const BlockMap = @import("block.zig").BlockMap;
 const MethodMap = @import("method.zig").MethodMap;
@@ -20,7 +21,7 @@ const map_import = @import("../map.zig");
 const SlotsObject = slots.Slots;
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
-const object_lookup = @import("../object_lookup.zig");
+const LookupResult = @import("../object_lookup.zig").LookupResult;
 const VirtualMachine = @import("../VirtualMachine.zig");
 const exceedsBoundsOf = @import("../../utility/bounds_check.zig").exceedsBoundsOf;
 const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;
@@ -197,12 +198,12 @@ pub const Activation = extern struct {
         @panic("Attempted to call Activation.finalize");
     }
 
-    pub fn lookup(self: Activation.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
-        const slots_lookup_result = slots.slotsLookup(Activation, self, selector_hash, previously_visited);
+    pub fn lookup(self: Activation.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
+        const slots_lookup_result = slots.slotsLookup(Activation, self, selector, previously_visited);
         if (slots_lookup_result != .Nothing) return slots_lookup_result;
 
         // Receiver lookup
-        return self.receiver.lookupByHash(selector_hash);
+        return self.receiver.lookup(selector);
     }
 
     // --- Finding activation receiver ---

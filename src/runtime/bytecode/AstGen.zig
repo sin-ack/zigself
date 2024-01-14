@@ -10,6 +10,7 @@ const debug = @import("../../debug.zig");
 const Range = @import("../../language/Range.zig");
 const Script = @import("../../language/Script.zig");
 const astcode = @import("./astcode.zig");
+const Selector = @import("../Selector.zig");
 
 const Block = astcode.Block;
 const Executable = astcode.Executable;
@@ -207,7 +208,7 @@ fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, messag
             } else {
                 try block.addInstruction(executable.allocator, .Send, message_location, .{
                     .receiver_location = receiver_location,
-                    .message_name = message.message_name,
+                    .selector = Selector.fromName(message.message_name),
                     .send_index = block.makeSendIndex(),
                 }, message.range);
             }
@@ -222,7 +223,7 @@ fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, messag
             try block.addInstruction(executable.allocator, .SelfPrimSend, message_location, .{ .message_name = message.message_name[1..] }, message.range);
         } else {
             try block.addInstruction(executable.allocator, .SelfSend, message_location, .{
-                .message_name = message.message_name,
+                .selector = Selector.fromName(message.message_name),
                 .send_index = block.makeSendIndex(),
             }, message.range);
         }
@@ -252,7 +253,7 @@ fn generateIdentifier(self: *AstGen, executable: *Executable, block: *Block, ide
         try block.addInstruction(executable.allocator, .SelfPrimSend, identifier_location, .{ .message_name = identifier.value[1..] }, identifier.range);
     } else {
         try block.addInstruction(executable.allocator, .SelfSend, identifier_location, .{
-            .message_name = identifier.value,
+            .selector = Selector.fromName(identifier.value),
             .send_index = block.makeSendIndex(),
         }, identifier.range);
     }

@@ -11,10 +11,11 @@ const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
 const context = @import("../context.zig");
 const pointer = @import("../../utility/pointer.zig");
+const Selector = @import("../Selector.zig");
 const ActorObject = @import("actor.zig").Actor;
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
-const object_lookup = @import("../object_lookup.zig");
+const LookupResult = @import("../object_lookup.zig").LookupResult;
 const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
@@ -82,21 +83,21 @@ pub const ActorProxy = extern struct {
         @panic("Attempted to call ActorProxy.finalize");
     }
 
-    pub fn lookup(self: ActorProxy.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: ActorProxy.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         _ = previously_visited;
 
         // FIXME: Refactor this to not perform a method lookup in preparation of multi-threading.
         if (LOOKUP_DEBUG) std.debug.print("ActorProxy.lookup: Looking at an actor proxy object\n", .{});
 
         const target_actor = self.actor_object.get();
-        return switch (target_actor.context.lookupByHash(selector_hash)) {
-            .Nothing => object_lookup.LookupResult.nothing,
+        return switch (target_actor.context.lookup(selector)) {
+            .Nothing => LookupResult.nothing,
             // FIXME: This should probably cause a different kind of error.
-            .Assignment => object_lookup.LookupResult.nothing,
+            .Assignment => LookupResult.nothing,
             .Regular => |lookup_result| blk: {
                 if (lookup_result.asObject()) |object| {
                     if (object.asType(.Method)) |method_object| {
-                        break :blk object_lookup.LookupResult{
+                        break :blk LookupResult{
                             .ActorMessage = .{
                                 .target_actor = target_actor,
                                 .method = method_object,
@@ -109,7 +110,7 @@ pub const ActorProxy = extern struct {
                 //       message to a non-method slot will not return any
                 //       meaningful value to the user. However it should also
                 //       still be valid, so we cannot return nothing here.
-                break :blk object_lookup.LookupResult{ .Regular = context.getVM().nil() };
+                break :blk LookupResult{ .Regular = context.getVM().nil() };
             },
             .ActorMessage => unreachable,
         };

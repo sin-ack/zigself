@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -182,6 +182,10 @@ pub const Slot = packed struct {
         }
 
         return @intCast(self.value.asUnsignedInteger());
+    }
+
+    pub fn getName(self: Slot) []const u8 {
+        return self.name.asByteArray().?.getValues();
     }
 
     pub fn getHash(self: Slot) u32 {

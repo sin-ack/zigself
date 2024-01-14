@@ -11,11 +11,12 @@ const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const context = @import("../context.zig");
 const pointer = @import("../../utility/pointer.zig");
+const Selector = @import("../Selector.zig");
 const MapObject = @import("../object.zig").MapObject;
 const IntegerValue = value_import.IntegerValue;
 const GenericValue = @import("../value.zig").Value;
+const LookupResult = @import("../object_lookup.zig").LookupResult;
 const value_import = @import("../value.zig");
-const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
@@ -85,16 +86,16 @@ pub const Array = extern struct {
         @panic("Attempted to call Array.finalize");
     }
 
-    pub fn lookup(self: Array.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: Array.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         _ = self;
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Array.lookup: Looking at traits array\n", .{});
         const array_traits = context.getVM().array_traits.getValue();
-        if (selector_hash.regular == object_lookup.parent_hash)
-            return object_lookup.LookupResult{ .Regular = array_traits };
+        if (selector.equals(Selector.well_known.parent))
+            return LookupResult{ .Regular = array_traits };
 
-        return array_traits.lookupByHash(selector_hash);
+        return array_traits.lookup(selector);
     }
 
     pub fn getValues(self: Array.Ptr) []GenericValue {

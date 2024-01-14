@@ -13,13 +13,14 @@ const debug = @import("../../debug.zig");
 const slots = @import("slots.zig");
 const pointer = @import("../../utility/pointer.zig");
 const context = @import("../context.zig");
+const Selector = @import("../Selector.zig");
 const bytecode = @import("../bytecode.zig");
 const Activation = @import("../Activation.zig");
 const SlotsObject = slots.Slots;
 const SourceRange = @import("../SourceRange.zig");
+const LookupResult = @import("../object_lookup.zig").LookupResult;
 const value_import = @import("../value.zig");
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
-const object_lookup = @import("../object_lookup.zig");
 const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationObject = @import("activation.zig").Activation;
 const SlotsLikeMapBase = slots.SlotsLikeMapBase;
@@ -80,17 +81,17 @@ pub const Block = extern struct {
         @panic("Attempted to call Block.finalize");
     }
 
-    pub fn lookup(self: Block.Ptr, selector_hash: object_lookup.SelectorHash, previously_visited: ?*const object_lookup.VisitedValueLink) object_lookup.LookupResult {
+    pub fn lookup(self: Block.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         // NOTE: executeMessage will handle the execution of the block itself.
         _ = self;
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Block.lookup: Looking at traits block\n", .{});
         const block_traits = context.getVM().block_traits.getValue();
-        if (selector_hash.regular == object_lookup.parent_hash)
-            return object_lookup.LookupResult{ .Regular = block_traits };
+        if (selector.equals(Selector.well_known.parent))
+            return LookupResult{ .Regular = block_traits };
 
-        return block_traits.lookupByHash(selector_hash);
+        return block_traits.lookup(selector);
     }
 
     // --- Slot counts ---

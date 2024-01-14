@@ -10,6 +10,7 @@ const Heap = @import("Heap.zig");
 const Actor = @import("Actor.zig");
 const Value = @import("value.zig").Value;
 const pointer = @import("../utility/pointer.zig");
+const Selector = @import("Selector.zig");
 const Reference = @import("value.zig").Reference;
 const BaseObject = @import("base_object.zig").BaseObject;
 const ObjectLike = @import("value.zig").ObjectLike;
@@ -203,10 +204,10 @@ pub const Object = extern struct {
     /// Lookup a selector on this object.
     pub fn lookup(
         self: Object.Ptr,
-        selector_hash: object_lookup.SelectorHash,
-        previously_visited: ?*const object_lookup.VisitedValueLink,
+        selector: Selector,
+        previously_visited: ?*const Selector.VisitedValueLink,
     ) object_lookup.LookupResult {
-        return self.dispatch(object_lookup.LookupResult, "lookup", .{ selector_hash, previously_visited });
+        return self.dispatch(object_lookup.LookupResult, "lookup", .{ selector, previously_visited });
     }
 };
 

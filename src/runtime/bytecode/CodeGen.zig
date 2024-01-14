@@ -62,7 +62,7 @@ fn lowerInstruction(
 
             try block.addInstruction(allocator, .Send, target, .{
                 .receiver_location = register_pool.getAllocatedRegisterFor(payload.receiver_location),
-                .message_name = payload.message_name,
+                .selector = payload.selector,
                 .send_index = payload.send_index,
             }, inst.source_range);
         },
@@ -80,7 +80,7 @@ fn lowerInstruction(
             const payload = inst.payload.SelfSend;
 
             try block.addInstruction(allocator, .SelfSend, target, .{
-                .message_name = payload.message_name,
+                .selector = payload.selector,
                 .send_index = payload.send_index,
             }, inst.source_range);
         },
