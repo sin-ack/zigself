@@ -27,10 +27,9 @@ fn inspectValueInternal(
     indent: usize,
     visited_object_link: ?*const VisitedObjectLink,
 ) !void {
-    switch (value.getType()) {
-        .ObjectMarker => unreachable,
-        .Integer => std.debug.print("<integer> {d}", .{value.asInteger()}),
-        .ObjectReference => return inspectObject(display_type, vm, value.asObject(), indent, visited_object_link),
+    switch (value.type) {
+        .Integer => std.debug.print("<integer> {d}", .{value.asInteger().?}),
+        .Object => return inspectObject(display_type, vm, value.asObject().?, indent, visited_object_link),
     }
 }
 
@@ -88,7 +87,6 @@ fn inspectObject(
 
     // FIXME: Move this into object delegation.
     switch (object.getMetadata().type) {
-        .ForwardedObject => unreachable,
         .Slots => {
             const slots = object.asType(.Slots).?;
 
@@ -106,7 +104,7 @@ fn inspectObject(
         .Method => {
             const method = object.asType(.Method).?;
 
-            std.debug.print("<method object \"{s}\"> ", .{method.getMap().method_name.asByteArray().getValues()});
+            std.debug.print("<method object \"{s}\"> ", .{method.getMap().method_name.asByteArray().?.getValues()});
 
             if (method.getSlots().len > 0) {
                 std.debug.print("(|{s}", .{separator});
@@ -210,7 +208,7 @@ fn inspectSlots(
     for (slots) |slot| {
         const parent_marker: []const u8 = if (slot.isParent()) "*" else "";
         const assignability_marker: []const u8 = if (slot.isAssignable()) "<-" else "=";
-        printWithIndent(display_type, indent, "{s}{s} {s} ", .{ slot.name.asByteArray().getValues(), parent_marker, assignability_marker });
+        printWithIndent(display_type, indent, "{s}{s} {s} ", .{ slot.name.asByteArray().?.getValues(), parent_marker, assignability_marker });
 
         if (slot.isParent()) {
             // FIXME: Figure out creator slots, and give the path to this object

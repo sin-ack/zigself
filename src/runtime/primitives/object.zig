@@ -34,8 +34,8 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
     defer token.deinit();
 
     // Refresh the pointers in case that caused a GC
-    receiver = context.receiver.getValue().asObject().asType(.Slots).?;
-    argument = context.arguments[0].asObject().asType(.Slots).?;
+    receiver = context.receiver.getValue().asObject().?.asType(.Slots).?;
+    argument = context.arguments[0].asObject().?.asType(.Slots).?;
 
     const new_object = try receiver.addSlotsFrom(argument, context.vm.allocator, &token);
     return ExecutionResult.resolve(new_object.asValue());
@@ -96,8 +96,8 @@ pub fn Inspect(context: *PrimitiveContext) !ExecutionResult {
 pub fn Clone(context: *PrimitiveContext) !ExecutionResult {
     var receiver = context.receiver.getValue();
 
-    const required_memory = if (receiver.isObjectReference())
-        receiver.asObject().getSizeForCloning()
+    const required_memory = if (receiver.asObject()) |object|
+        object.getSizeForCloning()
     else
         0;
 

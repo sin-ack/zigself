@@ -10,7 +10,9 @@ const Heap = @import("Heap.zig");
 const Actor = @import("Actor.zig");
 const Value = @import("value.zig").Value;
 const pointer = @import("../utility/pointer.zig");
+const Reference = @import("value.zig").Reference;
 const BaseObject = @import("base_object.zig").BaseObject;
+const ObjectLike = @import("value.zig").ObjectLike;
 const scoped_bits = @import("../utility/scoped_bits.zig");
 const object_lookup = @import("object_lookup.zig");
 
@@ -28,9 +30,6 @@ pub const ObjectType = enum(u5) {
     Float,
     // Intrinsic objects
     AddrInfo,
-    // This is a special object type that overwrites the current object when the
-    // garbage collector copies the object to a new location.
-    ForwardedObject,
 };
 
 /// A registry of object types. Objects within this array will be encoded into
@@ -48,9 +47,6 @@ pub const ObjectRegistry = union(ObjectType) {
     Float: @import("objects/float.zig").Float,
     // Intrinsic objects
     AddrInfo: @import("objects/intrinsic/addrinfo.zig").AddrInfo,
-    // This is a special object type that overwrites the current object when the
-    // garbage collector copies the object to a new location.
-    ForwardedObject: ForwardedObject,
 };
 
 pub fn ObjectT(comptime object_type: ObjectType) type {
@@ -76,13 +72,6 @@ comptime {
         } else {
             @compileError("!!! Object " ++ @typeName(field.type) ++ " does not contain an object header!");
         }
-
-        // Ensure that all objects are at least two machine words long. This is
-        // required because when we overwrite objects with forwarding addresses,
-        // the second word is used to store the new location (we can't use the
-        // first word because that's the object header).
-        if (@sizeOf(field.type) < 2 * @sizeOf(u64))
-            @compileError("!!! Object " ++ @typeName(field.type) ++ " must be at least 2 machine words wide!");
     }
 }
 
@@ -95,7 +84,8 @@ pub const Object = extern struct {
     /// The BaseObject metadata is cast to this type in order to utilize the
     /// unused bits.
     pub const Metadata = packed struct(u64) {
-        marker: BaseObject.Marker = @intFromEnum(Value.ValueType.ObjectMarker),
+        value_type: Value.Type = .Object,
+        object_like_type: ObjectLike.Type = .Object,
         base_type: BaseObject.Type = .Object,
         type: ObjectType,
 
@@ -135,7 +125,8 @@ pub const Object = extern struct {
     /// Get an object pointer from its address.
     pub fn fromAddress(address: [*]u64) Object.Ptr {
         const object: Object.Ptr = @ptrCast(address);
-        std.debug.assert(object.getMetadata().marker == @intFromEnum(Value.ValueType.ObjectMarker));
+        std.debug.assert(object.getMetadata().value_type == .Object);
+        std.debug.assert(object.getMetadata().object_like_type == .Object);
         std.debug.assert(object.getMetadata().base_type == .Object);
         return object;
     }
@@ -163,7 +154,6 @@ pub const Object = extern struct {
     /// Perform a dynamic dispatch based on the current object type.
     fn dispatch(self: Object.Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
         return switch (self.getMetadata().type) {
-            .ForwardedObject => unreachable,
             inline else => |t| {
                 const self_ptr: ObjectT(t).Ptr = @ptrCast(self);
                 return @call(.auto, @field(ObjectT(t), name), .{self_ptr} ++ args);
@@ -220,26 +210,6 @@ pub const Object = extern struct {
     }
 };
 
-pub const ForwardedObject = extern struct {
-    object: Object align(@alignOf(u64)),
-    new_location: Value align(@alignOf(u64)),
-
-    const Ptr = pointer.HeapPtr(ForwardedObject, .Mutable);
-
-    /// Overwrite an existing object with a forwarded object. This is used by
-    /// the garbage collector to update references to the old object to the new
-    /// object.
-    pub fn overwrite(base_object: BaseObject.Ptr, new_address: [*]u64) void {
-        const self: ForwardedObject.Ptr = @ptrCast(base_object);
-        self.object.init(.ForwardedObject, .Global);
-        self.new_location = Value.fromObjectAddress(new_address);
-    }
-
-    pub fn getForwardAddress(self: ForwardedObject.Ptr) [*]u64 {
-        return self.new_location.asObjectAddress();
-    }
-};
-
 /// An object with an associated map reference. Some object types (notably Slots
 /// and thus anything slots-based) require maps in order to work.
 pub const MapObject = extern struct {
@@ -259,18 +229,16 @@ pub const MapObject = extern struct {
     }
 
     pub fn getMap(self: MapObject.Ptr) Map.Ptr {
-        const base_object = self.map.asBaseObject();
+        const reference = self.map.asReference().?;
 
         // XXX: If we're currently in the middle of scavenging, then our map
         //      probably has already been scavenged into the target space and
         //      a forward reference has been placed in its location instead.
         //      We should get the forwarded object.
-        if (base_object.asObject()) |object| {
-            if (object.asType(.ForwardedObject)) |forwarded_object| {
-                return BaseObject.fromAddress(forwarded_object.getForwardAddress()).asMap().?;
-            }
+        if (Reference.tryFromForwarding(reference.getAddress())) |forwarded_reference| {
+            return @ptrCast(forwarded_reference.getAddress());
         }
 
-        return base_object.asMap().?;
+        return reference.asMap().?;
     }
 };

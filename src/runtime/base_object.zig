@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
@@ -11,6 +12,7 @@ const Actor = @import("Actor.zig");
 const Value = @import("value.zig").Value;
 const Object = @import("object.zig").Object;
 const pointer = @import("../utility/pointer.zig");
+const ObjectLike = @import("value.zig").ObjectLike;
 
 fn BaseObjectT(comptime object_type: BaseObject.Type) type {
     return switch (object_type) {
@@ -24,15 +26,17 @@ pub const BaseObject = extern struct {
     /// Metadata about the object.
     metadata: Metadata align(@alignOf(u64)),
 
-    pub const Marker = u2;
     /// The type of this base object.
     pub const Type = enum(u1) { Object, Map };
     /// Whether this object is reachable. Globally-reachable objects are
     /// read-only in actor mode.
     pub const Reachability = enum(u1) { Local, Global };
     pub const Metadata = packed struct(u64) {
-        /// The object marker for the heap.
-        marker: Marker = @intFromEnum(Value.ValueType.ObjectMarker),
+        /// The value type of this base object. Used for GC.
+        value_type: Value.Type = .Object,
+        /// The type of this object with respect to whether it's a reference.
+        /// Used for casting from Value.
+        object_like_type: ObjectLike.Type = .Object,
         /// The type of this base object. A base object can be an object or a map.
         type: Type,
         /// Bits which are unused in BaseObject, but will be used in objects and maps.
@@ -45,9 +49,17 @@ pub const BaseObject = extern struct {
 
     pub fn fromAddress(address: [*]u64) BaseObject.Ptr {
         const metadata: *Metadata = @ptrCast(address);
-        if (metadata.marker != @intFromEnum(Value.ValueType.ObjectMarker)) {
-            std.debug.panic("!!! Address {*} is not a valid object!\n", .{address});
+
+        if (builtin.mode == .Debug) {
+            if (metadata.value_type != .Object) {
+                std.debug.panic("!!! Address {*} is not a valid object!\n", .{address});
+            }
+
+            if (metadata.object_like_type != .Object) {
+                std.debug.panic("!!! Address {*} is not a valid object!\n", .{address});
+            }
         }
+
         return @ptrCast(address);
     }
 

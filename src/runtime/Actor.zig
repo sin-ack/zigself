@@ -74,7 +74,7 @@ const Actor = @This();
 const Mailbox = std.TailQueue(Message);
 
 // Sentinel values for the stacks
-pub const ValueSentinel = Value{ .data = 0xCCCCCCCCCCCCCCCC };
+pub const ValueSentinel: Value = @bitCast(@as(u64, 0xCCCCCCCCCCCCCCCC));
 pub const SlotSentinel = Slot{ .name = ValueSentinel, .properties = .{ .properties = ValueSentinel }, .value = ValueSentinel };
 
 pub const MaximumStackDepth = 2048;
@@ -486,11 +486,10 @@ pub fn clearMailbox(self: *Actor, allocator: Allocator) void {
 }
 
 pub fn canWriteTo(self: *Actor, value: Value) bool {
-    return switch (value.getType()) {
-        .ObjectMarker => unreachable,
+    return switch (value.type) {
         .Integer => true,
-        .ObjectReference => writable: {
-            const object = value.asObject();
+        .Object => writable: {
+            const object = value.asObject().?;
             break :writable self.id == .Global or object.getMetadata().reachability != .Global;
         },
     };
@@ -500,11 +499,10 @@ pub fn canWriteTo(self: *Actor, value: Value) bool {
 /// If the actor cannot read this value, then the VM should crash, as we shouldn't
 /// be able to reach this object in the first place.
 pub fn ensureCanRead(self: *Actor, value: Value, source_range: SourceRange) void {
-    switch (value.getType()) {
-        .ObjectMarker => unreachable,
+    switch (value.type) {
         .Integer => {},
-        .ObjectReference => {
-            const object = value.asObject();
+        .Object => {
+            const object = value.asObject().?;
             if (object.getMetadata().reachability != .Global and object.getMetadata().actor_id != self.id)
                 std.debug.panic(
                     "!!! Attempted to read object that is not readable for this actor!\n" ++

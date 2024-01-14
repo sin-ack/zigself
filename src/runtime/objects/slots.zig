@@ -95,7 +95,7 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
             std.debug.assert(slot.isAssignable());
             std.debug.assert(!slot.isArgument());
 
-            return &getAssignableSlots(self)[@intCast(slot.value.asUnsignedInteger())];
+            return &getAssignableSlots(self)[@intCast(slot.value.asUnsignedInteger().?)];
         }
 
         /// Return a shallow copy of this object.
@@ -159,11 +159,11 @@ pub fn slotsLookup(
             else
                 slot.value;
 
-            if (slot_value.isObjectReference()) {
-                const parent_lookup_result = selector_hash.chainedLookupObject(slot_value.asObject(), &currently_visited);
+            if (slot_value.asObject()) |slot_object| {
+                const parent_lookup_result = selector_hash.chainedLookupObject(slot_object, &currently_visited);
                 if (parent_lookup_result != .Nothing) return parent_lookup_result;
             } else {
-                @panic("FIXME: Allow integers and floating point numbers to be parent slot values (let me know of your usecase!)");
+                @panic("FIXME: Allow integers to be parent slot values (let me know of your usecase!)");
             }
         }
     }
@@ -472,11 +472,6 @@ pub fn SlotsLikeMapBase(comptime MapT: type) type {
 /// The map of a slots object, consisting of a series of Slots.
 pub const SlotsMap = extern struct {
     map: Map align(@alignOf(u64)),
-    // FIXME: We need this extra memory for forwarding addresses.
-    //        This can be removed once we reduce object marking to a single
-    //        bit, which will allow us to embed forwarding addresses in the
-    //        object header word directly.
-    unused: Value align(@alignOf(u64)),
 
     pub const Ptr = pointer.HeapPtr(SlotsMap, .Mutable);
     pub const ObjectType = Slots;
@@ -499,7 +494,6 @@ pub const SlotsMap = extern struct {
     pub fn init(self: SlotsMap.Ptr, slot_count: u16) void {
         self.map.init(.Slots);
         self.map.getMetadata().slots = slot_count;
-        self.unused = Value.fromUnsignedInteger(0);
     }
 
     pub fn clone(self: SlotsMap.Ptr, token: *Heap.AllocationToken) SlotsMap.Ptr {

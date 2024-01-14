@@ -18,19 +18,19 @@ const VirtualMachine = @import("../VirtualMachine.zig");
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
 /// A file descriptor value consists of two things:
-/// - 30 bits of flags.
+/// - 31 bits of flags.
 /// - 32 bits for the actual file descriptor.
-pub const FileDescriptor = packed struct(u62) {
+pub const FileDescriptor = packed struct(GenericValue.Data) {
     flags: Flags,
     fd: std.os.fd_t,
 
-    pub const Flags = packed struct(u30) {
+    pub const Flags = packed struct(u31) {
         // Whether the FD is already closed.
         is_closed: bool = false,
         // Whether the FD should be closed during finalization.
         close_during_finalization: bool = true,
         // Reserved for future use.
-        reserved: u28 = 0,
+        reserved: u29 = 0,
     };
 
     pub fn adopt(fd: std.os.fd_t, flags: Flags) FileDescriptor {
@@ -41,12 +41,12 @@ pub const FileDescriptor = packed struct(u62) {
     }
 
     pub fn fromValue(value: GenericValue) FileDescriptor {
-        const raw_value: u62 = @intCast(value.asUnsignedInteger());
+        const raw_value: GenericValue.Data = @intCast(value.asUnsignedInteger().?);
         return @bitCast(raw_value);
     }
 
     pub fn toValue(self: FileDescriptor) GenericValue {
-        const self_as_int: u62 = @bitCast(self);
+        const self_as_int: GenericValue.Data = @bitCast(self);
         return GenericValue.fromUnsignedInteger(self_as_int);
     }
 

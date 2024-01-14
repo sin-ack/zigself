@@ -244,8 +244,8 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
     }
 
     for (fds.getValues()) |fd| {
-        if (fd.isObjectReference()) {
-            if (fd.asObject().asType(.Managed)) |managed_fd| {
+        if (fd.asObject()) |fd_object| {
+            if (fd_object.asType(.Managed)) |managed_fd| {
                 if (managed_fd.getManagedType() == .FileDescriptor)
                     continue;
             }
@@ -258,7 +258,7 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
     }
 
     for (events.getValues()) |event_flags| {
-        if (!event_flags.isInteger()) {
+        if (event_flags.type != .Integer) {
             return ExecutionResult.runtimeError(RuntimeError.initLiteral(
                 context.source_range,
                 "Argument 2 of _PollFDs:Events:WaitingForMS:IfFail: must be an array of integers",
@@ -284,13 +284,13 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
     const fd_values = fds.getValues();
     const event_values = events.getValues();
     for (fd_values, 0..) |fd, i| {
-        const managed_fd = fd.asObject().asType(.Managed).?;
+        const managed_fd = fd.asObject().?.asType(.Managed).?;
         const fd_value = FileDescriptor.fromValue(managed_fd.value);
         const event_flags = event_values[i];
 
         poll_fds[i] = .{
             .fd = fd_value.fd,
-            .events = @intCast(event_flags.asInteger()),
+            .events = @intCast(event_flags.asInteger().?),
             .revents = 0,
         };
     }
@@ -338,8 +338,8 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
             break :node_c null;
         }
 
-        if (host.isObjectReference()) {
-            if (host.asObject().asType(.ByteArray)) |host_byte_array| {
+        if (host.asObject()) |host_object| {
+            if (host_object.asType(.ByteArray)) |host_byte_array| {
                 break :node_c try context.vm.allocator.dupeZ(u8, host_byte_array.getValues());
             }
         }

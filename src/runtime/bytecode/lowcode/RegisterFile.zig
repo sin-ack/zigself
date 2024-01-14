@@ -17,10 +17,10 @@ const RegisterFile = @This();
 
 pub fn init(self: *RegisterFile) void {
     for (&self.general_purpose) |*register| {
-        register.* = Value{ .data = 0 };
+        register.* = Value.fromUnsignedInteger(0);
     }
 
-    self.ret = Value{ .data = 0 };
+    self.ret = Value.fromUnsignedInteger(0);
 }
 
 pub fn read(self: RegisterFile, location: RegisterLocation) Value {

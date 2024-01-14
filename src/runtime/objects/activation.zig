@@ -176,7 +176,7 @@ pub const Activation = extern struct {
     pub fn getAssignableSlotValue(self: Activation.Ptr, slot: Slot) *GenericValue {
         std.debug.assert(slot.isAssignable());
 
-        const offset_int = slot.value.asUnsignedInteger();
+        const offset_int = slot.value.asUnsignedInteger().?;
         std.debug.assert(!exceedsBoundsOf(offset_int, usize));
 
         const offset: usize = @intCast(offset_int);
@@ -211,11 +211,11 @@ pub const Activation = extern struct {
     /// receiver is also an activation object, then returns its receiver
     /// instead.
     pub fn findActivationReceiver(self: Activation.Ptr) GenericValue {
-        var object = self.asValue().asObject();
+        var object = self.asValue().asObject().?;
         while (object.asType(.Activation)) |activation| {
             const receiver = activation.receiver;
-            if (receiver.isObjectReference()) {
-                object = receiver.asObject();
+            if (receiver.type == .Object) {
+                object = receiver.asObject().?;
             } else {
                 return receiver;
             }

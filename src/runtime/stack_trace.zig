@@ -47,7 +47,7 @@ pub fn printTraceFromActivationStackUntil(stack: []Activation, first_source_rang
             if (until_ptr == activation_ptr) break;
         }
 
-        const message_name = activation_ptr.creator_message.asByteArray().getValues();
+        const message_name = activation_ptr.creator_message.asByteArray().?.getValues();
         writeTraceForFrame(message_name, called_from);
 
         called_from = activation_ptr.created_from;

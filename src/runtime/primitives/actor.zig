@@ -48,8 +48,8 @@ fn findActorMethod(
             .{selector},
         ) },
         .Regular => |lookup_result| blk: {
-            if (lookup_result.isObjectReference()) {
-                if (lookup_result.asObject().asType(.Method)) |lookup_result_as_method| {
+            if (lookup_result.asObject()) |lookup_result_object| {
+                if (lookup_result_object.asType(.Method)) |lookup_result_as_method| {
                     if (lookup_result_as_method.getArgumentSlotCount() != 0) {
                         break :blk FindActorMethodResult{ .RuntimeError = try RuntimeError.initFormatted(
                             source_range,
@@ -86,7 +86,7 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
 
     // FIXME: We should perhaps allow any object to be the genesis actor
     //        context, so blocks can also work for example.
-    if (!(receiver.isObjectReference() and receiver.asObject().getMetadata().type == .Slots)) {
+    if (!(receiver.type == .Object and receiver.asObject().?.getMetadata().type == .Slots)) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Expected receiver of _Genesis: to be a slots object",
@@ -109,7 +109,7 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
                 ActorObject.requiredSizeForAllocation(),
         );
 
-        method = tracked_method.getValue().asObject().asType(.Method).?;
+        method = tracked_method.getValue().asObject().?.asType(.Method).?;
         receiver = context.receiver.getValue();
 
         break :token token;
@@ -128,7 +128,7 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
 
         const blessed_receiver = try bless.bless(genesis_actor.id, receiver);
 
-        method = tracked_method.getValue().asObject().asType(.Method).?;
+        method = tracked_method.getValue().asObject().?.asType(.Method).?;
 
         break :blessed_receiver blessed_receiver;
     };
@@ -161,7 +161,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
     // FIXME: We should perhaps allow any object to receive a message context,
     //        so blocks can also work for example.
-    if (!(receiver.isObjectReference() and receiver.asObject().getMetadata().type == .Slots)) {
+    if (!(receiver.type == .Object and receiver.asObject().?.getMetadata().type == .Slots)) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Expected receiver of _ActorSpawn: to be a slots object",
@@ -191,7 +191,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
             spawn_method.requiredSizeForActivation(),
         );
 
-        spawn_method = tracked_method.getValue().asObject().asType(.Method).?;
+        spawn_method = tracked_method.getValue().asObject().?.asType(.Method).?;
         receiver = context.receiver.getValue();
 
         break :token token;
@@ -276,7 +276,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
         const inner_token = try context.vm.heap.getAllocation(required_memory);
 
-        entrypoint_method = tracked_method.getValue().asObject().asType(.Method).?;
+        entrypoint_method = tracked_method.getValue().asObject().?.asType(.Method).?;
         new_actor_context = tracked_new_actor_context.getValue();
         receiver = context.receiver.getValue();
 
@@ -307,7 +307,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
         const blessed_new_actor_context = try bless.bless(new_actor.id, new_actor_context);
 
-        entrypoint_method = tracked_method.getValue().asObject().asType(.Method).?;
+        entrypoint_method = tracked_method.getValue().asObject().?.asType(.Method).?;
 
         break :blessed_new_actor_context blessed_new_actor_context;
     };
@@ -320,7 +320,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
         const inner_token = try context.vm.heap.getAllocation(entrypoint_method.requiredSizeForActivation());
 
-        entrypoint_method = tracked_method.getValue().asObject().asType(.Method).?;
+        entrypoint_method = tracked_method.getValue().asObject().?.asType(.Method).?;
         break :token inner_token;
     };
 

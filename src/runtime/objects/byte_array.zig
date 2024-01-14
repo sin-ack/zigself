@@ -72,7 +72,7 @@ pub const ByteArray = extern struct {
     }
 
     pub fn getByteArray(self: ByteArray.Ptr) VMByteArray {
-        return self.byte_array.asByteArray();
+        return self.byte_array.asByteArray().?;
     }
 
     pub fn clone(self: ByteArray.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) ByteArray.Ptr {

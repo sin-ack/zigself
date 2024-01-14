@@ -10,6 +10,7 @@ const Actor = @import("Actor.zig");
 const Value = @import("value.zig").Value;
 const pointer = @import("../utility/pointer.zig");
 const BaseObject = @import("base_object.zig").BaseObject;
+const ObjectLike = @import("value.zig").ObjectLike;
 const scoped_bits = @import("../utility/scoped_bits.zig");
 
 // TODO: Unify MapType and MapRegistry once Zig stops raising false dependency loops.
@@ -31,18 +32,6 @@ pub const MapRegistry = union(MapType) {
     // Intrinsic maps
     AddrInfo: @import("objects/intrinsic/addrinfo.zig").AddrInfoMap,
 };
-
-// Comptime map checks
-comptime {
-    for (@typeInfo(MapRegistry).Union.fields) |field| {
-        // Ensure that all objects are at least two machine words long. This is
-        // required because when we overwrite objects with forwarding addresses,
-        // the second word is used to store the new location (we can't use the
-        // first word because that's the object header).
-        if (@sizeOf(field.type) < 2 * @sizeOf(u64))
-            @compileError("!!! Map " ++ @typeName(field.type) ++ " must be at least 2 machine words wide!");
-    }
-}
 
 pub fn MapT(comptime map_type: MapType) type {
     const map_type_name = @tagName(map_type);
@@ -66,7 +55,8 @@ pub const Map = extern struct {
     /// The BaseObject metadata is cast to this type in order to utilize the
     /// unused bits.
     pub const Metadata = packed struct(u64) {
-        marker: BaseObject.Marker = @intFromEnum(Value.ValueType.ObjectMarker),
+        value_type: Value.Type = .Object,
+        object_like_type: ObjectLike.Type = .Object,
         base_type: BaseObject.Type = .Map,
         type: MapType,
 

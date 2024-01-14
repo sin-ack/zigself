@@ -248,7 +248,7 @@ pub const ActivationRef = packed struct {
     pub fn init(activation: *Activation, stack: ActivationStack) ActivationRef {
         return .{
             .offset = IntegerValue(.Unsigned).init(@intCast(stack.offsetOf(activation))),
-            .saved_id = IntegerValue(.Unsigned).init(activation.activation_id),
+            .saved_id = IntegerValue(.Unsigned).init(@intCast(activation.activation_id)),
         };
     }
 

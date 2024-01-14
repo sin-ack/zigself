@@ -12,11 +12,11 @@ const debug = @import("../debug.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig").Object;
 const ByteArray = @import("./ByteArray.zig");
+const Reference = @import("value.zig").Reference;
 const Activation = @import("./Activation.zig");
 const BaseObject = @import("./base_object.zig").BaseObject;
 const VirtualMachine = @import("./VirtualMachine.zig");
 const ActivationStack = Activation.ActivationStack;
-const ForwardedObject = @import("object.zig").ForwardedObject;
 
 const GC_DEBUG = debug.GC_DEBUG;
 const GC_TOKEN_DEBUG = debug.GC_TOKEN_DEBUG;
@@ -204,9 +204,9 @@ fn freeHandle(self: *Heap, handle: *?[*]u64) void {
 /// Track the given value, returning a Tracked. When a garbage collection
 /// occurs, the value will be updated with the new location.
 pub fn track(self: *Heap, value: Value) !Tracked {
-    if (value.isObjectReference()) {
+    if (value.type == .Object) {
         const handle = self.allocateHandle();
-        handle.* = value.asObjectAddress();
+        handle.* = value.asReference().?.getAddress();
 
         // XXX: The handle cannot be null at this point.
         const nonnull_handle: *[*]u64 = @ptrCast(handle);
@@ -245,7 +245,7 @@ pub fn visitValues(
         if (handle.*) |h| {
             var handle_as_value = Value.fromObjectAddress(h);
             try visitor.visit(&handle_as_value);
-            handle.* = handle_as_value.asObjectAddress();
+            handle.* = handle_as_value.asReference().?.getAddress();
         }
     }
 
@@ -260,7 +260,7 @@ pub fn updateAllReferencesTo(self: *Heap, old_value: Value, new_value: Value) !v
         new_value: Value,
 
         pub fn visit(context: @This(), value: *Value) !void {
-            if (value.data == context.old_value.data)
+            if (@as(u64, @bitCast(value.*)) == @as(u64, @bitCast(context.old_value)))
                 value.* = context.new_value;
         }
     };
@@ -268,7 +268,7 @@ pub fn updateAllReferencesTo(self: *Heap, old_value: Value, new_value: Value) !v
     self.visitValues(Visitor{ .old_value = old_value, .new_value = new_value }) catch unreachable;
 
     // Finally scan each heap space and update the references.
-    try self.eden.updateAllReferencesTo(self.allocator, old_value.asObjectAddress(), new_value.asObjectAddress());
+    try self.eden.updateAllReferencesTo(self.allocator, old_value.asReference().?.getAddress(), new_value.asReference().?.getAddress());
 }
 
 /// Figure out which spaces the referrer and target object are in, and add an
@@ -278,13 +278,13 @@ pub fn updateAllReferencesTo(self: *Heap, old_value: Value, new_value: Value) !v
 pub fn rememberObjectReference(self: *Heap, referrer: Value, target: Value) !void {
     // FIXME: If we add an assignable slot to traits integer for instance, this
     //        will cause the assignment code to explode. What can we do there?
-    std.debug.assert(referrer.isObjectReference());
-    if (!target.isObjectReference()) return;
+    std.debug.assert(referrer.type == .Object);
+    if (target.type != .Object) return;
 
-    if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Trying to create a reference {*} -> {*}\n", .{ referrer.asObjectAddress(), target.asObjectAddress() });
+    const referrer_address = referrer.asReference().?.getAddress();
+    const target_address = target.asReference().?.getAddress();
 
-    const referrer_address = referrer.asObjectAddress();
-    const target_address = target.asObjectAddress();
+    if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Trying to create a reference {*} -> {*}\n", .{ referrer_address, target_address });
 
     var referrer_space: ?*Space = null;
     var target_space: ?*Space = null;
@@ -320,7 +320,7 @@ pub fn rememberObjectReference(self: *Heap, referrer: Value, target: Value) !voi
     }
 
     if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Adding to remembered set of {s}\n", .{target_space.?.name});
-    try target_space.?.addToRememberedSet(self.allocator, referrer_address, referrer.asObject().getSizeInMemory());
+    try target_space.?.addToRememberedSet(self.allocator, referrer_address, referrer.asObject().?.getSizeInMemory());
 }
 
 pub fn printTrackLocationCounts(self: *Heap) void {
@@ -459,7 +459,7 @@ const Space = struct {
         // Finalize everything that needs to be finalized.
         var finalization_it = self.finalization_set.iterator();
         while (finalization_it.next()) |entry| {
-            const base_object = Value.fromObjectAddress(entry.key_ptr.*).asBaseObject();
+            const base_object = Value.fromObjectAddress(entry.key_ptr.*).asBaseObject().?;
             base_object.finalize(allocator);
         }
 
@@ -481,13 +481,15 @@ const Space = struct {
     /// for the same object to just return the new location and avoid copying
     /// again.
     fn copyObjectTo(self: *Space, allocator: Allocator, address: [*]u64, target_space: *Space) ![*]u64 {
-        const base_object = BaseObject.fromAddress(address);
-        if (base_object.asObject()) |object| {
-            if (object.asType(.ForwardedObject)) |forwarded_object| {
-                return forwarded_object.getForwardAddress();
-            }
+        // If what we're pointing to looks like a forwarding reference, then
+        // just return the address it points to. Note that we need to look at
+        // what the address is *pointing to*, rather than what the address *is*,
+        // unlike in the non-forwarding case.
+        if (Reference.tryFromForwarding(address)) |forwarding_reference| {
+            return forwarding_reference.getAddress();
         }
 
+        const base_object = Value.fromObjectAddress(address).asBaseObject().?;
         const object_size = base_object.getSizeInMemory();
         std.debug.assert(object_size % @sizeOf(u64) == 0);
 
@@ -503,8 +505,7 @@ const Space = struct {
             try target_space.addToFinalizationSet(allocator, new_address);
         }
 
-        // Create a forwarding reference
-        ForwardedObject.overwrite(base_object, new_address);
+        address[0] = @bitCast(Reference.createForwarding(new_address));
         return new_address;
     }
 
@@ -574,8 +575,8 @@ const Space = struct {
             target_space: *Space,
 
             pub fn visit(ctx: @This(), value: *Value) !void {
-                if (value.isObjectReference()) {
-                    if (try ctx.self.copyAddress(ctx.allocator, value.asObjectAddress(), ctx.target_space, false)) |new_address| {
+                if (value.asReference()) |reference| {
+                    if (try ctx.self.copyAddress(ctx.allocator, reference.getAddress(), ctx.target_space, false)) |new_address| {
                         value.* = Value.fromObjectAddress(new_address);
                     }
                 }
@@ -594,11 +595,10 @@ const Space = struct {
                 const object_slice = start_of_object[0 .. object_size_in_bytes / @sizeOf(u64)];
 
                 for (object_slice) |*word| {
-                    const value = Value{ .data = word.* };
-                    if (value.isObjectReference()) {
-                        const address = value.asObjectAddress();
-                        if (try self.copyAddress(allocator, address, target_space, false)) |new_address| {
-                            word.* = Value.fromObjectAddress(new_address).data;
+                    const value: Value = @bitCast(word.*);
+                    if (value.asReference()) |reference| {
+                        if (try self.copyAddress(allocator, reference.getAddress(), target_space, false)) |new_address| {
+                            word.* = @bitCast(Value.fromObjectAddress(new_address));
                         }
                     }
                 }
@@ -621,11 +621,10 @@ const Space = struct {
             // Update all the addresses in the newer space with the new
             // locations in the target space
             for (newer_generation_space.object_segment) |*word| {
-                const value = Value{ .data = word.* };
-                if (value.isObjectReference()) {
-                    const address = value.asObjectAddress();
-                    if (try self.copyAddress(allocator, address, target_space, false)) |new_address| {
-                        word.* = Value.fromObjectAddress(new_address).data;
+                const value: Value = @bitCast(word.*);
+                if (value.asReference()) |reference| {
+                    if (try self.copyAddress(allocator, reference.getAddress(), target_space, false)) |new_address| {
+                        word.* = @bitCast(Value.fromObjectAddress(new_address));
                     }
                 }
             }
@@ -643,15 +642,15 @@ const Space = struct {
         // space.
         while (target_object_segment_index < target_space.object_segment.len) : (target_object_segment_index += 1) {
             const word_ptr = &target_space.object_segment[target_object_segment_index];
-            const value = Value{ .data = word_ptr.* };
+            const value: Value = @bitCast(word_ptr.*);
 
-            if (value.isObjectReference()) {
-                const address = value.asObjectAddress();
+            if (value.asReference()) |reference| {
+                const address = reference.getAddress();
 
                 if (self.objectSegmentContains(address)) {
-                    word_ptr.* = Value.fromObjectAddress(try self.copyObjectTo(allocator, address, target_space)).data;
+                    word_ptr.* = @bitCast(Value.fromObjectAddress(try self.copyObjectTo(allocator, address, target_space)));
                 } else if (self.byteArraySegmentContains(address)) {
-                    word_ptr.* = Value.fromObjectAddress(copyByteArrayTo(allocator, address, target_space)).data;
+                    word_ptr.* = @bitCast(Value.fromObjectAddress(copyByteArrayTo(allocator, address, target_space)));
                 }
             }
         }
@@ -689,22 +688,17 @@ const Space = struct {
                 const object_size = entry.value_ptr.*;
 
                 if (self.objectSegmentContains(object_address)) {
-                    const base_object = BaseObject.fromAddress(object_address);
+                    const object_reference = Value.fromObjectAddress(object_address).asReference().?;
 
-                    did_survive: {
-                        if (base_object.asObject()) |object| {
-                            if (object.asType(.ForwardedObject)) |forwarded_object| {
-                                // Yes, the object's been copied. Replace the entry in
-                                // the remembered set.
-                                const new_address = forwarded_object.getForwardAddress();
-                                newer_generation_space.removeFromRememberedSet(object_address) catch unreachable;
-                                // Hopefully the object size has not changed somehow
-                                // during a GC. :^)
-                                try newer_generation_space.addToRememberedSet(allocator, new_address, object_size);
-                                break :did_survive;
-                            }
-                        }
-
+                    if (object_reference.isForwarding()) {
+                        // Yes, the object's been copied. Replace the entry in
+                        // the remembered set.
+                        const new_address = object_reference.getAddress();
+                        newer_generation_space.removeFromRememberedSet(object_address) catch unreachable;
+                        // Hopefully the object size has not changed somehow
+                        // during a GC. :^)
+                        try newer_generation_space.addToRememberedSet(allocator, new_address, object_size);
+                    } else {
                         // No, the object didn't survive the scavenge.
                         newer_generation_space.removeFromRememberedSet(object_address) catch unreachable;
                     }
@@ -769,6 +763,8 @@ const Space = struct {
         // Looks like the scavenge didn't give us enough memory. Let's attempt a
         // tenure.
         if (self.tenure_target) |tenure_target| {
+            const tenure_target_previous_free_memory: isize = @intCast(tenure_target.freeMemory());
+
             if (GC_DEBUG) std.debug.print("Space.collectGarbage: Attempting to tenure to {s}\n", .{tenure_target.name});
             try self.cheneyCommon(allocator, tenure_target, newer_generation_link);
 
@@ -780,7 +776,6 @@ const Space = struct {
             }
 
             if (GC_DEBUG) {
-                const tenure_target_previous_free_memory: isize = @intCast(tenure_target.freeMemory());
                 const tenure_target_current_free_memory: isize = @intCast(tenure_target.freeMemory());
                 const free_memory_diff = tenure_target_previous_free_memory - tenure_target_current_free_memory;
 
@@ -918,8 +913,8 @@ const Space = struct {
         }
 
         const new_address_value = Value.fromObjectAddress(new_address);
-        const old_address_as_reference = Value.fromObjectAddress(old_address).data;
-        const new_address_as_reference = new_address_value.data;
+        const old_address_as_reference: u64 = @bitCast(Value.fromObjectAddress(old_address));
+        const new_address_as_reference: u64 = @bitCast(new_address_value);
 
         for (self.object_segment) |*word| {
             if (word.* == old_address_as_reference)
@@ -928,7 +923,7 @@ const Space = struct {
 
         // If the new object is in the current space and should be finalized,
         // then put it in the finalization set.
-        if (self.objectSegmentContains(new_address) and new_address_value.asObject().canFinalize())
+        if (self.objectSegmentContains(new_address) and new_address_value.asObject().?.canFinalize())
             try self.finalization_set.put(allocator, new_address, {});
     }
 
@@ -961,7 +956,7 @@ pub const Tracked = struct {
     }
 
     pub fn createWithLiteral(value: Value) Tracked {
-        std.debug.assert(!value.isObjectReference());
+        std.debug.assert(value.type != .Object);
         return Tracked{ .value = .{ .Literal = value } };
     }
 
@@ -1038,7 +1033,7 @@ test "link an object to another and perform scavenge" {
     try std.testing.expect(activation_object != new_activation_object);
     var new_activation_object_map = new_activation_object.getMap();
     try std.testing.expect(activation_object_map != new_activation_object_map);
-    try std.testing.expect(activation_object_map.getSlots()[0].name.asObjectAddress() != new_activation_object_map.getSlots()[0].name.asObjectAddress());
+    try std.testing.expect(activation_object_map.getSlots()[0].name.asReference() != new_activation_object_map.getSlots()[0].name.asObjectAddress());
     try std.testing.expectEqualStrings("reference", new_activation_object_map.getSlots()[0].name.asByteArray().getValues());
 
     // Find the new referenced object

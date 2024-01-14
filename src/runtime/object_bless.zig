@@ -70,7 +70,7 @@ fn copyObjectGraphForNewActor(allocator: Allocator, token: *Heap.AllocationToken
 }
 
 pub fn bless(target_actor_id: Actor.ActorID, const_value: Value) !Value {
-    if (!const_value.isObjectReference())
+    if (const_value.type != .Object)
         return const_value;
 
     var value = const_value;

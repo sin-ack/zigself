@@ -64,31 +64,31 @@ const SlotProperties = packed struct {
     }
 
     pub fn isParent(self: SlotProperties) bool {
-        return self.properties.asUnsignedInteger() & ParentBit > 0;
+        return self.properties.asUnsignedInteger().? & ParentBit > 0;
     }
 
     pub fn isAssignable(self: SlotProperties) bool {
-        return self.properties.asUnsignedInteger() & AssignableBit > 0;
+        return self.properties.asUnsignedInteger().? & AssignableBit > 0;
     }
 
     pub fn isArgument(self: SlotProperties) bool {
-        return self.properties.asUnsignedInteger() & ArgumentBit > 0;
+        return self.properties.asUnsignedInteger().? & ArgumentBit > 0;
     }
 
     fn isIndexAssigned(self: SlotProperties) bool {
-        return self.properties.asUnsignedInteger() & IndexAssignedBit > 0;
+        return self.properties.asUnsignedInteger().? & IndexAssignedBit > 0;
     }
 
     fn setIndexAssigned(self: *SlotProperties) void {
         if (self.isIndexAssigned())
             @panic("Attempting to set the index assigned bit twice!");
         self.properties = Value.fromUnsignedInteger(
-            self.properties.asUnsignedInteger() | IndexAssignedBit,
+            self.properties.asUnsignedInteger().? | IndexAssignedBit,
         );
     }
 
     pub fn getHash(self: SlotProperties) u32 {
-        return @intCast(self.properties.asUnsignedInteger() >> 30);
+        return @intCast(self.properties.asUnsignedInteger().? >> 30);
     }
 };
 
@@ -191,7 +191,7 @@ pub const Slot = packed struct {
     /// Creates a copy of this slot with the original value, reverting any index
     /// assignment. Requires access to the object which holds this slot.
     pub fn copy(self: Slot, holder: anytype) Slot {
-        const name = self.name.asByteArray();
+        const name = self.name.asByteArray().?;
 
         if (self.isArgument()) {
             return initArgument(name);
@@ -278,7 +278,7 @@ pub const Slot = packed struct {
                 @panic("TODO: Handle overriding of argument slots");
 
             if (previous_slot.isAssignable()) {
-                const overwritten_assignable_slot_index = previous_slot.value.asUnsignedInteger();
+                const overwritten_assignable_slot_index = previous_slot.value.asUnsignedInteger().?;
                 _ = assignable_slot_values.orderedRemove(@intCast(overwritten_assignable_slot_index));
 
                 // Go through all the previous slots, and subtract 1 from all
@@ -286,9 +286,9 @@ pub const Slot = packed struct {
                 // current one (to sync with the slot value removal).
                 for (previous_slots) |*slot| {
                     if (!slot.isArgument() and slot.isAssignable()) {
-                        const other_assignable_slot_index = slot.value.asUnsignedInteger();
+                        const other_assignable_slot_index = slot.value.asUnsignedInteger().?;
                         if (other_assignable_slot_index > overwritten_assignable_slot_index)
-                            slot.value = Value.fromUnsignedInteger(other_assignable_slot_index - 1);
+                            slot.value = Value.fromUnsignedInteger(@intCast(other_assignable_slot_index - 1));
                     }
                 }
 

@@ -96,7 +96,7 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
     defer token.deinit();
 
     // Refresh pointers
-    receiver = context.receiver.getValue().asObject().asType(.ByteArray).?;
+    receiver = context.receiver.getValue().asObject().?.asType(.ByteArray).?;
 
     var values = receiver.getValues();
 
@@ -120,18 +120,15 @@ pub fn ByteArrayEq(context: *PrimitiveContext) !ExecutionResult {
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
     const argument = arguments.getValue(0);
 
-    if (argument.isObjectReference()) {
-        if (argument.asObject().asType(.ByteArray)) |byte_array| {
-            return ExecutionResult.resolve(
-                if (std.mem.eql(u8, receiver.getValues(), byte_array.getValues()))
-                    context.vm.getTrue()
-                else
-                    context.vm.getFalse(),
-            );
-        }
-    }
+    const object = argument.asObject() orelse return ExecutionResult.resolve(context.vm.getFalse());
+    const byte_array = object.asType(.ByteArray) orelse return ExecutionResult.resolve(context.vm.getFalse());
 
-    return ExecutionResult.resolve(context.vm.getFalse());
+    return ExecutionResult.resolve(
+        if (std.mem.eql(u8, receiver.getValues(), byte_array.getValues()))
+            context.vm.getTrue()
+        else
+            context.vm.getFalse(),
+    );
 }
 
 pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
@@ -152,8 +149,8 @@ pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
     defer token.deinit();
 
     // Refresh pointers
-    receiver = context.receiver.getValue().asObject().asType(.ByteArray).?;
-    argument = context.arguments[0].asObject().asType(.ByteArray).?;
+    receiver = context.receiver.getValue().asObject().?.asType(.ByteArray).?;
+    argument = context.arguments[0].asObject().?.asType(.ByteArray).?;
 
     var new_byte_array = ByteArray.createUninitialized(&token, receiver_size + argument_size);
     @memcpy(new_byte_array.getValues()[0..receiver_size], receiver.getValues());

@@ -70,7 +70,7 @@ pub const Header = packed struct {
     pub const Ptr = pointer.HeapPtr(Header, .Mutable);
 
     pub fn init(self: Header.Ptr, byte_array_length: u64) void {
-        self.length = IntegerValue(.Unsigned).init(@sizeOf(Header) + byte_array_length);
+        self.length = IntegerValue(.Unsigned).init(@intCast(@sizeOf(Header) + byte_array_length));
     }
 
     pub fn asByteVector(self: Header.Ptr) ByteArray {

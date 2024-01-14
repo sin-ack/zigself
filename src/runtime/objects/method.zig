@@ -230,7 +230,7 @@ pub const MethodMap = extern struct {
             self.getArgumentSlotCount(),
             self.getSlotCount(),
             self.isInlineMethod(),
-            self.method_name.asByteArray(),
+            self.method_name.asByteArray().?,
             self.base_map.block.get(),
             self.base_map.definition_executable_ref.get(),
         );

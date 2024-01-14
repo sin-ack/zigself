@@ -6,32 +6,31 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("./Heap.zig");
-const Slot = slot_import.Slot;
+const Slot = @import("./slot.zig").Slot;
 const debug = @import("../debug.zig");
 const Actor = @import("./Actor.zig");
 const bless = @import("./object_bless.zig");
 const Value = @import("./value.zig").Value;
 const bytecode = @import("./bytecode.zig");
-const BlockMap = block_object.BlockMap;
-const SlotsMap = slots_object.SlotsMap;
+const BlockMap = objects_block.BlockMap;
+const SlotsMap = objects_slots.SlotsMap;
 const ByteArray = @import("./ByteArray.zig");
-const MethodMap = method_object.MethodMap;
+const MethodMap = objects_method.MethodMap;
 const traversal = @import("./object_traversal.zig");
 const Activation = @import("./Activation.zig");
 const BaseObject = @import("./base_object.zig").BaseObject;
 const primitives = @import("./primitives.zig");
 const vm_context = @import("context.zig");
 const SourceRange = @import("./SourceRange.zig");
-const BlockObject = block_object.Block;
+const BlockObject = objects_block.Block;
 const FloatObject = @import("objects/float.zig").Float;
-const SlotsObject = slots_object.Slots;
-const slot_import = @import("./slot.zig");
-const block_object = @import("objects/block.zig");
-const slots_object = @import("objects/slots.zig");
-const MethodObject = method_object.Method;
+const SlotsObject = objects_slots.Slots;
+const MethodObject = objects_method.Method;
 const RuntimeError = @import("RuntimeError.zig");
-const method_object = @import("objects/method.zig");
+const objects_block = @import("objects/block.zig");
+const objects_slots = @import("objects/slots.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
+const objects_method = @import("objects/method.zig");
 const ExecutionResult = @import("execution_result.zig").ExecutionResult;
 const ByteArrayObject = @import("objects/byte_array.zig").ByteArray;
 const ActivationObject = @import("objects/activation.zig").Activation;
@@ -244,7 +243,7 @@ fn opcodeSelfPrimSend(context: *InterpreterContext) InterpreterError!ExecutionRe
 fn opcodePushConstantSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
     const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushConstantSlot);
     const name_value = context.vm.readRegister(payload.name_location);
-    const name_byte_array_object = name_value.asObject().asType(.ByteArray).?;
+    const name_byte_array_object = name_value.asObject().?.asType(.ByteArray).?;
     const value = context.vm.readRegister(payload.value_location);
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initConstant(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
@@ -254,7 +253,7 @@ fn opcodePushConstantSlot(context: *InterpreterContext) InterpreterError!Executi
 fn opcodePushAssignableSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
     const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushAssignableSlot);
     const name_value = context.vm.readRegister(payload.name_location);
-    const name_byte_array_object = name_value.asObject().asType(.ByteArray).?;
+    const name_byte_array_object = name_value.asObject().?.asType(.ByteArray).?;
     const value = context.vm.readRegister(payload.value_location);
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initAssignable(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
@@ -264,7 +263,7 @@ fn opcodePushAssignableSlot(context: *InterpreterContext) InterpreterError!Execu
 fn opcodePushArgumentSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
     const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushArgumentSlot);
     const name_value = context.vm.readRegister(payload.name_location);
-    const name_byte_array_object = name_value.asObject().asType(.ByteArray).?;
+    const name_byte_array_object = name_value.asObject().?.asType(.ByteArray).?;
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initArgument(name_byte_array_object.getByteArray()));
     return ExecutionResult.normal();
@@ -320,7 +319,7 @@ fn opcodeCreateMethod(context: *InterpreterContext) InterpreterError!ExecutionRe
     const index = context.getInstructionIndex();
 
     const payload = block.getTypedPayload(index, .CreateMethod);
-    const method_name_byte_array = context.vm.readRegister(payload.method_name_location).asObject().asType(.ByteArray).?.getByteArray();
+    const method_name_byte_array = context.vm.readRegister(payload.method_name_location).asObject().?.asType(.ByteArray).?.getByteArray();
 
     try createMethod(
         context.getDefinitionExecutable(),
@@ -386,8 +385,8 @@ fn opcodePushArg(context: *InterpreterContext) InterpreterError!ExecutionResult 
     const payload = context.getCurrentBytecodeBlock().getTypedPayload(index, .PushArg);
 
     var argument = context.vm.readRegister(payload.argument_location);
-    if (argument.isObjectReference()) {
-        if (argument.asObject().asType(.Activation)) |activation| {
+    if (argument.asObject()) |argument_object| {
+        if (argument_object.asType(.Activation)) |activation| {
             argument = activation.findActivationReceiver();
         }
     }
@@ -444,8 +443,8 @@ fn performSend(
     switch (result) {
         .Resolved => |v| {
             var value = v;
-            if (value.isObjectReference()) {
-                if (value.asObject().asType(.Activation)) |activation| {
+            if (value.asObject()) |object| {
+                if (object.asType(.Activation)) |activation| {
                     value = activation.findActivationReceiver();
                 }
             }
@@ -465,8 +464,8 @@ fn performPrimitiveSend(
 ) !ExecutionResult {
     if (primitives.getPrimitive(message_name)) |primitive| {
         var receiver = receiver_;
-        if (receiver.isObjectReference()) {
-            if (receiver.asObject().asType(.Activation)) |activation| {
+        if (receiver.asObject()) |receiver_object| {
+            if (receiver_object.asType(.Activation)) |activation| {
                 receiver = activation.findActivationReceiver();
             }
         }
@@ -518,14 +517,14 @@ pub fn sendMessage(
     // FIXME: Only activate this when the message looks like a block execution.
     {
         var block_receiver = receiver;
-        if (block_receiver.isObjectReference()) {
-            if (block_receiver.asObject().asType(.Activation)) |activation| {
+        if (block_receiver.asObject()) |block_object| {
+            if (block_object.asType(.Activation)) |activation| {
                 block_receiver = activation.findActivationReceiver();
             }
         }
 
-        if (block_receiver.isObjectReference()) {
-            if (block_receiver.asObject().asType(.Block)) |receiver_as_block| {
+        if (block_receiver.asObject()) |block_object| {
+            if (block_object.asType(.Block)) |receiver_as_block| {
                 if (receiver_as_block.isCorrectMessageForBlockExecution(message_name)) {
                     const argument_count = receiver_as_block.getArgumentSlotCount();
                     const argument_slice = actor.argument_stack.lastNItems(argument_count);
@@ -550,8 +549,8 @@ pub fn sendMessage(
 
     return switch (receiver.lookup(message_name)) {
         .Regular => |lookup_result| {
-            if (lookup_result.isObjectReference()) {
-                if (lookup_result.asObject().asType(.Method)) |method| {
+            if (lookup_result.asObject()) |lookup_result_object| {
+                if (lookup_result_object.asType(.Method)) |method| {
                     const argument_count = method.getArgumentSlotCount();
                     const argument_slice = actor.argument_stack.lastNItems(argument_count);
 
@@ -577,8 +576,8 @@ pub fn sendMessage(
             // NOTE: This is required, for instance, when we are assigning `self` to
             //       a slot (happens more often than you might think!). We need to strip
             //       the activation object to get to the actual value inside.
-            if (argument.isObjectReference()) {
-                if (argument.asObject().asType(.Activation)) |activation| {
+            if (argument.asObject()) |argument_object| {
+                if (argument_object.asType(.Activation)) |activation| {
                     argument = activation.findActivationReceiver();
                 }
             }
@@ -676,7 +675,7 @@ fn executeBlock(
 
         if (tracked_block) |t| {
             // Refresh the pointer to the block.
-            block = t.getValue().asObject().asType(.Block).?;
+            block = t.getValue().asObject().?.asType(.Block).?;
         }
 
         break :token token;
@@ -733,7 +732,7 @@ fn executeMethod(
         if (tracked_receiver) |t| {
             // Refresh the pointers to the method and its receiver.
             receiver_of_method = t.getValue();
-            method = tracked_method.?.getValue().asObject().asType(.Method).?;
+            method = tracked_method.?.getValue().asObject().?.asType(.Method).?;
         }
 
         break :token token;
@@ -743,9 +742,11 @@ fn executeMethod(
     // NOTE: The receiver of a method activation must never be an activation
     //       object (unless it explicitly wants that), as that would allow
     //       us to access the slots of upper scopes.
-    if (!method.expectsActivationObjectAsReceiver() and receiver_of_method.isObjectReference()) {
-        if (receiver_of_method.asObject().asType(.Activation)) |activation| {
-            receiver_of_method = activation.findActivationReceiver();
+    if (!method.expectsActivationObjectAsReceiver()) {
+        if (receiver_of_method.asObject()) |receiver_object| {
+            if (receiver_object.asType(.Activation)) |activation| {
+                receiver_of_method = activation.findActivationReceiver();
+            }
         }
     }
 

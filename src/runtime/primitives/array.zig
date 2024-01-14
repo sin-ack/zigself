@@ -47,7 +47,7 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
 pub fn ArraySize(context: *PrimitiveContext) !ExecutionResult {
     const arguments = context.getArguments("_ArraySize");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
-    return ExecutionResult.resolve(Value.fromUnsignedInteger(receiver.getSize()));
+    return ExecutionResult.resolve(Value.fromUnsignedInteger(@intCast(receiver.getSize())));
 }
 
 /// Return the value at the given position of the receiver array. If the given

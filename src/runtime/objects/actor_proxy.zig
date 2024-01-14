@@ -94,21 +94,22 @@ pub const ActorProxy = extern struct {
             // FIXME: This should probably cause a different kind of error.
             .Assignment => object_lookup.LookupResult.nothing,
             .Regular => |lookup_result| blk: {
-                if (!(lookup_result.isObjectReference() and lookup_result.asObject().getMetadata().type == .Method)) {
-                    // NOTE: In zigSelf, all messages are async. Therefore
-                    //       sending a message to a non-method slot will not
-                    //       return any meaningful value to the user.
-                    //       However it should also still be valid, so we
-                    //       cannot return nothing here.
-                    break :blk object_lookup.LookupResult{ .Regular = context.getVM().nil() };
+                if (lookup_result.asObject()) |object| {
+                    if (object.asType(.Method)) |method_object| {
+                        break :blk object_lookup.LookupResult{
+                            .ActorMessage = .{
+                                .target_actor = target_actor,
+                                .method = method_object,
+                            },
+                        };
+                    }
                 }
 
-                break :blk object_lookup.LookupResult{
-                    .ActorMessage = .{
-                        .target_actor = target_actor,
-                        .method = lookup_result.asObject().asType(.Method).?,
-                    },
-                };
+                // NOTE: In zigSelf, all messages are async. Therefore sending a
+                //       message to a non-method slot will not return any
+                //       meaningful value to the user. However it should also
+                //       still be valid, so we cannot return nothing here.
+                break :blk object_lookup.LookupResult{ .Regular = context.getVM().nil() };
             },
             .ActorMessage => unreachable,
         };

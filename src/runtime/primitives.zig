@@ -109,8 +109,8 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
 
         fn IntegerType(comptime signedness: IntegerValueSignedness) type {
             return switch (signedness) {
-                .Signed => i64,
-                .Unsigned => u64,
+                .Signed => Value.SignedData,
+                .Unsigned => Value.Data,
             };
         }
 
@@ -126,16 +126,14 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
         pub fn getInteger(self: Self, comptime index: isize, comptime signedness: IntegerValueSignedness) !IntegerType(signedness) {
             const value = self.getValue(index);
 
-            if (!value.isInteger()) {
+            const value_as_integer = value.asInteger() orelse {
                 self.context.get_argument_error = ExecutionResult.runtimeError(RuntimeError.initFormattedComptime(
                     self.context.source_range,
                     "Expected integer for {s} {s}",
                     .{ getArgumentMessage(index), primitive_name },
                 ));
                 return error.GetArgumentFailure;
-            }
-
-            const value_as_integer = value.asInteger();
+            };
             if (signedness == .Signed) return value_as_integer;
 
             if (value_as_integer < 0) {
@@ -154,8 +152,8 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
         pub fn getObject(self: Self, comptime index: isize, comptime object_type: object.ObjectType) !object.ObjectT(object_type).Ptr {
             const value = self.getValue(index);
 
-            if (value.isObjectReference()) {
-                if (value.asObject().asType(object_type)) |cast_object|
+            if (value.asObject()) |value_object| {
+                if (value_object.asType(object_type)) |cast_object|
                     return cast_object;
             }
 

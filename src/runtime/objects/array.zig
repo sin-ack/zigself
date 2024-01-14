@@ -144,7 +144,7 @@ pub const ArrayMap = extern struct {
 
     fn init(self: ArrayMap.Ptr, size: usize) void {
         self.map.init(.Array);
-        self.size = IntegerValue(.Unsigned).init(@as(u64, size));
+        self.size = IntegerValue(.Unsigned).init(@intCast(size));
     }
 
     pub fn asValue(self: ArrayMap.Ptr) GenericValue {

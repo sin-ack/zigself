@@ -57,7 +57,7 @@ pub const Float = extern struct {
     fn write(self: Float.Ptr, value: f64) void {
         const value_bits: u64 = @bitCast(value);
         Float.ExtraBits.write(self.object.getMetadata(), @intCast(value_bits & ((1 << BottomBitCount) - 1)));
-        self.top_bits = IntegerValue(.Unsigned).init(value_bits >> BottomBitCount);
+        self.top_bits = IntegerValue(.Unsigned).init(@intCast(value_bits >> BottomBitCount));
     }
 
     // --- Casting ---

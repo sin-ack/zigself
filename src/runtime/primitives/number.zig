@@ -15,7 +15,7 @@ const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 fn integerOpCommon(
     comptime primitive_name: [*:0]const u8,
     context: *PrimitiveContext,
-    comptime operation: fn (context: PrimitiveContext, receiver: i64, term: i64) Allocator.Error!ExecutionResult,
+    comptime operation: fn (context: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) Allocator.Error!ExecutionResult,
 ) !ExecutionResult {
     const arguments = context.getArguments("_" ++ primitive_name ++ ":");
     const receiver = try arguments.getInteger(PrimitiveContext.Receiver, .Signed);
@@ -27,9 +27,15 @@ fn integerOpCommon(
 /// Add two integer numbers. The returned value is an integer.
 pub fn IntAdd(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntAdd", context, struct {
-        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
-            _ = ctx;
-            return ExecutionResult.resolve(Value.fromInteger(receiver + term));
+        pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
+            const result, const overflow = @addWithOverflow(receiver, term);
+            if (overflow == 1) {
+                return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+                    ctx.source_range,
+                    "Integer overflow",
+                ));
+            }
+            return ExecutionResult.resolve(Value.fromInteger(result));
         }
     }.op);
 }
@@ -37,9 +43,15 @@ pub fn IntAdd(context: *PrimitiveContext) !ExecutionResult {
 /// Subtract the argument from the receiver. The returned value is an integer.
 pub fn IntSub(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntSub", context, struct {
-        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
-            _ = ctx;
-            return ExecutionResult.resolve(Value.fromInteger(receiver - term));
+        pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
+            const result, const overflow = @subWithOverflow(receiver, term);
+            if (overflow == 1) {
+                return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+                    ctx.source_range,
+                    "Integer underflow",
+                ));
+            }
+            return ExecutionResult.resolve(Value.fromInteger(result));
         }
     }.op);
 }
@@ -47,9 +59,15 @@ pub fn IntSub(context: *PrimitiveContext) !ExecutionResult {
 /// Multiply the argument with the receiver. The returned value is an integer.
 pub fn IntMul(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntMul", context, struct {
-        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
-            _ = ctx;
-            return ExecutionResult.resolve(Value.fromInteger(receiver * term));
+        pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
+            const result, const overflow = @mulWithOverflow(receiver, term);
+            if (overflow == 1) {
+                return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+                    ctx.source_range,
+                    "Integer overflow",
+                ));
+            }
+            return ExecutionResult.resolve(Value.fromInteger(result));
         }
     }.op);
 }
@@ -58,9 +76,12 @@ pub fn IntMul(context: *PrimitiveContext) !ExecutionResult {
 /// discarded. The returned value is an integer.
 pub fn IntDiv(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntDiv", context, struct {
-        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
+        pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             if (term == 0)
-                return ExecutionResult.runtimeError(RuntimeError.initLiteral(ctx.source_range, "Division by zero"));
+                return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+                    ctx.source_range,
+                    "Division by zero",
+                ));
             return ExecutionResult.resolve(Value.fromInteger(@divFloor(receiver, term)));
         }
     }.op);
@@ -70,9 +91,12 @@ pub fn IntDiv(context: *PrimitiveContext) !ExecutionResult {
 /// integer.
 pub fn IntMod(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntMod", context, struct {
-        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
+        pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             if (term == 0)
-                return ExecutionResult.runtimeError(RuntimeError.initLiteral(ctx.source_range, "Modulo by zero"));
+                return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+                    ctx.source_range,
+                    "Modulo by zero",
+                ));
             return ExecutionResult.resolve(Value.fromInteger(@mod(receiver, term)));
         }
     }.op);
@@ -82,16 +106,14 @@ pub fn IntMod(context: *PrimitiveContext) !ExecutionResult {
 /// is an integer.
 pub fn IntShl(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntShl", context, struct {
-        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
-            if (term < 0 or term > 62)
-                return ExecutionResult.runtimeError(RuntimeError.initLiteral(
+        pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
+            if (term < 0 or term > Value.DataBits)
+                return ExecutionResult.runtimeError(RuntimeError.initFormattedComptime(
                     ctx.source_range,
-                    "Argument to _IntShl: must be between 0 and 62",
+                    "Argument to _IntShl: must be between 0 and {}",
+                    .{Value.DataBits},
                 ));
-            // FIXME: These functions should be passed i62s in the first place,
-            // but doing that requires making Value.fromInteger return 62-bit
-            // integers.
-            const result: i64 = (receiver << @as(u6, @intCast(term))) & ((@as(i64, 1) << 62) - 1);
+            const result: Value.SignedData = (receiver << @as(u6, @intCast(term)));
             return ExecutionResult.resolve(Value.fromInteger(result));
         }
     }.op);
@@ -101,18 +123,16 @@ pub fn IntShl(context: *PrimitiveContext) !ExecutionResult {
 /// is an integer.
 pub fn IntShr(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntShr", context, struct {
-        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
-            if (term < 0 or term > 62)
+        pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
+            if (term < 0 or term > Value.DataBits)
                 return ExecutionResult.runtimeError(
-                    RuntimeError.initLiteral(
+                    RuntimeError.initFormattedComptime(
                         ctx.source_range,
-                        "Argument to _IntShr: must be between 0 and 62",
+                        "Argument to _IntShr: must be between 0 and {}",
+                        .{Value.DataBits},
                     ),
                 );
-            // FIXME: These functions should be passed i62s in the first place,
-            // but doing that requires making Value.fromInteger return 62-bit
-            // integers.
-            const result: i64 = (receiver >> @as(u6, @intCast(term))) & ((@as(i64, 1) << 62) - 1);
+            const result: Value.SignedData = (receiver >> @as(u6, @intCast(term)));
             return ExecutionResult.resolve(Value.fromInteger(result));
         }
     }.op);
@@ -122,7 +142,7 @@ pub fn IntShr(context: *PrimitiveContext) !ExecutionResult {
 /// is an integer.
 pub fn IntXor(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntXor", context, struct {
-        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
+        pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             _ = ctx;
             return ExecutionResult.resolve(Value.fromInteger(receiver ^ term));
         }
@@ -133,7 +153,7 @@ pub fn IntXor(context: *PrimitiveContext) !ExecutionResult {
 /// is an integer.
 pub fn IntAnd(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntAnd", context, struct {
-        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
+        pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             _ = ctx;
             return ExecutionResult.resolve(Value.fromInteger(receiver & term));
         }
@@ -144,7 +164,7 @@ pub fn IntAnd(context: *PrimitiveContext) !ExecutionResult {
 /// is an integer.
 pub fn IntOr(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntOr", context, struct {
-        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
+        pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             _ = ctx;
             return ExecutionResult.resolve(Value.fromInteger(receiver | term));
         }
@@ -155,7 +175,7 @@ pub fn IntOr(context: *PrimitiveContext) !ExecutionResult {
 /// either "true" or "false".
 pub fn IntLT(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntLT", context, struct {
-        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
+        pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             return ExecutionResult.resolve(
                 if (receiver < term)
                     ctx.vm.getTrue()
@@ -170,7 +190,7 @@ pub fn IntLT(context: *PrimitiveContext) !ExecutionResult {
 /// is either "true" or "false".
 pub fn IntGT(context: *PrimitiveContext) !ExecutionResult {
     return try integerOpCommon("IntGT", context, struct {
-        pub fn op(ctx: PrimitiveContext, receiver: i64, term: i64) !ExecutionResult {
+        pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             return ExecutionResult.resolve(
                 if (receiver > term)
                     ctx.vm.getTrue()
@@ -189,7 +209,7 @@ pub fn IntEq(context: *PrimitiveContext) !ExecutionResult {
     const receiver = try arguments.getInteger(PrimitiveContext.Receiver, .Signed);
     const term = arguments.getValue(0);
 
-    if (!term.isInteger()) {
+    if (term.type != .Integer) {
         return ExecutionResult.resolve(context.vm.getFalse());
     }
 

@@ -19,12 +19,12 @@ fn traverseObjectGraphInner(
     visitor: anytype,
     previous_link: ?*const TraverseObjectGraphLink,
 ) anyerror!Value {
-    return switch (value.getType()) {
-        .ObjectMarker => unreachable,
+    return switch (value.type) {
         .Integer => value,
-        .ObjectReference => value: {
-            const old_base_object = value.asBaseObject();
-            const old_object_address = value.asObjectAddress();
+        .Object => value: {
+            const old_reference = value.asReference().?;
+            const old_base_object = old_reference.asBaseObject();
+            const old_object_address = old_reference.getAddress();
 
             // Globally reachable objects are never traversed.
             if (old_base_object.metadata.reachability == .Global)
@@ -77,7 +77,7 @@ fn traverseObjectGraphInner(
                     };
                     // FIXME: Move this switch into object delegation.
                     switch (old_object_type) {
-                        .ForwardedObject, .Activation, .Actor => unreachable,
+                        .Activation, .Actor => unreachable,
                         .Slots, .Method, .Block => {
                             const new_base_object = (try visitor.visit(old_base_object)).asObject().?;
                             @as(MapObject.Ptr, @ptrCast(new_base_object)).map = new_map.?;

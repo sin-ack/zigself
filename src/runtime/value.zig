@@ -24,92 +24,98 @@ const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
-pub const Value = packed struct {
-    data: u64,
+pub const Value = packed struct(u64) {
+    type: Type,
+    data: Data,
 
-    pub const ValueMarkerMask: u64 = 0b11;
-
-    pub const ValueType = enum(u2) {
-        Integer = 0b00,
-        ObjectReference = 0b01,
-        ObjectMarker = 0b11,
+    pub const Data = u63;
+    pub const SignedData = i63;
+    pub const Type = enum(u1) {
+        Integer = 0,
+        Object = 1,
     };
+
+    pub const TypeBits = 1;
+    pub const TypeMask: u64 = 0b1;
+    pub const DataBits = 63;
+
+    // --- Creation ---
 
     /// Create a new Value object from the given object address.
     pub inline fn fromObjectAddress(address: [*]u64) Value {
-        // Must be 8-byte aligned
-        std.debug.assert((@intFromPtr(address) & 0b111) == 0);
-        return .{ .data = @intFromPtr(address) | @intFromEnum(ValueType.ObjectReference) };
+        return @bitCast(Reference.createRegular(address));
     }
 
     /// Create a new Value object from an integer literal.
-    pub inline fn fromInteger(integer: i64) Value {
-        std.debug.assert((@as(i64, -1) << 62) < integer and integer < (@as(i64, 1) << 62));
-        const data: u64 = @bitCast(integer << 2);
-        return .{ .data = data | @intFromEnum(ValueType.Integer) };
+    pub inline fn fromInteger(integer: SignedData) Value {
+        return .{ .data = @bitCast(integer), .type = .Integer };
     }
 
     /// Create a new Value object from an unsigned integer literal.
-    pub inline fn fromUnsignedInteger(integer: u64) Value {
-        std.debug.assert(integer < (@as(u64, 1) << 62));
-        return .{ .data = (integer << 2) | @intFromEnum(ValueType.Integer) };
+    pub inline fn fromUnsignedInteger(integer: Data) Value {
+        return .{ .data = @intCast(integer), .type = .Integer };
     }
 
-    /// Return the type of this value.
-    pub inline fn getType(self: Value) ValueType {
-        return @enumFromInt(self.data & ValueMarkerMask);
+    // --- Casting ---
+
+    /// Try to cast this value to an integer. Returns null if this value is not
+    /// an integer.
+    pub inline fn asInteger(self: Value) ?Value.SignedData {
+        if (self.type == .Integer) return @bitCast(self.data);
+        return null;
     }
 
-    /// Return whether this value is an integer.
-    pub inline fn isInteger(self: Value) bool {
-        return self.getType() == .Integer;
+    /// Try to cast this value to an unsigned integer. Returns null if this
+    /// value is not an unsigned integer.
+    pub inline fn asUnsignedInteger(self: Value) ?Value.Data {
+        if (self.type == .Integer) return self.data;
+        return null;
     }
 
-    /// Return whether this value is an object reference.
-    pub inline fn isObjectReference(self: Value) bool {
-        return self.getType() == .ObjectReference;
+    /// Try to cast this value to an object-like. Returns null if this value is
+    /// not an object-like.
+    pub inline fn asObjectLike(self: Value) ?ObjectLike {
+        if (self.type == .Object) return @bitCast(self);
+        return null;
     }
 
-    /// Return this value as an integer.
-    pub inline fn asInteger(self: Value) i64 {
-        std.debug.assert(self.isInteger());
-        const data: i64 = @bitCast(self.data);
-        return data >> 2;
+    /// Try to cast this value to an object reference. Returns null if this
+    /// value is not an object reference.
+    pub inline fn asReference(self: Value) ?Reference {
+        if (self.asObjectLike()) |object_like| return object_like.asReference();
+        return null;
     }
 
-    /// Return this value as an unsigned integer.
-    pub inline fn asUnsignedInteger(self: Value) u64 {
-        std.debug.assert(self.isInteger());
-        return self.data >> 2;
+    /// Try to cast this value to a base object pointer. Returns null if this
+    /// value is not an object reference.
+    pub inline fn asBaseObject(self: Value) ?BaseObject.Ptr {
+        if (self.asObjectLike()) |object_like| return object_like.asBaseObject();
+        return null;
     }
 
-    /// Return the object address stored in this value as a pointer.
-    pub inline fn asObjectAddress(self: Value) [*]u64 {
-        std.debug.assert(self.isObjectReference());
-        const address: usize = @intCast(self.data & ~ValueMarkerMask);
-        return @ptrFromInt(address);
+    /// Try to cast this value to an object pointer. Returns null if this value
+    /// is not an object reference.
+    pub inline fn asObject(self: Value) ?Object.Ptr {
+        if (self.asBaseObject()) |base_object| return base_object.asObject();
+        return null;
     }
 
-    /// Return the base object the address of which is stored in this value.
-    pub inline fn asBaseObject(self: Value) BaseObject.Ptr {
-        return BaseObject.fromAddress(self.asObjectAddress());
+    /// Try to cast this value to a map pointer. Returns null if this value is
+    /// not an object reference.
+    pub inline fn asMap(self: Value) ?Map.Ptr {
+        if (self.asBaseObject()) |base_object| return base_object.asMap();
+        return null;
     }
 
-    /// Return the object the address of which is stored in this value.
-    pub inline fn asObject(self: Value) Object.Ptr {
-        return self.asBaseObject().asObject().?;
+    /// Try to cast this value to a byte array pointer. Returns null if this
+    /// value is not an object reference.
+    pub inline fn asByteArray(self: Value) ?ByteArray {
+        if (self.asObjectLike()) |object_like| return object_like.asByteArray();
+        return null;
     }
 
-    /// Return the map the address of which is stored in this value.
-    pub inline fn asMap(self: Value) Map.Ptr {
-        return self.asBaseObject().asMap().?;
-    }
-
-    /// Return the byte vector the address of which is stored in this value.
-    pub inline fn asByteArray(self: Value) ByteArray {
-        return ByteArray.fromAddress(self.asObjectAddress());
-    }
-
+    /// Perform a lookup on this value by a string selector. If your selector
+    /// is already hashed, use `lookupByHash` instead.
     pub fn lookup(
         self: Value,
         selector: []const u8,
@@ -120,6 +126,7 @@ pub const Value = packed struct {
         return self.lookupByHash(selector_hash);
     }
 
+    /// Perform a lookup on this value by a selector hash.
     pub fn lookupByHash(
         self: Value,
         selector_hash: SelectorHash,
@@ -129,10 +136,8 @@ pub const Value = packed struct {
         }
 
         const vm = context.getVM();
-        return switch (self.getType()) {
-            .ObjectMarker => unreachable,
-            .ObjectReference => selector_hash.lookupObject(self.asObject()),
-
+        return switch (self.type) {
+            .Object => selector_hash.lookupObject(self.asObject().?),
             .Integer => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookupByHash: Looking up on traits integer\n", .{});
                 const integer_traits = vm.integer_traits.getValue();
@@ -144,15 +149,120 @@ pub const Value = packed struct {
         };
     }
 
-    /// Clones this value and returns a copy of it.
+    /// Clone this value on the heap and return a reference to the new copy.
     pub fn clone(self: Value, token: *Heap.AllocationToken, actor_id: Actor.ActorID) Value {
-        return switch (self.getType()) {
-            .ObjectMarker => unreachable,
-            .Integer => Value{ .data = self.data },
+        return switch (self.type) {
+            .Integer => self,
             // NOTE: The only error condition that can happen here is during method and block map cloning.
             //       Since user code is unable to do this, there is no reason to propagate a try here.
-            .ObjectReference => (self.asObject().clone(token, actor_id) catch unreachable).asValue(),
+            .Object => (self.asObject().?.clone(token, actor_id) catch unreachable).asValue(),
         };
+    }
+};
+
+/// ObjectLike is a value that's not an integer. This can be an actual object
+/// header, or an object reference.
+pub const ObjectLike = packed struct(u64) {
+    value_type: Value.Type = .Object,
+    type: Type,
+    data: Data,
+
+    pub const Data = u62;
+    pub const Type = enum(u1) {
+        Reference = 0,
+        Object = 1,
+    };
+
+    pub inline fn asReference(self: ObjectLike) ?Reference {
+        if (self.type == .Reference) return @bitCast(self);
+        return null;
+    }
+
+    pub inline fn asBaseObject(self: ObjectLike) ?BaseObject.Ptr {
+        if (self.asReference()) |reference| return reference.asBaseObject();
+        return null;
+    }
+
+    pub inline fn asByteArray(self: ObjectLike) ?ByteArray {
+        if (self.asReference()) |reference| return ByteArray.fromAddress(reference.getAddress());
+        return null;
+    }
+
+    // NOTE: Since we don't manipulate object headers here, we don't supply
+    //       a method for it.
+};
+
+/// A reference to an object in the heap. This can be a regular or forwarding
+/// reference.
+pub const Reference = packed struct(u64) {
+    value_type: Value.Type = .Object,
+    object_like_type: ObjectLike.Type = .Reference,
+    type: Type,
+    data: Data,
+
+    pub const Data = u61;
+    pub const Type = enum(u1) {
+        Regular = 0,
+        Forwarding = 1,
+    };
+
+    const Mask: u64 = 0b111;
+
+    fn create(comptime reference_type: Type, address: [*]u64) Reference {
+        const address_as_int: u64 = @intFromPtr(address);
+
+        // Must be 8-byte aligned in order to utilize all the bottom bits.
+        std.debug.assert(address_as_int & 0b111 == 0);
+
+        var new_reference: Reference = @bitCast(address_as_int);
+        new_reference.value_type = .Object;
+        new_reference.object_like_type = .Reference;
+        new_reference.type = reference_type;
+
+        return new_reference;
+    }
+
+    /// Create a new non-forwarding reference.
+    pub inline fn createRegular(address: [*]u64) Reference {
+        return create(.Regular, address);
+    }
+
+    /// Create a new forwarding reference.
+    pub inline fn createForwarding(address: [*]u64) Reference {
+        return create(.Forwarding, address);
+    }
+
+    pub inline fn isForwarding(self: Reference) bool {
+        return self.type == .Forwarding;
+    }
+
+    /// Attempt to convert the given address on the heap to a forwarding
+    /// reference, returning null if it doesn't look like one.
+    pub inline fn tryFromForwarding(address: [*]u64) ?Reference {
+        const reference: Reference = @bitCast(address[0]);
+        if (reference.value_type != .Object) return null;
+        if (reference.object_like_type != .Reference) return null;
+        if (reference.type != .Forwarding) return null;
+
+        return reference;
+    }
+
+    pub inline fn getAddress(self: Reference) [*]u64 {
+        const raw_value: u64 = @bitCast(self);
+        return @ptrFromInt(raw_value & ~Mask);
+    }
+
+    /// Return a pointer to the object this reference points to.
+    pub inline fn asBaseObject(self: Reference) BaseObject.Ptr {
+        return @ptrCast(self.getAddress());
+    }
+
+    pub inline fn asObject(self: Reference) ?Object.Ptr {
+        return self.asBaseObject().asObject();
+    }
+
+    pub inline fn asMap(self: Reference) ?Map.Ptr {
+        return self.asBaseObject().asMap();
     }
 };
 
@@ -170,11 +280,11 @@ pub fn PointerValueAlignment(comptime T: type, comptime alignment: ?u29) type {
         const Self = @This();
 
         pub fn init(value: PointerT) Self {
-            return .{ .value = Value.fromUnsignedInteger(@intFromPtr(value)) };
+            return .{ .value = Value.fromUnsignedInteger(@intCast(@intFromPtr(value))) };
         }
 
         pub fn get(self: Self) PointerT {
-            const self_int: usize = @intCast(self.value.asUnsignedInteger());
+            const self_int: usize = @intCast(self.value.asUnsignedInteger().?);
             return @ptrFromInt(self_int);
         }
     };
@@ -215,8 +325,8 @@ pub const IntegerValueSignedness = enum { Signed, Unsigned };
 /// A value which is known to be an integer.
 pub fn IntegerValue(comptime signedness: IntegerValueSignedness) type {
     const IntegerT = switch (signedness) {
-        .Signed => i64,
-        .Unsigned => u64,
+        .Signed => Value.SignedData,
+        .Unsigned => Value.Data,
     };
     const init_function = switch (signedness) {
         .Signed => Value.fromInteger,
@@ -238,12 +348,12 @@ pub fn IntegerValue(comptime signedness: IntegerValueSignedness) type {
 
         pub fn get(self: Self) IntegerT {
             if (builtin.mode == .Debug) {
-                if (!self.value.isInteger()) {
+                if (self.value.type != .Integer) {
                     @panic("!!! IntegerValue does not contain an integer!");
                 }
             }
 
-            return conversion_function(self.value);
+            return conversion_function(self.value).?;
         }
     };
 }
@@ -262,7 +372,7 @@ pub fn ObjectValue(comptime ObjectT: type) type {
         }
 
         pub fn get(self: Self) ObjectT.Ptr {
-            return self.value.asObject().asType(ObjectT.Type).?;
+            return self.value.asObject().?.asType(ObjectT.Type).?;
         }
     };
 }
