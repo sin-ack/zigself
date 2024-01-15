@@ -322,14 +322,35 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "AcceptFromFD:IfFail:", .arity = 2, .function_name = "AcceptFromFD_IfFail" },
 });
 
-// FIXME: This is very naive! We shouldn't need to linear search every single
-//        time.
-pub fn getPrimitive(selector: []const u8) ?PrimitiveSpec {
-    for (PrimitiveRegistry) |primitive| {
+pub const PrimitiveIndex = enum(u32) {
+    _,
+
+    pub fn format(
+        self: PrimitiveIndex,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+
+        try std.fmt.format(writer, "\"{s}\"", .{getPrimitive(self).name});
+    }
+};
+
+pub fn getPrimitiveIndex(selector: []const u8) ?PrimitiveIndex {
+    for (PrimitiveRegistry, 0..) |primitive, index| {
         if (std.mem.eql(u8, primitive.name, selector)) {
-            return primitive;
+            return @enumFromInt(index);
         }
     }
 
     return null;
+}
+
+pub fn getPrimitive(index: PrimitiveIndex) PrimitiveSpec {
+    const i = @intFromEnum(index);
+    std.debug.assert(i < PrimitiveRegistry.len);
+
+    return PrimitiveRegistry[i];
 }

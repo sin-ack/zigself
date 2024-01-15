@@ -229,7 +229,7 @@ fn opcodePrimSend(context: *InterpreterContext) InterpreterError!ExecutionResult
 
     const payload = block.getTypedPayload(index, .PrimSend);
     const receiver = context.vm.readRegister(payload.receiver_location);
-    return try performPrimitiveSend(receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
+    return try performPrimitiveSend(receiver, payload.index, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodeSelfPrimSend(context: *InterpreterContext) InterpreterError!ExecutionResult {
@@ -238,7 +238,7 @@ fn opcodeSelfPrimSend(context: *InterpreterContext) InterpreterError!ExecutionRe
 
     const payload = block.getTypedPayload(index, .SelfPrimSend);
     const receiver = context.actor.activation_stack.getCurrent().activation_object.get().findActivationReceiver();
-    return try performPrimitiveSend(receiver, payload.message_name, block.getTargetLocation(index), context.getSourceRange());
+    return try performPrimitiveSend(receiver, payload.index, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodePushConstantSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
@@ -459,45 +459,40 @@ fn performSend(
 
 fn performPrimitiveSend(
     receiver_: Value,
-    message_name: []const u8,
+    index: primitives.PrimitiveIndex,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !ExecutionResult {
-    if (primitives.getPrimitive(message_name)) |primitive| {
-        var receiver = receiver_;
-        if (receiver.asObject()) |receiver_object| {
-            if (receiver_object.asType(.Activation)) |activation| {
-                receiver = activation.findActivationReceiver();
-            }
-        }
-
-        const heap = vm_context.getHeap();
-        const tracked_receiver = try heap.track(receiver);
-        defer tracked_receiver.untrack(heap);
-
-        const actor = vm_context.getActor();
-        const argument_slice = vm_context.getActor().argument_stack.lastNItems(primitive.arity);
-
-        const primitive_result = try primitive.call(tracked_receiver, argument_slice, target_location, source_range);
-        if (!(primitive_result == .ActorYielded and actor.yield_reason == .Blocked)) {
-            // NOTE: If the actor got blocked, it will retry the same primitive
-            //       call when it gets unblocked, so we shouldn't pop values off
-            //       its stack.
-            actor.argument_stack.popNItems(primitive.arity);
-        }
-
-        switch (primitive_result) {
-            .Resolved => |value| {
-                vm_context.getVM().writeRegister(target_location, value);
-                return ExecutionResult.normal();
-            },
-            else => return primitive_result,
+    const primitive = primitives.getPrimitive(index);
+    var receiver = receiver_;
+    if (receiver.asObject()) |receiver_object| {
+        if (receiver_object.asType(.Activation)) |activation| {
+            receiver = activation.findActivationReceiver();
         }
     }
 
-    return ExecutionResult.runtimeError(
-        try RuntimeError.initFormatted(source_range, "Unknown primitive selector '{s}'", .{message_name}),
-    );
+    const heap = vm_context.getHeap();
+    const tracked_receiver = try heap.track(receiver);
+    defer tracked_receiver.untrack(heap);
+
+    const actor = vm_context.getActor();
+    const argument_slice = vm_context.getActor().argument_stack.lastNItems(primitive.arity);
+
+    const primitive_result = try primitive.call(tracked_receiver, argument_slice, target_location, source_range);
+    if (!(primitive_result == .ActorYielded and actor.yield_reason == .Blocked)) {
+        // NOTE: If the actor got blocked, it will retry the same primitive
+        //       call when it gets unblocked, so we shouldn't pop values off
+        //       its stack.
+        actor.argument_stack.popNItems(primitive.arity);
+    }
+
+    switch (primitive_result) {
+        .Resolved => |value| {
+            vm_context.getVM().writeRegister(target_location, value);
+            return ExecutionResult.normal();
+        },
+        else => return primitive_result,
+    }
 }
 
 /// Sends a message to the given receiver, returning the result if it can be

@@ -72,7 +72,7 @@ fn lowerInstruction(
 
             try block.addInstruction(allocator, .PrimSend, target, .{
                 .receiver_location = register_pool.getAllocatedRegisterFor(payload.receiver_location),
-                .message_name = payload.message_name,
+                .index = payload.index,
             }, inst.source_range);
         },
         .SelfSend => {
@@ -88,7 +88,7 @@ fn lowerInstruction(
             const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
             const payload = inst.payload.SelfPrimSend;
 
-            try block.addInstruction(allocator, .SelfPrimSend, target, .{ .message_name = payload.message_name }, inst.source_range);
+            try block.addInstruction(allocator, .SelfPrimSend, target, .{ .index = payload.index }, inst.source_range);
         },
         .PushConstantSlot => {
             const payload = inst.payload.PushParentableSlot;

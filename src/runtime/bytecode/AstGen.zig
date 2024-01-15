@@ -11,6 +11,7 @@ const Range = @import("../../language/Range.zig");
 const Script = @import("../../language/Script.zig");
 const astcode = @import("./astcode.zig");
 const Selector = @import("../Selector.zig");
+const primitives = @import("../primitives.zig");
 
 const Block = astcode.Block;
 const Executable = astcode.Executable;
@@ -124,7 +125,7 @@ fn generateObject(self: *AstGen, executable: *Executable, block: *Block, object:
 
     if (assignable_slot_count > MaximumAssignableSlots) {
         // FIXME: Return rich errors
-        // return Completion.initRuntimeError(context.vm, source_range, "Maximum assignable slot limit exceeded for slots object", .{});
+        // return "Maximum assignable slot limit exceeded for slots object"
         return error.AstGenFailure;
     }
 
@@ -201,10 +202,16 @@ fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, messag
 
             const message_location = self.allocateRegister();
             if (message.message_name[0] == '_') {
-                try block.addInstruction(executable.allocator, .PrimSend, message_location, .{
-                    .receiver_location = receiver_location,
-                    .message_name = message.message_name[1..],
-                }, message.range);
+                if (primitives.getPrimitiveIndex(message.message_name[1..])) |index| {
+                    try block.addInstruction(executable.allocator, .PrimSend, message_location, .{
+                        .receiver_location = receiver_location,
+                        .index = index,
+                    }, message.range);
+                } else {
+                    // FIXME: Return rich errors
+                    // Error: "Unknown primitive selector _{s}"
+                    return error.AstGenFailure;
+                }
             } else {
                 try block.addInstruction(executable.allocator, .Send, message_location, .{
                     .receiver_location = receiver_location,
@@ -220,7 +227,13 @@ fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, messag
 
         const message_location = self.allocateRegister();
         if (message.message_name[0] == '_') {
-            try block.addInstruction(executable.allocator, .SelfPrimSend, message_location, .{ .message_name = message.message_name[1..] }, message.range);
+            if (primitives.getPrimitiveIndex(message.message_name[1..])) |index| {
+                try block.addInstruction(executable.allocator, .SelfPrimSend, message_location, .{ .index = index }, message.range);
+            } else {
+                // FIXME: Return rich errors
+                // Error: "Unknown primitive selector _{s}"
+                return error.AstGenFailure;
+            }
         } else {
             try block.addInstruction(executable.allocator, .SelfSend, message_location, .{
                 .selector = Selector.fromName(message.message_name),
@@ -250,7 +263,13 @@ fn generateReturn(self: *AstGen, executable: *Executable, block: *Block, return_
 fn generateIdentifier(self: *AstGen, executable: *Executable, block: *Block, identifier: ast.IdentifierNode) AstGenError!RegisterLocation {
     const identifier_location = self.allocateRegister();
     if (identifier.value[0] == '_') {
-        try block.addInstruction(executable.allocator, .SelfPrimSend, identifier_location, .{ .message_name = identifier.value[1..] }, identifier.range);
+        if (primitives.getPrimitiveIndex(identifier.value[1..])) |index| {
+            try block.addInstruction(executable.allocator, .SelfPrimSend, identifier_location, .{ .index = index }, identifier.range);
+        } else {
+            // FIXME: Return rich errors
+            // Error: "Unknown primitive selector _{s}"
+            return error.AstGenFailure;
+        }
     } else {
         try block.addInstruction(executable.allocator, .SelfSend, identifier_location, .{
             .selector = Selector.fromName(identifier.value),
@@ -298,13 +317,13 @@ fn generateSlotsAndCodeCommon(
 
     if (argument_slot_count > MaximumArguments) {
         // FIXME: Return rich errors
-        // return Completion.initRuntimeError(context.vm, source_range, "Maximum argument slot limit exceeded for block object", .{});
+        // return "Maximum argument slot limit exceeded for block object"
         return error.AstGenFailure;
     }
 
     if (assignable_slot_count > MaximumAssignableSlots) {
         // FIXME: Return rich errors
-        // return Completion.initRuntimeError(context.vm, source_range, "Maximum assignable slot limit exceeded for block object", .{});
+        // return "Maximum assignable slot limit exceeded for block object"
         return error.AstGenFailure;
     }
 

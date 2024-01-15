@@ -6,6 +6,7 @@ const std = @import("std");
 
 const Range = @import("../../language/Range.zig");
 const Selector = @import("../Selector.zig");
+const PrimitiveIndex = @import("../primitives.zig").PrimitiveIndex;
 const AstcodeRegisterLocation = @import("./astcode/register_location.zig").RegisterLocation;
 const LowcodeRegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
 
@@ -139,11 +140,10 @@ fn Instruction(comptime RegisterLocationT: type) type {
             },
             PrimSend: struct {
                 receiver_location: RegisterLocation,
-                // TODO: Only assign the primitive ID here.
-                message_name: []const u8,
+                index: PrimitiveIndex,
             },
             SelfPrimSend: struct {
-                message_name: []const u8,
+                index: PrimitiveIndex,
             },
             PushParentableSlot: struct {
                 name_location: RegisterLocation,
@@ -208,11 +208,11 @@ fn Instruction(comptime RegisterLocationT: type) type {
                 },
                 .PrimSend => {
                     const payload = inst.payload.PrimSend;
-                    try std.fmt.format(writer, "({}, \"{s}\")", .{ payload.receiver_location, payload.message_name });
+                    try std.fmt.format(writer, "({}, {})", .{ payload.receiver_location, payload.index });
                 },
                 .SelfPrimSend => {
                     const payload = inst.payload.SelfPrimSend;
-                    try std.fmt.format(writer, "(\"{s}\")", .{payload.message_name});
+                    try std.fmt.format(writer, "({})", .{payload.index});
                 },
                 .PushConstantSlot, .PushAssignableSlot => {
                     const payload = inst.payload.PushParentableSlot;
