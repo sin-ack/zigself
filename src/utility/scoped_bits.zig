@@ -61,7 +61,7 @@ fn BackingIntType(comptime T: type, comptime name: []const u8) type {
     const BackingInt = switch (type_info) {
         .Int => T,
         .Struct => |s| blk: {
-            if (s.layout != .Packed) {
+            if (s.layout != .@"packed") {
                 @compileError("ScopedBits requires the backing type of the " ++ name ++ " to be packed");
             }
 

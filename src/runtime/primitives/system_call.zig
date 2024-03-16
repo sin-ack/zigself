@@ -68,7 +68,7 @@ pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
     const null_terminated_path = std.os.toPosixPath(file_path.getValues()) catch unreachable;
 
     // FIXME: Allow the user to pass permissions via the primitive.
-    const rc = std.os.system.open(&null_terminated_path, @intCast(flags), @as(u32, 0));
+    const rc = std.os.system.open(&null_terminated_path, @bitCast(@as(u32, @intCast(flags))), @as(u32, 0));
     const errno = std.os.system.getErrno(rc);
     if (errno == .SUCCESS) {
         const fd: std.os.fd_t = @intCast(rc);
@@ -521,7 +521,8 @@ pub fn AcceptFromFD_IfFail(context: *PrimitiveContext) !ExecutionResult {
             _ = std.os.fcntl(new_fd_value, std.os.F.SETFD, std.os.FD_CLOEXEC) catch unreachable;
 
             if (context.vm.isInRegularActor()) {
-                _ = std.os.fcntl(new_fd_value, std.os.F.SETFL, std.os.O.NONBLOCK) catch unreachable;
+                const flags: std.os.O = .{ .NONBLOCK = true };
+                _ = std.os.fcntl(new_fd_value, std.os.F.SETFL, @intCast(@as(u32, @bitCast(flags)))) catch unreachable;
             }
 
             return makeManagedFD(context, new_fd_value, .{});

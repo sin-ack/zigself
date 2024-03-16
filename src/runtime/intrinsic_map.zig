@@ -48,7 +48,7 @@ pub fn IntrinsicMap(comptime MapT: type, comptime object_type: ObjectType) type 
     }
 
     const struct_info = type_info.Struct;
-    if (struct_info.layout != .Extern) {
+    if (struct_info.layout != .@"extern") {
         @compileError("IntrinsicMap requires an extern struct");
     }
 

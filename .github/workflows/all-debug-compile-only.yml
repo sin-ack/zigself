@@ -19,7 +19,7 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2.1.1
         with:
-          version: 0.12.0-dev.2063+804cee3b9
+          version: 0.12.0-dev.3328+5cd7fef17
 
       - name: Enable all debug flags
         run: scripts/enable-all-debug-flags.sh
