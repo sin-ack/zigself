@@ -113,6 +113,15 @@ std traits _AddSlots: (|
             absentBlock value.
         ).
 
+        "Return the index of the given item within the indexable collection.
+         If it's not present within the collection, then return -1.
+         The values are compared for equality."
+        indexOf: needle = (
+            findFirst: [| :value. :index | needle = value]
+            IfPresent: [| :index | index]
+             IfAbsent: [1negate].
+        ).
+
         fold: blk Initial: initial = (| result |
             result: initial.
             each: [| :v | result: blk value: result With: v ].
