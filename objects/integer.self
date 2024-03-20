@@ -55,6 +55,7 @@ std traits integer _AddSlots: (|
     abs = (< 0 ifTrue: negate False: self).
 
     max: n = (< n ifTrue: [ n ] False: [ self ]).
+    min: n = (< n ifTrue: [ self ] False: [ n ]).
 
     kib = (self * 1024).
     mib = (kib * 1024).
