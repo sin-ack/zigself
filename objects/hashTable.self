@@ -195,11 +195,11 @@ std traits _AddSlots: (|
                     result: hash.
                     result = 0 ifTrue: [ result: magic ].
 
-                    result: result ^^ (result << 13).
-                    result: result ^^ (result >> 17).
-                    result: result ^^ (result << 5).
+                    result: result bitXor: (result << 13).
+                    result: result bitXor: (result >> 17).
+                    result: result bitXor: (result << 5).
 
-                    result && 0xFFFFFFFF
+                    result bitAnd: 0xFFFFFFFF
                 ).
             |).
         | prototype clone; receiver: self).

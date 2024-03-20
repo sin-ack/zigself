@@ -1,5 +1,5 @@
 "
-Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 
 SPDX-License-Identifier: GPL-3.0-only
 "
@@ -25,9 +25,9 @@ std traits integer _AddSlots: (|
     != n = ((= n) not).
     << n = (_IntShl: n).
     >> n = (_IntShr: n).
-    ^^ n = (_IntXor: n).
-    && n = (_IntAnd: n).
-    || n = (_IntOr: n).
+    bitXor: n = (_IntXor: n).
+    bitAnd: n = (_IntAnd: n).
+    bitOr: n = (_IntOr: n).
 
     ** n = (| i |
         n = 0 ifTrue: [ ^ 1 ].

@@ -153,13 +153,13 @@ std traits string _AddSlots: (|
         each: [| :byte |
             result: result + byte.
             result: result + (result << 10).
-            result: result ^^ (result >> 6).
+            result: result bitXor: (result >> 6).
         ].
 
         result: result + (result << 3).
-        result: result ^^ (result << 11).
+        result: result bitXor: (result << 11).
         result: result + (result << 15).
-        result && hashMask
+        result bitAnd: hashMask
     ).
 |).
 
