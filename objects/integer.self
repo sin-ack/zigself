@@ -104,6 +104,8 @@ std traits integer _AddSlots: (|
     asString = (asStringBase: 10).
     asHexString = (asStringBase: 16).
 
+    asInteger = (self).
+
     "Return the 32-bit 'hash' of this integer."
     hash = (&& 0xFFFFFFFF).
 |).

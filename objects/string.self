@@ -164,19 +164,40 @@ std traits string _AddSlots: (|
 |).
 
 std traits string _AddSlots: (|
-    asInteger = (| value. zeroByte = '0' at: 0. nineByte = '9' at: 0 |
-        isEmpty ifTrue: [ _Error: 'empty string cannot be converted to integer' ].
+    "Convert this string to an integer, interpreted as decimal."
+    asInteger = (asIntegerBase: 10).
 
-        value: 0.
-        each: [| :byte |
-            ((byte >= zeroByte) && [byte <= nineByte]) ifTrue: [
-                value: (value * 10) + (byte - zeroByte).
-            ] False: [
-                _Error: 'string with non-digit characters cannot be converted to integer'
-            ].
+    "Convert this string to an integer, interpreted as hexadecimal."
+    asHexInteger = (asIntegerBase: 16).
+
+    asIntegerBase: base = (| value. zeroByte = '0' at: 0. nineByte = '9' at: 0. aByte = 'A' at: 0. zByte = 'Z' at: 0. |
+        isEmpty ifTrue: [ _Error: 'empty string cannot be converted to integer' ].
+        base: base asInteger.
+        (base < 0) || [base > 36] ifTrue: [
+            _Error: 'base can at most be 36'
         ].
 
-        value
+        value: 0.
+        "NOTE: This isn't Unicode-aware but we don't allow Unicode characters anyway."
+        each: [| :byte. index |
+            [| :break |
+                (byte >= zeroByte) && [byte <= nineByte] ifTrue: [
+                    value: (value * base) + (byte - zeroByte).
+                    break value.
+                ].
+
+                "NOTE: The AND operation is used to convert lowercase letters to uppercase."
+                byte: (byte bitAnd: 0b11011111).
+                (byte >= aByte) && [byte <= zByte] ifTrue: [
+                    value: (value * base) + (byte + 10 - aByte).
+                    break value.
+                ].
+
+                _Error: 'Invalid character in string'.
+            ] break.
+        ].
+
+        value.
     ).
 |).
 
