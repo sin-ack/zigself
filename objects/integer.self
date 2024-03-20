@@ -106,6 +106,5 @@ std traits integer _AddSlots: (|
 
     asInteger = (self).
 
-    "Return the 32-bit 'hash' of this integer."
-    hash = (&& 0xFFFFFFFF).
+    hash = (self).
 |).
