@@ -36,7 +36,7 @@ std traits _AddSlots: (|
         ).
 
         "Performs a union operation. Creates a new set."
-        || other = (| newSet |
+        + other = (| newSet |
             newSet: copyRemoveAll.
             each: [| :item | newSet add: item ].
             other each: [| :item | newSet add: item ].
