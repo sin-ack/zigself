@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -44,10 +44,12 @@ pub const StatementList = struct {
 
 /// A node which describes a single script.
 pub const ScriptNode = struct {
+    slots: []SlotNode,
     statements: StatementList.Ref,
     range: Range,
 
     pub fn deinit(self: *ScriptNode, allocator: Allocator) void {
+        allocator.free(self.slots);
         self.statements.unrefWithAllocator(allocator);
     }
 };
@@ -76,10 +78,10 @@ pub const ExpressionNode = union(enum) {
         }
     }
 
-    pub fn range(self: ExpressionNode) Range {
+    pub fn range(self: *ExpressionNode) *Range {
         inline for (comptime std.enums.values(std.meta.Tag(ExpressionNode))) |field| {
-            if (self == field)
-                return @field(self, @tagName(field)).range;
+            if (self.* == field)
+                return &@field(self, @tagName(field)).range;
         }
         unreachable;
     }
@@ -110,9 +112,6 @@ pub const SlotNode = struct {
     is_mutable: bool,
     is_parent: bool,
     is_argument: bool,
-
-    /// The ID of this slot in definition order.
-    order: usize,
 
     name: []const u8,
     value: ?ExpressionNode,

@@ -1,0 +1,61 @@
+<Script> ::= <Whitespace> <MethodSlotList>? <Whitespace> <StatementList>? <Whitespace>
+<StatementList> ::= <Expression> (<Whitespace> "." <Whitespace> <Expression>)* <Whitespace> "."?
+
+<MethodSlotList> ::= "|" <Whitespace> "|" | "|" <Whitespace> <MethodSlot> (<Whitespace> "." <Whitespace> <MethodSlot>)* <Whitespace> "."? <Whitespace> "|"
+<MethodSlot> ::= <CommonSlot>
+<CommonSlot> ::= <NonPrimitiveIdentifier> <Whitespace> "=" <Whitespace> <MethodOrExpression> | <NonPrimitiveIdentifier> <Whitespace> "<-" <Whitespace> <Expression> | <MethodSlotName> <Whitespace> "=" <Whitespace> <Method> | <NonPrimitiveIdentifier>
+<MethodOrExpression> ::= <NonParenthesizedExpression> | <SendToParenthesizedExpression> | <Method>
+
+<NonPrimitiveIdentifier> ::= [a-z] ([a-z] | [A-Z] | [0-9])*
+<Identifier> ::= <NonPrimitiveIdentifier> | ("_" ([a-z] | [A-Z] | [0-9])+)
+
+<Expression> ::= <KeywordExpression> (";" <Whitespace> <MessageSend>)*
+<NonParenthesizedExpression> ::= <NonParenthesizedKeywordExpression> (";" <Whitespace> <MessageSend>)*
+<PrimaryNoParenExpr> ::= <Integer> | <FloatingPoint> | <SlotsObject> | <Block> | <Identifier> | <String>
+<Primary> ::= <PrimaryNoParenExpr> | "(" <Expression> ")"
+<SendToParenthesizedExpression> ::= "(" <Expression> ")" <MessageSend>
+
+<MessageSend> ::= <KeywordSend> | <BinarySend> (<Whitespace> <KeywordSend>)? | <UnarySend> (<Whitespace> <UnarySend>)* (<Whitespace> <BinarySend>)? (<Whitespace> <KeywordSend>)?
+
+<KeywordSend> ::= <FirstKeywordName> <Whitespace> <KeywordExpression> (<Whitespace> <RestKeywordName> <Whitespace> <KeywordExpression>)*
+<KeywordExpression> ::= (<KeywordSend> | <BinarySend> <Whitespace> <KeywordSend>? | <Primary> <Whitespace> <MessageSend>?)
+<NonParenthesizedKeywordExpression> ::= (<KeywordSend> | <BinarySend> <Whitespace> <KeywordSend>? | <PrimaryNoParenExpr> <Whitespace> <MessageSend>?)
+<FirstKeywordName> ::= <Identifier> <Whitespace> ":"
+<RestKeywordName> ::= <RestKeyword> <Whitespace> ":"
+<RestKeyword> ::= [A-Z] ([a-z] | [A-Z] | [0-9])*
+<MethodSlotName> ::= <FirstKeywordName> <Whitespace> <NonPrimitiveIdentifier> (<Whitespace> <RestKeywordName> <Whitespace> <NonPrimitiveIdentifier>)* | <BinaryOp>+ <Whitespace> <NonPrimitiveIdentifier>
+
+<BinarySend> ::= <BinaryOp>+ <Whitespace> <BinaryExpression>
+<BinaryExpression> ::= <Primary> <Whitespace> <UnarySend>* (<Whitespace> <BinarySend>)?
+<BinaryOp> ::= "!" | "@" | "#" | "$" | "%" | "^" | "&" | "*" | "," | "/" | "\\" | "<" | ">" | "=" | "+" | "-" | "?" | "`" | "~"
+
+<UnarySend> ::= <Identifier>
+
+<Integer> ::= <BinaryInteger> | <OctalInteger> | <HexInteger> | <DecimalInteger>
+<BinaryInteger> ::= "0" "b" [0-1] ("_"? [0-1])*
+<OctalInteger> ::= "0" "o" [0-7] ("_"? [0-7])*
+<HexInteger> ::= "0" "x" <HexDigit> ("_"? <HexDigit>)*
+<DecimalInteger> ::= [0-9] ("_"? [0-9])*
+<HexDigit> ::= [0-9] | [a-f] | [A-F]
+
+<FloatingPoint> ::= <DecimalInteger> "." <DecimalInteger>
+
+<SlotsObject> ::= "(" <Whitespace> <SlotsSlotList>? <Whitespace> ")"
+<SlotsSlotList> ::= "|" <Whitespace> "|" | "|" <Whitespace> <SlotsSlot> (<Whitespace> "." <Whitespace> <SlotsSlot>)* "."? <Whitespace> "|"
+<SlotsSlot> ::= <CommonSlot> | <NonPrimitiveIdentifier> <Whitespace> "*" <Whitespace> ("=" | "<-") <Whitespace> <Expression>
+
+<Block> ::= "[" <Whitespace> <BlockSlotList>? <Whitespace> <BlockStatementList>? <Whitespace> "]"
+<BlockSlotList> ::= "|" <Whitespace> "|" | "|" <Whitespace> <BlockSlot> (<Whitespace> "." <Whitespace> <BlockSlot>)* (<Whitespace> ".")? <Whitespace> "|"
+<BlockSlot> ::= <CommonSlot> | ":" <Whitespace> <NonPrimitiveIdentifier>
+<BlockStatementList> ::= (<Expression> (<Whitespace> "." <Whitespace> <Expression>)*)? (<Whitespace> "^")? <Whitespace> <Expression> (<Whitespace> ".")?
+
+<Method> ::= "(" <Whitespace> <MethodSlotList>? <Whitespace> <StatementList>? <Whitespace> ")"
+
+<String> ::= "'" <StringContent>* "'"
+
+<Whitespace> ::= (" " | "\t" | "\n" | <Comment>)*
+<Comment> ::= "\"" <CommentContent>* "\""
+
+// TODO: Specify the valid characters properly
+<StringContent> ::= "\\" ("\\" | "n" | "t" | "r" | ("x" | "X") <HexDigit> <HexDigit> | ("u" | "U") <HexDigit> <HexDigit> <HexDigit> <HexDigit>) | <ValidUnicodeExceptNewlineSingleQuoteAndBackslash>
+<CommentContent> ::= "\\" "\"" | "\\" "\\" | <ValidUnicodeExceptDoubleQuoteAndBackslash>

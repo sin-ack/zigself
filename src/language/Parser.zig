@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -21,11 +21,12 @@ tokens: std.MultiArrayList(struct {
 }),
 token_tags: []Token.Tag = undefined,
 token_starts: []usize = undefined,
-token_index: usize,
+token_index: TokenIndex,
 line_offsets: std.ArrayListUnmanaged(usize),
 
 pub const ParseError = Allocator.Error;
 const Parser = @This();
+const TokenIndex = enum(usize) { _ };
 
 pub fn createFromFile(allocator: Allocator, file_path: []const u8) !*Parser {
     const cwd = std.fs.cwd();
@@ -55,7 +56,7 @@ fn init(self: *Parser, allocator: Allocator, buffer: [:0]const u8, from_file: bo
     self.* = .{
         .allocator = allocator,
         .buffer = buffer,
-        .token_index = 0,
+        .token_index = @enumFromInt(0),
         .tokens = .{},
         .line_offsets = .{},
         .diagnostics = try Diagnostics.init(allocator),
@@ -113,26 +114,203 @@ pub fn destroy(self: *Parser) void {
     self.allocator.destroy(self);
 }
 
-pub fn parseScript(self: *Parser) ParseError!AST.ScriptNode {
-    // Script = StatementList
-    const statements = try self.parseStatementList(false);
-    errdefer statements.unrefWithAllocator(self.allocator);
-
-    if (self.token_tags[self.token_index] != .EOF) {
-        try self.diagnostics.reportDiagnosticFormatted(
-            .Error,
-            self.offsetToLocation(self.token_starts[self.token_index]),
-            "Expected end-of-file after last statement, got {s}",
-            .{self.token_tags[self.token_index].symbol()},
-        );
+/// Peek at the current token.
+fn peek(self: *Parser) Token.Tag {
+    const token_index = @intFromEnum(self.token_index);
+    if (token_index >= self.token_tags.len) {
+        return .EOF;
     }
-
-    return AST.ScriptNode{ .statements = statements, .range = .{ .start = 0, .end = self.buffer.len } };
+    return self.token_tags[token_index];
 }
 
-fn parseStatementList(self: *Parser, allow_nonlocal_return: bool) ParseError!AST.StatementList.Ref {
-    // StatementList = Statement ("." Statement)* "."? | empty
+/// Move the token index forward and return the previous token index.
+/// If the last token had already been consumed, returns the index of the last token.
+fn consume(self: *Parser) TokenIndex {
+    const result = @intFromEnum(self.token_index);
+    if (result < self.token_tags.len) {
+        self.token_index = @enumFromInt(result + 1);
+    }
+    return @enumFromInt(result);
+}
 
+/// Try to consume the given token, or return null.
+fn tryConsume(self: *Parser, tag: Token.Tag) ?TokenIndex {
+    if (self.tokenAt(self.token_index) == tag)
+        return self.consume();
+    return null;
+}
+
+/// Expect the given token and try to consume it, or produce a diagnostic and return null.
+fn expectToken(self: *Parser, expected: Token.Tag) !?TokenIndex {
+    return self.expectTokenContext(expected, null);
+}
+
+/// Expect the given token and try to consume it, or produce a diagnostic and return null.
+/// If `context` is non-null, it will be included in the diagnostic message after the expected token,
+/// i.e. "Expected 'foo' <context>, found 'bar'".
+fn expectTokenContext(self: *Parser, expected: Token.Tag, context: ?[]const u8) !?TokenIndex {
+    const actual = self.peek();
+    if (actual != expected) {
+        try self.diagnostics.reportDiagnosticFormatted(
+            .Error,
+            self.offsetToLocation(self.tokenStartAt(self.token_index)),
+            "Expected '{s}'{s}{s}, found '{s}'",
+            .{ expected.symbol(), if (context != null) " " else "", context orelse "", actual.symbol() },
+        );
+        return null;
+    }
+    return self.consume();
+}
+
+/// Assert that the current token is the given tag.
+/// When it isn't, panics when runtime safety is enabled and causes UB otherwise.
+/// Only used for checking invariants in debug builds.
+fn assertToken(self: *Parser, tag: Token.Tag) void {
+    std.debug.assert(self.peek() == tag);
+}
+
+/// Turn an offset into a line-and-column location.
+pub fn offsetToLocation(self: Parser, offset: usize) Location {
+    var line: usize = 1;
+    var line_start: usize = undefined;
+    var line_end: usize = undefined;
+    var did_find_line = false;
+
+    std.debug.assert(offset <= self.buffer.len);
+
+    while (line < self.line_offsets.items.len) : (line += 1) {
+        const line_offset = self.line_offsets.items[line];
+        if (offset < line_offset) {
+            line_start = self.line_offsets.items[line - 1];
+            line_end = line_offset - 1; // Get rid of newline
+            did_find_line = true;
+            break;
+        }
+    }
+
+    if (!did_find_line) {
+        // We are on the very last line.
+        line_start = self.line_offsets.items[line - 1];
+        line_end = self.buffer.len;
+        if (line_end > 0 and self.buffer[line_end - 1] == '\n')
+            line_end -= 1;
+    }
+
+    return Location{
+        .line = line,
+        .column = offset - line_start + 1,
+        .line_start = line_start,
+        .line_end = line_end,
+    };
+}
+
+/// Get a non-owning slice of the identifier at the given token index.
+/// The token at the given index must be an identifier.
+/// The returned slice will be at least one byte long.
+fn getIdentifierSlice(self: Parser, index: TokenIndex) []const u8 {
+    std.debug.assert(self.tokenAt(index) == .Identifier);
+
+    const start = self.tokenStartAt(index);
+    const next_start = self.tokenStartAt(@enumFromInt(@intFromEnum(index) + 1));
+    var end = next_start - 1;
+
+    while (true) {
+        switch (self.buffer[end]) {
+            'a'...'z', 'A'...'Z', '0'...'9', '_' => break,
+            else => end -= 1,
+        }
+    }
+
+    // The end needs to be exclusive.
+    end += 1;
+
+    // Can't have 0-length identifiers.
+    std.debug.assert(end > start);
+    return self.buffer[start..end];
+}
+
+/// Copy the identifier at the given token index.
+fn getIdentifierCopy(self: Parser, index: TokenIndex) Allocator.Error![]const u8 {
+    const slice = self.getIdentifierSlice(index);
+    return try self.allocator.dupe(u8, slice);
+}
+
+/// Get a non-owning slice of the keyword at the given token index.
+fn getKeywordSlice(self: Parser, index: TokenIndex) []const u8 {
+    std.debug.assert(self.tokenAt(index) == .FirstKeyword or self.tokenAt(index) == .RestKeyword);
+
+    const start = self.tokenStartAt(index);
+    const next_start = self.tokenStartAt(@enumFromInt(@intFromEnum(index) + 1));
+    var end = next_start;
+
+    while (self.buffer[end] != ':') : (end -= 1) {}
+    // The end needs to be exclusive.
+    end += 1;
+
+    // A keyword must be at least one character long, plus the colon.
+    std.debug.assert(end - start >= 2);
+    return self.buffer[start..end];
+}
+
+/// Ensure that the current identifier token isn't primitive (doesn't start with `_`).
+/// Returns true if the identifier is non-primitive, false otherwise.
+fn expectNonPrimitiveIdentifier(self: *Parser) !bool {
+    self.assertToken(.Identifier);
+
+    const token_start = self.tokenStartAt(self.token_index);
+    if (self.buffer[token_start] == '_') {
+        try self.diagnostics.reportDiagnostic(
+            .Error,
+            self.offsetToLocation(self.tokenStartAt(self.token_index)),
+            "Expected non-primitive identifier",
+        );
+        return false;
+    }
+
+    return true;
+}
+
+/// Get the token at the given index.
+fn tokenAt(self: Parser, index: TokenIndex) Token.Tag {
+    return self.token_tags[@intFromEnum(index)];
+}
+
+/// Get the token start offset at the given index.
+fn tokenStartAt(self: Parser, index: TokenIndex) usize {
+    return self.token_starts[@intFromEnum(index)];
+}
+
+// <Script> ::= <MethodSlotList>? <StatementList>? <Whitespace>
+pub fn parseScript(self: *Parser) ParseError!?AST.ScriptNode {
+    const slots = try self.parseSlotList(.Method);
+    errdefer {
+        for (slots) |*slot| {
+            slot.deinit(self.allocator);
+        }
+        self.allocator.free(slots);
+    }
+
+    const statements = try self.parseStatementList(.DisallowNonlocalReturns, .EOF);
+
+    return AST.ScriptNode{
+        .range = .{
+            .start = 0,
+            .end = self.buffer.len,
+        },
+        .slots = slots,
+        .statements = statements,
+    };
+}
+
+// std.io.getStdErr().writer().writeByteNTimes(' ', self.depth * 2) catch unreachable;
+// std.debug.print(@src().fn_name ++ ": self.peek() = {s}, self.token_index = {}\n", .{ @tagName(self.peek()), @intFromEnum(self.token_index) });
+// self.depth += 1;
+// defer self.depth -= 1;
+
+// <StatementList> ::= <Expression> ("." <Expression>)* "."?
+// <BlockStatementList> ::= (<Expression> ("." <Expression>)*)? "^"? <Expression> "."?
+const StatementListNonlocalReturns = enum { AllowNonlocalReturns, DisallowNonlocalReturns };
+fn parseStatementList(self: *Parser, nonlocal_returns: StatementListNonlocalReturns, closing_token: Token.Tag) ParseError!AST.StatementList.Ref {
     var statements = std.ArrayList(AST.ExpressionNode).init(self.allocator);
     defer {
         for (statements.items) |*expression| {
@@ -141,370 +319,78 @@ fn parseStatementList(self: *Parser, allow_nonlocal_return: bool) ParseError!AST
         statements.deinit();
     }
 
-    var nonlocal_return_state: NonlocalReturnState = if (allow_nonlocal_return) .Allowed else .Disallowed;
+    var nonlocal_return_start: ?usize = null;
+    if (self.tryConsume(closing_token) == null) parse_first_statement: {
+        {
+            if (self.peek() == .Cap and nonlocal_returns == .AllowNonlocalReturns) {
+                nonlocal_return_start = self.tokenStartAt(self.consume());
+            }
 
-    if (self.token_tags[self.token_index] != .EOF) first_expr_parsing: {
-        const first_statement = (try self.parseStatement(&nonlocal_return_state)) orelse break :first_expr_parsing;
-        try statements.append(first_statement);
+            var expression = (try self.parseExpression(.WithParenExpr)) orelse break :parse_first_statement;
+            errdefer expression.deinit(self.allocator);
 
-        while (self.consumeToken(.Period)) |_| {
-            const statement = (try self.parseStatement(&nonlocal_return_state)) orelse break;
-            try statements.append(statement);
+            try statements.append(expression);
         }
-    }
 
-    return AST.StatementList.create(self.allocator, try statements.toOwnedSlice());
-}
+        while (self.tryConsume(.Period)) |_| {
+            if (self.peek() == closing_token) {
+                break;
+            }
 
-const NonlocalReturnState = enum { Disallowed, Allowed, WrappingThisExpr, Parsed };
-fn parseStatement(self: *Parser, nonlocal_return_state: *NonlocalReturnState) ParseError!?AST.ExpressionNode {
-    // Statement = "^"? Expression
-    var start_of_expression = self.token_starts[self.token_index];
-    if (self.consumeToken(.Cap)) |nonlocal_return_token| {
-        const cap_offset = self.token_starts[nonlocal_return_token];
-        start_of_expression = cap_offset;
+            if (nonlocal_return_start) |start| {
+                try self.diagnostics.reportDiagnostic(
+                    .Error,
+                    self.offsetToLocation(start),
+                    "Non-local return must be the last statement in blocks",
+                );
+            }
 
-        switch (nonlocal_return_state.*) {
-            .Disallowed => {
-                try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(cap_offset), "Non-local returns are not allowed here");
-            },
-            .Allowed => {
-                nonlocal_return_state.* = .WrappingThisExpr;
-            },
-            .Parsed => {
-                try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(cap_offset), "Unexpected statement after non-local return");
-            },
-            else => unreachable,
+            if (self.peek() == .Cap and nonlocal_returns == .AllowNonlocalReturns) {
+                nonlocal_return_start = self.tokenStartAt(self.consume());
+            }
+
+            var expression = (try self.parseExpression(.WithParenExpr)) orelse break;
+            errdefer expression.deinit(self.allocator);
+
+            try statements.append(expression);
         }
+
+        _ = try self.expectTokenContext(closing_token, "after statement list");
     }
 
-    if (!self.canParseExpression()) {
-        if (nonlocal_return_state.* == .WrappingThisExpr)
-            try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(self.token_starts[self.token_index]), "Expected expression after non-local return");
-        return null;
-    }
+    if (nonlocal_return_start) |start| {
+        // Turn the last expression into a non-local return.
+        var last_expression = statements.items[statements.items.len - 1];
 
-    var expression = (try self.parseExpression(.Any)) orelse return null;
-    errdefer expression.deinit(self.allocator);
-
-    switch (nonlocal_return_state.*) {
-        .WrappingThisExpr => {
-            const return_node = try self.allocator.create(AST.ReturnNode);
-            return_node.* = .{
-                .expression = expression,
-                .range = .{ .start = start_of_expression, .end = expression.range().end },
-            };
-            expression = AST.ExpressionNode{ .Return = return_node };
-
-            nonlocal_return_state.* = .Parsed;
-        },
-        .Parsed => {
-            try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(self.token_starts[self.token_index]), "Unexpected statement after non-local return");
-        },
-        .Allowed, .Disallowed => {},
-    }
-
-    return expression;
-}
-
-fn canParseExpression(self: *Parser) bool {
-    const current_tag = self.token_tags[self.token_index];
-    // binary to self
-    if (current_tag.isOperator())
-        return true;
-
-    return switch (current_tag) {
-        // zig fmt: off
-        .FirstKeyword, // keyword to self
-        .Identifier,   // unary to self
-        .ParenOpen,    // object/subexpr
-        .BracketOpen,  // block
-        .String,
-        .Integer,
-        .FloatingPoint,
-        => true,
-        // zig fmt: on
-        else => false,
-    };
-}
-
-const MessagePrecedence = enum { Binary, Keyword, Any };
-fn parseExpression(self: *Parser, precedence: MessagePrecedence) ParseError!?AST.ExpressionNode {
-    // Expression = KeywordSend
-    //            | BinarySend
-    //            | Primary UnarySend* BinarySend? KeywordSend?
-
-    var primary: AST.ExpressionNode = undefined;
-
-    const current_tag = self.token_tags[self.token_index];
-    if (current_tag == .FirstKeyword)
-        primary = (try self.parseKeywordMessage(null)) orelse return null
-    else if (current_tag.isOperator())
-        primary = (try self.parseBinaryMessage(null)) orelse return null
-    else
-        primary = (try self.parsePrimary()) orelse return null;
-    errdefer primary.deinit(self.allocator);
-
-    return try self.parseExpressionFromPrimary(primary, precedence, false);
-}
-
-fn emitDiagnosticIfNeeded(self: *Parser, require: bool, did_send: bool) ParseError!void {
-    if (!did_send and require) {
-        try self.diagnostics.reportDiagnosticFormatted(
-            .Error,
-            self.offsetToLocation(self.token_starts[self.token_index]),
-            "Expected unary, binary or keyword message, got {s}",
-            .{self.token_tags[self.token_index].symbol()},
-        );
-    }
-}
-
-// If require_message is true then the primary must receive at least one message.
-fn parseExpressionFromPrimary(
-    self: *Parser,
-    primary: AST.ExpressionNode,
-    precedence: MessagePrecedence,
-    require_message: bool,
-) ParseError!?AST.ExpressionNode {
-    var expr = primary;
-    var did_send_message = false;
-
-    // Collect unary messages
-    while (self.consumeToken(.Identifier)) |identifier_token| {
-        did_send_message = true;
-
-        const message_node = try self.allocator.create(AST.MessageNode);
-        errdefer self.allocator.destroy(message_node);
-
-        const identifier_copy = try self.getIdentifierCopy(identifier_token);
-        const end_of_identifier = self.token_starts[identifier_token] + identifier_copy.len;
-
-        message_node.* = .{
-            .receiver = expr,
-            .message_name = identifier_copy,
-            .arguments = &.{},
-            .range = .{ .start = expr.range().start, .end = end_of_identifier },
-        };
-        expr = AST.ExpressionNode{ .Message = message_node };
-    }
-
-    // If possible, parse a binary message.
-    if (self.token_tags[self.token_index].isOperator()) {
-        did_send_message = true;
-        expr = (try self.parseBinaryMessage(expr)) orelse return null;
-    }
-
-    if (precedence == .Binary) {
-        try self.emitDiagnosticIfNeeded(require_message, did_send_message);
-        return expr;
-    }
-
-    // Otherwise, try parsing a keyword message.
-    if (self.token_tags[self.token_index] == .FirstKeyword) {
-        did_send_message = true;
-        expr = (try self.parseKeywordMessage(expr)) orelse return null;
-    }
-
-    if (precedence == .Keyword) {
-        try self.emitDiagnosticIfNeeded(require_message, did_send_message);
-        return expr;
-    }
-
-    // If the current token is a semicolon then we want to send more messages to it,
-    // so try parsing an expression after it with the current expression as the
-    // "primary".
-    if (self.token_tags[self.token_index] == .Semicolon) {
-        _ = self.nextToken();
-        expr = (try self.parseExpressionFromPrimary(expr, .Any, true)) orelse return null;
-    }
-
-    return expr;
-}
-
-fn parseBinaryMessage(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
-    // BinarySend = binaryOp+ Expression
-    std.debug.assert(self.token_tags[self.token_index].isOperator());
-
-    const start_of_message = self.token_starts[self.token_index];
-    // FIXME: De-magic this number
-    var binary_message_name = std.BoundedArray(u8, 128).init(0) catch unreachable;
-
-    // FIXME: Disallow space between operator tokens.
-    while (self.token_tags[self.token_index].isOperator()) {
-        binary_message_name.appendSlice(self.token_tags[self.token_index].symbol()) catch {
-            try self.diagnostics.reportDiagnostic(
-                .Error,
-                self.offsetToLocation(self.token_starts[self.token_index]),
-                "Maximum binary operator length exceeded",
-            );
-            // FIXME: This will fail if we exceeded the binary operator length with an implicit self!
-            return receiver;
+        const return_node = try self.allocator.create(AST.ReturnNode);
+        // NOTE: No errdefer here as owned_statements will handle the error condition.
+        return_node.* = .{
+            .expression = last_expression,
+            .range = .{ .start = start, .end = last_expression.range().end },
         };
 
-        _ = self.nextToken();
+        statements.items[statements.items.len - 1] = AST.ExpressionNode{ .Return = return_node };
     }
 
-    var term = (try self.parseExpression(.Binary)) orelse return null;
-    errdefer term.deinit(self.allocator);
-    const binary_message_copy = try self.allocator.dupe(u8, binary_message_name.constSlice());
-    errdefer self.allocator.free(binary_message_copy);
-    var arguments = try self.allocator.alloc(AST.ExpressionNode, 1);
-    errdefer self.allocator.free(arguments);
-    arguments[0] = term;
-
-    const message_node = try self.allocator.create(AST.MessageNode);
-    message_node.* = .{
-        .receiver = receiver,
-        .message_name = binary_message_copy,
-        .arguments = arguments,
-        .range = .{ .start = if (receiver) |r| r.range().start else start_of_message, .end = term.range().end },
-    };
-
-    return AST.ExpressionNode{ .Message = message_node };
-}
-
-fn parseKeywordMessage(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
-    // KeywordSend = firstKeyword Expression (restKeyword Expression)*
-    const first_keyword_token = self.assertToken(.FirstKeyword);
-    const start_of_message = self.token_starts[first_keyword_token];
-    const first_keyword_slice = self.getKeywordSlice(first_keyword_token);
-
-    var message_name = try std.ArrayList(u8).initCapacity(self.allocator, first_keyword_slice.len);
-    defer message_name.deinit();
-    var arguments = try std.ArrayList(AST.ExpressionNode).initCapacity(self.allocator, 1);
-    defer {
-        for (arguments.items) |*expression| {
+    const owned_statements = try statements.toOwnedSlice();
+    errdefer {
+        for (statements.items) |*expression| {
             expression.deinit(self.allocator);
         }
-        arguments.deinit();
+        self.allocator.free(owned_statements);
     }
 
-    message_name.appendSliceAssumeCapacity(first_keyword_slice);
-
-    const first_expression = (try self.parseExpression(.Keyword)) orelse return null;
-    // NOTE: No errdefer as arguments now owns first_expression.
-    arguments.appendAssumeCapacity(first_expression);
-
-    while (self.consumeToken(.RestKeyword)) |rest_keyword_token| {
-        const rest_keyword_slice = self.getKeywordSlice(rest_keyword_token);
-        try message_name.appendSlice(rest_keyword_slice);
-
-        var expression = (try self.parseExpression(.Keyword)) orelse return null;
-        errdefer expression.deinit(self.allocator);
-        try arguments.append(expression);
-    }
-
-    const end_of_last_argument = arguments.items[arguments.items.len - 1].range().end;
-
-    const message_node = try self.allocator.create(AST.MessageNode);
-    errdefer self.allocator.destroy(message_node);
-
-    message_node.* = .{
-        .receiver = receiver,
-        .message_name = try message_name.toOwnedSlice(),
-        .arguments = try arguments.toOwnedSlice(),
-        .range = .{ .start = if (receiver) |r| r.range().start else start_of_message, .end = end_of_last_argument },
-    };
-
-    return AST.ExpressionNode{ .Message = message_node };
+    return AST.StatementList.create(self.allocator, owned_statements);
 }
 
-fn parsePrimary(self: *Parser) ParseError!?AST.ExpressionNode {
-    // Primary = Integer | FloatingPoint | Object | Block | identifier | String
-    return switch (self.token_tags[self.token_index]) {
-        .Integer => AST.ExpressionNode{ .Number = try self.parseInteger() },
-        .FloatingPoint => AST.ExpressionNode{ .Number = try self.parseFloatingPoint() },
-        .ParenOpen => (try self.parseSlotsObjectOrSubexpr(true, null, null)) orelse return null,
-        .BracketOpen => AST.ExpressionNode{ .Block = (try self.parseBlock()) orelse return null },
-        .Identifier => AST.ExpressionNode{ .Identifier = try self.parseIdentifier() },
-        .String => AST.ExpressionNode{ .String = (try self.parseString()) orelse return null },
-        else => blk: {
-            try self.diagnostics.reportDiagnosticFormatted(
-                .Error,
-                self.offsetToLocation(self.token_starts[self.token_index]),
-                "Expected primary expression, got {s}",
-                .{self.token_tags[self.token_index].symbol()},
-            );
-            break :blk null;
-        },
-    };
-}
-
-fn parseSlotsObjectOrSubexpr(self: *Parser, must_not_be_method: bool, did_extract_expr: ?*bool, arguments: ?[]const AST.SlotNode) ParseError!?AST.ExpressionNode {
-    var did_use_slots = false;
-    var object = (try self.parseObject(&did_use_slots, arguments)) orelse return null;
-    errdefer object.destroy(self.allocator);
-
-    const statement_count = object.statements.value.statements.len;
-    const slot_count = object.slots.len;
-    if (!did_use_slots) {
-        if (statement_count == 0) {
-            // Just an empty slots object.
-            return AST.ExpressionNode{ .Object = object };
-        } else if (statement_count == 1) {
-            // A sub-expression. We need to do some fiddling here to avoid destroying
-            // the expression when we destroy the expression node.
-            const subexpr = object.statements.value.statements[0];
-            self.allocator.free(object.statements.value.statements);
-            object.statements.value.statements = &.{};
-
-            object.destroy(self.allocator);
-            if (did_extract_expr) |flag| flag.* = true;
-            return subexpr;
-        } else {
-            if (must_not_be_method)
-                try self.diagnostics.reportDiagnostic(
-                    .Error,
-                    self.offsetToLocation(object.range.start),
-                    "Sub-expressions cannot have more than one expression",
-                );
-
-            return AST.ExpressionNode{ .Object = object };
-        }
-    }
-
-    if (slot_count == 0) {
-        if (statement_count == 0) {
-            // Just an empty slots object.
-            return AST.ExpressionNode{ .Object = object };
-        } else if (statement_count == 1) {
-            if (must_not_be_method)
-                try self.diagnostics.reportDiagnostic(
-                    .Error,
-                    self.offsetToLocation(object.range.start),
-                    "Sub-expressions must not use slot delimiters",
-                );
-
-            return AST.ExpressionNode{ .Object = object };
-        } else {
-            if (must_not_be_method)
-                try self.diagnostics.reportDiagnostic(
-                    .Error,
-                    self.offsetToLocation(object.range.start),
-                    "Slots object cannot contain expressions, use methods",
-                );
-
-            return AST.ExpressionNode{ .Object = object };
-        }
-    } else if (statement_count != 0) {
-        if (must_not_be_method)
-            try self.diagnostics.reportDiagnostic(
-                .Error,
-                self.offsetToLocation(object.range.start),
-                "Slots object cannot contain expressions, use methods",
-            );
-
-        return AST.ExpressionNode{ .Object = object };
-    }
-
-    return AST.ExpressionNode{ .Object = object };
-}
-
-fn parseObject(self: *Parser, did_use_slots: ?*bool, argument_slots: ?[]const AST.SlotNode) ParseError!?*AST.ObjectNode {
-    // Object = "(" SlotList<ObjectSlot>? ")"
-    // Method = "(" SlotList<ObjectSlot>? StatementList ")"
-    const paren_open_token = self.assertToken(.ParenOpen);
-    const start_of_object = self.token_starts[paren_open_token];
+// <SlotsSlotList> ::= "|" "|" | "|" <SlotsSlot> ("." <SlotsSlot>)* "."? "|"
+// <MethodSlotList> ::= "|" "|" | "|" <MethodSlot> ("." <MethodSlot>)* "."? "|"
+// <BlockSlotList> ::= "|" "|" | "|" <BlockSlot> ("." <BlockSlot>)* (".")? "|"
+const SlotType = enum { Slots, Method, Block };
+fn parseSlotList(self: *Parser, slot_type: SlotType) ParseError![]AST.SlotNode {
+    _ = self.tryConsume(.Pipe) orelse return &.{};
+    // Empty slot list.
+    if (self.tryConsume(.Pipe)) |_| return &.{};
 
     var slots = std.ArrayList(AST.SlotNode).init(self.allocator);
     defer {
@@ -514,413 +400,1019 @@ fn parseObject(self: *Parser, did_use_slots: ?*bool, argument_slots: ?[]const AS
         slots.deinit();
     }
 
-    var slot_list_order_offset: usize = 0;
-    if (argument_slots) |slot_list| {
-        slot_list_order_offset = slot_list.len;
-        try slots.appendSlice(slot_list);
+    {
+        var slot = (try self.parseSlot(slot_type)) orelse return slots.toOwnedSlice();
+        errdefer slot.deinit(self.allocator);
+
+        try slots.append(slot);
     }
 
-    if (self.token_tags[self.token_index] == .Pipe) {
-        if (did_use_slots) |flag| flag.* = true;
-        const slot_list = (try self.parseSlotList(.Object, slot_list_order_offset)) orelse return null;
-        defer self.allocator.free(slot_list);
-        errdefer for (slot_list) |*slot| {
-            slot.deinit(self.allocator);
-        };
+    while (self.tryConsume(.Period)) |_| {
+        if (self.peek() == .Pipe) {
+            break;
+        }
 
-        try slots.appendSlice(slot_list);
+        var slot = (try self.parseSlot(slot_type)) orelse return slots.toOwnedSlice();
+        errdefer slot.deinit(self.allocator);
+
+        try slots.append(slot);
     }
 
-    var statements = blk: {
-        if (self.token_tags[self.token_index] != .ParenClose)
-            break :blk try self.parseStatementList(false);
-        break :blk try AST.StatementList.create(self.allocator, &.{});
-    };
-    defer statements.unrefWithAllocator(self.allocator);
-
-    if (self.consumeToken(.ParenClose) == null) {
-        return null;
-    }
-    const end_of_object = self.token_starts[self.token_index];
-
-    statements.ref();
-    const object_node = try self.allocator.create(AST.ObjectNode);
-    object_node.* = .{
-        .slots = try slots.toOwnedSlice(),
-        .statements = statements,
-        .range = .{ .start = start_of_object, .end = end_of_object },
-    };
-
-    return object_node;
+    _ = try self.expectTokenContext(.Pipe, "after slot list");
+    return slots.toOwnedSlice();
 }
 
-fn parseBlock(self: *Parser) ParseError!?*AST.BlockNode {
-    // Block = "[" SlotList<BlockSlot>? StatementList "]"
-    const bracket_open_token = self.assertToken(.BracketOpen);
-    const start_of_block = self.token_starts[bracket_open_token];
+// <SlotsSlot> ::= <CommonSlot> | <NonPrimitiveIdentifier> "*" ("=" | "<-") <Expression>
+// <BlockSlot> ::= <CommonSlot> | ":" <NonPrimitiveIdentifier>
+// <MethodSlot> ::= <CommonSlot>
+fn parseSlot(self: *Parser, slot_type: SlotType) ParseError!?AST.SlotNode {
+    const start = self.tokenStartAt(self.token_index);
 
-    var slots: []AST.SlotNode = if (self.token_tags[self.token_index] == .Pipe)
-        (try self.parseSlotList(.Block, 0)) orelse return null
-    else
-        &[_]AST.SlotNode{};
-    defer {
-        for (slots) |*slot| {
-            slot.deinit(self.allocator);
-        }
-        self.allocator.free(slots);
-    }
+    return switch (slot_type) {
+        .Slots, .Method => blk: {
+            const current = self.peek();
+            if (current == .Identifier) {
+                if (!try self.expectNonPrimitiveIdentifier()) return null;
+                const identifier_token = self.consume();
 
-    var statements = blk: {
-        if (self.token_tags[self.token_index] != .BracketClose)
-            break :blk try self.parseStatementList(true);
-        break :blk try AST.StatementList.create(self.allocator, &.{});
-    };
-    defer statements.unrefWithAllocator(self.allocator);
-
-    if (self.consumeToken(.BracketClose) == null) {
-        return null;
-    }
-
-    const end_of_block = self.token_starts[self.token_index] + 1;
-
-    const block_node = try self.allocator.create(AST.BlockNode);
-    block_node.* = .{
-        .slots = slots,
-        .statements = statements,
-        .range = .{ .start = start_of_block, .end = end_of_block },
-    };
-    // Replace slots with an empty slice so that we don't free the slots after
-    // we exit.
-    slots = &.{};
-    statements.ref();
-
-    return block_node;
-}
-
-const SlotListType = enum { Object, Block };
-fn parseSlotList(self: *Parser, comptime slot_list_type: SlotListType, initial_order_offset: usize) ParseError!?[]AST.SlotNode {
-    // SlotList<SlotType> = "|" "|" | "|" SlotType ("." SlotType)* "."? "|"
-    _ = self.assertToken(.Pipe);
-
-    var slots = std.ArrayList(AST.SlotNode).init(self.allocator);
-    defer {
-        for (slots.items) |*slot| {
-            slot.deinit(self.allocator);
-        }
-        slots.deinit();
-    }
-
-    const allow_argument = switch (slot_list_type) {
-        .Object => false,
-        .Block => true,
-    };
-
-    var order: usize = initial_order_offset;
-    if (self.token_tags[self.token_index] != .Pipe) first_slot_parsing: {
-        {
-            var first_slot = (try self.parseSlot(order, allow_argument)) orelse break :first_slot_parsing;
-            errdefer first_slot.deinit(self.allocator);
-            try slots.append(first_slot);
-            order += 1;
-        }
-
-        while (self.consumeToken(.Period)) |_| {
-            if (!self.canParseSlot()) break;
-
-            var slot = (try self.parseSlot(order, allow_argument)) orelse continue;
-            errdefer slot.deinit(self.allocator);
-            try slots.append(slot);
-            order += 1;
-        }
-    }
-
-    if (!try self.expectToken(.Pipe)) {
-        while (self.token_tags[self.token_index] != .Pipe and self.token_tags[self.token_index] != .EOF)
-            _ = self.nextToken();
-        if (self.token_tags[self.token_index] == .Pipe)
-            _ = self.nextToken();
-    }
-
-    return try slots.toOwnedSlice();
-}
-
-fn canParseSlot(self: *Parser) bool {
-    if (self.token_tags[self.token_index].isOperator())
-        return true;
-    return switch (self.token_tags[self.token_index]) {
-        .FirstKeyword, .Identifier, .Colon => true,
-        else => false,
-    };
-}
-
-const MethodMode = enum { Required, Optional, Forbidden };
-fn parseSlot(self: *Parser, order: usize, allow_argument: bool) ParseError!?AST.SlotNode {
-    //   CommonSlots = identifier "*"? ("=" | "<-") Expression -- slot
-    //               | SlotName "=" Method                     -- method
-    //               | identifier                              -- default init to nil
-    //   ObjectSlot = CommonSlots
-    //   BlockSlot = CommonSlots
-    //             | ":" identifier                            -- argument
-
-    const start_of_slot = self.token_starts[self.token_index];
-
-    var is_argument = false;
-    var is_mutable = false;
-    var is_parent = false;
-
-    if (self.token_tags[self.token_index] == .Colon) {
-        if (!allow_argument) {
-            try self.diagnostics.reportDiagnostic(
-                .Error,
-                self.offsetToLocation(start_of_slot),
-                "Argument slots are not allowed in this slot list",
-            );
-            return null;
-        }
-
-        is_argument = true;
-        _ = self.nextToken();
-    }
-
-    var did_parse_successfully = false;
-    var method_mode = MethodMode.Optional;
-    var arguments = std.ArrayList(AST.SlotNode).init(self.allocator);
-    defer arguments.deinit();
-
-    const slot_name = blk: {
-        errdefer for (arguments.items) |*slot| {
-            slot.deinit(self.allocator);
-        };
-
-        break :blk (try self.parseSlotName(&arguments, &method_mode)) orelse return null;
-    };
-    defer if (!did_parse_successfully) self.allocator.free(slot_name);
-
-    if (method_mode == .Required) {
-        if (!try self.expectToken(.Equals)) return null;
-    } else {
-        if (self.consumeToken(.Asterisk)) |_| {
-            is_parent = true;
-        }
-
-        if (self.consumeToken(.Arrow)) |_| {
-            is_mutable = true;
-        } else if (self.token_tags[self.token_index] == .Period or self.token_tags[self.token_index] == .Pipe) {
-            // This slot has no value. Just exit.
-            did_parse_successfully = true;
-            return AST.SlotNode{
-                .is_mutable = true,
-                .is_parent = is_parent,
-                .is_argument = is_argument,
-                .order = order,
-                .name = slot_name,
-                .value = null,
-                .range = .{
-                    .start = start_of_slot,
-                    .end = self.token_starts[self.token_index],
-                },
-            };
-        } else if (self.consumeToken(.Equals)) |_| {} else {
-            try self.diagnostics.reportDiagnosticFormatted(
-                .Error,
-                self.offsetToLocation(self.token_starts[self.token_index]),
-                "Expected arrow or equals after slot name, got {s}",
-                .{self.token_tags[self.token_index].symbol()},
-            );
-            return null;
-        }
-    }
-
-    var value = switch (method_mode) {
-        .Required => blk: {
-            // NOTE: Just for fun, turn this into:
-            //           break :blk AST.ExpressionNode{ ...
-            //       and watch the Zig compiler crash and burn.
-            const expression_node = AST.ExpressionNode{
-                .Object = (try self.parseObject(null, arguments.items)) orelse return null,
-            };
-            break :blk expression_node;
-        },
-        .Optional => blk: {
-            if (self.token_tags[self.token_index] == .ParenOpen) {
-                // It's entirely possible for the user to do this:
-                //     value = (1 + 2) * 3.
-                // Or this:
-                //     value = (| foo = ... |) foo.
-                // We don't want to disallow these, so we look at the object and see
-                // whether it is a slots object or sub-expr, and if it is we look
-                // ahead to the next token to see whether it would be a valid message
-                // token. If it is, we turn this into a message instead (through the
-                // use of parseExpressionFromPrimary).
-
-                var did_extract_expr = false;
-                var expr = (try self.parseSlotsObjectOrSubexpr(false, &did_extract_expr, arguments.items)) orelse return null;
-                errdefer expr.deinit(self.allocator);
-                if (expr == .Object and expr.Object.statements.value.statements.len > 0) {
-                    // This is a method, we cannot put expressions after it.
-                    break :blk expr;
-                }
-
-                if (self.token_tags[self.token_index] == .Period or self.token_tags[self.token_index] == .Pipe) {
-                    // This is a method, but it looks like a sub-expression. If it was extracted
-                    // into an expression, then re-pack it, and then return it from this block.
-                    // FIXME: This is very ugly.
-                    if (did_extract_expr) {
-                        var statement_slice = try self.allocator.alloc(AST.ExpressionNode, 1);
-                        errdefer self.allocator.free(statement_slice);
-                        statement_slice[0] = expr;
-
-                        var statement_list = try AST.StatementList.create(self.allocator, statement_slice);
-                        errdefer statement_list.unrefWithAllocator(self.allocator);
-
-                        const object_node = try self.allocator.create(AST.ObjectNode);
-                        object_node.* = .{
-                            .slots = &.{},
-                            .statements = statement_list,
-                            .range = expr.range(),
-                        };
-                        expr = AST.ExpressionNode{ .Object = object_node };
+                // Parent slot
+                if (self.tryConsume(.Asterisk)) |_| {
+                    if (slot_type == .Method) {
+                        try self.diagnostics.reportDiagnostic(
+                            .Error,
+                            self.offsetToLocation(start),
+                            "Method slots can't have parent slots",
+                        );
+                        return null;
                     }
 
-                    break :blk expr;
+                    const is_mutable = if (self.peek() == .Equals)
+                        false
+                    else if (self.peek() == .Arrow)
+                        true
+                    else {
+                        try self.diagnostics.reportDiagnostic(
+                            .Error,
+                            self.offsetToLocation(self.tokenStartAt(self.token_index)),
+                            "Expected '=' or '<-' after '*' in slot",
+                        );
+                        return null;
+                    };
+                    _ = self.consume();
+
+                    var expression = (try self.parseExpression(.WithParenExpr)) orelse return null;
+                    errdefer expression.deinit(self.allocator);
+
+                    const end = self.tokenStartAt(self.token_index);
+                    break :blk AST.SlotNode{
+                        .range = .{
+                            .start = start,
+                            .end = end,
+                        },
+                        .name = try self.getIdentifierCopy(identifier_token),
+                        .value = expression,
+
+                        .is_parent = true,
+                        .is_mutable = is_mutable,
+                        .is_argument = false,
+                    };
                 }
 
-                break :blk (try self.parseExpressionFromPrimary(expr, .Any, false)) orelse return null;
+                break :blk self.parseSlotCommonIdentifier(identifier_token);
             }
 
-            break :blk (try self.parseExpression(.Any)) orelse return null;
+            break :blk self.parseSlotCommon();
         },
-        .Forbidden => (try self.parseExpression(.Any)) orelse return null,
-    };
+        .Block => blk: {
+            // Argument slot
+            if (self.tryConsume(.Colon)) |_| {
+                if (self.peek() != .Identifier) {
+                    try self.diagnostics.reportDiagnostic(
+                        .Error,
+                        self.offsetToLocation(self.tokenStartAt(self.token_index)),
+                        "Expected identifier after ':' in argument slot",
+                    );
+                    return null;
+                }
+                if (!try self.expectNonPrimitiveIdentifier()) return null;
 
-    did_parse_successfully = true;
-    return AST.SlotNode{
-        .is_mutable = is_mutable,
-        .is_parent = is_parent,
-        .is_argument = is_argument,
-        .order = order,
-        .name = slot_name,
-        .value = value,
-        .range = .{ .start = start_of_slot, .end = value.range().end },
+                const identifier_token = self.consume();
+
+                const end = self.tokenStartAt(self.token_index);
+                break :blk AST.SlotNode{
+                    .range = .{
+                        .start = start,
+                        .end = end,
+                    },
+                    .name = try self.getIdentifierCopy(identifier_token),
+                    .value = null,
+
+                    .is_parent = false,
+                    .is_mutable = true,
+                    .is_argument = true,
+                };
+            }
+
+            break :blk self.parseSlotCommon();
+        },
     };
 }
 
-/// Creates an argument slot node from the current identifier.
-fn createSlotNodeFromArgument(self: *Parser, order: usize) ParseError!AST.SlotNode {
-    const identifier_token = self.assertToken(.Identifier);
-    const identifier_copy = try self.getIdentifierCopy(identifier_token);
-    errdefer self.allocator.free(identifier_copy);
+// <CommonSlot> ::= <NonPrimitiveIdentifier> "=" <MethodOrExpression>
+//                | <NonPrimitiveIdentifier> "<-" <Expression>
+//                | <NonPrimitiveIdentifier>
+//                | <MethodSlotName> "=" <Method>
+fn parseSlotCommon(self: *Parser) ParseError!?AST.SlotNode {
+    const start = self.tokenStartAt(self.token_index);
 
-    const start_of_identifier = self.token_starts[self.token_index];
-    const end_of_identifier = start_of_identifier + identifier_copy.len;
-
-    const slot_node = AST.SlotNode{
-        .is_mutable = true,
-        .is_parent = false,
-        .is_argument = true,
-        .order = order,
-        .name = identifier_copy,
-        .value = null,
-        .range = .{ .start = start_of_identifier, .end = end_of_identifier },
-    };
-    return slot_node;
-}
-
-fn parseSlotName(self: *Parser, arguments: *std.ArrayList(AST.SlotNode), method_mode: *MethodMode) ParseError!?[]const u8 {
-    var order: usize = 0;
-
-    if (self.consumeToken(.Identifier)) |identifier_token| {
-        // Identifier means this is a unary message, no need to do anymore work.
-        method_mode.* = .Optional;
-        return try self.getIdentifierCopy(identifier_token);
+    const current = self.peek();
+    if (current == .Identifier) {
+        if (!try self.expectNonPrimitiveIdentifier()) return null;
+        const identifier_index = self.consume();
+        return self.parseSlotCommonIdentifier(identifier_index);
     }
 
-    if (self.consumeToken(.FirstKeyword)) |first_keyword_token| {
-        method_mode.* = .Required;
+    // Method slot. The name is either a binary or keyword message.
+    if (!(current == .FirstKeyword or current.isOperator())) {
+        try self.diagnostics.reportDiagnostic(
+            .Error,
+            self.offsetToLocation(start),
+            "Expected identifier, keyword or operator for slot name",
+        );
+        return null;
+    }
 
-        const first_keyword_slice = self.getKeywordSlice(first_keyword_token);
-        var slot_name = try std.ArrayList(u8).initCapacity(self.allocator, first_keyword_slice.len);
-        defer slot_name.deinit();
-        slot_name.appendSliceAssumeCapacity(first_keyword_slice);
-
-        if (self.token_tags[self.token_index] != .Identifier) {
-            try self.diagnostics.reportDiagnosticFormatted(
-                .Error,
-                self.offsetToLocation(self.token_starts[self.token_index]),
-                "Expected identifier after keyword in slot name, got {s}",
-                .{self.token_tags[self.token_index].symbol()},
-            );
-            return null;
-        }
-
-        try arguments.append(try self.createSlotNodeFromArgument(order));
-        order += 1;
-
-        while (self.consumeToken(.RestKeyword)) |rest_keyword_token| {
-            const keyword_slice = self.getKeywordSlice(rest_keyword_token);
-            try slot_name.appendSlice(keyword_slice);
-
-            if (self.token_tags[self.token_index] != .Identifier) {
-                try self.diagnostics.reportDiagnosticFormatted(
-                    .Error,
-                    self.offsetToLocation(self.token_starts[self.token_index]),
-                    "Expected identifier after keyword in slot name, got {s}",
-                    .{self.token_tags[self.token_index].symbol()},
-                );
-                return null;
+    var argument_names = std.ArrayList([]const u8).init(self.allocator);
+    var did_transfer_argument_names = false;
+    defer {
+        if (!did_transfer_argument_names) {
+            for (argument_names.items) |argument_name| {
+                self.allocator.free(argument_name);
             }
+        }
+        argument_names.deinit();
+    }
 
-            try arguments.append(try self.createSlotNodeFromArgument(order));
-            order += 1;
+    const slot_name = (try self.parseMethodSlotName(&argument_names)) orelse return null;
+    errdefer self.allocator.free(slot_name);
+    _ = try self.expectTokenContext(.Equals, "after method slot name");
+
+    const method = (try self.parseMethod(argument_names.items, .DisallowParentSlots)) orelse return null;
+    did_transfer_argument_names = true;
+
+    const end = self.tokenStartAt(self.token_index);
+    return AST.SlotNode{
+        .range = .{
+            .start = start,
+            .end = end,
+        },
+        .name = slot_name,
+        .value = .{ .Object = method },
+
+        .is_parent = false,
+        .is_mutable = false,
+        .is_argument = false,
+    };
+}
+
+// <MethodSlotName> ::= <FirstKeywordName> <NonPrimitiveIdentifier> (<RestKeywordName> <NonPrimitiveIdentifier>)*
+//                    | <BinaryOp>+ <NonPrimitiveIdentifier>
+fn parseMethodSlotName(self: *Parser, argument_names: *std.ArrayList([]const u8)) ParseError!?[]const u8 {
+    var slot_name = std.ArrayList(u8).init(self.allocator);
+    defer slot_name.deinit();
+
+    if (self.peek() == .FirstKeyword) {
+        try slot_name.appendSlice(self.getKeywordSlice(self.consume()));
+
+        var identifier_index = (try self.expectToken(.Identifier)) orelse return null;
+        var identifier = try self.getIdentifierCopy(identifier_index);
+        errdefer self.allocator.free(identifier);
+        try argument_names.append(identifier);
+
+        while (self.peek() == .RestKeyword) {
+            try slot_name.appendSlice(self.getKeywordSlice(self.consume()));
+
+            identifier_index = (try self.expectToken(.Identifier)) orelse return null;
+            identifier = try self.getIdentifierCopy(identifier_index);
+            errdefer self.allocator.free(identifier);
+            try argument_names.append(identifier);
         }
 
         return try slot_name.toOwnedSlice();
     }
 
-    if (!self.token_tags[self.token_index].isOperator()) {
-        try self.diagnostics.reportDiagnosticFormatted(
-            .Error,
-            self.offsetToLocation(self.token_starts[self.token_index]),
-            "Expected slot name, got {s}",
-            .{self.token_tags[self.token_index].symbol()},
-        );
-        return null;
+    std.debug.assert(self.peek().isOperator());
+
+    while (self.peek().isOperator()) {
+        try slot_name.appendSlice(self.peek().symbol());
+        _ = self.consume();
     }
 
-    method_mode.* = .Required;
-    // FIXME: De-magic this number
-    var binary_message_name = std.BoundedArray(u8, 128).init(0) catch unreachable;
+    const identifier_index = (try self.expectToken(.Identifier)) orelse return null;
+    const identifier = try self.getIdentifierCopy(identifier_index);
+    errdefer self.allocator.free(identifier);
+    try argument_names.append(identifier);
 
-    // FIXME: Disallow space between operator tokens.
-    while (self.token_tags[self.token_index].isOperator()) {
-        binary_message_name.appendSlice(self.token_tags[self.token_index].symbol()) catch {
-            try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(self.token_starts[self.token_index]), "Maximum binary operator length exceeded");
+    return try slot_name.toOwnedSlice();
+}
+
+fn parseSlotCommonIdentifier(self: *Parser, identifier_index: TokenIndex) ParseError!?AST.SlotNode {
+    const start = self.tokenStartAt(identifier_index);
+
+    // Constant slot. Can be either a method or an expression.
+    if (self.tryConsume(.Equals)) |_| {
+        const expression = try self.parseMethodOrExpression() orelse return null;
+        const end = self.tokenStartAt(self.token_index);
+
+        return AST.SlotNode{
+            .range = .{
+                .start = start,
+                .end = end,
+            },
+            .name = try self.getIdentifierCopy(identifier_index),
+            .value = expression,
+
+            .is_parent = false,
+            .is_mutable = false,
+            .is_argument = false,
+        };
+    }
+
+    // Assignable slot. Can't hold a method (at least syntactically).
+    if (self.tryConsume(.Arrow)) |_| {
+        const expression = try self.parseExpression(.WithParenExpr) orelse return null;
+        const end = self.tokenStartAt(self.token_index);
+
+        return AST.SlotNode{
+            .range = .{
+                .start = start,
+                .end = end,
+            },
+            .name = try self.getIdentifierCopy(identifier_index),
+            .value = expression,
+
+            .is_parent = false,
+            .is_mutable = true,
+            .is_argument = false,
+        };
+    }
+
+    // Assignable slot with no value.
+    const end = self.tokenStartAt(self.token_index);
+    return AST.SlotNode{
+        .range = .{
+            .start = start,
+            .end = end,
+        },
+        .name = try self.getIdentifierCopy(identifier_index),
+        .value = null,
+
+        .is_parent = false,
+        .is_mutable = true,
+        .is_argument = false,
+    };
+}
+
+// <MethodOrExpression> ::= <NonParenthesizedExpression> | <SendToParenthesizedExpression> | <Method>
+// <SendToParenthesizedExpression> ::= "(" <Expression> ")" <MessageSend>
+fn parseMethodOrExpression(self: *Parser) ParseError!?AST.ExpressionNode {
+    if (self.peek() != .ParenOpen) {
+        // Simple case: just a (non-parenthesized) expression.
+        return self.parseExpression(.WithoutParenExpr);
+    }
+
+    const start = self.token_index;
+    // The ugliest part of Self syntax... Since method objects just look like
+    // slots objects with statements added, we have no idea whether we need to
+    // parse what's ahead of us as a slots object or as a method object until we
+    // see what's after the closing parenthesis. We parse a "method" first while
+    // allowing parent slots, and then check what comes after; if it looks like
+    // a message send, we reset the parser state and parse a slots object.
+    // Otherwise, we reset the parser state and parse a method object, this time
+    // disallowing parent slots.
+    //
+    // Even worse, parenthesized expressions are really just single-statement
+    // method objects, so we need to check for that as well. In that case we simply
+    // extract the expression from the method object.
+    {
+        const method = (try self.parseMethod(&.{}, .AllowParentSlots)) orelse return null;
+        defer method.destroy(self.allocator);
+
+        // If what's in front of us looks like a message send...
+        if (self.peek() == .FirstKeyword or self.peek().isOperator() or self.peek() == .Identifier) {
+            // ...then this "method" must either be a "single-statement method object"
+            // (i.e. parenthesized expression) or a slots object with no statements.
+            var expression = if (method.slots.len == 0 and method.statements.value.statements.len == 1) blk: {
+                const expression = method.statements.value.statements[0];
+                // Prevent the method from freeing the expression.
+                method.statements.value.statements.len = 0;
+                break :blk expression;
+            } else if (method.statements.value.statements.len == 0) blk: {
+                self.token_index = start;
+                const slots = (try self.parseSlotsObject()) orelse return null;
+                break :blk AST.ExpressionNode{ .Object = slots };
+            } else {
+                try self.diagnostics.reportDiagnostic(
+                    .Error,
+                    self.offsetToLocation(method.range.start),
+                    "Messages can only be sent to expressions, found method",
+                );
+                method.destroy(self.allocator);
+                return null;
+            };
+
+            errdefer expression.deinit(self.allocator);
+            return (try self.maybeParseMessageSend(expression)) orelse null;
+        }
+
+        // Alternatively, if the "method" has no statements, then assume it's a
+        // slots object.
+        if (method.statements.value.statements.len == 0) {
+            self.token_index = start;
+            const slots = (try self.parseSlotsObject()) orelse return null;
+            return AST.ExpressionNode{ .Object = slots };
+        }
+    }
+
+    // Otherwise, it's just a method object. Parse it properly this time.
+    self.token_index = start;
+    const method = (try self.parseMethod(&.{}, .DisallowParentSlots)) orelse return null;
+    return AST.ExpressionNode{ .Object = method };
+}
+
+/// Parse a method. The strings in `argument_names` will be owned by the returned method object.
+// <Method> ::= "(" <MethodSlotList>? <StatementList>? ")"
+const MethodParentSlotPermissiveness = enum { AllowParentSlots, DisallowParentSlots };
+fn parseMethod(self: *Parser, argument_names: []const []const u8, permissiveness: MethodParentSlotPermissiveness) ParseError!?*AST.ObjectNode {
+    const start = self.tokenStartAt(self.consume());
+
+    var slots = try std.ArrayList(AST.SlotNode).initCapacity(self.allocator, argument_names.len);
+    defer {
+        for (slots.items) |*slot| {
+            slot.deinit(self.allocator);
+        }
+        slots.deinit();
+    }
+
+    // TODO: Check if the argument names are unique.
+    // TODO: Check for clobbering of argument slots by non-argument slots.
+    for (argument_names) |argument_name| {
+        const argument_slot = AST.SlotNode{
+            .range = .{
+                .start = 0,
+                .end = 0,
+            },
+            .name = argument_name,
+            .value = null,
+
+            .is_parent = false,
+            .is_mutable = true,
+            .is_argument = true,
+        };
+        try slots.append(argument_slot);
+    }
+
+    {
+        const nonargument_slots = try self.parseSlotList(if (permissiveness == .AllowParentSlots) .Slots else .Method);
+        defer self.allocator.free(nonargument_slots);
+        errdefer {
+            for (nonargument_slots) |*slot| {
+                slot.deinit(self.allocator);
+            }
+        }
+
+        try slots.appendSlice(nonargument_slots);
+    }
+
+    const slots_slice = try slots.toOwnedSlice();
+    errdefer self.allocator.free(slots_slice);
+
+    const statements = try self.parseStatementList(.DisallowNonlocalReturns, .ParenClose);
+    errdefer statements.unrefWithAllocator(self.allocator);
+
+    const end = self.tokenStartAt(self.token_index);
+    const method_node = try self.allocator.create(AST.ObjectNode);
+    method_node.* = .{
+        .range = .{
+            .start = start,
+            .end = end,
+        },
+        .slots = slots_slice,
+        .statements = statements,
+    };
+
+    return method_node;
+}
+
+// <Expression> ::= <KeywordExpression> (";" <MessageSend>)*
+// <NonParenthesizedExpression> ::= <NonParenthesizedKeywordExpression> (";" <MessageSend>)*
+fn parseExpression(self: *Parser, mode: PrimaryMode) ParseError!?AST.ExpressionNode {
+    var expression = (try self.parseKeywordExpression(mode)) orelse return null;
+    // NOTE: `maybeParseMessageSend` will free `expression` if it fails.
+
+    while (self.tryConsume(.Semicolon)) |_| {
+        expression = (try self.maybeParseMessageSend(expression)) orelse return null;
+    }
+    return expression;
+}
+
+// <KeywordExpression> ::= (<KeywordSend> | <BinarySend> <KeywordSend>? | <Primary> <MessageSend>?)
+// <NonParenthesizedKeywordExpression> ::= (<KeywordSend> | <BinarySend> <KeywordSend>? | <PrimaryNoParenExpr> <MessageSend>?)
+fn parseKeywordExpression(self: *Parser, mode: PrimaryMode) ParseError!?AST.ExpressionNode {
+    const current_tag = self.peek();
+    return if (current_tag == .FirstKeyword)
+        (try self.parseKeywordSend(null)) orelse return null
+    else if (current_tag.isOperator()) blk: {
+        var primary = (try self.parseBinarySend(null, null)) orelse return null;
+        errdefer primary.deinit(self.allocator);
+
+        if (self.peek() == .FirstKeyword) {
+            primary = (try self.parseKeywordSend(primary)) orelse {
+                primary.deinit(self.allocator);
+                return null;
+            };
+        }
+        break :blk primary;
+    } else blk: {
+        var primary = (try self.parsePrimary(mode)) orelse return null;
+        errdefer primary.deinit(self.allocator);
+
+        // NOTE: `maybeParseMessageSend` will free `primary` if it fails.
+        break :blk (try self.maybeParseMessageSend(primary)) orelse return null;
+    };
+}
+
+/// Try to parse a message send with `receiver` as its receiver.
+/// If the current token doesn't look like a message send, return `receiver`
+/// as-is; otherwise, return the wrapping message send.
+/// On parse error, return null.
+/// Takes ownership of `receiver` and will free it on parse error.
+// <MessageSend> ::= <KeywordSend> | <BinarySend> <KeywordSend>? | <UnarySend>+ <BinarySend>? <KeywordSend>?
+fn maybeParseMessageSend(self: *Parser, receiver: AST.ExpressionNode) ParseError!?AST.ExpressionNode {
+    const current_tag = self.peek();
+    if (current_tag == .FirstKeyword) {
+        return (try self.parseKeywordSend(receiver)) orelse null;
+    }
+
+    if (current_tag.isOperator()) {
+        var binary_send = (try self.parseBinarySend(receiver, null)) orelse return null;
+        errdefer binary_send.deinit(self.allocator);
+
+        if (self.peek() == .FirstKeyword) {
+            binary_send = (try self.parseKeywordSend(binary_send)) orelse {
+                binary_send.deinit(self.allocator);
+                return null;
+            };
+        }
+
+        return binary_send;
+    }
+
+    var message = receiver;
+    while (self.peek() == .Identifier) {
+        message = (try self.parseUnarySend(message)) orelse {
+            message.deinit(self.allocator);
             return null;
         };
-
-        _ = self.nextToken();
     }
 
-    if (self.token_tags[self.token_index] != .Identifier) {
-        try self.diagnostics.reportDiagnosticFormatted(
-            .Error,
-            self.offsetToLocation(self.token_starts[self.token_index]),
-            "Expected identifier after keyword in slot name, got {s}",
-            .{self.token_tags[self.token_index].symbol()},
-        );
-        return null;
+    if (self.peek().isOperator()) {
+        message = (try self.parseBinarySend(message, null)) orelse {
+            message.deinit(self.allocator);
+            return null;
+        };
     }
 
-    try arguments.append(try self.createSlotNodeFromArgument(order));
-    return try self.allocator.dupe(u8, binary_message_name.constSlice());
+    if (self.peek() == .FirstKeyword) {
+        message = (try self.parseKeywordSend(message)) orelse {
+            message.deinit(self.allocator);
+            return null;
+        };
+    }
+
+    return message;
+}
+
+// <KeywordSend> ::= <FirstKeywordName> <KeywordExpression> (<RestKeywordName> <KeywordExpression>)*
+fn parseKeywordSend(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
+    self.assertToken(.FirstKeyword);
+    const first_keyword = self.consume();
+    const start = self.tokenStartAt(first_keyword);
+
+    var message = std.ArrayList(u8).init(self.allocator);
+    defer message.deinit();
+
+    var arguments = std.ArrayList(AST.ExpressionNode).init(self.allocator);
+    defer {
+        for (arguments.items) |*argument| {
+            argument.deinit(self.allocator);
+        }
+        arguments.deinit();
+    }
+
+    try message.appendSlice(self.getKeywordSlice(first_keyword));
+    {
+        var argument = (try self.parseKeywordExpression(.WithParenExpr)) orelse return null;
+        errdefer argument.deinit(self.allocator);
+
+        try arguments.append(argument);
+    }
+
+    while (self.tryConsume(.RestKeyword)) |rest_keyword| {
+        try message.appendSlice(self.getKeywordSlice(rest_keyword));
+
+        var argument = (try self.parseKeywordExpression(.WithParenExpr)) orelse return null;
+        errdefer argument.deinit(self.allocator);
+
+        try arguments.append(argument);
+    }
+
+    const message_slice = try message.toOwnedSlice();
+    errdefer self.allocator.free(message_slice);
+    const arguments_slice = try arguments.toOwnedSlice();
+    errdefer self.allocator.free(arguments_slice);
+
+    const end = self.tokenStartAt(self.token_index);
+    const message_node = try self.allocator.create(AST.MessageNode);
+    message_node.* = .{
+        .range = .{
+            .start = start,
+            .end = end,
+        },
+        .receiver = receiver,
+        .message_name = message_slice,
+        .arguments = arguments_slice,
+    };
+
+    return AST.ExpressionNode{ .Message = message_node };
+}
+
+// <BinarySend> ::= <BinaryOp>+ <BinaryExpression>
+// FIXME: Binary sends are currently right-associative, but they should be left-associative,
+//        because it's more intuitive. i.e. `a + b + c` should be parsed as `(a + b) + c`.
+fn parseBinarySend(self: *Parser, receiver: ?AST.ExpressionNode, previous_operator: ?[]const u8) ParseError!?AST.ExpressionNode {
+    const start = self.tokenStartAt(self.token_index);
+    std.debug.assert(self.peek().isOperator());
+
+    var operator = std.ArrayList(u8).init(self.allocator);
+    defer operator.deinit();
+
+    // FIXME: Disallow whitespace between characters in binary operators
+    while (self.peek().isOperator()) {
+        try operator.appendSlice(self.peek().symbol());
+        _ = self.consume();
+    }
+
+    std.debug.assert(operator.items.len > 0);
+
+    if (previous_operator) |previous| {
+        if (!std.mem.eql(u8, operator.items, previous)) {
+            try self.diagnostics.reportDiagnostic(
+                .Error,
+                self.offsetToLocation(start),
+                "Different binary messages cannot be chained",
+            );
+            return null;
+        }
+    }
+
+    const operator_slice = try operator.toOwnedSlice();
+    errdefer self.allocator.free(operator_slice);
+
+    var argument = (try self.parseBinaryExpression(operator_slice)) orelse return null;
+    errdefer argument.deinit(self.allocator);
+
+    const arguments_slice = try self.allocator.alloc(AST.ExpressionNode, 1);
+    errdefer self.allocator.free(arguments_slice);
+    arguments_slice[0] = argument;
+
+    const end = self.tokenStartAt(self.token_index);
+    const message_node = try self.allocator.create(AST.MessageNode);
+    errdefer self.allocator.destroy(message_node);
+    message_node.* = .{
+        .range = .{
+            .start = start,
+            .end = end,
+        },
+        .receiver = receiver,
+        .message_name = operator_slice,
+        .arguments = arguments_slice,
+    };
+
+    return AST.ExpressionNode{ .Message = message_node };
+}
+
+// <BinaryExpression> ::= <Primary> <UnaryMessage>* <BinaryMessage>?
+fn parseBinaryExpression(self: *Parser, previous_operator: []const u8) ParseError!?AST.ExpressionNode {
+    var primary = (try self.parsePrimary(.WithParenExpr)) orelse return null;
+    errdefer primary.deinit(self.allocator);
+
+    while (self.peek() == .Identifier) {
+        const unary_message = (try self.parseUnarySend(primary)) orelse return null;
+        primary = AST.ExpressionNode{ .Message = unary_message.Message };
+    }
+
+    if (self.peek().isOperator()) {
+        primary = (try self.parseBinarySend(primary, previous_operator)) orelse return null;
+    }
+
+    return primary;
+}
+
+// <UnarySend> ::= <Identifier>
+fn parseUnarySend(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
+    const start = self.tokenStartAt(self.token_index);
+    self.assertToken(.Identifier);
+
+    const identifier_copy = try self.getIdentifierCopy(self.consume());
+    errdefer self.allocator.free(identifier_copy);
+
+    const end = self.tokenStartAt(self.token_index);
+    const message_node = try self.allocator.create(AST.MessageNode);
+    errdefer self.allocator.destroy(message_node);
+    message_node.* = .{
+        .range = .{
+            .start = start,
+            .end = end,
+        },
+        .receiver = receiver,
+        .message_name = identifier_copy,
+        .arguments = &.{},
+    };
+
+    return AST.ExpressionNode{ .Message = message_node };
+}
+
+// <PrimaryNoParenExpr> ::= <Integer> | <FloatingPoint> | <SlotsObject> | <Block> | <Identifier> | <String>
+// <Primary> ::= <PrimaryNoParenExpr> | "(" <Expression> ")"
+const PrimaryMode = enum { WithParenExpr, WithoutParenExpr };
+fn parsePrimary(self: *Parser, mode: PrimaryMode) ParseError!?AST.ExpressionNode {
+    const current_tag = self.peek();
+    const start = self.tokenStartAt(self.token_index);
+
+    return switch (current_tag) {
+        .Integer => AST.ExpressionNode{ .Number = try self.parseInteger() },
+        .FloatingPoint => AST.ExpressionNode{ .Number = try self.parseFloatingPoint() },
+        .ParenOpen => blk: {
+            if (mode == .WithoutParenExpr) {
+                const slots_object = (try self.parseSlotsObject()) orelse return null;
+                return AST.ExpressionNode{ .Object = slots_object };
+            }
+
+            const paren_open = self.consume();
+            if (self.peek() == .Pipe or self.peek() == .ParenClose) {
+                self.token_index = paren_open;
+                const slots_object = (try self.parseSlotsObject()) orelse return null;
+                return AST.ExpressionNode{ .Object = slots_object };
+            }
+
+            var expression = (try self.parseExpression(.WithParenExpr)) orelse return null;
+            errdefer expression.deinit(self.allocator);
+
+            _ = try self.expectTokenContext(.ParenClose, "after expression");
+            break :blk expression;
+        },
+        .BracketOpen => blk: {
+            const block = (try self.parseBlock()) orelse return null;
+            break :blk AST.ExpressionNode{ .Block = block };
+        },
+        .Identifier => AST.ExpressionNode{ .Identifier = try self.parseIdentifier() },
+        .String => blk: {
+            const string = (try self.parseString()) orelse return null;
+            break :blk AST.ExpressionNode{ .String = string };
+        },
+        else => {
+            try self.diagnostics.reportDiagnostic(
+                .Error,
+                self.offsetToLocation(start),
+                "Expected primary expression",
+            );
+            return null;
+        },
+    };
+}
+
+// <Integer> ::= <BinaryInteger> | <OctalInteger> | <HexInteger> | <DecimalInteger>
+// <BinaryInteger> ::= "0" "b" [0-1] ("_"? [0-1])*
+// <OctalInteger> ::= "0" "o" [0-7] ("_"? [0-7])*
+// <HexInteger> ::= "0" "x" <HexDigit> ("_"? <HexDigit>)*
+// <DecimalInteger> ::= [0-9] ("_"? [0-9])*
+// <HexDigit> ::= [0-9] | [a-f] | [A-F]
+const IntegerParseState = enum { Start, Zero, Decimal, Hexadecimal, Octal, Binary };
+fn parseInteger(self: *Parser) ParseError!AST.NumberNode {
+    self.assertToken(.Integer);
+    const start_of_number = self.tokenStartAt(self.consume());
+
+    var integer: i63 = 0;
+    var state = IntegerParseState.Start;
+    var offset = start_of_number;
+    while (offset < self.buffer.len) : (offset += 1) {
+        const c = self.buffer[offset];
+        switch (state) {
+            .Start => switch (c) {
+                '0' => {
+                    state = .Zero;
+                },
+                '1'...'9' => {
+                    integer = c - '0';
+                    state = .Decimal;
+                },
+                else => unreachable,
+            },
+            .Zero => switch (c) {
+                'x', 'X' => {
+                    state = .Hexadecimal;
+                },
+                'o', 'O' => {
+                    state = .Octal;
+                },
+                'b', 'B' => {
+                    state = .Binary;
+                },
+                '0' => {},
+                '_' => {},
+                '1'...'9' => {
+                    integer = c - '0';
+                    state = .Decimal;
+                },
+                else => break,
+            },
+            .Decimal => switch (c) {
+                '0'...'9' => {
+                    const digit = c - '0';
+
+                    const mul_result = @mulWithOverflow(integer, 10);
+                    if (mul_result[1] != 0) {
+                        try self.diagnostics.reportDiagnostic(
+                            .Error,
+                            self.offsetToLocation(start_of_number),
+                            "Value does not fit in 63-bit integer",
+                        );
+                        break;
+                    }
+                    integer = mul_result[0];
+
+                    const add_result = @addWithOverflow(integer, digit);
+                    if (add_result[1] != 0) {
+                        try self.diagnostics.reportDiagnostic(
+                            .Error,
+                            self.offsetToLocation(start_of_number),
+                            "Value does not fit in 63-bit integer",
+                        );
+                        break;
+                    }
+                    integer = add_result[0];
+                },
+                '_' => {},
+                else => break,
+            },
+            .Hexadecimal => switch (c) {
+                '0'...'9' => {
+                    const digit = c - '0';
+
+                    const mul_result = @mulWithOverflow(integer, 16);
+                    if (mul_result[1] != 0) {
+                        try self.diagnostics.reportDiagnostic(
+                            .Error,
+                            self.offsetToLocation(start_of_number),
+                            "Value does not fit in 63-bit integer",
+                        );
+                        break;
+                    }
+                    integer = mul_result[0];
+
+                    const add_result = @addWithOverflow(integer, digit);
+                    if (add_result[1] != 0) {
+                        try self.diagnostics.reportDiagnostic(
+                            .Error,
+                            self.offsetToLocation(start_of_number),
+                            "Value does not fit in 63-bit integer",
+                        );
+                        break;
+                    }
+                    integer = add_result[0];
+                },
+                'A'...'F', 'a'...'f' => {
+                    const digit = 10 + (if (c >= 'a') c - 'a' else c - 'A');
+
+                    const mul_result = @mulWithOverflow(integer, 16);
+                    if (mul_result[1] != 0) {
+                        try self.diagnostics.reportDiagnostic(
+                            .Error,
+                            self.offsetToLocation(start_of_number),
+                            "Value does not fit in 63-bit integer",
+                        );
+                        break;
+                    }
+                    integer = mul_result[0];
+
+                    const add_result = @addWithOverflow(integer, digit);
+                    if (add_result[1] != 0) {
+                        try self.diagnostics.reportDiagnostic(
+                            .Error,
+                            self.offsetToLocation(start_of_number),
+                            "Value does not fit in 63-bit integer",
+                        );
+                        break;
+                    }
+                    integer = add_result[0];
+                },
+                '_' => {},
+                else => break,
+            },
+            .Octal => switch (c) {
+                '0'...'7' => {
+                    const digit = c - '0';
+
+                    const mul_result = @mulWithOverflow(integer, 8);
+                    if (mul_result[1] != 0) {
+                        try self.diagnostics.reportDiagnostic(
+                            .Error,
+                            self.offsetToLocation(start_of_number),
+                            "Value does not fit in 63-bit integer",
+                        );
+                        break;
+                    }
+                    integer = mul_result[0];
+
+                    const add_result = @addWithOverflow(integer, digit);
+                    if (add_result[1] != 0) {
+                        try self.diagnostics.reportDiagnostic(
+                            .Error,
+                            self.offsetToLocation(start_of_number),
+                            "Value does not fit in 63-bit integer",
+                        );
+                        break;
+                    }
+                    integer = add_result[0];
+                },
+                '8', '9' => unreachable,
+                '_' => {},
+                else => break,
+            },
+            .Binary => switch (c) {
+                '0', '1' => {
+                    const digit = c - '0';
+
+                    const mul_result = @mulWithOverflow(integer, 2);
+                    if (mul_result[1] != 0) {
+                        try self.diagnostics.reportDiagnostic(
+                            .Error,
+                            self.offsetToLocation(start_of_number),
+                            "Value does not fit in 63-bit integer",
+                        );
+                        break;
+                    }
+                    integer = mul_result[0];
+
+                    const add_result = @addWithOverflow(integer, digit);
+                    if (add_result[1] != 0) {
+                        try self.diagnostics.reportDiagnostic(
+                            .Error,
+                            self.offsetToLocation(start_of_number),
+                            "Value does not fit in 63-bit integer",
+                        );
+                        break;
+                    }
+                    integer = add_result[0];
+                },
+                '2'...'9' => unreachable,
+                '_' => {},
+                else => break,
+            },
+        }
+    }
+
+    const node = AST.NumberNode{
+        .value = .{ .Integer = integer },
+        .range = .{ .start = start_of_number, .end = offset },
+    };
+    return node;
+}
+
+// <FloatingPoint> ::= <DecimalInteger> "." <DecimalInteger>
+const FloatingPointParseState = enum { Integer, Fraction };
+fn parseFloatingPoint(self: *Parser) ParseError!AST.NumberNode {
+    self.assertToken(.FloatingPoint);
+    const start_of_number = self.tokenStartAt(self.consume());
+
+    var result: f64 = 0.0;
+    var fraction: i64 = 0;
+    var fraction_counter: usize = 0;
+    var state = FloatingPointParseState.Integer;
+    var offset = start_of_number;
+    while (offset < self.buffer.len) : (offset += 1) {
+        const c = self.buffer[offset];
+        switch (state) {
+            .Integer => switch (c) {
+                '0'...'9' => {
+                    result = (result * 10) + @as(f64, @floatFromInt(c - '0'));
+                },
+                '.' => {
+                    state = .Fraction;
+                },
+                else => unreachable,
+            },
+            .Fraction => switch (c) {
+                '0'...'9' => {
+                    if (fraction_counter == 9) {
+                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Floating point fraction too large");
+                        break;
+                    }
+                    const digit = c - '0';
+
+                    fraction = (fraction * 10) + digit;
+                    fraction_counter += 1;
+                },
+                else => break,
+            },
+        }
+    }
+
+    const divisor = std.math.pow(f64, 10.0, @as(f64, @floatFromInt(fraction_counter)));
+    result += @as(f64, @floatFromInt(fraction)) / divisor;
+
+    const node = AST.NumberNode{
+        .value = .{ .FloatingPoint = result },
+        .range = .{ .start = start_of_number, .end = offset },
+    };
+    return node;
+}
+
+// <SlotsObject> ::= "(" <Whitespace> <SlotsSlotList>? <Whitespace> ")"
+fn parseSlotsObject(self: *Parser) ParseError!?*AST.ObjectNode {
+    self.assertToken(.ParenOpen);
+    const start = self.tokenStartAt(self.consume());
+
+    const slots = try self.parseSlotList(.Slots);
+    errdefer self.allocator.free(slots);
+
+    _ = try self.expectTokenContext(.ParenClose, "after slots object");
+    const end = self.tokenStartAt(self.token_index);
+
+    var statements = try AST.StatementList.create(self.allocator, &.{});
+    errdefer statements.unrefWithAllocator(self.allocator);
+
+    const object_node = try self.allocator.create(AST.ObjectNode);
+    object_node.* = .{
+        .range = .{
+            .start = start,
+            .end = end,
+        },
+        .slots = slots,
+        .statements = statements,
+    };
+
+    return object_node;
+}
+
+// <Block> ::= "[" <Whitespace> <BlockSlotList>? <Whitespace> <BlockStatementList>? <Whitespace> "]"
+fn parseBlock(self: *Parser) ParseError!?*AST.BlockNode {
+    self.assertToken(.BracketOpen);
+    const start = self.tokenStartAt(self.consume());
+
+    const slots = try self.parseSlotList(.Block);
+    errdefer self.allocator.free(slots);
+
+    const statements = try self.parseStatementList(.AllowNonlocalReturns, .BracketClose);
+    errdefer statements.unrefWithAllocator(self.allocator);
+
+    const end = self.tokenStartAt(self.token_index);
+    const block_node = try self.allocator.create(AST.BlockNode);
+    block_node.* = .{
+        .range = .{
+            .start = start,
+            .end = end,
+        },
+        .slots = slots,
+        .statements = statements,
+    };
+
+    return block_node;
+}
+
+// <NonPrimitiveIdentifier> ::= [a-z] ([a-z] | [A-Z] | [0-9])*
+// <Identifier> ::= <NonPrimitiveIdentifier> | ("_" ([a-z] | [A-Z] | [0-9])+)
+fn parseIdentifier(self: *Parser) ParseError!AST.IdentifierNode {
+    self.assertToken(.Identifier);
+    const start = self.tokenStartAt(self.token_index);
+
+    const identifier = try self.getIdentifierCopy(self.consume());
+    const end = self.tokenStartAt(self.token_index);
+
+    return AST.IdentifierNode{
+        .value = identifier,
+        .range = .{ .start = start, .end = end },
+    };
 }
 
 const StringParseState = enum { Start, Literal, Backslash };
 fn parseString(self: *Parser) ParseError!?AST.StringNode {
-    const string_token = self.assertToken(.String);
-    const start_of_string = self.token_starts[string_token];
+    self.assertToken(.String);
+    const start_of_string = self.tokenStartAt(self.token_index);
+    _ = self.consume();
 
-    var offset = self.token_starts[string_token];
+    var offset = start_of_string;
     var state = StringParseState.Start;
     var string_buffer = std.ArrayList(u8).init(self.allocator);
     defer string_buffer.deinit();
@@ -1010,315 +1502,4 @@ fn parseString(self: *Parser) ParseError!?AST.StringNode {
         "Unterminated string literal",
     );
     return null;
-}
-
-fn parseIdentifier(self: *Parser) ParseError!AST.IdentifierNode {
-    const identifier_token = self.assertToken(.Identifier);
-    const identifier_copy = try self.getIdentifierCopy(identifier_token);
-    errdefer self.allocator.free(identifier_copy);
-
-    const start_of_identifier = self.token_starts[identifier_token];
-    const end_of_identifier = start_of_identifier + identifier_copy.len;
-
-    const node = AST.IdentifierNode{
-        .value = identifier_copy,
-        .range = .{ .start = start_of_identifier, .end = end_of_identifier },
-    };
-    return node;
-}
-
-const IntegerParseState = enum { Start, Zero, Decimal, Hexadecimal, Octal, Binary };
-fn parseInteger(self: *Parser) ParseError!AST.NumberNode {
-    const number_token = self.assertToken(.Integer);
-    const start_of_number = self.token_starts[number_token];
-
-    var integer: i62 = 0;
-    var state = IntegerParseState.Start;
-    var offset = start_of_number;
-    while (offset < self.buffer.len) : (offset += 1) {
-        const c = self.buffer[offset];
-        switch (state) {
-            .Start => switch (c) {
-                '0' => {
-                    state = .Zero;
-                },
-                '1'...'9' => {
-                    integer = c - '0';
-                    state = .Decimal;
-                },
-                else => unreachable,
-            },
-            .Zero => switch (c) {
-                'x', 'X' => {
-                    state = .Hexadecimal;
-                },
-                'o', 'O' => {
-                    state = .Octal;
-                },
-                'b', 'B' => {
-                    state = .Binary;
-                },
-                '0' => {},
-                '_' => {},
-                '1'...'9' => unreachable,
-                else => break,
-            },
-            .Decimal => switch (c) {
-                '0'...'9' => {
-                    const digit = c - '0';
-
-                    const mul_result = @mulWithOverflow(integer, 10);
-                    if (mul_result[1] != 0) {
-                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
-                        break;
-                    }
-                    integer = mul_result[0];
-
-                    const add_result = @addWithOverflow(integer, digit);
-                    if (add_result[1] != 0) {
-                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
-                        break;
-                    }
-                    integer = add_result[0];
-                },
-                '_' => {},
-                else => break,
-            },
-            .Hexadecimal => switch (c) {
-                '0'...'9' => {
-                    const digit = c - '0';
-
-                    const mul_result = @mulWithOverflow(integer, 16);
-                    if (mul_result[1] != 0) {
-                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
-                        break;
-                    }
-                    integer = mul_result[0];
-
-                    const add_result = @addWithOverflow(integer, digit);
-                    if (add_result[1] != 0) {
-                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
-                        break;
-                    }
-                    integer = add_result[0];
-                },
-                'A'...'F', 'a'...'f' => {
-                    const digit = 10 + (if (c >= 'a') c - 'a' else c - 'A');
-
-                    const mul_result = @mulWithOverflow(integer, 16);
-                    if (mul_result[1] != 0) {
-                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
-                        break;
-                    }
-                    integer = mul_result[0];
-
-                    const add_result = @addWithOverflow(integer, digit);
-                    if (add_result[1] != 0) {
-                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
-                        break;
-                    }
-                    integer = add_result[0];
-                },
-                '_' => {},
-                else => break,
-            },
-            .Octal => switch (c) {
-                '0'...'7' => {
-                    const digit = c - '0';
-
-                    const mul_result = @mulWithOverflow(integer, 8);
-                    if (mul_result[1] != 0) {
-                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
-                        break;
-                    }
-                    integer = mul_result[0];
-
-                    const add_result = @addWithOverflow(integer, digit);
-                    if (add_result[1] != 0) {
-                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
-                        break;
-                    }
-                    integer = add_result[0];
-                },
-                '8', '9' => unreachable,
-                '_' => {},
-                else => break,
-            },
-            .Binary => switch (c) {
-                '0', '1' => {
-                    const digit = c - '0';
-
-                    const mul_result = @mulWithOverflow(integer, 2);
-                    if (mul_result[1] != 0) {
-                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
-                        break;
-                    }
-                    integer = mul_result[0];
-
-                    const add_result = @addWithOverflow(integer, digit);
-                    if (add_result[1] != 0) {
-                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Value does not fit in 62-bit integer");
-                        break;
-                    }
-                    integer = add_result[0];
-                },
-                '2'...'9' => unreachable,
-                '_' => {},
-                else => break,
-            },
-        }
-    }
-
-    const node = AST.NumberNode{
-        .value = .{ .Integer = integer },
-        .range = .{ .start = start_of_number, .end = offset },
-    };
-    return node;
-}
-
-const FloatingPointParseState = enum { Integer, Fraction };
-fn parseFloatingPoint(self: *Parser) ParseError!AST.NumberNode {
-    const number_token = self.assertToken(.FloatingPoint);
-    const start_of_number = self.token_starts[number_token];
-
-    var result: f64 = 0.0;
-    var fraction: i64 = 0;
-    var fraction_counter: usize = 0;
-    var state = FloatingPointParseState.Integer;
-    var offset = start_of_number;
-    while (offset < self.buffer.len) : (offset += 1) {
-        const c = self.buffer[offset];
-        switch (state) {
-            .Integer => switch (c) {
-                '0'...'9' => {
-                    result = (result * 10) + @as(f64, @floatFromInt(c - '0'));
-                },
-                '.' => {
-                    state = .Fraction;
-                },
-                else => unreachable,
-            },
-            .Fraction => switch (c) {
-                '0'...'9' => {
-                    if (fraction_counter == 9) {
-                        try self.diagnostics.reportDiagnostic(.Error, self.offsetToLocation(start_of_number), "Floating point fraction too large");
-                        break;
-                    }
-                    const digit = c - '0';
-
-                    fraction = (fraction * 10) + digit;
-                    fraction_counter += 1;
-                },
-                else => break,
-            },
-        }
-    }
-
-    const divisor = std.math.pow(f64, 10.0, @as(f64, @floatFromInt(fraction_counter)));
-    result += @as(f64, @floatFromInt(fraction)) / divisor;
-
-    const node = AST.NumberNode{
-        .value = .{ .FloatingPoint = result },
-        .range = .{ .start = start_of_number, .end = offset },
-    };
-    return node;
-}
-
-fn nextToken(self: *Parser) usize {
-    const result = self.token_index;
-    self.token_index += 1;
-    return result;
-}
-
-fn consumeToken(self: *Parser, tag: Token.Tag) ?usize {
-    if (self.token_tags[self.token_index] == tag)
-        return self.nextToken();
-    return null;
-}
-
-fn assertToken(self: *Parser, tag: Token.Tag) usize {
-    const result = self.consumeToken(tag);
-    if (result) |r| return r;
-    unreachable;
-}
-
-fn expectToken(self: *Parser, tag: Token.Tag) ParseError!bool {
-    const current_tag = self.token_tags[self.token_index];
-    const current_start = self.token_starts[self.token_index];
-
-    if (current_tag != tag) {
-        try self.diagnostics.reportDiagnosticFormatted(
-            .Error,
-            self.offsetToLocation(current_start),
-            "Expected '{s}', got '{s}'",
-            .{ tag.symbol(), current_tag.symbol() },
-        );
-        return false;
-    }
-
-    _ = self.nextToken();
-    return true;
-}
-
-/// Turn an offset into a line-and-column location.
-pub fn offsetToLocation(self: Parser, offset: usize) Location {
-    var line: usize = 1;
-    var line_start: usize = undefined;
-    var line_end: usize = undefined;
-    var did_find_line = false;
-
-    std.debug.assert(offset <= self.buffer.len);
-
-    while (line < self.line_offsets.items.len) : (line += 1) {
-        const line_offset = self.line_offsets.items[line];
-        if (offset < line_offset) {
-            line_start = self.line_offsets.items[line - 1];
-            line_end = line_offset - 1; // Get rid of newline
-            did_find_line = true;
-            break;
-        }
-    }
-
-    if (!did_find_line) {
-        // We are on the very last line.
-        line_start = self.line_offsets.items[line - 1];
-        line_end = self.buffer.len;
-        if (line_end > 0 and self.buffer[line_end - 1] == '\n')
-            line_end -= 1;
-    }
-
-    return Location{
-        .line = line,
-        .column = offset - line_start + 1,
-        .line_start = line_start,
-        .line_end = line_end,
-    };
-}
-
-fn getKeywordSlice(self: Parser, index: usize) []const u8 {
-    const start = self.token_starts[index];
-    const next_start = self.token_starts[index + 1];
-    var end = next_start;
-
-    while (self.buffer[end] != ':') : (end -= 1) {}
-    return self.buffer[start .. end + 1];
-}
-
-fn getIdentifierSlice(self: Parser, index: usize) []const u8 {
-    const start = self.token_starts[index];
-    const next_start = self.token_starts[index + 1];
-    var end = next_start - 1;
-
-    while (true) {
-        switch (self.buffer[end]) {
-            'a'...'z', 'A'...'Z', '0'...'9', '_' => break,
-            else => end -= 1,
-        }
-    }
-    return self.buffer[start .. end + 1];
-}
-
-fn getIdentifierCopy(self: Parser, index: usize) Allocator.Error![]const u8 {
-    const slice = self.getIdentifierSlice(index);
-    return try self.allocator.dupe(u8, slice);
 }
