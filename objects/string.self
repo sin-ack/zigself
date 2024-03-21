@@ -189,7 +189,7 @@ std traits string _AddSlots: (|
                 "NOTE: The AND operation is used to convert lowercase letters to uppercase."
                 byte: (byte bitAnd: 0b11011111).
                 (byte >= aByte) && [byte <= zByte] ifTrue: [
-                    value: (value * base) + (byte + 10 - aByte).
+                    value: (value * base) + (byte + (10 - aByte)).
                     break value.
                 ].
 
