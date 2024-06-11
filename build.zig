@@ -1,28 +1,27 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
-
-    // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
-    // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const zig_args_dependency = b.dependency("zig_args", .{}).module("args");
+    const zigself = b.addModule("zigself", .{
+        .root_source_file = b.path("src/package.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
 
     const exe = b.addExecutable(.{
         .name = "self",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
     exe.linkLibC();
     b.installArtifact(exe);
-    exe.root_module.addImport("zig-args", zig_args_dependency);
+
+    const zig_args = b.dependency("zig-args", .{});
+    exe.root_module.addImport("zig-args", zig_args.module("args"));
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -35,14 +34,11 @@ pub fn build(b: *std.Build) void {
 
     var test_harness_exe = b.addExecutable(.{
         .name = "self-test",
-        .root_source_file = .{ .path = "tests/harness.zig" },
+        .root_source_file = b.path("tests/harness.zig"),
         .target = target,
         .optimize = optimize,
     });
-    test_harness_exe.linkLibC();
-    test_harness_exe.root_module.addAnonymousImport("zigself", .{
-        .root_source_file = .{ .path = "src/package.zig" },
-    });
+    test_harness_exe.root_module.addImport("zigself", zigself);
 
     const test_harness_run_cmd = b.addRunArtifact(test_harness_exe);
     if (b.args) |args| {

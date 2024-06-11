@@ -100,7 +100,10 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
     const stdlib_entrypoint = try std.fs.path.resolve(allocator, &[_][]const u8{ project_root, "objects", "everything.self" });
     defer allocator.free(stdlib_entrypoint);
 
-    var progress = std.Progress{};
+    var progress = std.Progress.start(.{
+        .root_name = "Run zigSelf tests",
+        .estimated_total_items = tests.items.len,
+    });
 
     const stdlib_script = try Script.createFromFilePath(allocator, stdlib_entrypoint);
     defer stdlib_script.unref();
@@ -118,9 +121,6 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
         std.debug.panic("!!! Standard library script failed to execute!", .{});
     }
 
-    const root_progress_node = progress.start("Run zigSelf tests", tests.items.len);
-    root_progress_node.activate();
-
     // Passes
     var passed_tests = std.ArrayList([]const u8).init(allocator);
     defer passed_tests.deinit();
@@ -135,15 +135,8 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
     defer crashed_tests.deinit();
 
     next_test: for (tests.items) |the_test| {
-        var script_progress_node = root_progress_node.start(the_test.basename, 0);
-        script_progress_node.activate();
+        var script_progress_node = progress.start(the_test.basename, 0);
         defer script_progress_node.end();
-
-        // NOTE: Our tests run too fast, so maybeRefresh doesn't get a chance to
-        //       print the test name. This causes us to not be able to easily
-        //       tell which test failed. So let's directly use refresh() and
-        //       print each test name.
-        progress.refresh();
 
         vm.silent_errors = the_test.expects_error;
 
@@ -189,8 +182,7 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
         try passed_tests.append(the_test.basename);
     }
 
-    root_progress_node.end();
-
+    progress.end();
     std.debug.print("Summary: {} total, {} passed, {} failed, {} failed to parse, {} crashed, {} passing expected-error.\n", .{
         tests.items.len,
         passed_tests.items.len,

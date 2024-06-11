@@ -25,7 +25,7 @@ pub const AddrInfoMap = extern struct {
 
     pub usingnamespace IntrinsicMap(AddrInfoMap, .AddrInfo);
 
-    pub fn createFromAddrinfo(token: *Heap.AllocationToken, actor_id: Actor.ActorID, addrinfo: *std.os.addrinfo) AddrInfoMap.Ptr {
+    pub fn createFromAddrinfo(token: *Heap.AllocationToken, actor_id: Actor.ActorID, addrinfo: *std.posix.addrinfo) AddrInfoMap.Ptr {
         const sockaddr_memory: [*]u8 = @ptrCast(addrinfo.addr.?);
         const sockaddr_bytes_object = ByteArrayObject.createWithValues(token, actor_id, sockaddr_memory[0..addrinfo.addrlen]);
 
@@ -62,7 +62,7 @@ pub const AddrInfoMap = extern struct {
         return new_map;
     }
 
-    pub fn requiredSizeToCreateFromAddrinfo(addrinfo: *std.os.addrinfo) usize {
+    pub fn requiredSizeToCreateFromAddrinfo(addrinfo: *std.posix.addrinfo) usize {
         return AddrInfoMap.requiredSizeForAllocation() + ByteArrayObject.requiredSizeForAllocation(addrinfo.addrlen);
     }
 };

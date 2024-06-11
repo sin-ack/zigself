@@ -1,11 +1,17 @@
 .{
     .name = "zigself",
     .version = "0.0.0",
-    .paths = .{ "./src", "README.md" },
+    .minimum_zig_version = "0.13.0",
+    .paths = .{
+        "src",
+        "build.zig",
+        "build.zig.zon",
+        "README.md",
+    },
     .dependencies = .{
-        .zig_args = .{
-            .url = "https://github.com/MasterQ32/zig-args/archive/89f18a104d9c13763b90e97d6b4ce133da8a3e2b.tar.gz",
-            .hash = "12203ded54c85878eea7f12744066dcb4397177395ac49a7b2aa365bf6047b623829",
+        .@"zig-args" = .{
+            .url = "https://github.com/ikskuh/zig-args/archive/872272205d95bdba33798c94e72c5387a31bc806.zip",
+            .hash = "1220fe6ae56b668cc4a033282b5f227bfbb46a67ede6d84e9f9493fea9de339b5f37",
         },
     },
 }

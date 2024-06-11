@@ -10,7 +10,7 @@ const debug = @import("../debug.zig");
 const STACK_DEBUG = debug.STACK_DEBUG;
 
 /// A typed stack object.
-pub fn Stack(comptime T: type, comptime debug_name: [*:0]const u8, comptime sentinel: ?T) type {
+pub fn Stack(comptime T: type, comptime debug_name: []const u8, comptime sentinel: ?T) type {
     return struct {
         stack: std.ArrayListUnmanaged(T) = .{},
 

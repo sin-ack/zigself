@@ -13,7 +13,7 @@ const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 // FIXME: Add overflow checks here
 
 fn integerOpCommon(
-    comptime primitive_name: [*:0]const u8,
+    comptime primitive_name: []const u8,
     context: *PrimitiveContext,
     comptime operation: fn (context: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) Allocator.Error!ExecutionResult,
 ) !ExecutionResult {

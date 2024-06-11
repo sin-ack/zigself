@@ -23,7 +23,7 @@ const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 /// - 32 bits for the actual file descriptor.
 pub const FileDescriptor = packed struct(GenericValue.Data) {
     flags: Flags,
-    fd: std.os.fd_t,
+    fd: std.posix.fd_t,
 
     pub const Flags = packed struct(u31) {
         // Whether the FD is already closed.
@@ -34,7 +34,7 @@ pub const FileDescriptor = packed struct(GenericValue.Data) {
         reserved: u29 = 0,
     };
 
-    pub fn adopt(fd: std.os.fd_t, flags: Flags) FileDescriptor {
+    pub fn adopt(fd: std.posix.fd_t, flags: Flags) FileDescriptor {
         return .{
             .fd = fd,
             .flags = flags,
@@ -53,7 +53,7 @@ pub const FileDescriptor = packed struct(GenericValue.Data) {
 
     pub fn close(self: *FileDescriptor) void {
         if (self.flags.is_closed) return;
-        std.os.close(self.fd);
+        std.posix.close(self.fd);
         self.flags.is_closed = true;
     }
 

@@ -28,7 +28,7 @@ const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 fn callFailureBlock(
     context: *PrimitiveContext,
-    errno: std.os.system.E,
+    errno: std.posix.system.E,
     block: Value,
 ) !ExecutionResult {
     const errno_int = @intFromEnum(errno);
@@ -39,7 +39,7 @@ fn callFailureBlock(
 }
 
 /// Create a managed FD out of a native FD value.
-fn makeManagedFD(context: *PrimitiveContext, native_fd: std.os.fd_t, flags: FileDescriptor.Flags) !ExecutionResult {
+fn makeManagedFD(context: *PrimitiveContext, native_fd: std.posix.fd_t, flags: FileDescriptor.Flags) !ExecutionResult {
     var token = try context.vm.heap.getAllocation(ManagedObject.requiredSizeForAllocation());
     defer token.deinit();
 
@@ -49,11 +49,11 @@ fn makeManagedFD(context: *PrimitiveContext, native_fd: std.os.fd_t, flags: File
 }
 
 pub fn ManagedStdin(context: *PrimitiveContext) !ExecutionResult {
-    return makeManagedFD(context, std.os.STDIN_FILENO, .{ .close_during_finalization = false });
+    return makeManagedFD(context, std.posix.STDIN_FILENO, .{ .close_during_finalization = false });
 }
 
 pub fn ManagedStdout(context: *PrimitiveContext) !ExecutionResult {
-    return makeManagedFD(context, std.os.STDOUT_FILENO, .{ .close_during_finalization = false });
+    return makeManagedFD(context, std.posix.STDOUT_FILENO, .{ .close_during_finalization = false });
 }
 
 /// Open the path with the given flags and return a file descriptor.
@@ -65,13 +65,13 @@ pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
     const failure_block = arguments.getValue(2);
 
     // FIXME: Handle this error
-    const null_terminated_path = std.os.toPosixPath(file_path.getValues()) catch unreachable;
+    const null_terminated_path = std.posix.toPosixPath(file_path.getValues()) catch unreachable;
 
     // FIXME: Allow the user to pass permissions via the primitive.
-    const rc = std.os.system.open(&null_terminated_path, @bitCast(@as(u32, @intCast(flags))), @as(u32, 0));
-    const errno = std.os.system.getErrno(rc);
+    const rc = std.posix.system.open(&null_terminated_path, @bitCast(@as(u32, @intCast(flags))), @as(u32, 0));
+    const errno = std.posix.errno(rc);
     if (errno == .SUCCESS) {
-        const fd: std.os.fd_t = @intCast(rc);
+        const fd: std.posix.fd_t = @intCast(rc);
         return makeManagedFD(context, fd, .{});
     }
 
@@ -120,9 +120,9 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: *PrimitiveContext) !Executio
     }
 
     const fd_value = FileDescriptor.fromValue(fd.value).fd;
-    const rc = std.os.system.read(fd_value, byte_array.getValues().ptr + offset, @intCast(bytes_to_read));
+    const rc = std.posix.system.read(fd_value, byte_array.getValues().ptr + offset, @intCast(bytes_to_read));
 
-    const errno = std.os.system.getErrno(rc);
+    const errno = std.posix.errno(rc);
     return switch (errno) {
         .SUCCESS => ExecutionResult.resolve(Value.fromUnsignedInteger(@intCast(rc))),
         .AGAIN => blk: {
@@ -182,9 +182,9 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: *PrimitiveContext) !Executi
     }
 
     const fd_value = FileDescriptor.fromValue(fd.value).fd;
-    const rc = std.os.system.write(fd_value, byte_array.getValues().ptr + offset, @intCast(bytes_to_write));
+    const rc = std.posix.system.write(fd_value, byte_array.getValues().ptr + offset, @intCast(bytes_to_write));
 
-    const errno = std.os.system.getErrno(rc);
+    const errno = std.posix.errno(rc);
     if (errno == .SUCCESS) {
         return ExecutionResult.resolve(Value.fromUnsignedInteger(@intCast(rc)));
     }
@@ -219,7 +219,7 @@ pub fn Exit(context: *PrimitiveContext) !ExecutionResult {
     const status_code = try arguments.getInteger(0, .Unsigned);
 
     // The ultimate in garbage collection.
-    std.os.exit(@intCast(status_code));
+    std.posix.exit(@intCast(status_code));
 }
 
 /// The maximum amount of pollfd structures that can be on the stack before
@@ -268,12 +268,12 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
     }
 
     const fd_count = fds.getSize();
-    var inline_poll_fds: [MaximumInlinePollFDs]std.os.pollfd = undefined;
+    var inline_poll_fds: [MaximumInlinePollFDs]std.posix.pollfd = undefined;
     var poll_fds = poll_fds: {
         if (fd_count <= MaximumInlinePollFDs) {
             break :poll_fds inline_poll_fds[0..fd_count];
         } else {
-            break :poll_fds try context.vm.allocator.alloc(std.os.pollfd, fd_count);
+            break :poll_fds try context.vm.allocator.alloc(std.posix.pollfd, fd_count);
         }
     };
 
@@ -296,8 +296,8 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
         };
     }
 
-    const rc = std.os.system.poll(poll_fds.ptr, @intCast(fds.getSize()), @intCast(timeout_ms));
-    const errno = std.os.system.getErrno(rc);
+    const rc = std.posix.system.poll(poll_fds.ptr, @intCast(fds.getSize()), @intCast(timeout_ms));
+    const errno = std.posix.errno(rc);
     if (errno == .SUCCESS) {
         for (poll_fds, 0..) |pollfd, i| {
             event_values[i] = Value.fromInteger(@intCast(pollfd.revents));
@@ -322,7 +322,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     const failure_block = arguments.getValue(6);
 
     // FIXME: Do not directly intCast here
-    const hints = std.os.addrinfo{
+    const hints = std.posix.addrinfo{
         .family = @intCast(family),
         .socktype = @intCast(socket_type),
         .protocol = @intCast(protocol),
@@ -356,10 +356,10 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     const service_c = try std.fmt.allocPrintZ(context.vm.allocator, "{}", .{port});
     defer context.vm.allocator.free(service_c);
 
-    var result_ptr: ?*std.os.addrinfo = undefined;
-    const rc = std.os.system.getaddrinfo(if (node_c) |s| s.ptr else null, service_c, &hints, &result_ptr);
+    var result_ptr: ?*std.posix.addrinfo = undefined;
+    const rc = std.posix.system.getaddrinfo(if (node_c) |s| s.ptr else null, service_c, &hints, &result_ptr);
     switch (rc) {
-        @as(std.os.system.EAI, @enumFromInt(0)) => {},
+        @as(std.posix.system.EAI, @enumFromInt(0)) => {},
 
         // FIXME: Handle errors
         .ADDRFAMILY,
@@ -379,12 +379,12 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     }
     _ = failure_block;
 
-    defer if (result_ptr) |r| std.os.system.freeaddrinfo(r);
+    defer if (result_ptr) |r| std.posix.system.freeaddrinfo(r);
 
     var required_memory: usize = 0;
     var result_count: usize = 0;
     {
-        var it: ?*std.os.addrinfo = result_ptr;
+        var it: ?*std.posix.addrinfo = result_ptr;
         while (it) |result| : (it = result.next) {
             required_memory += AddrInfoMap.requiredSizeToCreateFromAddrinfo(result);
             required_memory += AddrInfoObject.requiredSizeForAllocation();
@@ -403,7 +403,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
 
     const result_values = result_array.getValues();
     {
-        var it: ?*std.os.addrinfo = result_ptr;
+        var it: ?*std.posix.addrinfo = result_ptr;
         var i: usize = 0;
         while (it) |result| : ({
             it = result.next;
@@ -429,16 +429,16 @@ pub fn SocketWithFamily_Type_Protocol_IfFail(context: *PrimitiveContext) !Execut
 
     // FIXME: Check before casting
     // FIXME: SOCK_NONBLOCK and SOCK_CLOEXEC only works on Linux! Make a fallback.
-    var full_socket_type = @as(c_uint, @intCast(socket_type)) | std.os.SOCK.CLOEXEC;
+    var full_socket_type = @as(c_uint, @intCast(socket_type)) | std.posix.SOCK.CLOEXEC;
 
     if (context.vm.isInRegularActor()) {
-        full_socket_type |= std.os.SOCK.NONBLOCK;
+        full_socket_type |= std.posix.SOCK.NONBLOCK;
     }
 
-    const rc = std.os.system.socket(@intCast(family), full_socket_type, @intCast(protocol));
-    const errno = std.os.system.getErrno(rc);
+    const rc = std.posix.system.socket(@intCast(family), full_socket_type, @intCast(protocol));
+    const errno = std.posix.errno(rc);
     if (errno == .SUCCESS) {
-        const fd: std.os.fd_t = @intCast(rc);
+        const fd: std.posix.fd_t = @intCast(rc);
         return makeManagedFD(context, fd, .{});
     }
 
@@ -463,8 +463,8 @@ pub fn BindFD_ToSockaddrBytes_IfFail(context: *PrimitiveContext) !ExecutionResul
     const sockaddr_bytes: []const u8 = sockaddr_object.getValues();
 
     // FIXME: Check before casting
-    const rc = std.os.system.bind(fd.fd, @ptrCast(@alignCast(sockaddr_bytes.ptr)), @intCast(sockaddr_bytes.len));
-    const errno = std.os.system.getErrno(rc);
+    const rc = std.posix.system.bind(fd.fd, @ptrCast(@alignCast(sockaddr_bytes.ptr)), @intCast(sockaddr_bytes.len));
+    const errno = std.posix.errno(rc);
     if (errno == .SUCCESS) {
         return ExecutionResult.resolve(context.vm.nil());
     }
@@ -488,8 +488,8 @@ pub fn ListenOnFD_WithBacklog_IfFail(context: *PrimitiveContext) !ExecutionResul
 
     // FIXME: Check before casting
     const fd = FileDescriptor.fromValue(fd_object.value);
-    const rc = std.os.system.listen(fd.fd, @intCast(backlog));
-    const errno = std.os.system.getErrno(rc);
+    const rc = std.posix.system.listen(fd.fd, @intCast(backlog));
+    const errno = std.posix.errno(rc);
     if (errno == .SUCCESS) {
         return ExecutionResult.resolve(context.vm.nil());
     }
@@ -513,16 +513,16 @@ pub fn AcceptFromFD_IfFail(context: *PrimitiveContext) !ExecutionResult {
 
     const fd = FileDescriptor.fromValue(fd_object.value);
 
-    const rc = std.os.system.accept(fd.fd, null, null);
-    const errno = std.os.system.getErrno(rc);
+    const rc = std.posix.system.accept(fd.fd, null, null);
+    const errno = std.posix.errno(rc);
     return switch (errno) {
         .SUCCESS => {
-            const new_fd_value: std.os.fd_t = @intCast(rc);
-            _ = std.os.fcntl(new_fd_value, std.os.F.SETFD, std.os.FD_CLOEXEC) catch unreachable;
+            const new_fd_value: std.posix.fd_t = @intCast(rc);
+            _ = std.posix.fcntl(new_fd_value, std.posix.F.SETFD, std.posix.FD_CLOEXEC) catch unreachable;
 
             if (context.vm.isInRegularActor()) {
-                const flags: std.os.O = .{ .NONBLOCK = true };
-                _ = std.os.fcntl(new_fd_value, std.os.F.SETFL, @intCast(@as(u32, @bitCast(flags)))) catch unreachable;
+                const flags: std.posix.O = .{ .NONBLOCK = true };
+                _ = std.posix.fcntl(new_fd_value, std.posix.F.SETFL, @intCast(@as(u32, @bitCast(flags)))) catch unreachable;
             }
 
             return makeManagedFD(context, new_fd_value, .{});
