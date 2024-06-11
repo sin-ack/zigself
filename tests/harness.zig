@@ -6,9 +6,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const zigself = @import("zigself");
-const Heap = zigself.Heap;
-const Script = zigself.Script;
-const VirtualMachine = zigself.VirtualMachine;
+const Script = zigself.language.Script;
+const VirtualMachine = zigself.runtime.VirtualMachine;
 
 const Test = struct {
     basename: []const u8,

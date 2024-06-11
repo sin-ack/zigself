@@ -5,10 +5,10 @@
 const std = @import("std");
 const zig_args = @import("zig-args");
 
-const Script = @import("./language/Script.zig");
-const ASTPrinter = @import("./language/ASTPrinter.zig");
-
-const VirtualMachine = @import("./runtime/VirtualMachine.zig");
+const zigself = @import("zigself");
+const Script = zigself.language.Script;
+const ASTPrinter = zigself.language.ASTPrinter;
+const VirtualMachine = zigself.runtime.VirtualMachine;
 
 const ArgumentSpec = struct {
     help: bool = false,

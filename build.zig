@@ -1,27 +1,30 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    // Options
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Modules
     const zigself = b.addModule("zigself", .{
-        .root_source_file = b.path("src/package.zig"),
+        .root_source_file = b.path("src/zigself.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
+    const zig_args = b.dependency("zig-args", .{}).module("args");
 
+    // Steps
     const exe = b.addExecutable(.{
         .name = "self",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    exe.linkLibC();
-    b.installArtifact(exe);
+    exe.root_module.addImport("zigself", zigself);
+    exe.root_module.addImport("zig-args", zig_args);
 
-    const zig_args = b.dependency("zig-args", .{});
-    exe.root_module.addImport("zig-args", zig_args.module("args"));
+    b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
