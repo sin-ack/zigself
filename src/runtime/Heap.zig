@@ -5,9 +5,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
-const ArenaAllocator = std.heap.ArenaAllocator;
 
-const hash = @import("../utility/hash.zig");
 const debug = @import("../debug.zig");
 const Value = @import("./value.zig").Value;
 const Object = @import("./object.zig").Object;
@@ -16,7 +14,6 @@ const Reference = @import("value.zig").Reference;
 const Activation = @import("./Activation.zig");
 const BaseObject = @import("./base_object.zig").BaseObject;
 const VirtualMachine = @import("./VirtualMachine.zig");
-const ActivationStack = Activation.ActivationStack;
 
 const GC_DEBUG = debug.GC_DEBUG;
 const GC_TOKEN_DEBUG = debug.GC_TOKEN_DEBUG;

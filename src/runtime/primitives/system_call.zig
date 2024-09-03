@@ -4,21 +4,16 @@
 
 const std = @import("std");
 
-const Heap = @import("../Heap.zig");
 const Value = value_import.Value;
 const Selector = @import("../Selector.zig");
-const ByteArray = @import("../ByteArray.zig");
 const AddrInfoMap = addrinfo_object.AddrInfoMap;
-const SlotsObject = @import("../objects/slots.zig").Slots;
 const array_object = @import("../objects/array.zig");
 const value_import = @import("../value.zig");
 const RuntimeError = @import("../RuntimeError.zig");
 const ManagedObject = @import("../objects/managed.zig").Managed;
 const AddrInfoObject = addrinfo_object.AddrInfo;
 const FileDescriptor = @import("../objects/managed.zig").FileDescriptor;
-const ByteArrayObject = @import("../objects/byte_array.zig").ByteArray;
 const ExecutionResult = @import("../execution_result.zig").ExecutionResult;
-const value_inspector = @import("../value_inspector.zig");
 const addrinfo_object = @import("../objects/intrinsic/addrinfo.zig");
 const exceedsBoundsOf = @import("../../utility/bounds_check.zig").exceedsBoundsOf;
 

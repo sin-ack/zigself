@@ -7,7 +7,6 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
-const hash = @import("../utility/hash.zig");
 const Heap = @import("./Heap.zig");
 const Actor = @import("./Actor.zig");
 const debug = @import("../debug.zig");
@@ -19,8 +18,6 @@ const ByteArray = @import("./ByteArray.zig");
 const BaseObject = @import("base_object.zig").BaseObject;
 const LookupResult = object_lookup.LookupResult;
 const object_lookup = @import("object_lookup.zig");
-const VirtualMachine = @import("./VirtualMachine.zig");
-const InterpreterContext = @import("./interpreter.zig").InterpreterContext;
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 

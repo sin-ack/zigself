@@ -15,7 +15,6 @@ const primitives = @import("../primitives.zig");
 
 const Block = astcode.Block;
 const Executable = astcode.Executable;
-const Instruction = astcode.Instruction;
 const RegisterLocation = astcode.RegisterLocation;
 
 const AST_EXECUTABLE_DUMP_DEBUG = debug.AST_EXECUTABLE_DUMP_DEBUG;

@@ -3,14 +3,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 
-const hash = @import("../utility/hash.zig");
 const Value = @import("value.zig").Value;
 const Object = @import("object.zig").Object;
 const ActorObject = @import("objects/actor.zig").Actor;
 const MethodObject = @import("objects/method.zig").Method;
-const VirtualMachine = @import("VirtualMachine.zig");
 
 /// The result of a lookup operation.
 pub const LookupResult = union(enum) {

@@ -22,7 +22,6 @@ const SlotsObject = slots.Slots;
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
 const LookupResult = @import("../object_lookup.zig").LookupResult;
-const VirtualMachine = @import("../VirtualMachine.zig");
 const exceedsBoundsOf = @import("../../utility/bounds_check.zig").exceedsBoundsOf;
 const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;
 

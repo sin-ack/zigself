@@ -2,8 +2,6 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
-const std = @import("std");
-
 const Heap = @import("./Heap.zig");
 const value = @import("./value.zig");
 const Value = value.Value;

@@ -2,10 +2,8 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
-const Map = @import("map.zig").Map;
 const Slot = @import("slot.zig").Slot;
 const Value = @import("value.zig").Value;
-const Object = @import("object.zig").Object;
 const MapObject = @import("object.zig").MapObject;
 
 const TraverseObjectGraphLink = struct {

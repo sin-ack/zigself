@@ -16,7 +16,6 @@ const VMByteArray = @import("../ByteArray.zig");
 const value_import = @import("../value.zig");
 const GenericValue = value_import.Value;
 const LookupResult = @import("../object_lookup.zig").LookupResult;
-const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 

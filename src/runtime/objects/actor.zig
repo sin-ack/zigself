@@ -15,9 +15,6 @@ const GenericValue = value_import.Value;
 const PointerValue = value_import.PointerValue;
 const value_import = @import("../value.zig");
 const LookupResult = @import("../object_lookup.zig").LookupResult;
-const VirtualMachine = @import("../VirtualMachine.zig");
-
-const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
 /// An actor object which is the object that the genesis actor interacts with in
 /// Self code.

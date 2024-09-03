@@ -9,7 +9,6 @@ const Slot = @import("slot.zig").Slot;
 const Value = @import("value.zig").Value;
 const AstGen = @import("bytecode/AstGen.zig");
 const context = @import("context.zig");
-const VirtualMachine = @import("VirtualMachine.zig");
 
 pub const AssignableSlotValues = std.BoundedArray(Value, AstGen.MaximumAssignableSlots);
 

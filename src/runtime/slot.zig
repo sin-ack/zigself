@@ -4,9 +4,7 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 
-const AST = @import("../language/ast.zig");
 const Heap = @import("./Heap.zig");
 const hash = @import("../utility/hash.zig");
 const Value = @import("./value.zig").Value;

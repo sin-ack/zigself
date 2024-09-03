@@ -21,7 +21,6 @@ const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
 const LookupResult = @import("../object_lookup.zig").LookupResult;
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
-const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationObject = @import("activation.zig").Activation;
 const SlotsLikeMapBase = slots.SlotsLikeMapBase;
 const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;

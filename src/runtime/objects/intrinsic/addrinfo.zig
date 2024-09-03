@@ -9,7 +9,6 @@ const Heap = @import("../../Heap.zig");
 const Actor = @import("../../Actor.zig");
 const Value = @import("../../value.zig").Value;
 const IntrinsicMap = @import("../../intrinsic_map.zig").IntrinsicMap;
-const VirtualMachine = @import("../../VirtualMachine.zig");
 const ByteArrayObject = @import("../byte_array.zig").ByteArray;
 
 /// The addrinfo object is used by the _GetAddrInfoForHost:... primitive to
