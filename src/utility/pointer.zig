@@ -4,8 +4,6 @@
 
 //! Heap pointer utilities.
 
-const builtin = @import("builtin");
-
 const IsConst = enum { Mutable, Const };
 
 /// Return a heap-aligned pointer.

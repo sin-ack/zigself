@@ -11,7 +11,6 @@ const Value = @import("value.zig").Value;
 const BaseObject = @import("base_object.zig").BaseObject;
 const context = @import("context.zig");
 const traversal = @import("object_traversal.zig");
-const VirtualMachine = @import("VirtualMachine.zig");
 
 const SeenObjectsSet = std.AutoHashMap([*]u64, void);
 const RequiredMemoryCalculator = struct {

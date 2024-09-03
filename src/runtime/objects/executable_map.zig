@@ -6,8 +6,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Map = @import("../map.zig").Map;
-const Value = value_import.Value;
-const Object = @import("../object.zig").Object;
 const MapType = @import("../map.zig").MapType;
 const bytecode = @import("../bytecode.zig");
 const SlotsMap = @import("slots.zig").SlotsMap;

@@ -6,7 +6,5 @@
 //! not contain line and column information; that information should be obtained
 //! when necessary from the script.
 
-const std = @import("std");
-
 start: usize,
 end: usize,

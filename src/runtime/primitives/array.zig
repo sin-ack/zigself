@@ -3,9 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 
-const Heap = @import("../Heap.zig");
 const Value = @import("../value.zig").Value;
 const traversal = @import("../object_traversal.zig");
 const BaseObject = @import("../base_object.zig").BaseObject;

@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 
 const Value = @import("../../value.zig").Value;
 const RegisterLocation = @import("./register_location.zig").RegisterLocation;

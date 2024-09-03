@@ -7,16 +7,13 @@ const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
 const Heap = @import("Heap.zig");
-const hash = @import("../utility/hash.zig");
 const Actor = @import("Actor.zig");
 const value = @import("value.zig");
-const Object = @import("object.zig").Object;
 const pointer = @import("../utility/pointer.zig");
 const Selector = @import("Selector.zig");
 const MapObject = @import("object.zig").MapObject;
 const ObjectType = @import("object.zig").ObjectType;
 const LookupResult = @import("object_lookup.zig").LookupResult;
-const VirtualMachine = @import("VirtualMachine.zig");
 
 /// A shaped object makes it easy to define an object with well-known slots for
 /// use in primitives. The values can currently only be constants. This function

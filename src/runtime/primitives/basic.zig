@@ -3,9 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 
-const Heap = @import("../Heap.zig");
 const Script = @import("../../language/Script.zig");
 const AstGen = @import("../bytecode/AstGen.zig");
 const CodeGen = @import("../bytecode/CodeGen.zig");
@@ -13,7 +11,6 @@ const Selector = @import("../Selector.zig");
 const interpreter = @import("../interpreter.zig");
 const RuntimeError = @import("../RuntimeError.zig");
 const ExecutionResult = @import("../execution_result.zig").ExecutionResult;
-const error_set_utils = @import("../../utility/error_set.zig");
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 const stack_trace = @import("../stack_trace.zig");

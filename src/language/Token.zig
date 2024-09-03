@@ -4,8 +4,6 @@
 
 //! A single token.
 
-const std = @import("std");
-
 tag: Tag,
 location: Location,
 

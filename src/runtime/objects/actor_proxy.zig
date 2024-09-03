@@ -16,7 +16,6 @@ const ActorObject = @import("actor.zig").Actor;
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
 const LookupResult = @import("../object_lookup.zig").LookupResult;
-const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 

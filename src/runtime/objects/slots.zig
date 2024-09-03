@@ -19,7 +19,6 @@ const MapObject = @import("../object.zig").MapObject;
 const BaseObject = @import("../base_object.zig").BaseObject;
 const MapBuilder = @import("../map_builder.zig").MapBuilder;
 const LookupResult = @import("../object_lookup.zig").LookupResult;
-const VirtualMachine = @import("../VirtualMachine.zig");
 
 const SLOTS_LOOKUP_DEBUG = debug.SLOTS_LOOKUP_DEBUG;
 

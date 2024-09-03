@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
-const builtin = @import("builtin");
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
@@ -14,7 +13,6 @@ const bytecode = @import("./bytecode.zig");
 const SourceRange = @import("./SourceRange.zig");
 const IntegerValue = value.IntegerValue;
 const MethodObject = @import("objects/method.zig").Method;
-const VirtualMachine = @import("./VirtualMachine.zig");
 const ActivationObject = @import("objects/activation.zig").Activation;
 
 /// The ID of the activation which is used with ActivationRef in order to check

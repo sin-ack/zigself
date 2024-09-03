@@ -6,10 +6,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("./Heap.zig");
-const Slot = @import("./slot.zig").Slot;
 const Actor = @import("./Actor.zig");
 const Value = @import("./value.zig").Value;
-const Range = @import("../language/Range.zig");
 const Script = @import("../language/Script.zig");
 const AstGen = @import("./bytecode/AstGen.zig");
 const context = @import("context.zig");

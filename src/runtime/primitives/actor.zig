@@ -4,7 +4,6 @@
 
 const std = @import("std");
 
-const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const Value = @import("../value.zig").Value;
 const bless = @import("../object_bless.zig");
@@ -14,7 +13,6 @@ const SourceRange = @import("../SourceRange.zig");
 const stack_trace = @import("../stack_trace.zig");
 const MethodObject = @import("../objects/method.zig").Method;
 const RuntimeError = @import("../RuntimeError.zig");
-const VirtualMachine = @import("../VirtualMachine.zig");
 const ExecutionResult = @import("../execution_result.zig").ExecutionResult;
 const ActorProxyObject = @import("../objects/actor_proxy.zig").ActorProxy;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;

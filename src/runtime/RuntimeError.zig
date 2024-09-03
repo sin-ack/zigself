@@ -11,9 +11,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const context = @import("context.zig");
-const Activation = @import("./Activation.zig");
 const SourceRange = @import("./SourceRange.zig");
-const VirtualMachine = @import("./VirtualMachine.zig");
 
 /// The error message. This can be either Literal (non-owned) or Formatted (owned).
 message: Message,

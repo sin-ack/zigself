@@ -17,7 +17,6 @@ const IntegerValue = value_import.IntegerValue;
 const GenericValue = @import("../value.zig").Value;
 const LookupResult = @import("../object_lookup.zig").LookupResult;
 const value_import = @import("../value.zig");
-const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
