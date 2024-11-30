@@ -40,11 +40,11 @@ const LookupResult = @import("object_lookup.zig").LookupResult;
 ///     }
 pub fn IntrinsicMap(comptime MapT: type, comptime object_type: ObjectType) type {
     const type_info = @typeInfo(MapT);
-    if (type_info != .Struct) {
+    if (type_info != .@"struct") {
         @compileError("A struct must be passed to IntrinsicMap");
     }
 
-    const struct_info = type_info.Struct;
+    const struct_info = type_info.@"struct";
     if (struct_info.layout != .@"extern") {
         @compileError("IntrinsicMap requires an extern struct");
     }

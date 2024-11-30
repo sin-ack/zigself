@@ -31,7 +31,7 @@ pub const Float = extern struct {
     pub const Ptr = pointer.HeapPtr(Float, .Mutable);
 
     const BottomBitCount = 16;
-    const ExtraBits = Object.ExtraBits.reserve(@Type(.{ .Int = .{ .bits = BottomBitCount, .signedness = .unsigned } }));
+    const ExtraBits = Object.ExtraBits.reserve(@Type(.{ .int = .{ .bits = BottomBitCount, .signedness = .unsigned } }));
 
     /// Create a new Float from the given 64-bit float.
     pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, value: f64) Float.Ptr {

@@ -47,6 +47,7 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| {
         test_harness_run_cmd.addArgs(args);
     }
+    test_harness_run_cmd.cwd = b.path(".");
 
     const test_harness_step = b.step("test", "Run zigSelf test harness");
     test_harness_step.dependOn(&test_harness_run_cmd.step);

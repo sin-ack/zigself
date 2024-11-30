@@ -32,7 +32,7 @@ pub const AddrInfoMap = extern struct {
         self.family = Value.fromInteger(addrinfo.family);
         self.socketType = Value.fromInteger(addrinfo.socktype);
         self.protocol = Value.fromInteger(addrinfo.protocol);
-        self.flags = Value.fromInteger(addrinfo.flags);
+        self.flags = Value.fromInteger(@as(u32, @bitCast(addrinfo.flags)));
         self.sockaddrBytes = sockaddr_bytes_object.asValue();
 
         return self;

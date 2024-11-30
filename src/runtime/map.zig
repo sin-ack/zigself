@@ -35,7 +35,7 @@ pub const MapRegistry = union(MapType) {
 
 pub fn MapT(comptime map_type: MapType) type {
     const map_type_name = @tagName(map_type);
-    inline for (@typeInfo(MapRegistry).Union.fields) |field| {
+    inline for (@typeInfo(MapRegistry).@"union".fields) |field| {
         if (std.mem.eql(u8, map_type_name, field.name))
             return field.type;
     }
@@ -148,7 +148,7 @@ pub const Map = extern struct {
 
                 const map_ptr: MapT(t).Ptr = @ptrCast(self);
                 const result_or_error = map_ptr.clone(token);
-                const result = if (@typeInfo(@TypeOf(result_or_error)) == .ErrorUnion) try result_or_error else result_or_error;
+                const result = if (@typeInfo(@TypeOf(result_or_error)) == .error_union) try result_or_error else result_or_error;
                 return @ptrCast(result);
             },
         };

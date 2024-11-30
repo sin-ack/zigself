@@ -93,18 +93,12 @@ fn collectTests(allocator: Allocator, directory: std.fs.Dir) !std.ArrayList(Test
 }
 
 fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
-    const harness_dirname = std.fs.path.dirname(@src().file) orelse ".";
-    const project_root = try std.fs.path.resolve(allocator, &[_][]const u8{ harness_dirname, ".." });
-    defer allocator.free(project_root);
-    const stdlib_entrypoint = try std.fs.path.resolve(allocator, &[_][]const u8{ project_root, "objects", "everything.self" });
-    defer allocator.free(stdlib_entrypoint);
-
     var progress = std.Progress.start(.{
         .root_name = "Run zigSelf tests",
         .estimated_total_items = tests.items.len,
     });
 
-    const stdlib_script = try Script.createFromFilePath(allocator, stdlib_entrypoint);
+    const stdlib_script = try Script.createFromFilePath(allocator, "objects/everything.self");
     defer stdlib_script.unref();
 
     var did_parse_without_errors = try stdlib_script.value.parseScript();
@@ -139,10 +133,9 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
 
         vm.silent_errors = the_test.expects_error;
 
-        const path_to_test = try std.fs.path.resolve(allocator, &[_][]const u8{ harness_dirname, the_test.path });
-        defer allocator.free(path_to_test);
-
-        const script = try Script.createFromFilePath(allocator, path_to_test);
+        const test_path = try std.fs.path.join(allocator, &.{ "tests", the_test.path });
+        defer allocator.free(test_path);
+        const script = try Script.createFromFilePath(allocator, test_path);
         defer script.unref();
 
         did_parse_without_errors = try script.value.parseScript();
@@ -225,15 +218,10 @@ pub fn main() !u8 {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var directory: std.fs.Dir = blk: {
-        const cwd = std.fs.cwd();
-        const source_file = @src().file;
+    var tests_dir = try std.fs.cwd().openDir("tests", .{ .iterate = true });
+    defer tests_dir.close();
 
-        break :blk try cwd.openDir(std.fs.path.dirname(source_file) orelse ".", .{ .iterate = true });
-    };
-    defer directory.close();
-
-    var tests = try collectTests(allocator, directory);
+    var tests = try collectTests(allocator, tests_dir);
     defer {
         for (tests.items) |*the_test| {
             the_test.deinit(allocator);

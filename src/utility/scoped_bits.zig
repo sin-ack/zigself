@@ -49,7 +49,7 @@ pub fn ScopedBits(comptime Source: type) type {
 
 pub fn ScopedBitsOffset(comptime Source: type, comptime offset_bits: comptime_int) type {
     const SourceBackingInt = BackingIntType(Source, "source");
-    return ScopedBitsOffsetLimit(Source, offset_bits, @typeInfo(SourceBackingInt).Int.bits);
+    return ScopedBitsOffsetLimit(Source, offset_bits, @typeInfo(SourceBackingInt).int.bits);
 }
 
 pub fn ScopedBitsOffsetLimit(comptime Source: type, comptime offset_bits: comptime_int, comptime limit_bits: comptime_int) type {
@@ -59,25 +59,25 @@ pub fn ScopedBitsOffsetLimit(comptime Source: type, comptime offset_bits: compti
 fn BackingIntType(comptime T: type, comptime name: []const u8) type {
     const type_info = @typeInfo(T);
     const BackingInt = switch (type_info) {
-        .Int => T,
-        .Struct => |s| blk: {
+        .int => T,
+        .@"struct" => |s| blk: {
             if (s.layout != .@"packed") {
                 @compileError("ScopedBits requires the backing type of the " ++ name ++ " to be packed");
             }
 
             break :blk s.backing_integer.?;
         },
-        .Enum => |e| e.tag_type,
+        .@"enum" => |e| e.tag_type,
         else => @compileError("ScopedBits only works with unsigned integers, packed structs, and enums"),
     };
 
     const backing_type_info = @typeInfo(BackingInt);
 
-    if (backing_type_info != .Int) {
+    if (backing_type_info != .int) {
         @compileError("ScopedBits requires the backing type of the " ++ name ++ " to be an integer");
     }
 
-    if (backing_type_info.Int.signedness == .signed) {
+    if (backing_type_info.int.signedness == .signed) {
         @compileError("ScopedBits requires the backing type of the " ++ name ++ " to be an unsigned integer");
     }
 
@@ -90,7 +90,7 @@ fn ScopedBitsDetail(comptime Source: type, comptime offset_bits: comptime_int, c
 
     const target_backing_type_info = @typeInfo(TargetBackingInt);
 
-    const reserved_bits = target_backing_type_info.Int.bits;
+    const reserved_bits = target_backing_type_info.int.bits;
     const remaining_bits = limit_bits - offset_bits - reserved_bits;
 
     return struct {
@@ -101,7 +101,7 @@ fn ScopedBitsDetail(comptime Source: type, comptime offset_bits: comptime_int, c
             const NewBackingInt = BackingIntType(NewTarget, "target");
 
             const new_backing_type_info = @typeInfo(NewBackingInt);
-            const new_bits = new_backing_type_info.Int.bits;
+            const new_bits = new_backing_type_info.int.bits;
 
             if (new_bits > remaining_bits) {
                 @compileError(std.fmt.comptimePrint("ScopedBits could not reserve {} bits for {} ({} bits remaining)", .{ new_bits, @typeName(NewTarget), remaining_bits }));
@@ -112,18 +112,18 @@ fn ScopedBitsDetail(comptime Source: type, comptime offset_bits: comptime_int, c
 
         fn castToBackingType(comptime T: type, comptime BackingT: type, value: T) BackingT {
             return switch (@typeInfo(T)) {
-                .Int => @intCast(value),
-                .Struct => @bitCast(value),
-                .Enum => @intFromEnum(value),
+                .int => @intCast(value),
+                .@"struct" => @bitCast(value),
+                .@"enum" => @intFromEnum(value),
                 else => unreachable,
             };
         }
 
         fn castFromBackingType(comptime T: type, comptime BackingT: type, value: BackingT) T {
             return switch (@typeInfo(T)) {
-                .Int => @intCast(value),
-                .Struct => @bitCast(value),
-                .Enum => @enumFromInt(value),
+                .int => @intCast(value),
+                .@"struct" => @bitCast(value),
+                .@"enum" => @enumFromInt(value),
                 else => unreachable,
             };
         }

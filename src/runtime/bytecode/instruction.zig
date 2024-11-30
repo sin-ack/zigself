@@ -116,7 +116,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
 
             pub fn PayloadT(comptime opcode: Opcode) type {
                 const opcode_field = opcode.payloadField();
-                inline for (@typeInfo(Payload).Union.fields) |field| {
+                inline for (@typeInfo(Payload).@"union".fields) |field| {
                     if (std.mem.eql(u8, opcode_field, field.name))
                         return field.type;
                 }

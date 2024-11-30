@@ -52,7 +52,7 @@ pub const ObjectRegistry = union(ObjectType) {
 
 pub fn ObjectT(comptime object_type: ObjectType) type {
     const object_type_name = @tagName(object_type);
-    inline for (@typeInfo(ObjectRegistry).Union.fields) |field| {
+    inline for (@typeInfo(ObjectRegistry).@"union".fields) |field| {
         if (std.mem.eql(u8, object_type_name, field.name))
             return field.type;
     }
@@ -62,14 +62,14 @@ pub fn ObjectT(comptime object_type: ObjectType) type {
 
 // Comptime object checks
 comptime {
-    for (@typeInfo(ObjectRegistry).Union.fields) |field| {
+    for (@typeInfo(ObjectRegistry).@"union".fields) |field| {
         // Ensure that all objects contain the BaseObject type as their first
         // word, either directly or via another parent object.
-        var object_first_field = @typeInfo(field.type).Struct.fields[0].type;
-        while (@typeInfo(object_first_field) == .Struct) {
+        var object_first_field = @typeInfo(field.type).@"struct".fields[0].type;
+        while (@typeInfo(object_first_field) == .@"struct") {
             if (object_first_field == BaseObject)
                 break;
-            object_first_field = @typeInfo(object_first_field).Struct.fields[0].type;
+            object_first_field = @typeInfo(object_first_field).@"struct".fields[0].type;
         } else {
             @compileError("!!! Object " ++ @typeName(field.type) ++ " does not contain an object header!");
         }
@@ -195,7 +195,7 @@ pub const Object = extern struct {
 
                 const self_ptr: ObjectT(t).Ptr = @ptrCast(self);
                 const result_or_error = self_ptr.clone(token, actor_id);
-                const result = if (@typeInfo(@TypeOf(result_or_error)) == .ErrorUnion) try result_or_error else result_or_error;
+                const result = if (@typeInfo(@TypeOf(result_or_error)) == .error_union) try result_or_error else result_or_error;
                 return @ptrCast(result);
             },
         };

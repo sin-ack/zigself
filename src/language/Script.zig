@@ -26,6 +26,8 @@ parser: *Parser,
 
 pub fn createFromFilePath(allocator: Allocator, file_path: []const u8) !Ref {
     const self = try allocator.create(Script);
+    errdefer allocator.destroy(self);
+
     try self.initFromFilePath(allocator, file_path);
     return Ref.adopt(self);
 }

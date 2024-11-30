@@ -258,7 +258,7 @@ pub const Activation = extern struct {
     }
 
     fn DispatchReturn(comptime fn_name: []const u8) type {
-        return @typeInfo(@TypeOf(@field(MethodMap, fn_name))).Fn.return_type.?;
+        return @typeInfo(@TypeOf(@field(MethodMap, fn_name))).@"fn".return_type.?;
     }
 
     fn dispatch(self: Activation.Ptr, comptime fn_name: []const u8) DispatchReturn(fn_name) {

@@ -313,15 +313,17 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     const family = try arguments.getInteger(2, .Signed);
     const socket_type = try arguments.getInteger(3, .Signed);
     const protocol = try arguments.getInteger(4, .Signed);
-    const flags = try arguments.getInteger(5, .Signed);
+    const flags_arg = try arguments.getInteger(5, .Signed);
     const failure_block = arguments.getValue(6);
 
     // FIXME: Do not directly intCast here
+    var flags: std.posix.AI = @bitCast(@as(u32, @intCast(flags_arg)));
+    flags.NUMERICSERV = true;
     const hints = std.posix.addrinfo{
         .family = @intCast(family),
         .socktype = @intCast(socket_type),
         .protocol = @intCast(protocol),
-        .flags = std.c.AI.NUMERICSERV | @as(i32, @intCast(flags)),
+        .flags = flags,
 
         .addrlen = 0,
         .addr = null,

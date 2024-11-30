@@ -14,12 +14,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2.1.1
+        uses: mlugg/setup-zig@v1
         with:
-          version: 0.13.0
+          version: 0.14.0-dev.2340+182cdf74b
 
       - name: Enable all debug flags
         run: scripts/enable-all-debug-flags.sh

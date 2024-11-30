@@ -71,7 +71,7 @@ range: Range = .{ .start = 0, .end = 0 },
 id: ActorID,
 
 const Actor = @This();
-const Mailbox = std.TailQueue(Message);
+const Mailbox = std.DoublyLinkedList(Message);
 
 // Sentinel values for the stacks
 pub const ValueSentinel: Value = @bitCast(@as(u64, 0xCCCCCCCCCCCCCCCC));
