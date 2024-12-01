@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const tracy = @import("tracy");
 
 const Value = @import("../value.zig").Value;
 const ByteArray = @import("../ByteArray.zig");
@@ -13,6 +14,9 @@ const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
 /// Return the size of the byte vector in bytes.
 pub fn ByteArraySize(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_ByteArraySize");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
     return ExecutionResult.resolve(Value.fromInteger(@intCast(receiver.getValues().len)));
@@ -22,6 +26,9 @@ pub fn ByteArraySize(context: *PrimitiveContext) !ExecutionResult {
 /// byte vector. Fails if the index is out of bounds or if the receiver is not a
 /// byte vector.
 pub fn ByteAt(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_ByteAt:");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
     const position = try arguments.getInteger(0, .Unsigned);
@@ -43,6 +50,9 @@ pub fn ByteAt(context: *PrimitiveContext) !ExecutionResult {
 /// byte vector receiver. Fails if the index is out of bounds or if the receiver
 /// is not a byte vector.
 pub fn ByteAt_Put(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_ByteAt:Put:");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
     const position = try arguments.getInteger(0, .Unsigned);
@@ -73,6 +83,9 @@ pub fn ByteAt_Put(context: *PrimitiveContext) !ExecutionResult {
 /// Copy the byte vector receiver with a new size. Extra space is filled
 /// with the second argument (must be a byte array of length 1).
 pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_ByteArrayCopySize:FillingExtrasWith:");
     var receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
     const size = try arguments.getInteger(0, .Unsigned);
@@ -115,6 +128,9 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
 /// Note that the argument not being a byte array is not an error
 /// and this primitive simply returns false in that case.
 pub fn ByteArrayEq(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_ByteArrayEq:");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
     const argument = arguments.getValue(0);
@@ -131,6 +147,9 @@ pub fn ByteArrayEq(context: *PrimitiveContext) !ExecutionResult {
 }
 
 pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_ByteArrayConcatenate:");
     var receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
     var argument = try arguments.getObject(0, .ByteArray);

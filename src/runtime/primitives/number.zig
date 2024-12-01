@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const tracy = @import("tracy");
 const Allocator = std.mem.Allocator;
 
 const Value = @import("../value.zig").Value;
@@ -26,6 +27,9 @@ fn integerOpCommon(
 
 /// Add two integer numbers. The returned value is an integer.
 pub fn IntAdd(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return try integerOpCommon("IntAdd", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             const result, const overflow = @addWithOverflow(receiver, term);
@@ -42,6 +46,9 @@ pub fn IntAdd(context: *PrimitiveContext) !ExecutionResult {
 
 /// Subtract the argument from the receiver. The returned value is an integer.
 pub fn IntSub(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return try integerOpCommon("IntSub", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             const result, const overflow = @subWithOverflow(receiver, term);
@@ -58,6 +65,9 @@ pub fn IntSub(context: *PrimitiveContext) !ExecutionResult {
 
 /// Multiply the argument with the receiver. The returned value is an integer.
 pub fn IntMul(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return try integerOpCommon("IntMul", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             const result, const overflow = @mulWithOverflow(receiver, term);
@@ -75,6 +85,9 @@ pub fn IntMul(context: *PrimitiveContext) !ExecutionResult {
 /// Perform integer division on the receiver with the argument. Fraction is
 /// discarded. The returned value is an integer.
 pub fn IntDiv(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return try integerOpCommon("IntDiv", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             if (term == 0)
@@ -90,6 +103,9 @@ pub fn IntDiv(context: *PrimitiveContext) !ExecutionResult {
 /// Perform modulo on the receiver with the argument. The returned value is an
 /// integer.
 pub fn IntMod(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return try integerOpCommon("IntMod", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             if (term == 0)
@@ -105,6 +121,9 @@ pub fn IntMod(context: *PrimitiveContext) !ExecutionResult {
 /// Perform a left shift on the receiver with the argument. The returned value
 /// is an integer.
 pub fn IntShl(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return try integerOpCommon("IntShl", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             if (term < 0 or term > Value.DataBits)
@@ -122,6 +141,9 @@ pub fn IntShl(context: *PrimitiveContext) !ExecutionResult {
 /// Perform a right shift on the receiver with the argument. The returned value
 /// is an integer.
 pub fn IntShr(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return try integerOpCommon("IntShr", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             if (term < 0 or term > Value.DataBits)
@@ -141,6 +163,9 @@ pub fn IntShr(context: *PrimitiveContext) !ExecutionResult {
 /// Perform a bitwise XOR on the receiver with the argument. The returned value
 /// is an integer.
 pub fn IntXor(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return try integerOpCommon("IntXor", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             _ = ctx;
@@ -152,6 +177,9 @@ pub fn IntXor(context: *PrimitiveContext) !ExecutionResult {
 /// Perform a bitwise AND on the receiver with the argument. The returned value
 /// is an integer.
 pub fn IntAnd(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return try integerOpCommon("IntAnd", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             _ = ctx;
@@ -163,6 +191,9 @@ pub fn IntAnd(context: *PrimitiveContext) !ExecutionResult {
 /// Perform a bitwise OR on the receiver with the argument. The returned value
 /// is an integer.
 pub fn IntOr(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return try integerOpCommon("IntOr", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             _ = ctx;
@@ -174,6 +205,9 @@ pub fn IntOr(context: *PrimitiveContext) !ExecutionResult {
 /// Return whether the receiver is less than its argument. The return value is
 /// either "true" or "false".
 pub fn IntLT(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return try integerOpCommon("IntLT", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             return ExecutionResult.resolve(
@@ -189,6 +223,9 @@ pub fn IntLT(context: *PrimitiveContext) !ExecutionResult {
 /// Return whether the receiver is greater than its argument. The return value
 /// is either "true" or "false".
 pub fn IntGT(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return try integerOpCommon("IntGT", context, struct {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             return ExecutionResult.resolve(
@@ -205,6 +242,9 @@ pub fn IntGT(context: *PrimitiveContext) !ExecutionResult {
 /// either "true" or "false". Note that passing a non-integer term is not an
 /// error and simply returns false.
 pub fn IntEq(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_IntEq:");
     const receiver = try arguments.getInteger(PrimitiveContext.Receiver, .Signed);
     const term = arguments.getValue(0);

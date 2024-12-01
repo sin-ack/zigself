@@ -4,6 +4,7 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
+const tracy = @import("tracy");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("./Heap.zig");

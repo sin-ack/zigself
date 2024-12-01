@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const tracy = @import("tracy");
 const Allocator = std.mem.Allocator;
 
 const AST = @import("./ast.zig");
@@ -282,6 +283,9 @@ fn tokenStartAt(self: Parser, index: TokenIndex) usize {
 
 // <Script> ::= <MethodSlotList>? <StatementList>? <Whitespace>
 pub fn parseScript(self: *Parser) ParseError!?AST.ScriptNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const slots = try self.parseSlotList(.Method);
     errdefer {
         for (slots) |*slot| {
@@ -311,6 +315,9 @@ pub fn parseScript(self: *Parser) ParseError!?AST.ScriptNode {
 // <BlockStatementList> ::= (<Expression> ("." <Expression>)*)? "^"? <Expression> "."?
 const StatementListNonlocalReturns = enum { AllowNonlocalReturns, DisallowNonlocalReturns };
 fn parseStatementList(self: *Parser, nonlocal_returns: StatementListNonlocalReturns, closing_token: Token.Tag) ParseError!AST.StatementList.Ref {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var statements = std.ArrayList(AST.ExpressionNode).init(self.allocator);
     defer {
         for (statements.items) |*expression| {
@@ -388,6 +395,9 @@ fn parseStatementList(self: *Parser, nonlocal_returns: StatementListNonlocalRetu
 // <BlockSlotList> ::= "|" "|" | "|" <BlockSlot> ("." <BlockSlot>)* (".")? "|"
 const SlotType = enum { Slots, Method, Block };
 fn parseSlotList(self: *Parser, slot_type: SlotType) ParseError![]AST.SlotNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = self.tryConsume(.Pipe) orelse return &.{};
     // Empty slot list.
     if (self.tryConsume(.Pipe)) |_| return &.{};
@@ -426,6 +436,9 @@ fn parseSlotList(self: *Parser, slot_type: SlotType) ParseError![]AST.SlotNode {
 // <BlockSlot> ::= <CommonSlot> | ":" <NonPrimitiveIdentifier>
 // <MethodSlot> ::= <CommonSlot>
 fn parseSlot(self: *Parser, slot_type: SlotType) ParseError!?AST.SlotNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const start = self.tokenStartAt(self.token_index);
 
     return switch (slot_type) {
@@ -523,6 +536,9 @@ fn parseSlot(self: *Parser, slot_type: SlotType) ParseError!?AST.SlotNode {
 //                | <NonPrimitiveIdentifier>
 //                | <MethodSlotName> "=" <Method>
 fn parseSlotCommon(self: *Parser) ParseError!?AST.SlotNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const start = self.tokenStartAt(self.token_index);
 
     const current = self.peek();
@@ -578,6 +594,9 @@ fn parseSlotCommon(self: *Parser) ParseError!?AST.SlotNode {
 // <MethodSlotName> ::= <FirstKeywordName> <NonPrimitiveIdentifier> (<RestKeywordName> <NonPrimitiveIdentifier>)*
 //                    | <BinaryOp>+ <NonPrimitiveIdentifier>
 fn parseMethodSlotName(self: *Parser, argument_names: *std.ArrayList([]const u8)) ParseError!?[]const u8 {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var slot_name = std.ArrayList(u8).init(self.allocator);
     defer slot_name.deinit();
 
@@ -617,6 +636,9 @@ fn parseMethodSlotName(self: *Parser, argument_names: *std.ArrayList([]const u8)
 }
 
 fn parseSlotCommonIdentifier(self: *Parser, identifier_index: TokenIndex) ParseError!?AST.SlotNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const start = self.tokenStartAt(identifier_index);
 
     // Constant slot. Can be either a method or an expression.
@@ -676,6 +698,9 @@ fn parseSlotCommonIdentifier(self: *Parser, identifier_index: TokenIndex) ParseE
 // <MethodOrExpression> ::= <NonParenthesizedExpression> | <SendToParenthesizedExpression> | <Method>
 // <SendToParenthesizedExpression> ::= "(" <Expression> ")" <MessageSend>
 fn parseMethodOrExpression(self: *Parser) ParseError!?AST.ExpressionNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (self.peek() != .ParenOpen) {
         // Simple case: just a (non-parenthesized) expression.
         return self.parseExpression(.WithoutParenExpr);
@@ -744,6 +769,9 @@ fn parseMethodOrExpression(self: *Parser) ParseError!?AST.ExpressionNode {
 // <Method> ::= "(" <MethodSlotList>? <StatementList>? ")"
 const MethodParentSlotPermissiveness = enum { AllowParentSlots, DisallowParentSlots };
 fn parseMethod(self: *Parser, argument_names: []const []const u8, permissiveness: MethodParentSlotPermissiveness) ParseError!?*AST.ObjectNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const start = self.tokenStartAt(self.consume());
 
     var slots = try std.ArrayList(AST.SlotNode).initCapacity(self.allocator, argument_names.len);
@@ -807,6 +835,9 @@ fn parseMethod(self: *Parser, argument_names: []const []const u8, permissiveness
 // <Expression> ::= <KeywordExpression> (";" <MessageSend>)*
 // <NonParenthesizedExpression> ::= <NonParenthesizedKeywordExpression> (";" <MessageSend>)*
 fn parseExpression(self: *Parser, mode: PrimaryMode) ParseError!?AST.ExpressionNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var expression = (try self.parseKeywordExpression(mode)) orelse return null;
     // NOTE: `maybeParseMessageSend` will free `expression` if it fails.
 
@@ -819,6 +850,9 @@ fn parseExpression(self: *Parser, mode: PrimaryMode) ParseError!?AST.ExpressionN
 // <KeywordExpression> ::= (<KeywordSend> | <BinarySend> <KeywordSend>? | <Primary> <MessageSend>?)
 // <NonParenthesizedKeywordExpression> ::= (<KeywordSend> | <BinarySend> <KeywordSend>? | <PrimaryNoParenExpr> <MessageSend>?)
 fn parseKeywordExpression(self: *Parser, mode: PrimaryMode) ParseError!?AST.ExpressionNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const current_tag = self.peek();
     return if (current_tag == .FirstKeyword)
         (try self.parseKeywordSend(null)) orelse return null
@@ -849,6 +883,9 @@ fn parseKeywordExpression(self: *Parser, mode: PrimaryMode) ParseError!?AST.Expr
 /// Takes ownership of `receiver` and will free it on parse error.
 // <MessageSend> ::= <KeywordSend> | <BinarySend> <KeywordSend>? | <UnarySend>+ <BinarySend>? <KeywordSend>?
 fn maybeParseMessageSend(self: *Parser, receiver: AST.ExpressionNode) ParseError!?AST.ExpressionNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const current_tag = self.peek();
     if (current_tag == .FirstKeyword) {
         return (try self.parseKeywordSend(receiver)) orelse null;
@@ -895,6 +932,9 @@ fn maybeParseMessageSend(self: *Parser, receiver: AST.ExpressionNode) ParseError
 
 // <KeywordSend> ::= <FirstKeywordName> <KeywordExpression> (<RestKeywordName> <KeywordExpression>)*
 fn parseKeywordSend(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     self.assertToken(.FirstKeyword);
     const first_keyword = self.consume();
     const start = self.tokenStartAt(first_keyword);
@@ -951,6 +991,9 @@ fn parseKeywordSend(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AS
 // FIXME: Binary sends are currently right-associative, but they should be left-associative,
 //        because it's more intuitive. i.e. `a + b + c` should be parsed as `(a + b) + c`.
 fn parseBinarySend(self: *Parser, receiver: ?AST.ExpressionNode, previous_operator: ?[]const u8) ParseError!?AST.ExpressionNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const start = self.tokenStartAt(self.token_index);
     std.debug.assert(self.peek().isOperator());
 
@@ -1004,6 +1047,9 @@ fn parseBinarySend(self: *Parser, receiver: ?AST.ExpressionNode, previous_operat
 
 // <BinaryExpression> ::= <Primary> <UnaryMessage>* <BinaryMessage>?
 fn parseBinaryExpression(self: *Parser, previous_operator: []const u8) ParseError!?AST.ExpressionNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var primary = (try self.parsePrimary(.WithParenExpr)) orelse return null;
     errdefer primary.deinit(self.allocator);
 
@@ -1021,6 +1067,9 @@ fn parseBinaryExpression(self: *Parser, previous_operator: []const u8) ParseErro
 
 // <UnarySend> ::= <Identifier>
 fn parseUnarySend(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const start = self.tokenStartAt(self.token_index);
     self.assertToken(.Identifier);
 
@@ -1047,6 +1096,9 @@ fn parseUnarySend(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AST.
 // <Primary> ::= <PrimaryNoParenExpr> | "(" <Expression> ")"
 const PrimaryMode = enum { WithParenExpr, WithoutParenExpr };
 fn parsePrimary(self: *Parser, mode: PrimaryMode) ParseError!?AST.ExpressionNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const current_tag = self.peek();
     const start = self.tokenStartAt(self.token_index);
 
@@ -1100,6 +1152,9 @@ fn parsePrimary(self: *Parser, mode: PrimaryMode) ParseError!?AST.ExpressionNode
 // <HexDigit> ::= [0-9] | [a-f] | [A-F]
 const IntegerParseState = enum { Start, Zero, Decimal, Hexadecimal, Octal, Binary };
 fn parseInteger(self: *Parser) ParseError!AST.NumberNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     self.assertToken(.Integer);
     const start_of_number = self.tokenStartAt(self.consume());
 
@@ -1293,6 +1348,9 @@ fn parseInteger(self: *Parser) ParseError!AST.NumberNode {
 // <FloatingPoint> ::= <DecimalInteger> "." <DecimalInteger>
 const FloatingPointParseState = enum { Integer, Fraction };
 fn parseFloatingPoint(self: *Parser) ParseError!AST.NumberNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     self.assertToken(.FloatingPoint);
     const start_of_number = self.tokenStartAt(self.consume());
 
@@ -1341,6 +1399,9 @@ fn parseFloatingPoint(self: *Parser) ParseError!AST.NumberNode {
 
 // <SlotsObject> ::= "(" <Whitespace> <SlotsSlotList>? <Whitespace> ")"
 fn parseSlotsObject(self: *Parser) ParseError!?*AST.ObjectNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     self.assertToken(.ParenOpen);
     const start = self.tokenStartAt(self.consume());
 
@@ -1368,6 +1429,9 @@ fn parseSlotsObject(self: *Parser) ParseError!?*AST.ObjectNode {
 
 // <Block> ::= "[" <Whitespace> <BlockSlotList>? <Whitespace> <BlockStatementList>? <Whitespace> "]"
 fn parseBlock(self: *Parser) ParseError!?*AST.BlockNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     self.assertToken(.BracketOpen);
     const start = self.tokenStartAt(self.consume());
 
@@ -1394,6 +1458,9 @@ fn parseBlock(self: *Parser) ParseError!?*AST.BlockNode {
 // <NonPrimitiveIdentifier> ::= [a-z] ([a-z] | [A-Z] | [0-9])*
 // <Identifier> ::= <NonPrimitiveIdentifier> | ("_" ([a-z] | [A-Z] | [0-9])+)
 fn parseIdentifier(self: *Parser) ParseError!AST.IdentifierNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     self.assertToken(.Identifier);
     const start = self.tokenStartAt(self.token_index);
 
@@ -1408,6 +1475,9 @@ fn parseIdentifier(self: *Parser) ParseError!AST.IdentifierNode {
 
 const StringParseState = enum { Start, Literal, Backslash };
 fn parseString(self: *Parser) ParseError!?AST.StringNode {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     self.assertToken(.String);
     const start_of_string = self.tokenStartAt(self.token_index);
     _ = self.consume();

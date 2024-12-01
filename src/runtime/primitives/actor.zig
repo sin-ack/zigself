@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const tracy = @import("tracy");
 
 const Actor = @import("../Actor.zig");
 const Value = @import("../value.zig").Value;
@@ -72,6 +73,9 @@ fn findActorMethod(
 
 /// Create a new actor which then becomes the genesis actor.
 pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (context.vm.isInActorMode()) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
@@ -146,6 +150,9 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
 /// in a regular actor, then additionally create an ActorProxy object and write
 /// it to the result location of the primitive.
 pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (!context.vm.isInActorMode()) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
@@ -349,6 +356,9 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 /// the activation once the spawn activation is complete (in order to prime it
 /// for its resuming).
 pub fn ActorSetEntrypoint(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (!context.vm.isInActorMode()) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
@@ -365,6 +375,9 @@ pub fn ActorSetEntrypoint(context: *PrimitiveContext) !ExecutionResult {
 
 /// Resume the activation from where it last left off.
 pub fn ActorResume(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (!context.vm.isInGenesisActor()) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
@@ -407,6 +420,9 @@ pub fn ActorResume(context: *PrimitiveContext) !ExecutionResult {
 
 /// Return the reason this actor has yielded.
 pub fn ActorYieldReason(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (!context.vm.isInGenesisActor()) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
@@ -439,6 +455,9 @@ pub fn ActorYield(context: *PrimitiveContext) !ExecutionResult {
 /// Return the current actor's sender. Raise a runtime error if the actor
 /// doesn't have a sender (isn't in a message).
 pub fn ActorSender(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (!context.vm.isInRegularActor()) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
@@ -469,6 +488,9 @@ pub fn ActorSender(context: *PrimitiveContext) !ExecutionResult {
 /// Return the managed file descriptor object that the actor is blocked on.
 /// If the actor's yield reason isn't Blocked, then raise a runtime error.
 pub fn ActorBlockedFD(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     if (!context.vm.isInGenesisActor()) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,

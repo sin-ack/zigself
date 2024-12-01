@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const tracy = @import("tracy");
 const Allocator = std.mem.Allocator;
 
 const SlotsObject = @import("../objects/slots.zig").Slots;
@@ -14,6 +15,9 @@ const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 /// Adds the slots in the argument object to the receiver object. The slots
 /// are copied. The objects at each slot are not cloned, however.
 pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_AddSlots:");
     var receiver = try arguments.getObject(PrimitiveContext.Receiver, .Slots);
     var argument = try arguments.getObject(0, .Slots);
@@ -86,6 +90,9 @@ pub fn RemoveSlot_IfFail(context: *PrimitiveContext) !ExecutionResult {
 
 /// Inspect the receiver and print it to stderr. Return the receiver.
 pub fn Inspect(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const receiver = context.receiver.getValue();
     try value_inspector.inspectValue(.Multiline, context.vm, receiver);
     return ExecutionResult.resolve(receiver);
@@ -93,6 +100,9 @@ pub fn Inspect(context: *PrimitiveContext) !ExecutionResult {
 
 /// Make an identical shallow copy of the receiver and return it.
 pub fn Clone(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     var receiver = context.receiver.getValue();
 
     const required_memory = if (receiver.asObject()) |object|
@@ -111,6 +121,9 @@ pub fn Clone(context: *PrimitiveContext) !ExecutionResult {
 /// Return whether the receiver and argument are identical. Returns either
 /// the global "true" or "false" object.
 pub fn Eq(context: *PrimitiveContext) error{}!ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return ExecutionResult.resolve(
         if (context.receiver.getValue().data == context.arguments[0].data)
             context.vm.getTrue()

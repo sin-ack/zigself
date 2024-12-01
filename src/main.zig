@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const zig_args = @import("zig-args");
+const tracy = @import("tracy");
 
 const zigself = @import("zigself");
 const Script = zigself.language.Script;
@@ -19,8 +20,6 @@ const ArgumentSpec = struct {
         .A = "dump-ast",
     };
 };
-
-const Allocator = std.heap.GeneralPurposeAllocator(.{});
 
 const usage_text =
     \\Usage: self [--help] <path>
@@ -40,10 +39,14 @@ fn printUsage() !void {
     _ = try stderr.write(usage_text);
 }
 
+const GPA = std.heap.GeneralPurposeAllocator(.{});
+
 pub fn main() !u8 {
-    var general_purpose_allocator = Allocator{};
-    defer _ = general_purpose_allocator.deinit();
-    const allocator = general_purpose_allocator.allocator();
+    var gpa = GPA{};
+    defer _ = gpa.deinit();
+
+    var tracy_allocator = if (tracy.enable_allocation) tracy.tracyAllocator(gpa.allocator()) else {};
+    const allocator = if (tracy.enable_allocation) tracy_allocator.allocator() else gpa.allocator();
 
     const arguments = zig_args.parseForCurrentProcess(ArgumentSpec, allocator, .print) catch {
         try printUsage();

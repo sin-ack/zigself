@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const tracy = @import("tracy");
 
 const Value = @import("../value.zig").Value;
 const traversal = @import("../object_traversal.zig");
@@ -19,6 +20,9 @@ const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 /// As a special case, if the first argument is 0, then a new empty array is
 /// created without looking at the receiver.
 pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_ArrayCopySize:FillingExtrasWith:");
     const size = try arguments.getInteger(0, .Unsigned);
     if (try context.wouldOverflow(usize, size, "size")) |result| return result;
@@ -43,6 +47,9 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
 
 /// Return the size of the receiver array.
 pub fn ArraySize(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_ArraySize");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
     return ExecutionResult.resolve(Value.fromUnsignedInteger(@intCast(receiver.getSize())));
@@ -51,6 +58,9 @@ pub fn ArraySize(context: *PrimitiveContext) !ExecutionResult {
 /// Return the value at the given position of the receiver array. If the given
 /// position is out of bounds, an error is raised.
 pub fn ArrayAt(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_ArrayAt:");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
     const position = try arguments.getInteger(0, .Unsigned);
@@ -74,6 +84,9 @@ pub fn ArrayAt(context: *PrimitiveContext) !ExecutionResult {
 /// argument. If the given position is out of bounds, an error is raised.
 /// Returns the receiver.
 pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_ArrayAt:Put:");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .Array);
     const position = try arguments.getInteger(0, .Unsigned);

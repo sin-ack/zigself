@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const tracy = @import("tracy");
 const Allocator = std.mem.Allocator;
 
 const Heap = @import("./Heap.zig");
@@ -177,9 +178,13 @@ pub fn makeSpecializedExecutor(comptime opcode: bytecode.Instruction.Opcode) Exe
                 std.debug.print("[#{} {s}] Executing: {} = {}\n", .{ context.actor.id, context.getDefinitionExecutable().value.definition_script.value.file_path, inst.target, inst });
             }
 
-            context.actor.range = context.getCurrentBytecodeBlock().getSourceRange(context.getInstructionIndex());
-            const result = try @call(.always_inline, opcodeHandler(opcode), .{context});
             const new_instruction_index = new_instruction_index: {
+                const tracy_ctx = tracy.traceNamed(@src(), "Interpreter.execute<" ++ @tagName(opcode) ++ ">");
+                defer tracy_ctx.end();
+
+                context.actor.range = context.getCurrentBytecodeBlock().getSourceRange(context.getInstructionIndex());
+                const result = try @call(.always_inline, opcodeHandler(opcode), .{context});
+
                 switch (result) {
                     .Normal => {
                         break :new_instruction_index context.getCurrentActivation().advanceInstruction();

@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const tracy = @import("tracy");
 const Allocator = std.mem.Allocator;
 
 const debug = @import("../debug.zig");
@@ -752,6 +753,12 @@ const Space = struct {
         if (self.freeMemory() >= required_memory) return;
 
         if (GC_DEBUG) std.debug.print("Space.collectGarbage: Attempting to garbage collect in {s}\n", .{self.name});
+
+        const gc_zone_name = if (tracy.enable) try std.fmt.allocPrint(allocator, "Garbage Collection in {s}", .{self.name}) else {};
+        defer if (tracy.enable) allocator.free(gc_zone_name);
+        const gc_zone = tracy.trace(@src());
+        if (tracy.enable) gc_zone.setName(gc_zone_name);
+        defer gc_zone.end();
 
         // See if we can perform a scavenge first.
         if (self.scavenge_target) |scavenge_target| {

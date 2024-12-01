@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const tracy = @import("tracy");
 
 const Value = value_import.Value;
 const Selector = @import("../Selector.zig");
@@ -44,16 +45,25 @@ fn makeManagedFD(context: *PrimitiveContext, native_fd: std.posix.fd_t, flags: F
 }
 
 pub fn ManagedStdin(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return makeManagedFD(context, std.posix.STDIN_FILENO, .{ .close_during_finalization = false });
 }
 
 pub fn ManagedStdout(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return makeManagedFD(context, std.posix.STDOUT_FILENO, .{ .close_during_finalization = false });
 }
 
 /// Open the path with the given flags and return a file descriptor.
 /// On failure, call the given block with the errno as the argument.
 pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_Open:WithFlags:IfFail:");
     const file_path = try arguments.getObject(0, .ByteArray);
     const flags = try arguments.getInteger(1, .Unsigned);
@@ -78,6 +88,9 @@ pub fn Open_WithFlags_IfFail(context: *PrimitiveContext) !ExecutionResult {
 /// amount of bytes, raises an error. On success, returns the amount of bytes
 /// read. On failure, call the given block with the errno as the argument.
 pub fn Read_BytesInto_AtOffset_From_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_Read:BytesInto:AtOffset:From:IfFail:");
     const bytes_to_read = try arguments.getInteger(0, .Unsigned);
     const byte_array = try arguments.getObject(1, .ByteArray);
@@ -140,6 +153,9 @@ pub fn Read_BytesInto_AtOffset_From_IfFail(context: *PrimitiveContext) !Executio
 /// amount of bytes, raises an error. On success, returns the amount of bytes
 /// written. On failure, call the given block with the errno as the argument.
 pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_Write:BytesFrom:AtOffset:Into:IfFail:");
     const bytes_to_write = try arguments.getInteger(0, .Unsigned);
     const byte_array = try arguments.getObject(1, .ByteArray);
@@ -190,6 +206,9 @@ pub fn Write_BytesFrom_AtOffset_Into_IfFail(context: *PrimitiveContext) !Executi
 /// Closes a file descriptor.
 /// If the file descriptor was already closed, this primitive does nothing.
 pub fn Close(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_Close:");
     const fd_object = try arguments.getObject(0, .Managed);
 
@@ -210,6 +229,9 @@ pub fn Close(context: *PrimitiveContext) !ExecutionResult {
 
 /// Exit with the given return code.
 pub fn Exit(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_Exit:");
     const status_code = try arguments.getInteger(0, .Unsigned);
 
@@ -226,6 +248,9 @@ const MaximumInlinePollFDs = 32;
 /// `WaitingForMS' milliseconds. If an error is encountered with the system
 /// call, send `value:' to `IfFail' with the errno.
 pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_PollFDs:Events:WaitingForMS:IfFail:");
     const fds = try arguments.getObject(0, .Array);
     const events = try arguments.getObject(1, .Array);
@@ -306,6 +331,9 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
 /// Perform the getaddrinfo system call and return an array of getaddrinfo
 /// objects.
 pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const primitive_name = "_GetAddrInfoForHost:Port:Family:SocketType:Protocol:Flags:IfFail:";
     const arguments = context.getArguments(primitive_name);
     const host = arguments.getValue(0);
@@ -418,6 +446,9 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
 
 /// Create a new socket with the given family, type and protocol.
 pub fn SocketWithFamily_Type_Protocol_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_SocketWithFamily:Type:Protocol:IfFail:");
     const family = try arguments.getInteger(0, .Unsigned);
     const socket_type = try arguments.getInteger(1, .Unsigned);
@@ -444,6 +475,9 @@ pub fn SocketWithFamily_Type_Protocol_IfFail(context: *PrimitiveContext) !Execut
 
 /// Bind the given fd to the address defined in the given sockaddr structure.
 pub fn BindFD_ToSockaddrBytes_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_BindFD:ToSockaddrBytes:IfFail:");
     const fd_object = try arguments.getObject(0, .Managed);
     const sockaddr_object = try arguments.getObject(1, .ByteArray);
@@ -471,6 +505,9 @@ pub fn BindFD_ToSockaddrBytes_IfFail(context: *PrimitiveContext) !ExecutionResul
 
 /// Set the given fd as a passive socket with the given backlog.
 pub fn ListenOnFD_WithBacklog_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_ListenOnFD:WithBacklog:IfFail:");
     const fd_object = try arguments.getObject(0, .Managed);
     const backlog = try arguments.getInteger(1, .Signed);
@@ -496,6 +533,9 @@ pub fn ListenOnFD_WithBacklog_IfFail(context: *PrimitiveContext) !ExecutionResul
 
 /// Accept a connection from the given fd, returning the new fd.
 pub fn AcceptFromFD_IfFail(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     // TODO: Return the struct sockaddr with the connection details
     const arguments = context.getArguments("_AcceptFromFD:IfFail:");
     const fd_object = try arguments.getObject(0, .Managed);

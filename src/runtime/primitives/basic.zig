@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const tracy = @import("tracy");
 
 const Script = @import("../../language/Script.zig");
 const AstGen = @import("../bytecode/AstGen.zig");
@@ -17,6 +18,9 @@ const stack_trace = @import("../stack_trace.zig");
 
 /// Return the static "nil" slots object.
 pub fn Nil(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     return ExecutionResult.resolve(context.vm.nil());
 }
 
@@ -34,6 +38,9 @@ fn getRelativePathToScript(context: *PrimitiveContext, path: []const u8) ![]cons
 
 /// Run the given script file, and return the result of the last expression.
 pub fn RunScript(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_RunScript:");
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
 
@@ -84,6 +91,9 @@ pub fn RunScript(context: *PrimitiveContext) !ExecutionResult {
 }
 
 pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     // FIXME: _EvaluateStringIfFail: should be replaced with _EvaluateString and
     //       fail the current actor the same way _RunScript does. The REPL
     //       should create a new actor for each string evaluation.
@@ -174,6 +184,9 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
 
 /// Raise the argument as an error. The argument must be a byte vector.
 pub fn Error(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     const arguments = context.getArguments("_Error:");
     const message = try arguments.getObject(0, .ByteArray);
 
@@ -187,6 +200,9 @@ pub fn Error(context: *PrimitiveContext) !ExecutionResult {
 /// Restarts the current method, executing it from the first statement.
 /// This primitive is intended to be used internally only.
 pub fn Restart(context: *PrimitiveContext) !ExecutionResult {
+    const tracy_zone = tracy.trace(@src());
+    defer tracy_zone.end();
+
     _ = context;
     return ExecutionResult.restart();
 }
