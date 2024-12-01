@@ -83,10 +83,11 @@ pub const AllocationToken = struct {
         }
 
         self.bytes_left -= bytes;
-        if (GC_TOKEN_ALLOCATION_DEBUG) std.debug.print("AllocationToken.allocate: {}/{} bytes allocated (requested {})\n", .{ self.total_bytes - self.bytes_left, self.total_bytes, bytes });
         // NOTE: The only error this can raise is allocation failure during lazy allocation
         //       which eden does not do.
-        return self.heap.eden.allocateInSegment(self.heap.allocator, segment, bytes) catch unreachable;
+        const address = self.heap.eden.allocateInSegment(self.heap.allocator, segment, bytes) catch unreachable;
+        if (GC_TOKEN_ALLOCATION_DEBUG) std.debug.print("AllocationToken.allocate: {}/{} bytes allocated at {*} (requested {})\n", .{ self.total_bytes - self.bytes_left, self.total_bytes, address, bytes });
+        return address;
     }
 
     pub fn deinit(self: @This()) void {
