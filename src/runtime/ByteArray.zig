@@ -60,10 +60,10 @@ pub fn requiredSizeForAllocation(length: usize) usize {
     return @sizeOf(Header) + required_words * @sizeOf(u64);
 }
 
-pub const Header = packed struct {
+pub const Header = extern struct {
     /// The length of the bytevector object, including the size of the
     /// header.
-    length: IntegerValue(.Unsigned),
+    length: IntegerValue(.Unsigned) align(@alignOf(u64)),
 
     pub const Ptr = pointer.HeapPtr(Header, .Mutable);
 

@@ -239,9 +239,9 @@ pub const ActivationStack = struct {
 
 /// A reference to an activation. The pointer and saved ID values are stored as
 /// Values, which makes this struct object heap-safe.
-pub const ActivationRef = packed struct {
-    offset: IntegerValue(.Unsigned),
-    saved_id: IntegerValue(.Unsigned),
+pub const ActivationRef = extern struct {
+    offset: IntegerValue(.Unsigned) align(@alignOf(u64)),
+    saved_id: IntegerValue(.Unsigned) align(@alignOf(u64)),
 
     pub fn init(activation: *Activation, stack: ActivationStack) ActivationRef {
         return .{

@@ -260,8 +260,8 @@ pub fn PointerValue(comptime T: type) type {
 pub fn PointerValueAlignment(comptime T: type, comptime alignment: ?u29) type {
     const PointerT = if (alignment) |a| *align(a) T else *T;
 
-    return packed struct {
-        value: Value,
+    return extern struct {
+        value: Value align(@alignOf(u64)),
 
         const Self = @This();
 
@@ -281,8 +281,8 @@ pub fn RefCountedValue(comptime T: type) type {
     const RefT = RefPtr(T);
     const PointerT = PointerValue(T);
 
-    return packed struct {
-        value: PointerT,
+    return extern struct {
+        value: PointerT align(@alignOf(u64)),
 
         const Self = @This();
 
@@ -323,8 +323,8 @@ pub fn IntegerValue(comptime signedness: IntegerValueSignedness) type {
         .Unsigned => Value.asUnsignedInteger,
     };
 
-    return packed struct {
-        value: Value,
+    return extern struct {
+        value: Value align(@alignOf(u64)),
 
         const Self = @This();
 
@@ -348,8 +348,8 @@ pub fn IntegerValue(comptime signedness: IntegerValueSignedness) type {
 /// object when something else is stored is a runtime panic in debug, and
 /// undefined behavior in release mode.
 pub fn ObjectValue(comptime ObjectT: type) type {
-    return packed struct {
-        value: Value,
+    return extern struct {
+        value: Value align(@alignOf(u64)),
 
         const Self = @This();
 

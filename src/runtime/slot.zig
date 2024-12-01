@@ -14,12 +14,12 @@ const map_builder = @import("map_builder.zig");
 const pointer = @import("../utility/pointer.zig");
 
 /// The properties of a slot. This is shared by both ProtoSlot and Slot.
-const SlotProperties = packed struct {
+const SlotProperties = extern struct {
     /// The properties and hash of the slot, as a 62-bit integer.
     ///
     /// The top 32 bits are the slot hash, while the bottom 30 bits are the
     /// various properties of the slot.
-    properties: Value,
+    properties: Value align(@alignOf(u64)),
 
     const ParentShift = 0;
     const AssignableShift = 1;
@@ -93,10 +93,10 @@ const SlotProperties = packed struct {
 /// A slot as it exists on the heap. The slot caries various properties, as well
 /// as the hash of the slot name it holds and the value that is currently on
 /// this slot.
-pub const Slot = packed struct {
+pub const Slot = extern struct {
     /// The slot name.
-    name: Value,
-    properties: SlotProperties,
+    name: Value align(@alignOf(u64)),
+    properties: SlotProperties align(@alignOf(u64)),
     /// The value stored in this slot.
     ///
     /// For assignable slots, this will be the assignable slot index at which the
@@ -106,7 +106,7 @@ pub const Slot = packed struct {
     /// activation object that is created with the map containing this slot will
     /// have the slot at the given index (block and method objects will not
     /// contain the argument slots).
-    value: Value,
+    value: Value align(@alignOf(u64)),
 
     pub const ConstSlice = pointer.HeapSlice(Slot, .Const);
     pub const Slice = pointer.HeapSlice(Slot, .Mutable);
