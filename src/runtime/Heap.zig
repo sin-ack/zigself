@@ -312,7 +312,7 @@ pub fn rememberObjectReference(self: *Heap, referrer: Value, target: Value) !voi
         break :blk true;
     };
     if (!referrer_space_is_newer) {
-        if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Referrer in same or older space than target, not creating a reference.\n", .{});
+        if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Referrer in same or newer space than target, not creating a reference.\n", .{});
         return;
     }
 
@@ -802,6 +802,9 @@ const Space = struct {
     }
 
     fn objectSegmentContains(self: *Space, address: [*]u64) bool {
+        if (self.lazy_allocate)
+            return false;
+
         const start_of_object_segment = @intFromPtr(self.object_segment.ptr);
         const end_of_object_segment = @intFromPtr(self.object_segment.ptr + self.object_segment.len);
         const address_value = @intFromPtr(address);
@@ -810,6 +813,9 @@ const Space = struct {
     }
 
     fn byteArraySegmentContains(self: *Space, address: [*]u64) bool {
+        if (self.lazy_allocate)
+            return false;
+
         const start_of_byte_array_segment = @intFromPtr(self.byte_array_segment.ptr);
         const end_of_byte_array_segment = @intFromPtr(self.byte_array_segment.ptr + self.byte_array_segment.len);
         const address_value = @intFromPtr(address);
@@ -865,6 +871,7 @@ const Space = struct {
     /// this space.
     /// Adds the given address to the finalization set of this space.
     pub fn addToFinalizationSet(self: *Space, allocator: Allocator, address: [*]u64) !void {
+        std.debug.assert(!self.lazy_allocate);
         try self.finalization_set.put(allocator, address, {});
     }
 
@@ -885,6 +892,7 @@ const Space = struct {
 
     /// Adds the given address into the remembered set of this space.
     pub fn addToRememberedSet(self: *Space, allocator: Allocator, address: [*]u64, size: usize) !void {
+        std.debug.assert(!self.lazy_allocate);
         try self.remembered_set.put(allocator, address, size);
     }
 
