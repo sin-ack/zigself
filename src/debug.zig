@@ -6,6 +6,8 @@ pub const LOOKUP_DEBUG = false;
 pub const SLOTS_LOOKUP_DEBUG = false;
 /// Debugging of garbage collections.
 pub const GC_DEBUG = false;
+/// Extra debug messages that are very spammy.
+pub const GC_SPAMMY_DEBUG = false;
 /// Debugging of allocation token requests.
 pub const GC_TOKEN_DEBUG = false;
 /// Debugging of every single allocation using an AllocationToken.

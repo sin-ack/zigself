@@ -16,6 +16,7 @@ const BaseObject = @import("./base_object.zig").BaseObject;
 const VirtualMachine = @import("./VirtualMachine.zig");
 
 const GC_DEBUG = debug.GC_DEBUG;
+const GC_SPAMMY_DEBUG = debug.GC_SPAMMY_DEBUG;
 const GC_TOKEN_DEBUG = debug.GC_TOKEN_DEBUG;
 const GC_TOKEN_ALLOCATION_DEBUG = debug.GC_TOKEN_ALLOCATION_DEBUG;
 const GC_TRACK_SOURCE_DEBUG = debug.GC_TRACK_SOURCE_DEBUG;
@@ -483,6 +484,7 @@ const Space = struct {
         // what the address is *pointing to*, rather than what the address *is*,
         // unlike in the non-forwarding case.
         if (Reference.tryFromForwarding(address)) |forwarding_reference| {
+            if (GC_SPAMMY_DEBUG) std.debug.print("Space.copyObjectTo: Found forwarding reference {*}\n", .{forwarding_reference.getAddress()});
             return forwarding_reference.getAddress();
         }
 
@@ -573,7 +575,9 @@ const Space = struct {
 
             pub fn visit(ctx: @This(), value: *Value) !void {
                 if (value.asReference()) |reference| {
+                    if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon: Visiting reference {*} ({*})\n", .{ reference.getAddress(), value });
                     if (try ctx.self.copyAddress(ctx.allocator, reference.getAddress(), ctx.target_space, false)) |new_address| {
+                        if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon:   -> copied to {*}\n", .{new_address});
                         value.* = Value.fromObjectAddress(new_address);
                     }
                 }
@@ -583,6 +587,7 @@ const Space = struct {
 
         {
             var remembered_set_iterator = self.remembered_set.iterator();
+            if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon: Scanning remembered set ({} items)\n", .{self.remembered_set.count()});
             // Go through the remembered set, and copy any referenced objects.
             // Transfer the remembered set objects to the new space if it has a
             // remembered set of its own. (TODO old space shouldn't have one)
@@ -594,7 +599,9 @@ const Space = struct {
                 for (object_slice) |*word| {
                     const value: Value = @bitCast(word.*);
                     if (value.asReference()) |reference| {
+                        if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon: Scanning remembered set reference {*} ({*})\n", .{ reference.getAddress(), word });
                         if (try self.copyAddress(allocator, reference.getAddress(), target_space, false)) |new_address| {
+                            if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon:   -> copied to {*}\n", .{new_address});
                             word.* = @bitCast(Value.fromObjectAddress(new_address));
                         }
                     }
@@ -620,7 +627,9 @@ const Space = struct {
             for (newer_generation_space.object_segment) |*word| {
                 const value: Value = @bitCast(word.*);
                 if (value.asReference()) |reference| {
+                    if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon: Scanning newer generation reference {*} ({*})\n", .{ reference.getAddress(), word });
                     if (try self.copyAddress(allocator, reference.getAddress(), target_space, false)) |new_address| {
+                        if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon:   -> copied to {*}\n", .{new_address});
                         word.* = @bitCast(Value.fromObjectAddress(new_address));
                     }
                 }
@@ -642,12 +651,10 @@ const Space = struct {
             const value: Value = @bitCast(word_ptr.*);
 
             if (value.asReference()) |reference| {
-                const address = reference.getAddress();
-
-                if (self.objectSegmentContains(address)) {
-                    word_ptr.* = @bitCast(Value.fromObjectAddress(try self.copyObjectTo(allocator, address, target_space)));
-                } else if (self.byteArraySegmentContains(address)) {
-                    word_ptr.* = @bitCast(Value.fromObjectAddress(copyByteArrayTo(allocator, address, target_space)));
+                if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon: Scanning copied reference {*} ({*})\n", .{ reference.getAddress(), word_ptr });
+                if (try self.copyAddress(allocator, reference.getAddress(), target_space, false)) |new_address| {
+                    if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon:   -> copied to {*}\n", .{new_address});
+                    word_ptr.* = @bitCast(Value.fromObjectAddress(new_address));
                 }
             }
         }
