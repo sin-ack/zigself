@@ -1,7 +1,7 @@
 // Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
 //
 // Contains code from the ZLS project.
-// Copyright (c) 2020-2024, Auguste Rame and Alexandros Naskos
+// Copyright (c) 2024, ZLS contributors
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
