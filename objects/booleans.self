@@ -15,6 +15,9 @@ SPDX-License-Identifier: GPL-3.0-only
             ifTrue: tb           = (ifTrue: tb False: []).
             ifFalse: fb          = (ifTrue: [] False: fb).
             ifFalse: fb True: tb = (ifTrue: tb False: fb).
+
+            assert = (ifFalse: [ _Error: 'Assertion failed' ]).
+            assert: msg = (ifFalse: [ _Error: 'Assertion failed: ', msg ]).
         |).
 
         t: 0 _IntLT: 1.
