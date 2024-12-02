@@ -36,7 +36,7 @@ std traits _AddSlots: (|
         ).
         remove: index IfAbsent: blk = (
             [| p = private |
-                (p isWithinBounds: index) ifFalse: blk.
+                (p isWithinBounds: index) ifFalse: [^ blk value].
                 p removeIndex: index.
             ] value.
             self
