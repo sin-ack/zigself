@@ -69,11 +69,19 @@ std traits string _AddSlots: (|
         newString
     ).
 
-    "Split the current string with the given delimiter, and put the results in the
-     given implicitKeyInsertable collection. If a collection is not given, a std
-     vector copy is used by default."
+    "Split the current string with the given delimiter, and put the results in a
+     std vector."
     splitBy: substring = (splitBy: substring CollectingInto: std vector copyRemoveAll).
-    splitBy: substring CollectingInto: collection = (| indices. index. previous |
+    "Split the current string with the given delimiter, and put the results in
+     the given collection."
+    splitBy: substring CollectingInto: collection = (
+        splitBy: substring Do: [| :substring | collection add: substring ].
+        collection
+    ).
+    "Split the current string with the given delimiter, and for each substring
+     call the given block with the substring as an argument. Return the original
+     string."
+    splitBy: substring Do: blk = (| indices. index. previous |
         indices: std vector copyRemoveAll.
         index: 0.
 
@@ -94,17 +102,17 @@ std traits string _AddSlots: (|
         indices add: size.
 
         "The first substring must be appended outside because we do not want to add the substring length."
-        collection add: (copyFrom: 0 Until: (indices at: 0)).
+        blk value: (copyFrom: 0 Until: (indices at: 0)).
 
         "Find and append all the rest of the substrings."
         previous: indices at: 0.
         1 to: indices size Do: [| :i. current |
             current: indices at: i.
-            collection add: (copyFrom: (previous + substring size) Until: current).
+            blk value: (copyFrom: (previous + substring size) Until: current).
             previous: current.
         ].
 
-        collection
+        self
     ).
 
     "Find the given substring, starting from the given index. Call presentBlock
