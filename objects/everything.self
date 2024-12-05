@@ -26,6 +26,9 @@ _AddSlots: (| nil = _Nil. lobby = self |).
 'hashSet.self' _RunScript.
 'hashMap.self' _RunScript.
 
+"Miscellaneous utilities for collections."
+'sortKey.self' _RunScript.
+
 "Collector for easy collecting."
 'collector.self' _RunScript.
 
