@@ -694,8 +694,10 @@ const Space = struct {
                 const object_size = entry.value_ptr.*;
 
                 if (self.objectSegmentContains(object_address)) {
+                    if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon: Updating remembered set entry {*} ({} bytes)\n", .{ object_address, object_size });
 
                     if (Reference.tryFromForwarding(object_address)) |forwarding_reference| {
+                        if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon:   -> forwarding reference, updating to {*}\n", .{forwarding_reference.getAddress()});
                         // Yes, the object's been copied. Replace the entry in
                         // the remembered set.
                         const new_address = forwarding_reference.getAddress();
@@ -704,6 +706,7 @@ const Space = struct {
                         // during a GC. :^)
                         try newer_generation_space.addToRememberedSet(allocator, new_address, object_size);
                     } else {
+                        if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon:   -> object didn't survive the scavenge, removing\n", .{});
                         // No, the object didn't survive the scavenge.
                         newer_generation_space.removeFromRememberedSet(object_address) catch unreachable;
                     }
