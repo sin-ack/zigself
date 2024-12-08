@@ -694,12 +694,11 @@ const Space = struct {
                 const object_size = entry.value_ptr.*;
 
                 if (self.objectSegmentContains(object_address)) {
-                    const object_reference = Value.fromObjectAddress(object_address).asReference().?;
 
-                    if (object_reference.isForwarding()) {
+                    if (Reference.tryFromForwarding(object_address)) |forwarding_reference| {
                         // Yes, the object's been copied. Replace the entry in
                         // the remembered set.
-                        const new_address = object_reference.getAddress();
+                        const new_address = forwarding_reference.getAddress();
                         newer_generation_space.removeFromRememberedSet(object_address) catch unreachable;
                         // Hopefully the object size has not changed somehow
                         // during a GC. :^)
