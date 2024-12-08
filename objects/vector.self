@@ -85,6 +85,7 @@ std traits _AddSlots: (|
             self
         ).
 
+        copyFrom: start = (copyFrom: start To: size).
         copyFrom: start To: end = (| new |
             new: copyRemoveAll.
             start to: end Do: [| :i | new add: at: i ].
