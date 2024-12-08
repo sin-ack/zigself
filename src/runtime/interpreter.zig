@@ -175,7 +175,13 @@ pub fn makeSpecializedExecutor(comptime opcode: bytecode.Instruction.Opcode) Exe
                     .payload = block.getPayload(index),
                     .source_range = block.getSourceRange(index),
                 };
-                std.debug.print("[#{} {s}] Executing: {} = {}\n", .{ context.actor.id, context.getDefinitionExecutable().value.definition_script.value.file_path, inst.target, inst });
+                std.debug.print("[#{} {s} {s}] Executing: {} = {}\n", .{
+                    context.actor.id,
+                    context.getDefinitionExecutable().value.definition_script.value.file_path,
+                    context.getCurrentActivation().creator_message.asByteArray().?.getValues(),
+                    inst.target,
+                    inst,
+                });
             }
 
             const new_instruction_index = new_instruction_index: {
