@@ -337,6 +337,7 @@ fn generateSlotsAndCodeCommon(
     const last_expression_location = try self.generateStatementList(executable, child_block, statements);
     try child_block.addInstruction(executable.allocator, .Return, .Nil, .{ .value_location = last_expression_location }, source_range);
 
+    child_block.seal();
     return child_block_index;
 }
 

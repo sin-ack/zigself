@@ -38,154 +38,155 @@ fn lowerBlock(allocator: Allocator, executable: *bytecode.lowcode.Executable, as
 
     const push_registers_inst_offset = try low_block.reserveInstruction(allocator);
 
-    for (ast_block.instructions.items, 0..) |inst, i| {
-        try lowerInstruction(allocator, low_block, &liveness, &register_pool, inst);
-        register_pool.expireOldIntervals(i);
+    for (0..ast_block.getLength()) |index| {
+        try lowerInstruction(allocator, ast_block, index, low_block, &liveness, &register_pool);
+        register_pool.expireOldIntervals(index);
     }
 
     // TODO: better source location
-    low_block.setInstruction(push_registers_inst_offset, .PushRegisters, .zero, register_pool.clobbered_registers, ast_block.instructions.items[0].source_range);
+    low_block.setInstruction(push_registers_inst_offset, .PushRegisters, .zero, register_pool.clobbered_registers, ast_block.getSourceRange(push_registers_inst_offset));
     low_block.seal();
 }
 
 fn lowerInstruction(
     allocator: Allocator,
-    block: *bytecode.lowcode.Block,
+    ast_block: *bytecode.astcode.Block,
+    index: usize,
+    low_block: *bytecode.lowcode.Block,
     liveness: *Liveness,
     register_pool: *RegisterPool,
-    inst: bytecode.astcode.Instruction,
 ) !void {
-    switch (inst.opcode) {
+    switch (ast_block.getOpcode(index)) {
         .Send => {
-            const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-            const payload = inst.payload.Send;
+            const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
+            const payload = ast_block.getTypedPayload(index, .Send);
 
-            try block.addInstruction(allocator, .Send, target, .{
+            try low_block.addInstruction(allocator, .Send, target, .{
                 .receiver_location = register_pool.getAllocatedRegisterFor(payload.receiver_location),
                 .selector = payload.selector,
                 .send_index = payload.send_index,
-            }, inst.source_range);
+            }, ast_block.getSourceRange(index));
         },
         .PrimSend => {
-            const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-            const payload = inst.payload.PrimSend;
+            const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
+            const payload = ast_block.getTypedPayload(index, .PrimSend);
 
-            try block.addInstruction(allocator, .PrimSend, target, .{
+            try low_block.addInstruction(allocator, .PrimSend, target, .{
                 .receiver_location = register_pool.getAllocatedRegisterFor(payload.receiver_location),
                 .index = payload.index,
-            }, inst.source_range);
+            }, ast_block.getSourceRange(index));
         },
         .SelfSend => {
-            const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-            const payload = inst.payload.SelfSend;
+            const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
+            const payload = ast_block.getTypedPayload(index, .SelfSend);
 
-            try block.addInstruction(allocator, .SelfSend, target, .{
+            try low_block.addInstruction(allocator, .SelfSend, target, .{
                 .selector = payload.selector,
                 .send_index = payload.send_index,
-            }, inst.source_range);
+            }, ast_block.getSourceRange(index));
         },
         .SelfPrimSend => {
-            const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-            const payload = inst.payload.SelfPrimSend;
+            const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
+            const payload = ast_block.getTypedPayload(index, .SelfPrimSend);
 
-            try block.addInstruction(allocator, .SelfPrimSend, target, .{ .index = payload.index }, inst.source_range);
+            try low_block.addInstruction(allocator, .SelfPrimSend, target, .{ .index = payload.index }, ast_block.getSourceRange(index));
         },
         .PushConstantSlot => {
-            const payload = inst.payload.PushParentableSlot;
+            const payload = ast_block.getTypedPayload(index, .PushConstantSlot);
             const name_location = register_pool.getAllocatedRegisterFor(payload.name_location);
             const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
 
-            try block.addInstruction(allocator, .PushConstantSlot, .zero, .{
+            try low_block.addInstruction(allocator, .PushConstantSlot, .zero, .{
                 .name_location = name_location,
                 .value_location = value_location,
                 .is_parent = payload.is_parent,
-            }, inst.source_range);
+            }, ast_block.getSourceRange(index));
         },
         .PushAssignableSlot => {
-            const payload = inst.payload.PushParentableSlot;
+            const payload = ast_block.getTypedPayload(index, .PushAssignableSlot);
             const name_location = register_pool.getAllocatedRegisterFor(payload.name_location);
             const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
 
-            try block.addInstruction(allocator, .PushAssignableSlot, .zero, .{
+            try low_block.addInstruction(allocator, .PushAssignableSlot, .zero, .{
                 .name_location = name_location,
                 .value_location = value_location,
                 .is_parent = payload.is_parent,
-            }, inst.source_range);
+            }, ast_block.getSourceRange(index));
         },
         .PushArgumentSlot => {
-            const payload = inst.payload.PushNonParentSlot;
+            const payload = ast_block.getTypedPayload(index, .PushArgumentSlot);
             const name_location = register_pool.getAllocatedRegisterFor(payload.name_location);
             const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
 
-            try block.addInstruction(allocator, .PushArgumentSlot, .zero, .{
+            try low_block.addInstruction(allocator, .PushArgumentSlot, .zero, .{
                 .name_location = name_location,
                 .value_location = value_location,
-            }, inst.source_range);
+            }, ast_block.getSourceRange(index));
         },
         .CreateInteger => {
-            const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-            try block.addInstruction(allocator, .CreateInteger, target, inst.payload.CreateInteger, inst.source_range);
+            const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
+            try low_block.addInstruction(allocator, .CreateInteger, target, ast_block.getTypedPayload(index, .CreateInteger), ast_block.getSourceRange(index));
         },
         .CreateFloatingPoint => {
-            const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-            try block.addInstruction(allocator, .CreateFloatingPoint, target, inst.payload.CreateFloatingPoint, inst.source_range);
+            const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
+            try low_block.addInstruction(allocator, .CreateFloatingPoint, target, ast_block.getTypedPayload(index, .CreateFloatingPoint), ast_block.getSourceRange(index));
         },
         .CreateByteArray => {
-            const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-            try block.addInstruction(allocator, .CreateByteArray, target, inst.payload.CreateByteArray, inst.source_range);
+            const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
+            try low_block.addInstruction(allocator, .CreateByteArray, target, ast_block.getTypedPayload(index, .CreateByteArray), ast_block.getSourceRange(index));
         },
         .CreateObject => {
-            const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
-            try block.addInstruction(allocator, .CreateObject, target, .{
-                .slot_count = inst.payload.CreateObject.slot_count,
-            }, inst.source_range);
+            const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
+            try low_block.addInstruction(allocator, .CreateObject, target, .{
+                .slot_count = ast_block.getTypedPayload(index, .CreateObject).slot_count,
+            }, ast_block.getSourceRange(index));
         },
         .CreateMethod => {
-            const payload = inst.payload.CreateMethod;
+            const payload = ast_block.getTypedPayload(index, .CreateMethod);
             const method_name_location = register_pool.getAllocatedRegisterFor(payload.method_name_location);
-            const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
+            const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
 
-            try block.addInstruction(allocator, .CreateMethod, target, .{
+            try low_block.addInstruction(allocator, .CreateMethod, target, .{
                 .method_name_location = method_name_location,
                 .slot_count = payload.slot_count,
                 .block_index = payload.block_index,
-            }, inst.source_range);
+            }, ast_block.getSourceRange(index));
         },
         .CreateBlock => {
-            const payload = inst.payload.CreateBlock;
-            const target = try register_pool.allocateRegister(allocator, block, liveness, inst.target);
+            const payload = ast_block.getTypedPayload(index, .CreateBlock);
+            const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
 
-            try block.addInstruction(allocator, .CreateBlock, target, .{
+            try low_block.addInstruction(allocator, .CreateBlock, target, .{
                 .slot_count = payload.slot_count,
                 .block_index = payload.block_index,
-            }, inst.source_range);
+            }, ast_block.getSourceRange(index));
         },
         .SetMethodInline => {
-            try block.addInstruction(allocator, .SetMethodInline, .zero, {}, inst.source_range);
+            try low_block.addInstruction(allocator, .SetMethodInline, .zero, {}, ast_block.getSourceRange(index));
         },
         .Return => {
-            const value_location = register_pool.getAllocatedRegisterFor(inst.payload.Return.value_location);
-            try block.addInstruction(allocator, .Return, .zero, .{ .value_location = value_location }, inst.source_range);
+            const value_location = register_pool.getAllocatedRegisterFor(ast_block.getTypedPayload(index, .Return).value_location);
+            try low_block.addInstruction(allocator, .Return, .zero, .{ .value_location = value_location }, ast_block.getSourceRange(index));
         },
         .NonlocalReturn => {
-            const value_location = register_pool.getAllocatedRegisterFor(inst.payload.Return.value_location);
-            try block.addInstruction(allocator, .NonlocalReturn, .zero, .{ .value_location = value_location }, inst.source_range);
+            const value_location = register_pool.getAllocatedRegisterFor(ast_block.getTypedPayload(index, .NonlocalReturn).value_location);
+            try low_block.addInstruction(allocator, .NonlocalReturn, .zero, .{ .value_location = value_location }, ast_block.getSourceRange(index));
         },
         .PushArg => {
-            const argument_location = register_pool.getAllocatedRegisterFor(inst.payload.PushArg.argument_location);
-            try block.addInstruction(allocator, .PushArg, .zero, .{ .argument_location = argument_location }, inst.source_range);
+            const argument_location = register_pool.getAllocatedRegisterFor(ast_block.getTypedPayload(index, .PushArg).argument_location);
+            try low_block.addInstruction(allocator, .PushArg, .zero, .{ .argument_location = argument_location }, ast_block.getSourceRange(index));
         },
         .PushArgumentSentinel => {
-            try block.addInstruction(allocator, .PushArgumentSentinel, .zero, {}, inst.source_range);
+            try low_block.addInstruction(allocator, .PushArgumentSentinel, .zero, {}, ast_block.getSourceRange(index));
         },
         .PushSlotSentinel => {
-            try block.addInstruction(allocator, .PushSlotSentinel, .zero, {}, inst.source_range);
+            try low_block.addInstruction(allocator, .PushSlotSentinel, .zero, {}, ast_block.getSourceRange(index));
         },
         .VerifyArgumentSentinel => {
-            try block.addInstruction(allocator, .VerifyArgumentSentinel, .zero, {}, inst.source_range);
+            try low_block.addInstruction(allocator, .VerifyArgumentSentinel, .zero, {}, ast_block.getSourceRange(index));
         },
         .VerifySlotSentinel => {
-            try block.addInstruction(allocator, .VerifySlotSentinel, .zero, {}, inst.source_range);
+            try low_block.addInstruction(allocator, .VerifySlotSentinel, .zero, {}, ast_block.getSourceRange(index));
         },
         .PushRegisters => unreachable,
     }

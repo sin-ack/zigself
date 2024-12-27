@@ -1,8 +1,6 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
-
-// FIXME: Move this to astcode/.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -22,8 +20,8 @@ pub fn analyzeBlock(allocator: Allocator, block: *astcode.Block) !Liveness {
     errdefer self.deinit(allocator);
 
     // FIXME: This is O(n^2).
-    for (block.instructions.items, 0..) |inst, start| {
-        try self.addIntervalForRegister(allocator, inst.target, start, block);
+    for (0..block.getLength()) |index| {
+        try self.addIntervalForRegister(allocator, block.getTargetLocation(index), index, block);
     }
 
     return self;
@@ -38,40 +36,49 @@ fn addIntervalForRegister(self: *Liveness, allocator: Allocator, location: astco
 
     var end = start;
 
-    for (block.instructions.items[start + 1 ..], 0..) |inst, i| {
-        if (instructionReferencesRegister(inst, location) and start + i > 0) {
+    for (start + 1..block.getLength(), 0..) |index, offset| {
+        if (instructionReferencesRegister(block, index, location) and start + offset > 0) {
             // The register died with this instruction, so it was last alive on the instruction before it.
-            end = start + i - 1;
+            end = start + offset - 1;
         }
     }
 
     try self.intervals.append(allocator, .{ .start = @intCast(start), .end = @intCast(end) });
 }
 
-fn instructionReferencesRegister(inst: astcode.Instruction, location: astcode.RegisterLocation) bool {
-    return switch (inst.opcode) {
+fn instructionReferencesRegister(block: *astcode.Block, index: usize, location: astcode.RegisterLocation) bool {
+    return switch (block.getOpcode(index)) {
         .Send => blk: {
-            break :blk inst.payload.Send.receiver_location == location;
+            const payload = block.getTypedPayload(index, .Send);
+            break :blk payload.receiver_location == location;
         },
         .PrimSend => blk: {
-            break :blk inst.payload.PrimSend.receiver_location == location;
+            const payload = block.getTypedPayload(index, .PrimSend);
+            break :blk payload.receiver_location == location;
         },
-        .PushConstantSlot, .PushAssignableSlot => blk: {
-            const payload = inst.payload.PushParentableSlot;
+        .PushConstantSlot => blk: {
+            const payload = block.getTypedPayload(index, .PushConstantSlot);
+            break :blk payload.name_location == location or payload.value_location == location;
+        },
+        .PushAssignableSlot => blk: {
+            const payload = block.getTypedPayload(index, .PushAssignableSlot);
             break :blk payload.name_location == location or payload.value_location == location;
         },
         .PushArgumentSlot => blk: {
-            const payload = inst.payload.PushNonParentSlot;
+            const payload = block.getTypedPayload(index, .PushArgumentSlot);
             break :blk payload.name_location == location or payload.value_location == location;
         },
         .CreateMethod => blk: {
-            break :blk inst.payload.CreateMethod.method_name_location == location;
+            const payload = block.getTypedPayload(index, .CreateMethod);
+            break :blk payload.method_name_location == location;
         },
         .Return, .NonlocalReturn => blk: {
-            break :blk inst.payload.Return.value_location == location;
+            const payload = block.getTypedPayload(index, .Return);
+            break :blk payload.value_location == location;
         },
         .PushArg => blk: {
-            break :blk inst.payload.PushArg.argument_location == location;
+            const payload = block.getTypedPayload(index, .PushArg);
+            break :blk payload.argument_location == location;
         },
 
         .SelfSend,
