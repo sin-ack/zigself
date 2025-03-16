@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -6,7 +6,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
-const Heap = @import("Heap.zig");
 const Actor = @import("Actor.zig");
 const Value = @import("value.zig").Value;
 const pointer = @import("../utility/pointer.zig");
@@ -14,8 +13,10 @@ const Selector = @import("Selector.zig");
 const Reference = @import("value.zig").Reference;
 const BaseObject = @import("base_object.zig").BaseObject;
 const ObjectLike = @import("value.zig").ObjectLike;
+const heap_import = @import("Heap.zig");
 const scoped_bits = @import("../utility/scoped_bits.zig");
 const object_lookup = @import("object_lookup.zig");
+const VirtualMachine = @import("VirtualMachine.zig");
 
 // TODO: Unify ObjectType and ObjectRegistry once Zig stops treating it as a dependency loop.
 pub const ObjectType = enum(u5) {
@@ -186,15 +187,30 @@ pub const Object = extern struct {
         self.dispatch(void, "finalize", .{allocator});
     }
 
+    /// Visit all the edges of this object.
+    pub fn visitEdges(self: Object.Ptr, visitor: anytype) !void {
+        const Error = blk: {
+            comptime var Visitor = @TypeOf(visitor);
+            if (@typeInfo(Visitor) == .pointer) {
+                Visitor = @typeInfo(Visitor).pointer.child;
+            }
+
+            const visit_info = @typeInfo(@TypeOf(Visitor.visit));
+            break :blk @typeInfo(visit_info.@"fn".return_type.?).error_union.error_set;
+        };
+
+        return self.dispatch(Error!void, "visitEdges", .{visitor});
+    }
+
     /// Create a new shallow copy of this object. The map is not affected.
-    pub fn clone(self: Object.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) Allocator.Error!Ptr {
+    pub fn clone(self: Object.Ptr, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID) Allocator.Error!Ptr {
         // NOTE: Inlining the delegation here because we need to cast the result into the generic object type.
         return switch (self.getMetadata().type) {
             inline else => |t| {
                 if (!@hasDecl(ObjectT(t), "clone")) unreachable;
 
                 const self_ptr: ObjectT(t).Ptr = @ptrCast(self);
-                const result_or_error = self_ptr.clone(token, actor_id);
+                const result_or_error = self_ptr.clone(allocator, heap, token, actor_id);
                 const result = if (@typeInfo(@TypeOf(result_or_error)) == .error_union) try result_or_error else result_or_error;
                 return @ptrCast(result);
             },
@@ -227,6 +243,12 @@ pub const MapObject = extern struct {
 
     pub fn getMetadata(self: MapObject.Ptr) *Object.Metadata {
         return self.object.getMetadata();
+    }
+
+    /// Visit edges of this object using the given visitor. Users of `MapObject`
+    /// must call this method in their own `visitEdges` implementation.
+    pub fn visitEdges(self: MapObject.Ptr, visitor: anytype) !void {
+        try visitor.visit(&self.map);
     }
 
     pub fn getMap(self: MapObject.Ptr) Map.Ptr {

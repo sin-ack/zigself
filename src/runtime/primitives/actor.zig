@@ -1,4 +1,4 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -84,7 +84,7 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
     }
 
     const arguments = context.getArguments("_Genesis:");
-    var receiver = context.receiver.getValue();
+    var receiver = context.receiver.get();
     const selector_name = (try arguments.getObject(0, .ByteArray)).getValues();
     const selector = Selector.fromName(selector_name);
 
@@ -105,16 +105,16 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
     }
 
     var token = token: {
-        var tracked_method = try context.vm.heap.track(method.asValue());
-        defer tracked_method.untrack(context.vm.heap);
+        var tracked_method = context.vm.heap.track(method.asValue());
+        defer tracked_method.deinit(&context.vm.heap);
 
-        const token = try context.vm.heap.getAllocation(
+        const token = try context.vm.heap.allocate(
             method.requiredSizeForActivation() +
                 ActorObject.requiredSizeForAllocation(),
         );
 
-        method = tracked_method.getValue().asObject().?.asType(.Method).?;
-        receiver = context.receiver.getValue();
+        method = tracked_method.get().asObject().?.asType(.Method).?;
+        receiver = context.receiver.get();
 
         break :token token;
     };
@@ -127,12 +127,12 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
     const genesis_actor = try Actor.create(context.vm, &token, receiver);
 
     const blessed_receiver = blessed_receiver: {
-        var tracked_method = try context.vm.heap.track(method.asValue());
-        defer tracked_method.untrack(context.vm.heap);
+        var tracked_method = context.vm.heap.track(method.asValue());
+        defer tracked_method.deinit(&context.vm.heap);
 
         const blessed_receiver = try bless.bless(genesis_actor.id, receiver);
 
-        method = tracked_method.getValue().asObject().?.asType(.Method).?;
+        method = tracked_method.get().asObject().?.asType(.Method).?;
 
         break :blessed_receiver blessed_receiver;
     };
@@ -161,7 +161,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     }
 
     const arguments = context.getArguments("_ActorSpawn:");
-    var receiver = context.receiver.getValue();
+    var receiver = context.receiver.get();
     const spawn_selector_name = (try arguments.getObject(0, .ByteArray)).getValues();
     const spawn_selector = Selector.fromName(spawn_selector_name);
 
@@ -192,15 +192,15 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     }
 
     var token = token: {
-        var tracked_method = try context.vm.heap.track(spawn_method.asValue());
-        defer tracked_method.untrack(context.vm.heap);
+        var tracked_method = context.vm.heap.track(spawn_method.asValue());
+        defer tracked_method.deinit(&context.vm.heap);
 
-        const token = try context.vm.heap.getAllocation(
+        const token = try context.vm.heap.allocate(
             spawn_method.requiredSizeForActivation(),
         );
 
-        spawn_method = tracked_method.getValue().asObject().?.asType(.Method).?;
-        receiver = context.receiver.getValue();
+        spawn_method = tracked_method.get().asObject().?.asType(.Method).?;
+        receiver = context.receiver.get();
 
         break :token token;
     };
@@ -248,7 +248,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     };
 
     // Refresh pointers in case the actor execution caused a GC
-    receiver = context.receiver.getValue();
+    receiver = context.receiver.get();
 
     const entrypoint_selector_name = entrypoint_selector_name: {
         if (context.actor.entrypoint_selector) |message_value| {
@@ -274,20 +274,20 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
     token.deinit();
     token = token: {
-        var tracked_method = try context.vm.heap.track(entrypoint_method.asValue());
-        defer tracked_method.untrack(context.vm.heap);
-        var tracked_new_actor_context = try context.vm.heap.track(new_actor_context);
-        defer tracked_new_actor_context.untrack(context.vm.heap);
+        var tracked_method = context.vm.heap.track(entrypoint_method.asValue());
+        defer tracked_method.deinit(&context.vm.heap);
+        var tracked_new_actor_context = context.vm.heap.track(new_actor_context);
+        defer tracked_new_actor_context.deinit(&context.vm.heap);
 
         var required_memory = ActorObject.requiredSizeForAllocation();
         if (context.actor != genesis_actor)
             required_memory += ActorProxyObject.requiredSizeForAllocation();
 
-        const inner_token = try context.vm.heap.getAllocation(required_memory);
+        const inner_token = try context.vm.heap.allocate(required_memory);
 
-        entrypoint_method = tracked_method.getValue().asObject().?.asType(.Method).?;
-        new_actor_context = tracked_new_actor_context.getValue();
-        receiver = context.receiver.getValue();
+        entrypoint_method = tracked_method.get().asObject().?.asType(.Method).?;
+        new_actor_context = tracked_new_actor_context.get();
+        receiver = context.receiver.get();
 
         break :token inner_token;
     };
@@ -311,12 +311,12 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
     // Bless the new actor context
     const blessed_new_actor_context = blessed_new_actor_context: {
-        var tracked_method = try context.vm.heap.track(entrypoint_method.asValue());
-        defer tracked_method.untrack(context.vm.heap);
+        var tracked_method = context.vm.heap.track(entrypoint_method.asValue());
+        defer tracked_method.deinit(&context.vm.heap);
 
         const blessed_new_actor_context = try bless.bless(new_actor.id, new_actor_context);
 
-        entrypoint_method = tracked_method.getValue().asObject().?.asType(.Method).?;
+        entrypoint_method = tracked_method.get().asObject().?.asType(.Method).?;
 
         break :blessed_new_actor_context blessed_new_actor_context;
     };
@@ -324,12 +324,12 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
     token.deinit();
     token = token: {
-        var tracked_method = try context.vm.heap.track(entrypoint_method.asValue());
-        defer tracked_method.untrack(context.vm.heap);
+        var tracked_method = context.vm.heap.track(entrypoint_method.asValue());
+        defer tracked_method.deinit(&context.vm.heap);
 
-        const inner_token = try context.vm.heap.getAllocation(entrypoint_method.requiredSizeForActivation());
+        const inner_token = try context.vm.heap.allocate(entrypoint_method.requiredSizeForActivation());
 
-        entrypoint_method = tracked_method.getValue().asObject().?.asType(.Method).?;
+        entrypoint_method = tracked_method.get().asObject().?.asType(.Method).?;
         break :token inner_token;
     };
 
@@ -474,7 +474,7 @@ pub fn ActorSender(context: *PrimitiveContext) !ExecutionResult {
 
     // FIXME: It would be nice to use a single actor proxy instead of spawning
     //        them on demand, as replying to senders is a common operation.
-    var token = try context.vm.heap.getAllocation(
+    var token = try context.vm.heap.allocate(
         ActorProxyObject.requiredSizeForAllocation(),
     );
     defer token.deinit();

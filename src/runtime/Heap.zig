@@ -1,1078 +1,1963 @@
-// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
+// TODO: Investigate if a conservative stack scanning approach would be
+//       faster. The Whippet garbage collector uses a hybrid approach where
+//       the stack is scanned conservatively and the heap is scanned
+//       precisely, and it seems to be faster thanks to not needing manual
+//       rooting or side tables.
+//
+//       To implement this, we would need to have a concept of pinned objects,
+//       which is fundamentally incompatible with an eden that must be cleared
+//       after every minor collection.
+
+// TODO: Investigate alternative strategies for tenuring surviving objects. Most
+//       Java garbage collectors use an age-based tenuring strategy where objects
+//       that survive a certain number of garbage collection cycles are tenured.
+//       We currently have 24 extra bits in the object header that go unused. Seems
+//       like most garbage collectors tenure objects after 15 or so cycles, so we
+//       could use 4 bits for the age.
+//
+//       For now, we just tenure as soon as the past survivor space is full beyond
+//       a certain threshold at the start of each minor collection cycle. This has
+//       the major downside of tenuring some very short-lived objects that have only
+//       survived a couple of cycles.
+//
+//       Idea from kprotty: Instead of preemptively copying aged objects, only copy
+//       when age == 2^N-1 AND referenced by something. Fixes edge case where object
+//       has survived many cycles but died on the exact cycle it would be tenured.
+
+// TODO: Investigate whether region memory can be allocated through performing
+//       a large mmap(PROT_NONE) and then mprotect'ing chunks of it. This would
+//       allow region memory to be contiguous which would simplify a lot of
+//       the old generation code. (Idea from kprotty)
+
+// TODO: During the heap rewrite, I removed byte arrays (strings etc.) from
+//       being allocated directly in the heap. See if this is better or worse
+//       than the old approach. The idea is that it's easier to intern byte
+//       arrays when they're off-heap, but we could just as easily hold
+//       references through the VM directly and just CoW when necessary.
+
 const std = @import("std");
-const builtin = @import("builtin");
-const tracy = @import("tracy");
 const Allocator = std.mem.Allocator;
 
 const debug = @import("../debug.zig");
-const Value = @import("./value.zig").Value;
-const Object = @import("./object.zig").Object;
-const ByteArray = @import("./ByteArray.zig");
-const Reference = @import("value.zig").Reference;
-const Activation = @import("./Activation.zig");
-const BaseObject = @import("./base_object.zig").BaseObject;
-const VirtualMachine = @import("./VirtualMachine.zig");
+const Value = value_import.Value;
+const Reference = value_import.Reference;
+const value_import = @import("value.zig");
+const VirtualMachine = @import("VirtualMachine.zig");
 
 const GC_DEBUG = debug.GC_DEBUG;
 const GC_SPAMMY_DEBUG = debug.GC_SPAMMY_DEBUG;
-const GC_TOKEN_DEBUG = debug.GC_TOKEN_DEBUG;
-const GC_TOKEN_ALLOCATION_DEBUG = debug.GC_TOKEN_ALLOCATION_DEBUG;
-const GC_TRACK_SOURCE_DEBUG = debug.GC_TRACK_SOURCE_DEBUG;
 const REMEMBERED_SET_DEBUG = debug.REMEMBERED_SET_DEBUG;
 const HEAP_HANDLE_MISS_DEBUG = debug.HEAP_HANDLE_MISS_DEBUG;
+const GC_TOKEN_ALLOCATION_DEBUG = debug.GC_TOKEN_ALLOCATION_DEBUG;
 const CRASH_ON_OUT_OF_ORDER_HANDLE_FREES = debug.CRASH_ON_OUT_OF_ORDER_HANDLE_FREES;
+// TODO: Restore GC_TOKEN_DEBUG
+// TODO: Restore GC_TRACK_SOURCE_DEBUG
 
-const Heap = @This();
-const UninitializedHeapScrubByte = 0xAB;
-
-/// This is the space where newly created objects are placed. It is a fixed size
-/// space, and objects that survive this space are placed in the from-space.
-eden: Space,
-
-/// This is the space where objects that survive the eden and previous scavenges
-/// are placed. It is a fixed size space. When a scavenge cannot clean up enough
-/// objects to leave memory for the survivors of a scavenge in this space, all
-/// the objects in this space are moved to the old space where they reside until
-/// a compaction happens.
-from_space: Space,
-/// This is a space with an identical size to the from space. When a scavenge
-/// happens in the new space, the from space and this space are swapped.
-to_space: Space,
-
-/// This is the space where permanent objects reside. It can be expanded as
-/// memory requirements of the program grows.
-old_space: Space,
-
-/// Holds the handles to heap values. The values stored here will be scanned
-/// during heap allocations.
-handles: [HandleAreaSize]?[*]u64 = .{null} ** HandleAreaSize,
-/// The index of the handle that was allocated most recently. We do a linear
-/// search in a ring fashion from this offset to find a new slot.
-// Begins from HandleAreaSize - 1 in order to search the first index first.
-most_recent_handle_index: std.math.IntFittingRange(0, HandleAreaSize - 1) = HandleAreaSize - 1,
-
-allocator: Allocator,
-/// The virtual machine running the whole thing. We use this to scan the
-/// argument and slot stacks during a scavenge/tenure.
-vm: *VirtualMachine,
-
-/// Tracks which return addresses track which addresses.
-caller_tracked_mapping: if (GC_TRACK_SOURCE_DEBUG) std.AutoArrayHashMap(*[*]u64, usize) else void,
-
-// FIXME: Make eden + new space configurable at runtime
-const EdenSize = 1 * 1024 * 1024;
-const NewSpaceSize = 4 * 1024 * 1024;
-const InitialOldSpaceSize = 16 * 1024 * 1024;
+/// The size of the new generation in bytes. This is further split between eden
+/// and half-spaces, controlled by SURVIVOR_SPACE_RATIO below.
+const NEW_GENERATION_SIZE = 1 * 1024 * 1024;
+/// The size of one region in the old generation in bytes. The old generation is
+/// split into regions to allow it to grow dynamically.
+const OLD_GENERATION_REGION_SIZE = 8 * 1024 * 1024;
+/// The ratio of the size of the survivor space to the size of eden. The value
+/// here means how many times larger eden is compared to the survivor space.
+/// For example, the value 3 would mean a new generation of 1MB would have an
+/// eden space of 750KB and two survivor spaces of 125KB each.
+const SURVIVOR_SPACE_RATIO = 6;
+/// The percentage of the past survivor space that must be full before objects
+/// are tenured to the old generation.
+const TENURE_THRESHOLD_PERCENT = 80;
+/// How many handles should be allocated per heap.
 // 2x the empirically determined maximum handles used during zig build test.
-const HandleAreaSize = 32;
+const HANDLES_PER_HEAP = 32;
+/// The initial value of the old generation's high water mark. When the number of
+/// active regions reaches this value * MAJOR_GC_HWM_MULTIPLIER, a major
+/// collection cycle is triggered.
+const INITIAL_HIGH_WATER_MARK = 5;
+/// The multiplier for the high water mark to trigger a major collection cycle.
+const COLLECTION_HWM_MULTIPLIER = 2;
+/// The maximum number of free regions to keep around for reuse. When the number
+/// of free regions exceeds this value, any extra regions are freed.
+const MAX_RECYCLED_REGIONS = 3;
 
-const Segment = enum { Object, ByteArray };
-pub const AllocationToken = struct {
-    heap: *Heap,
-    total_bytes: usize,
-    bytes_left: usize,
-
-    pub fn allocate(self: *@This(), segment: Segment, bytes: usize) [*]u64 {
-        if (self.bytes_left < bytes) {
-            std.debug.panic(
-                "!!! Attempted to allocate {} bytes from {} byte-sized allocation token with {} bytes remaining!",
-                .{ bytes, self.total_bytes, self.bytes_left },
-            );
-        }
-
-        self.bytes_left -= bytes;
-        // NOTE: The only error this can raise is allocation failure during lazy allocation
-        //       which eden does not do.
-        const address = self.heap.eden.allocateInSegment(self.heap.allocator, segment, bytes) catch unreachable;
-        if (GC_TOKEN_ALLOCATION_DEBUG) std.debug.print("AllocationToken.allocate: {}/{} bytes allocated at {*} (requested {})\n", .{ self.total_bytes - self.bytes_left, self.total_bytes, address, bytes });
-        return address;
+comptime {
+    if (NEW_GENERATION_SIZE % @sizeOf(u64) != 0) {
+        @compileError("!!! NEW_GENERATION_SIZE must be a multiple of the machine word size.");
     }
 
-    pub fn deinit(self: @This()) void {
-        if (std.debug.runtime_safety) {
-            if (self.bytes_left != 0) {
-                std.debug.panic("!!! Only {} out of {} bytes consumed from the allocation token!", .{ self.total_bytes - self.bytes_left, self.total_bytes });
-            }
-        }
+    if (OLD_GENERATION_REGION_SIZE % @sizeOf(u64) != 0) {
+        @compileError("!!! OLD_GENERATION_REGION_SIZE must be a multiple of the machine word size.");
     }
-};
 
-pub fn create(allocator: Allocator, vm: *VirtualMachine) !*Heap {
-    const self = try allocator.create(Heap);
-    errdefer allocator.destroy(self);
+    if (NEW_GENERATION_SIZE % (SURVIVOR_SPACE_RATIO + 2) != 0) {
+        @compileError("!!! NEW_GENERATION_SIZE must be evenly divisible by SURVIVOR_SPACE_RATIO + 2. (SURVIVOR_SPACE_RATIO * eden + 2 * survivor-semi-space)");
+    }
 
-    try self.init(allocator, vm);
-    return self;
-}
-
-pub fn destroy(self: *Heap) void {
-    self.deinit();
-    self.allocator.destroy(self);
-}
-
-fn init(self: *Heap, allocator: Allocator, vm: *VirtualMachine) !void {
-    var old_space = Space.lazyInit(self, "old space", InitialOldSpaceSize);
-    errdefer old_space.deinit(allocator);
-
-    var from_space = try Space.init(self, allocator, "from space", NewSpaceSize);
-    errdefer from_space.deinit(allocator);
-
-    var to_space = try Space.init(self, allocator, "to space", NewSpaceSize);
-    errdefer to_space.deinit(allocator);
-
-    var eden = try Space.init(self, allocator, "eden", EdenSize);
-    errdefer eden.deinit(allocator);
-
-    self.* = .{
-        .vm = vm,
-        .allocator = allocator,
-        .caller_tracked_mapping = if (GC_TRACK_SOURCE_DEBUG) std.AutoArrayHashMap(*[*]u64, usize).init(allocator) else {},
-        .eden = eden,
-        .from_space = from_space,
-        .to_space = to_space,
-        .old_space = old_space,
-    };
-
-    self.from_space.scavenge_target = &self.to_space;
-    self.from_space.tenure_target = &self.old_space;
-    self.eden.tenure_target = &self.from_space;
-}
-
-fn deinit(self: *Heap) void {
-    self.eden.deinit(self.allocator);
-    self.from_space.deinit(self.allocator);
-    self.to_space.deinit(self.allocator);
-    self.old_space.deinit(self.allocator);
-
-    if (GC_TRACK_SOURCE_DEBUG) {
-        self.caller_tracked_mapping.deinit();
+    if (!std.math.isPowerOfTwo(HANDLES_PER_HEAP)) {
+        @compileError("!!! HANDLES_PER_HEAP must be a power of two.");
     }
 }
 
-pub fn getAllocation(self: *Heap, bytes: usize) !AllocationToken {
-    if (GC_TOKEN_DEBUG) std.debug.print("Heap.getAllocation: Attempting to get a token of size {}\n", .{bytes});
-    try self.eden.collectGarbage(self.allocator, bytes);
-
-    if (bytes % @sizeOf(u64) != 0)
-        std.debug.panic("!!! Attempted to allocate {} bytes which is not a multiple of @sizeOf(u64)!", .{bytes});
-
-    return AllocationToken{ .heap = self, .total_bytes = bytes, .bytes_left = bytes };
-}
-
-/// Mark the given address within the heap as an object which needs to know when
-/// it is finalized. The address must've just been allocated (i.e. still in
-/// eden).
-pub fn markAddressAsNeedingFinalization(self: *Heap, address: [*]u64) !void {
-    if (!self.eden.objectSegmentContains(address)) {
-        std.debug.panic("!!! markAddressAsNeedingFinalization called on address which isn't in eden object segment", .{});
-    }
-
-    try self.eden.addToFinalizationSet(self.allocator, address);
-}
-
-fn allocateHandle(self: *Heap) *?[*]u64 {
-    var handle_index = self.most_recent_handle_index +% 1;
-    while (handle_index != self.most_recent_handle_index) : (handle_index +%= 1) {
-        const handle = &self.handles[handle_index];
-        if (handle.* != null) {
-            if (HEAP_HANDLE_MISS_DEBUG) std.debug.print("Heap.allocateHandle: Handle index {} was full, retrying\n", .{handle_index});
-            continue;
-        }
-
-        self.most_recent_handle_index = handle_index;
-        return handle;
-    }
-
-    @panic("!!! Could not find a free handle slot!");
-}
-
-fn freeHandle(self: *Heap, handle: *?[*]u64) void {
-    if (CRASH_ON_OUT_OF_ORDER_HANDLE_FREES) {
-        if (handle != &self.handles[self.most_recent_handle_index]) {
-            @panic("!!! Out-of-order handle free!");
-        }
-    }
-
-    const new_most_recent_handle_index: @TypeOf(self.most_recent_handle_index) = @intCast(@divExact(@intFromPtr(handle) - @intFromPtr(&self.handles), @sizeOf([*]u64)));
-    self.most_recent_handle_index = new_most_recent_handle_index -% 1;
-    handle.* = null;
-}
-
-/// Track the given value, returning a Tracked. When a garbage collection
-/// occurs, the value will be updated with the new location.
-pub fn track(self: *Heap, value: Value) !Tracked {
-    if (value.type == .Object) {
-        const handle = self.allocateHandle();
-        handle.* = value.asReference().?.getAddress();
-
-        // XXX: The handle cannot be null at this point.
-        const nonnull_handle: *[*]u64 = @ptrCast(handle);
-
-        if (GC_TRACK_SOURCE_DEBUG) {
-            const address = @returnAddress();
-            try self.caller_tracked_mapping.put(nonnull_handle, address);
-        }
-
-        const tracked = Tracked.createWithObject(nonnull_handle);
-
-        return tracked;
-    } else {
-        return Tracked.createWithLiteral(value);
-    }
-}
-
-/// Untracks the given value.
-pub fn untrack(self: *Heap, tracked: Tracked) void {
-    if (tracked.value == .Object) {
-        if (GC_TRACK_SOURCE_DEBUG) {
-            _ = self.caller_tracked_mapping.swapRemove(tracked.value.Object);
-        }
-
-        // XXX: The handle dies here, so this is alright.
-        self.freeHandle(@ptrCast(tracked.value.Object));
-    }
-}
-
-pub fn visitValues(
-    self: *Heap,
-    // TODO: Write interfaces proposal for Zig
-    visitor: anytype,
-) !void {
-    for (&self.handles) |*handle| {
-        if (handle.*) |h| {
-            var handle_as_value = Value.fromObjectAddress(h);
-            try visitor.visit(&handle_as_value);
-            handle.* = handle_as_value.asReference().?.getAddress();
-        }
-    }
-
-    try self.vm.visitValues(visitor);
-}
-
-/// Go through the whole heap, updating references to the given value with the
-/// new value.
-pub fn updateAllReferencesTo(self: *Heap, old_value: Value, new_value: Value) !void {
-    const Visitor = struct {
-        old_value: Value,
-        new_value: Value,
-
-        pub fn visit(context: @This(), value: *Value) !void {
-            if (@as(u64, @bitCast(value.*)) == @as(u64, @bitCast(context.old_value)))
-                value.* = context.new_value;
-        }
-    };
-
-    self.visitValues(Visitor{ .old_value = old_value, .new_value = new_value }) catch unreachable;
-
-    // Finally scan each heap space and update the references.
-    try self.eden.updateAllReferencesTo(self.allocator, old_value.asReference().?.getAddress(), new_value.asReference().?.getAddress());
-}
-
-/// Figure out which spaces the referrer and target object are in, and add an
-/// entry to the target object's space's remembered set. This ensures that the
-/// object in the old space gets its references properly updated when the new
-/// space gets garbage collected.
-pub fn rememberObjectReference(self: *Heap, referrer: Value, target: Value) !void {
-    // FIXME: If we add an assignable slot to traits integer for instance, this
-    //        will cause the assignment code to explode. What can we do there?
-    std.debug.assert(referrer.type == .Object);
-    if (target.type != .Object) return;
-
-    const referrer_address = referrer.asReference().?.getAddress();
-    const target_address = target.asReference().?.getAddress();
-
-    if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Trying to create a reference {*} -> {*}\n", .{ referrer_address, target_address });
-
-    var referrer_space: ?*Space = null;
-    var target_space: ?*Space = null;
-
-    if (self.eden.objectSegmentContains(referrer_address)) referrer_space = &self.eden;
-    if (self.from_space.objectSegmentContains(referrer_address)) referrer_space = &self.from_space;
-    if (self.old_space.objectSegmentContains(referrer_address)) referrer_space = &self.old_space;
-    std.debug.assert(referrer_space != null);
-
-    if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Referrer is in {s}\n", .{referrer_space.?.name});
-
-    const referrer_space_is_newer = blk: {
-        if (self.eden.objectSegmentContains(target_address)) {
-            if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Target is in eden\n", .{});
-            if (referrer_space.? == &self.eden) break :blk false;
-            target_space = &self.eden;
-        } else if (self.from_space.objectSegmentContains(target_address)) {
-            if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Target is in from space\n", .{});
-            if (referrer_space.? == &self.eden or referrer_space.? == &self.from_space) break :blk false;
-            target_space = &self.from_space;
-        } else if (self.old_space.objectSegmentContains(target_address)) {
-            if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Target is in old space\n", .{});
-            // Old space to old space references need not be updated, as the old
-            // space is supposed to infinitely expand.
-            break :blk false;
-        }
-        std.debug.assert(target_space != null);
-        break :blk true;
-    };
-    if (!referrer_space_is_newer) {
-        if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Referrer in same or newer space than target, not creating a reference.\n", .{});
-        return;
-    }
-
-    if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Adding to remembered set of {s}\n", .{target_space.?.name});
-    try target_space.?.addToRememberedSet(self.allocator, referrer_address, referrer.asObject().?.getSizeInMemory());
-}
-
-pub fn printTrackLocationCounts(self: *Heap) void {
-    const debug_info = std.debug.getSelfDebugInfo() catch unreachable;
-    const stderr = std.io.getStdErr();
-    const tty_config = std.io.tty.detectConfig(stderr);
-
-    var address_counts = std.AutoArrayHashMap(usize, usize).init(self.allocator);
-    defer address_counts.deinit();
-
-    var mapping_it = self.caller_tracked_mapping.iterator();
-    while (mapping_it.next()) |entry| {
-        const result = address_counts.getOrPut(entry.value_ptr.*) catch unreachable;
-        if (result.found_existing) {
-            result.value_ptr.* += 1;
-        } else {
-            result.value_ptr.* = 1;
-        }
-    }
-
-    std.debug.print("Leftover trackings:\n", .{});
-    var count_it = address_counts.iterator();
-    while (count_it.next()) |entry| {
-        std.debug.printSourceAtAddress(debug_info, stderr.writer(), entry.key_ptr.*, tty_config) catch unreachable;
-        std.debug.print("Count: {}\n\n", .{entry.value_ptr.*});
-    }
-}
-
-/// Return whether a garbage collection cycle would need to happen in order to
-/// provide the required amount of bytes from the heap.
-pub fn needsToGarbageCollectToProvide(self: Heap, bytes: usize) bool {
-    return self.eden.freeMemory() < bytes;
-}
-
-/// A mapping from an address to its size. This area of memory is checked for
-/// any object references in the current space which are then copied during a
-/// scavenge.
-const RememberedSet = std.AutoArrayHashMapUnmanaged([*]u64, usize);
-/// A set of objects which should be notified when they are not referenced
-/// anymore. See `Space.finalization_set` for more information.
-const FinalizationSet = std.AutoArrayHashMapUnmanaged([*]u64, void);
-const Space = struct {
-    /// A reference back to the heap.
-    heap: *Heap,
-
-    /// If true, then memory is undefined, and the next time an allocation is
-    /// requested the memory space should be allocated.
-    lazy_allocate: bool = true,
-    /// The size of this memory space.
-    size: usize,
-    /// The raw memory contents of the space. The space capacity can be learned
-    /// with `memory.len`. Uninitialized while `lazy_allocate` is true.
-    memory: []u64 = undefined,
-    /// A slice of the current object segment in this space.
-    object_segment: []u64 = undefined,
-    /// A slice of the current byte array segment in this space.
-    byte_array_segment: []u64 = undefined,
-    /// The set of objects which reference an object in this space. When a
-    /// constant or assignable slot from a previous space references this space,
-    /// it is added to this set; when it starts referencing another space, it is
-    /// removed from this space. During scavenging, this space is cleared and
-    /// any references that were still pointing to this space at scavenge time
-    /// are transferred to the target space.
-    ///
-    /// TODO: The original Heap VM used "cards" (i.e. a bitmap) to mark certain
-    ///       regions of memory as pointing to a new space indiscriminate of
-    ///       object size. Figure out whether that is faster than this
-    ///       approach.
-    remembered_set: RememberedSet,
-    /// The finalization set of a space represents the set of objects which
-    /// should be notified when they haven't been copied after a scavenge
-    /// operation. These objects need to perform additional steps once they are
-    /// not scavenged (in other words, not referenced by anyone anymore).
-    ///
-    ///When an item in this set gets copied to the target space, it is removed
-    ///from this set and added to the target set.
-    finalization_set: FinalizationSet,
-    /// The scavenging target of this space. When the space runs out of memory
-    /// and this space is set, the space will attempt to perform a scavenging
-    /// operation towards this space. This space must have the same size as the
-    /// current space and must be empty when the scavenging starts. After the
-    /// scavenge is complete, this object swaps its memory and cursors with the
-    /// other object.
-    scavenge_target: ?*Space = null,
-    /// The tenure target of this space. When the space runs out of memory and a
-    /// scavenge did not clear enough memory, a tenuring operation is done in
-    /// order to evacuate all the objects to a higher generation.
-    tenure_target: ?*Space = null,
-    /// The name of this space.
-    name: [*:0]const u8,
-
-    /// A link node for a newer generation space to scan in order to update
-    /// references from the newer space to the older one.
-    const NewerGenerationLink = struct {
-        space: *Space,
-        previous: ?*const NewerGenerationLink,
-    };
-
-    pub fn lazyInit(heap: *Heap, comptime name: [*:0]const u8, size: usize) Space {
-        return Space{
-            .heap = heap,
-            .name = name,
-            .size = size,
-            .remembered_set = .{},
-            .finalization_set = .{},
-        };
-    }
-
-    pub fn init(heap: *Heap, allocator: Allocator, comptime name: [*:0]const u8, size: usize) !Space {
-        var self = lazyInit(heap, name, size);
-        try self.allocateMemory(allocator);
-        return self;
-    }
-
-    fn allocateMemory(self: *Space, allocator: Allocator) !void {
-        var memory = try allocator.alloc(u64, @divExact(self.size, @sizeOf(u64)));
-
-        // REVIEW: When Zig fixes its zero-length arrays to not create a slice
-        //         with an undefined address, get rid of this and just use
-        //         memory[0..0].
-        var runtime_zero: usize = 0;
-        _ = &runtime_zero;
-
-        self.lazy_allocate = false;
-        self.memory = memory;
-        self.object_segment = memory[0..runtime_zero];
-        self.byte_array_segment = (memory.ptr + memory.len)[0..runtime_zero];
-
-        if (GC_DEBUG) std.debug.print("Heap.init: {s} is {*}-{*}\n", .{ self.name, self.memory.ptr, self.memory.ptr + self.memory.len });
-    }
-
-    pub fn deinit(self: *Space, allocator: Allocator) void {
-        if (self.lazy_allocate)
-            return;
-
-        // Finalize everything that needs to be finalized.
-        var finalization_it = self.finalization_set.iterator();
-        while (finalization_it.next()) |entry| {
-            const base_object = Value.fromObjectAddress(entry.key_ptr.*).asBaseObject().?;
-            base_object.finalize(allocator);
-        }
-
-        self.finalization_set.deinit(allocator);
-        self.remembered_set.deinit(allocator);
-        allocator.free(self.memory);
-    }
-
-    /// Return the amount of free memory in this space in bytes.
-    pub fn freeMemory(self: Space) usize {
-        const available_words = self.memory.len - self.object_segment.len - self.byte_array_segment.len;
-        return available_words * @sizeOf(u64);
-    }
-
-    /// Copy the given address as a new object in the target space. Creates a
-    /// forwarding reference in this space; if more than one object was pointing
-    /// to this object in the old space, then a special marker is placed in the
-    /// location of the old object which tells the future calls of this function
-    /// for the same object to just return the new location and avoid copying
-    /// again.
-    fn copyObjectTo(self: *Space, allocator: Allocator, address: [*]u64, target_space: *Space) ![*]u64 {
-        // If what we're pointing to looks like a forwarding reference, then
-        // just return the address it points to. Note that we need to look at
-        // what the address is *pointing to*, rather than what the address *is*,
-        // unlike in the non-forwarding case.
-        if (Reference.tryFromForwarding(address)) |forwarding_reference| {
-            if (GC_SPAMMY_DEBUG) std.debug.print("Space.copyObjectTo: Found forwarding reference {*}\n", .{forwarding_reference.getAddress()});
-            return forwarding_reference.getAddress();
-        }
-
-        const base_object = Value.fromObjectAddress(address).asBaseObject().?;
-        const object_size = base_object.getSizeInMemory();
-        std.debug.assert(object_size % @sizeOf(u64) == 0);
-
-        const object_size_in_words = object_size / @sizeOf(u64);
-        // We must have enough space at this point.
-        const new_address = target_space.allocateInObjectSegment(allocator, object_size) catch unreachable;
-        @memcpy(new_address[0..object_size_in_words], address[0..object_size_in_words]);
-
-        // Add this object to the target space's finalization set if it is in
-        // ours.
-        if (self.finalizationSetContains(address)) {
-            self.removeFromFinalizationSet(address) catch unreachable;
-            try target_space.addToFinalizationSet(allocator, new_address);
-        }
-
-        address[0] = @bitCast(Reference.createForwarding(new_address));
-        return new_address;
-    }
-
-    /// Same as copyObjectTo, but for byte arrays.
-    fn copyByteArrayTo(allocator: Allocator, address: [*]u64, target_space: *Space) [*]u64 {
-        const byte_array = ByteArray.fromAddress(address);
-        const byte_array_size = byte_array.getSizeInMemory();
-        std.debug.assert(byte_array_size % @sizeOf(u64) == 0);
-
-        const byte_array_size_in_words = byte_array_size / @sizeOf(u64);
-        // We must have enough space at this point.
-        const new_address = target_space.allocateInByteArraySegment(allocator, byte_array_size) catch unreachable;
-        @memcpy(new_address[0..byte_array_size_in_words], address[0..byte_array_size_in_words]);
-
-        return new_address;
-    }
-
-    /// Copy the given address to the target space. If require_copy is true,
-    /// panics if the given address wasn't in this space.
-    fn copyAddress(self: *Space, allocator: Allocator, address: [*]u64, target_space: *Space, comptime require_copy: bool) !?[*]u64 {
-        if (self.objectSegmentContains(address)) {
-            return self.copyObjectTo(allocator, address, target_space);
-        } else if (self.byteArraySegmentContains(address)) {
-            return copyByteArrayTo(allocator, address, target_space);
-        } else if (require_copy) {
-            std.debug.panic("!!! copyAddress called with an address that's not allocated in this space!", .{});
-        }
-
-        return null;
-    }
-
-    /// Performs Cheney's algorithm, copying alive objects to the given target.
-    pub fn cheneyCommon(
-        self: *Space,
+/// The zigSelf heap.
+///
+/// This is a generational scavenging garbage-collected heap. Unlike the
+/// original Self heap, byte arrays are allocated outside the heap itself. This
+/// is so that byte arrays can be interned and shared between objects.
+///
+/// Like with Self, there are two generations: New and old. The new generation
+/// is split between eden and the survivor half-spaces. The old generation is
+/// collected using tri-color mark-and-compact. The new generation collects when
+/// eden is full; the old generation is dynamically sized, and collects based on
+/// a heuristic.
+///
+/// This function takes a `Root` type that contains a method with the following
+/// signature:
+///
+///     fn visitEdges(self: *Root, visitor: anytype) !void
+///
+/// where `visitor` is a structure containing a method with the following
+/// signature:
+///
+///     fn visit(self: *@TypeOf(visitor), value: *Value) !void
+///
+/// The `visitEdges` method should iterate over all the heap references in the
+/// root and call the `visit` method on the `visitor` for each reference.
+pub fn Heap(comptime Root: type) type {
+    return struct {
         allocator: Allocator,
-        target_space: *Space,
-        newer_generation_link: ?*const NewerGenerationLink,
-    ) Allocator.Error!void {
-        // First see if the target space has enough space to potentially take
-        // everything in this space.
-        const space_size = self.memory.len * @sizeOf(u64);
-        const required_size = space_size - self.freeMemory();
-        if (required_size > target_space.freeMemory()) {
-            if (GC_DEBUG) std.debug.print("Space.cheneyCommon: Target space doesn't have enough memory to hold all of our objects, attempting to perform GC on it\n", .{});
+        new_generation: *NewGeneration,
+        old_generation: *OldGeneration,
 
-            // Make the other space garbage collect first.
-            const my_link = NewerGenerationLink{ .space = self, .previous = newer_generation_link };
-            try target_space.collectGarbageInternal(allocator, required_size, &my_link);
+        root: *Root,
 
-            if (space_size - self.freeMemory() > target_space.freeMemory()) {
-                std.debug.panic("Even after a garbage collection, the target space doesn't have enough memory for me to perform a scavenge, sorry.", .{});
+        /// Holds the handles to heap values. The values stored here will be scanned
+        /// during heap allocations.
+        handles: [HANDLES_PER_HEAP]?[*]u64,
+        /// The index of the handle that was allocated most recently. We do a linear
+        /// search in a ring fashion from this offset to find a new slot.
+        // Begins from HandleAreaSize - 1 in order to search the first index first.
+        most_recent_handle_index: std.math.IntFittingRange(0, HANDLES_PER_HEAP - 1),
+
+        const Self = @This();
+        const FinalizationSet = std.AutoArrayHashMapUnmanaged([*]u64, void);
+
+        /// Initialize a new heap.
+        pub fn init(allocator: Allocator, root: *Root) !Self {
+            const old_generation: *OldGeneration = try .create(allocator);
+            errdefer old_generation.destroy(allocator);
+
+            const new_generation: *NewGeneration = try .create(allocator);
+            errdefer new_generation.destroy(allocator);
+
+            return .{
+                .allocator = allocator,
+                .new_generation = new_generation,
+                .old_generation = old_generation,
+
+                .root = root,
+
+                .handles = .{null} ** HANDLES_PER_HEAP,
+                .most_recent_handle_index = HANDLES_PER_HEAP - 1,
+            };
+        }
+
+        /// Deinitialize this heap.
+        pub fn deinit(self: *Self) void {
+            self.new_generation.destroy(self.allocator);
+            self.old_generation.destroy(self.allocator);
+        }
+
+        // --- Allocation/Collection ---
+
+        /// Allocate the given number of bytes and return it in an allocation token.
+        /// This ensures that the given amount of bytes can be allocated without
+        /// garbage collection occurring.
+        pub fn allocate(self: *Self, bytes: usize) !AllocationToken {
+            const memory = try self.allocateRaw(bytes);
+            return .{ .slice = memory, .used = 0 };
+        }
+
+        pub const CollectionFlag = enum { Disable, Enable, Force };
+        pub const GarbageCollectionOptions = struct {
+            minor: CollectionFlag = .Enable,
+            major: CollectionFlag = .Enable,
+        };
+
+        /// Collect garbage. A minor cycle will be triggered unless the old space doesn't
+        /// have enough memory for the worst-case scenario for a minor cycle, in which case
+        /// a major cycle will be triggered first.
+        pub fn collect(self: *Self, options: GarbageCollectionOptions) !GarbageCollectionStats {
+            var stats: GarbageCollectionStats = .{
+                .freed_bytes = 0,
+                .existing_survived_bytes = 0,
+                .new_survived_bytes = 0,
+                .tenured_bytes = 0,
+                .old_compacted_bytes = 0,
+            };
+
+            // Ask the old generation whether it should collect (based on
+            // various heuristics), and if so, collect it first. This avoids
+            // extra system allocation churn if the old generation is full.
+            if (options.major != .Disable and (options.major == .Force or self.old_generation.shouldCollect())) {
+                try self.old_generation.collect(self, &stats);
             }
 
-            if (GC_DEBUG) std.debug.print("Space.cheneyCommon: Target space successfully GC'd, now has {} bytes free\n", .{target_space.freeMemory()});
+            // TODO: Handle .minor == .Force
+            if (options.minor != .Disable) {
+                try self.new_generation.collect(self, &stats);
+            }
+
+            return stats;
         }
-        // If we got here, then we have enough free memory on the target space
-        // to perform our operations.
 
-        // This is saved to race against the target space's object segment
-        // length after everything else has been copied in.
-        var target_object_segment_index = target_space.object_segment.len;
+        /// Allocate the given number of bytes from the new generation for the given
+        /// thread. If the allocation would exceed the remaining available space in
+        /// the new generation, then a garbage collection cycle is triggered.
+        fn allocateRaw(self: *Self, bytes: usize) ![]u64 {
+            return self.new_generation.allocate(bytes) catch |err| switch (err) {
+                error.OutOfMemory => {
+                    // Trigger a garbage collection cycle.
+                    _ = try self.collect(.{});
+                    // Try allocating again.
+                    return self.new_generation.allocate(bytes) catch @panic("!!! Out of memory after garbage collection!");
+                },
+            };
+        }
 
-        // Visit all the values in the VM and copy any addresses.
-        const Visitor = struct {
-            self: *Space,
-            allocator: Allocator,
-            target_space: *Space,
+        // --- Handles ---
 
-            pub fn visit(ctx: @This(), value: *Value) !void {
-                if (value.asReference()) |reference| {
-                    if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon: Visiting reference {*} ({*})\n", .{ reference.getAddress(), value });
-                    if (try ctx.self.copyAddress(ctx.allocator, reference.getAddress(), ctx.target_space, false)) |new_address| {
-                        if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon:   -> copied to {*}\n", .{new_address});
-                        value.* = Value.fromObjectAddress(new_address);
-                    }
+        /// Create a handle for the given value.
+        pub fn track(self: *Self, value: Value) Handle {
+            return .init(self, value);
+        }
+
+        /// Allocate a handle slot. This is only used for Handles with reference
+        /// values.
+        fn allocateHandleSlot(self: *Self) *?[*]u64 {
+            var handle_index = self.most_recent_handle_index +% 1;
+            while (handle_index != self.most_recent_handle_index) : (handle_index +%= 1) {
+                const handle = &self.handles[handle_index];
+                if (handle.* != null) {
+                    if (HEAP_HANDLE_MISS_DEBUG) std.debug.print("Self.allocateHandle: Handle index {} was full, retrying\n", .{handle_index});
+                    continue;
+                }
+
+                self.most_recent_handle_index = handle_index;
+                return handle;
+            }
+
+            @panic("!!! Could not find a free handle slot!");
+        }
+
+        /// Free the given handle slot.
+        fn freeHandleSlot(self: *Self, handle: *?[*]u64) void {
+            if (CRASH_ON_OUT_OF_ORDER_HANDLE_FREES) {
+                if (handle != &self.handles[self.most_recent_handle_index]) {
+                    @panic("!!! Out-of-order handle free!");
                 }
             }
-        };
-        try self.heap.visitValues(Visitor{ .self = self, .allocator = allocator, .target_space = target_space });
 
-        {
-            var remembered_set_iterator = self.remembered_set.iterator();
-            if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon: Scanning remembered set ({} items)\n", .{self.remembered_set.count()});
-            // Go through the remembered set, and copy any referenced objects.
-            // Transfer the remembered set objects to the new space if it has a
-            // remembered set of its own. (TODO old space shouldn't have one)
-            while (remembered_set_iterator.next()) |entry| {
-                const start_of_object = entry.key_ptr.*;
-                const object_size_in_bytes = entry.value_ptr.*;
-                const object_slice = start_of_object[0 .. object_size_in_bytes / @sizeOf(u64)];
+            const new_most_recent_handle_index: @TypeOf(self.most_recent_handle_index) = @intCast(@divExact(@intFromPtr(handle) - @intFromPtr(&self.handles), @sizeOf([*]u64)));
+            std.debug.assert(new_most_recent_handle_index < HANDLES_PER_HEAP);
 
-                for (object_slice) |*word| {
-                    const value: Value = @bitCast(word.*);
-                    if (value.asReference()) |reference| {
-                        if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon: Scanning remembered set reference {*} ({*})\n", .{ reference.getAddress(), word });
-                        if (try self.copyAddress(allocator, reference.getAddress(), target_space, false)) |new_address| {
-                            if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon:   -> copied to {*}\n", .{new_address});
-                            word.* = @bitCast(Value.fromObjectAddress(new_address));
+            self.most_recent_handle_index = new_most_recent_handle_index -% 1;
+            handle.* = null;
+        }
+
+        // --- Wololo ---
+
+        /// Update all occurrences for the given reference.
+        pub fn updateAllReferencesTo(self: *Self, from: Value, to: Value) void {
+            // Don't need to update non-references.
+            const from_ref = from.asReference() orelse return;
+
+            const Visitor = struct {
+                from: Reference,
+                to: Value,
+
+                pub fn visit(visitor: *const @This(), value: *Value) error{}!void {
+                    const reference = value.asReference() orelse return;
+                    if (reference.getAddress() == visitor.from.getAddress()) {
+                        // FIXME: This is unsound!! If this value is in an object that's in
+                        //        OldGeneration, the *object* containing this value must be
+                        //        remembered. The visitor currently isn't given enough
+                        //        information to do this (the object itself must be passed).
+                        value.* = visitor.to;
+                    }
+                }
+            };
+            const visitor: Visitor = .{
+                .from = from_ref,
+                .to = to,
+            };
+
+            self.root.visitEdges(visitor) catch unreachable;
+            self.new_generation.visitAllObjects(visitor) catch unreachable;
+            self.old_generation.visitAllObjects(visitor) catch unreachable;
+        }
+
+        // --- Remembering object references ---
+
+        pub fn rememberObjectReference(self: *Self, source: Value, target: Value) !bool {
+            // FIXME: If we add an assignable slot to traits integer for instance, this
+            //        will cause the assignment code to explode. What can we do there?
+            std.debug.assert(source.type == .Object);
+            if (target.type != .Object) return false;
+
+            const source_ref = source.asReference().?;
+            const target_ref = target.asReference().?;
+
+            if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Trying to create a reference {*} -> {*}\n", .{ source_ref.getAddress(), target_ref.getAddress() });
+
+            if (!(self.old_generation.contains(self, source_ref) and self.new_generation.contains(target_ref))) {
+                if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Referrer in same or newer space than target, not creating a reference.\n", .{});
+                return false;
+            }
+
+            if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Adding to old space remembered set\n", .{});
+            return self.old_generation.rememberAddress(source_ref.getAddress());
+        }
+
+        // --- Finalization ---
+
+        /// Put the given object in the finalization set of the new generation. This must
+        /// be called by object initialization code if the object needs to be finalized.
+        pub fn markAddressAsNeedingFinalization(self: *Self, object: [*]u64) !void {
+            if (std.debug.runtime_safety) {
+                if (self.new_generation.referenceLocation(Reference.createRegular(object)) != .Eden) {
+                    @panic("!!! Attempted to put object in finalization set that is not in eden!");
+                }
+            }
+
+            try self.new_generation.finalization_set.put(self.allocator, object, {});
+        }
+
+        /// The new generation. This is split between eden and the survivor half-spaces.
+        /// The eden space is where new objects are allocated. When the eden space is
+        /// exhausted, a minor garbage collection cycle is triggered. Objects that
+        /// have references from roots, other alive eden objects, or objects in the
+        /// old generation are moved to the future survivor space. Each cycle, the past
+        /// survivor space is scanned as well and those objects are also moved to the
+        /// future survivor space, and then the two half-spaces are swapped.
+        ///
+        /// If the surviving objects in the survivor space exceed a certain threshold,
+        /// then the objects are tenured to the old generation.
+        ///
+        /// If within a single cycle the surviving objects in eden exceed the available
+        /// space in the survivor space, the objects will be "spilled" to the old
+        /// generation.
+        const NewGeneration = struct {
+            // The full memory space.
+            memory: []align(@alignOf(u64)) u8,
+
+            // NOTE: All the _used fields below are in bytes.
+            /// The eden memory space. This is where new objects are allocated.
+            eden: []align(@alignOf(u64)) u8,
+            eden_used: usize,
+            /// The past survivor space, containing objects that survived the last
+            /// few garbage collection cycles.
+            past_survivor: []align(@alignOf(u64)) u8,
+            past_survivor_used: usize,
+            /// The future survivor space. Empty while not in a garbage collection
+            /// cycle. During garbage collection, this is where objects that are still
+            /// alive are moved to.
+            future_survivor: []align(@alignOf(u64)) u8,
+            future_survivor_used: usize,
+
+            finalization_set: FinalizationSet,
+
+            // TODO: Remembered set (keeping track of old->new references)
+            //       A lot of languages seem to do this with a bitmap, try that out.
+
+            // --- Initialization ---
+
+            pub fn create(allocator: Allocator) !*NewGeneration {
+                const self = try allocator.create(NewGeneration);
+                errdefer allocator.destroy(self);
+
+                const eden_size = NEW_GENERATION_SIZE / (SURVIVOR_SPACE_RATIO + 2) * SURVIVOR_SPACE_RATIO;
+                const semispace_size = NEW_GENERATION_SIZE / (SURVIVOR_SPACE_RATIO + 2);
+
+                const memory = try allocator.alignedAlloc(u8, .of(u64), NEW_GENERATION_SIZE);
+                const eden = memory[0..eden_size];
+                const past_survivor = memory[eden_size..(eden_size + semispace_size)];
+                const future_survivor = memory[(eden_size + semispace_size)..];
+
+                self.* = .{
+                    .memory = memory,
+
+                    .eden = eden,
+                    .eden_used = 0,
+
+                    .past_survivor = past_survivor,
+                    .past_survivor_used = 0,
+
+                    .future_survivor = future_survivor,
+                    .future_survivor_used = 0,
+
+                    .finalization_set = .empty,
+                };
+
+                return self;
+            }
+
+            pub fn destroy(self: *NewGeneration, allocator: Allocator) void {
+                // Finalize everything in the finalization set.
+                for (self.finalization_set.keys()) |address| {
+                    const reference = Reference.createRegular(address);
+                    const object = reference.asBaseObject();
+                    std.debug.assert(object.canFinalize());
+                    object.finalize(allocator);
+                }
+
+                self.finalization_set.deinit(allocator);
+                allocator.free(self.memory);
+                allocator.destroy(self);
+            }
+
+            // --- Heap Traversal ---
+
+            /// Visit all objects on the heap. Not all objects may be alive, but all
+            /// objects will be valid.
+            pub fn visitAllObjects(self: *const NewGeneration, visitor: anytype) !void {
+                var current_offset: usize = 0;
+                while (current_offset < self.eden_used) {
+                    const address: [*]u64 = @alignCast(@ptrCast(self.eden.ptr + current_offset));
+                    const reference = Reference.createRegular(address);
+                    const object = reference.asBaseObject();
+                    // XXX: Dynamic dispatch
+                    const object_size_bytes = object.getSizeInMemory();
+
+                    try object.visitEdges(visitor);
+
+                    current_offset += object_size_bytes;
+                }
+
+                current_offset = 0;
+                while (current_offset < self.past_survivor_used) {
+                    const address: [*]u64 = @alignCast(@ptrCast(self.past_survivor.ptr + current_offset));
+                    const reference = Reference.createRegular(address);
+                    const object = reference.asBaseObject();
+                    // XXX: Dynamic dispatch
+                    const object_size_bytes = object.getSizeInMemory();
+
+                    try object.visitEdges(visitor);
+
+                    current_offset += object_size_bytes;
+                }
+            }
+
+            // --- Allocation ---
+
+            /// Allocate the given number of bytes from eden.
+            pub fn allocate(self: *NewGeneration, bytes: usize) ![]u64 {
+                std.debug.assert(bytes % @sizeOf(u64) == 0);
+
+                if (self.eden_used + bytes > self.eden.len) {
+                    return error.OutOfMemory;
+                }
+
+                const memory: []align(@alignOf(u64)) u8 = @alignCast(self.eden[self.eden_used..][0..bytes]);
+                self.eden_used += bytes;
+
+                return std.mem.bytesAsSlice(u64, memory);
+            }
+
+            /// Return whether the new generation contains the given reference.
+            pub fn contains(self: *NewGeneration, reference: Reference) bool {
+                return switch (self.referenceLocation(reference)) {
+                    .Eden, .PastSurvivor, .FutureSurvivor => true,
+                    .Outside => false,
+                };
+            }
+
+            // --- Garbage Collection ---
+
+            const CopyTarget = enum { FutureSurvivorSpace, OldGeneration };
+
+            /// Allocate the given number of bytes from the future survivor space.
+            /// Must only be called during garbage collection.
+            fn allocateInFutureSurvivor(self: *NewGeneration, bytes: usize) ![]u64 {
+                std.debug.assert(bytes % @sizeOf(u64) == 0);
+
+                if (self.future_survivor_used + bytes > self.future_survivor.len) {
+                    return error.OutOfMemory;
+                }
+
+                const memory: []align(@alignOf(u64)) u8 = @alignCast(self.future_survivor[self.future_survivor_used..][0..bytes]);
+                self.future_survivor_used += bytes;
+
+                return std.mem.bytesAsSlice(u64, memory);
+            }
+
+            /// Where the given reference is located relative to the new generation.
+            const ReferenceLocation = enum {
+                Eden,
+                PastSurvivor,
+                FutureSurvivor,
+                Outside,
+            };
+
+            /// Return the location of the given reference.
+            pub fn referenceLocation(self: *NewGeneration, reference: Reference) ReferenceLocation {
+                const address = @intFromPtr(reference.getAddress());
+                const eden_base = @intFromPtr(self.eden.ptr);
+                const past_survivor_base = @intFromPtr(self.past_survivor.ptr);
+                const future_survivor_base = @intFromPtr(self.future_survivor.ptr);
+
+                if (address >= eden_base and address < eden_base + self.eden.len)
+                    return .Eden;
+                if (address >= past_survivor_base and address < past_survivor_base + self.past_survivor.len)
+                    return .PastSurvivor;
+                if (address >= future_survivor_base and address < future_survivor_base + self.future_survivor.len)
+                    return .FutureSurvivor;
+
+                return .Outside;
+            }
+
+            /// Copy the given reference to the target space if it's in the new
+            /// generation, leaving a forwarding reference in its place. If
+            /// the target is the future survivor space and the future survivor
+            /// space is full, this object (and any future objects copied) will
+            /// be tenured to the old generation instead.
+            fn copyReference(self: *NewGeneration, heap: *Self, target: *CopyTarget, stats: *GarbageCollectionStats, reference: Reference) !Reference {
+                var survived_bytes_stat = &stats.new_survived_bytes;
+
+                switch (self.referenceLocation(reference)) {
+                    .Eden => {},
+                    .PastSurvivor => {
+                        survived_bytes_stat = &stats.existing_survived_bytes;
+                    },
+                    .FutureSurvivor => @panic("!!! Attempting to copy object in future survivor space!"),
+                    .Outside => return reference,
+                }
+
+                // If what we're pointing to looks like a forwarding reference, then
+                // just return the address it points to. Note that we need to look at
+                // what the address is *pointing to*, rather than what the address *is*,
+                // unlike in the non-forwarding case.
+                if (Reference.tryFromForwarding2(reference)) |forwarding_reference| {
+                    if (GC_SPAMMY_DEBUG) std.debug.print("NewGeneration.copyObject: Found forwarding reference {*}\n", .{forwarding_reference.getAddress()});
+                    const new_address = forwarding_reference.getAddress();
+                    return Reference.createRegular(new_address);
+                }
+
+                const object = reference.asBaseObject();
+                // XXX: Dynamic dispatch happens here. If there is a heap corruption
+                //      bug, it will likely start here.
+                const object_size_bytes = object.getSizeInMemory();
+
+                survived_bytes_stat.* += object_size_bytes;
+                stats.freed_bytes -= object_size_bytes;
+
+                const old_memory = object.getAddress();
+                const new_memory = switch (target.*) {
+                    .FutureSurvivorSpace => self.allocateInFutureSurvivor(object_size_bytes) catch |err| switch (err) {
+                        error.OutOfMemory => blk: {
+                            // Future survivor space has no more room. We unfortunately have to
+                            // tenure this object to the old generation.
+                            if (GC_DEBUG) std.debug.print("NewGeneration.copyObject: Switching target to OldGeneration because future survivor space is full\n", .{});
+
+                            target.* = .OldGeneration;
+                            stats.tenured_bytes += object_size_bytes;
+                            break :blk heap.old_generation.allocate(heap.allocator, object_size_bytes) catch
+                                @panic("!!! Out of memory in old generation! (This should never happen since old generation grows dynamically)");
+                        },
+                    },
+                    .OldGeneration => blk: {
+                        stats.tenured_bytes += object_size_bytes;
+                        break :blk heap.old_generation.allocate(heap.allocator, object_size_bytes) catch
+                            @panic("!!! Out of memory in old generation! (This should never happen since old generation grows dynamically)");
+                    },
+                };
+
+                @memcpy(new_memory, old_memory);
+
+                // If the object was in our finalization set, update or move the entry.
+                if (self.finalization_set.swapRemove(old_memory)) {
+                    switch (target.*) {
+                        .FutureSurvivorSpace => {
+                            self.finalization_set.putAssumeCapacity(new_memory.ptr, {});
+                        },
+                        .OldGeneration => {
+                            try heap.old_generation.finalization_set.put(heap.allocator, new_memory.ptr, {});
+                        },
+                    }
+                }
+
+                old_memory[0] = @bitCast(Reference.createForwarding(new_memory.ptr));
+                return Reference.createRegular(new_memory.ptr);
+            }
+
+            /// Collect garbage in the new generation, copying objects from eden and the
+            /// past survivor space to the future survivor space.
+            pub fn collect(self: *NewGeneration, heap: *Self, stats: *GarbageCollectionStats) Allocator.Error!void {
+                var copy_target = CopyTarget.FutureSurvivorSpace;
+
+                // Assume that all the memory in the past survivor space is garbage at the
+                // start of the cycle. We'll decrement this as we copy objects over.
+                stats.freed_bytes += self.eden_used + self.past_survivor_used;
+
+                const future_survivor_space_initial_offset = self.future_survivor_used;
+                const old_generation_initial_latest_region = heap.old_generation.latest_region;
+                const old_generation_initial_latest_region_offset = if (old_generation_initial_latest_region) |region| region.used else 0;
+
+                // First, if necessary, tenure objects from the past survivor space to the
+                // old generation.
+                if (self.past_survivor_used >= (self.past_survivor.len * TENURE_THRESHOLD_PERCENT) / 100) {
+                    if (GC_DEBUG) std.debug.print("NewGeneration.collect: Tenuring past survivor space to old generation\n", .{});
+
+                    const Visitor = struct {
+                        heap: *Self,
+                        new_generation: *NewGeneration,
+                        stats: *GarbageCollectionStats,
+
+                        pub fn visit(visitor: *const @This(), value: *Value) !void {
+                            const reference = value.asReference() orelse return;
+                            var past_survivor_copy_target = CopyTarget.OldGeneration;
+                            const new_reference = try visitor.new_generation.copyReference(visitor.heap, &past_survivor_copy_target, visitor.stats, reference);
+                            value.* = new_reference.asValue();
+                        }
+                    };
+                    const visitor: Visitor = .{
+                        .heap = heap,
+                        .new_generation = self,
+                        .stats = stats,
+                    };
+
+                    var current_offset: usize = 0;
+                    while (current_offset < self.past_survivor_used) {
+                        const address: [*]u64 = @alignCast(@ptrCast(self.past_survivor.ptr + current_offset));
+                        const reference = Reference.createRegular(address);
+
+                        // If this is a forwarding reference, then the object being referenced has
+                        // already been copied, so the only thing we need to do is move forward.
+                        if (Reference.tryFromForwarding2(reference)) |forwarding_reference| {
+                            if (GC_SPAMMY_DEBUG) std.debug.print("NewGeneration.collect: Found forwarding reference {*} when tenuring to past survivor space\n", .{forwarding_reference.getAddress()});
+
+                            const new_object = forwarding_reference.asBaseObject();
+                            current_offset += new_object.getSizeInMemory();
+                        } else {
+                            const object = reference.asBaseObject();
+                            const object_size_bytes = object.getSizeInMemory();
+
+                            try object.visitEdges(visitor);
+                            // Since we're force-copying without using any roots, we don't care about the
+                            // new value we get back.
+                            var value = reference.asValue();
+                            try visitor.visit(&value);
+
+                            current_offset += object_size_bytes;
                         }
                     }
                 }
 
-                if (!target_space.objectSegmentContains(start_of_object)) {
-                    try target_space.addToRememberedSet(allocator, start_of_object, object_size_in_bytes);
+                const Visitor = struct {
+                    heap: *Self,
+                    new_generation: *NewGeneration,
+                    copy_target: *CopyTarget,
+                    stats: *GarbageCollectionStats,
+
+                    pub fn visit(visitor: *const @This(), value: *Value) !void {
+                        const reference = value.asReference() orelse return;
+                        const new_reference = try visitor.new_generation.copyReference(visitor.heap, visitor.copy_target, visitor.stats, reference);
+                        value.* = new_reference.asValue();
+                    }
+                };
+                const visitor: Visitor = .{
+                    .heap = heap,
+                    .new_generation = self,
+                    .copy_target = &copy_target,
+                    .stats = stats,
+                };
+
+                // Kick off the process by visiting roots.
+                try heap.root.visitEdges(visitor);
+
+                // Visit the heap handles.
+                for (&heap.handles) |*handle| {
+                    if (handle.*) |h| {
+                        var value = Value.fromObjectAddress(h);
+                        try visitor.visit(&value);
+                        handle.* = value.asReference().?.getAddress();
+                    }
+                }
+
+                // Iterate through the old generation's regions and check each
+                // card in the region's remembered set to see if there are any
+                // objects that are pointing to the new region.
+                var current_region = heap.old_generation.first_region;
+                while (current_region) |region| {
+                    current_region = region.next;
+
+                    for (region.remembered_set.cards, 0..) |card, index| {
+                        if (card == .Empty) continue;
+
+                        const card_start = index << RememberedSet.CARD_INDEX_SHIFT;
+                        const card_end = @min(region.used, (index + 1) << RememberedSet.CARD_INDEX_SHIFT);
+                        const first_offset = card.wordOffset() * Card.WORD_SIZE;
+
+                        // We hit the end of the region, so no point in going further.
+                        if (card_end < card_start) break;
+
+                        var offset = card_start + first_offset;
+                        while (offset < card_end) {
+                            const address: [*]u64 = @alignCast(@ptrCast(region.memory.ptr + offset));
+                            const reference = Reference.createRegular(address);
+
+                            const object = reference.asBaseObject();
+                            const object_size_bytes = object.getSizeInMemory();
+
+                            try object.visitEdges(visitor);
+
+                            offset += object_size_bytes;
+                        }
+                    }
+                }
+
+                // Cheney on the MTA: Try to catch up to the end of the future survivor
+                // space by scanning every object and copying over references to eden
+                // or the past survivor space.
+                var target_current_offset = future_survivor_space_initial_offset;
+                while (target_current_offset < self.future_survivor_used) {
+                    const address: [*]u64 = @alignCast(@ptrCast(self.future_survivor.ptr + target_current_offset));
+                    const reference = Reference.createRegular(address);
+
+                    const object = reference.asBaseObject();
+                    const object_size_bytes = object.getSizeInMemory();
+
+                    try object.visitEdges(visitor);
+
+                    target_current_offset += object_size_bytes;
+                }
+
+                // If our target switched to the old generation at any point, we need to
+                // also scan the objects in the old generation that have been added since
+                // the start of the garbage collection cycle.
+                if (copy_target == .OldGeneration) {
+                    target_current_offset = old_generation_initial_latest_region_offset;
+                    var current_scanned_region = old_generation_initial_latest_region;
+                    while (current_scanned_region) |region| {
+                        while (target_current_offset < region.used) {
+                            const address: [*]u64 = @alignCast(@ptrCast(region.memory.ptr + target_current_offset));
+                            const reference = Reference.createRegular(address);
+
+                            const object = reference.asBaseObject();
+                            const object_size_bytes = object.getSizeInMemory();
+
+                            try object.visitEdges(visitor);
+
+                            target_current_offset += object_size_bytes;
+                        }
+
+                        current_scanned_region = region.next;
+                        target_current_offset = 0;
+                    }
+                }
+
+                // Finalize any objects still in the finalization set and is part of eden
+                // or the past survivor space.
+                var new_finalization_set: FinalizationSet = .empty;
+                for (self.finalization_set.keys()) |address| {
+                    const reference = Reference.createRegular(address);
+                    switch (self.referenceLocation(reference)) {
+                        .Eden, .PastSurvivor => {
+                            const object = reference.asBaseObject();
+                            std.debug.assert(object.canFinalize());
+                            object.finalize(heap.allocator);
+                        },
+                        .FutureSurvivor => {
+                            try new_finalization_set.put(heap.allocator, address, {});
+                        },
+                        .Outside => @panic("!!! Finalization set contains object outside of new generation!"),
+                    }
+                }
+
+                self.finalization_set.deinit(heap.allocator);
+                self.finalization_set = new_finalization_set;
+
+                // We have now copied all the objects we need to, and can assume that the
+                // eden and past survivor spaces are completely empty.
+                self.eden_used = 0;
+                self.past_survivor_used = 0;
+
+                // Swap the past and future survivor spaces.
+                std.mem.swap([]align(@alignOf(u64)) u8, &self.past_survivor, &self.future_survivor);
+                std.mem.swap(usize, &self.past_survivor_used, &self.future_survivor_used);
+            }
+        };
+
+        const Card = enum(u8) {
+            Empty = 0xFF,
+            _,
+
+            pub const RANGE = 0x80;
+            pub const WORD_SIZE = @sizeOf(u64);
+            pub const MAXIMUM_WORD_OFFSET = RANGE - 1;
+            pub const MAXIMUM_BYTE_OFFSET = WORD_SIZE * MAXIMUM_WORD_OFFSET;
+
+            /// Create a card from the given offset (in bytes).
+            pub fn fromOffset(offset: u16) Card {
+                std.debug.assert(offset <= MAXIMUM_BYTE_OFFSET);
+                std.debug.assert(offset % WORD_SIZE == 0);
+
+                return @enumFromInt(@divExact(offset, WORD_SIZE));
+            }
+
+            /// Return the word offset for this card.
+            pub fn wordOffset(self: Card) u8 {
+                std.debug.assert(self != .Empty);
+                return @intFromEnum(self);
+            }
+        };
+
+        const RememberedSet = struct {
+            cards: []Card,
+
+            const BYTES_PER_CARD = Card.RANGE * Card.WORD_SIZE;
+            const CARD_INDEX_SHIFT = std.math.log2_int(usize, BYTES_PER_CARD);
+
+            comptime {
+                std.debug.assert(std.math.isPowerOfTwo(BYTES_PER_CARD));
+            }
+
+            /// Create a new remembered set based on the size (in bytes) of the
+            /// memory region that cards will be maintained for.
+            pub fn createFromSize(allocator: Allocator, size: usize) !RememberedSet {
+                std.debug.assert(size % BYTES_PER_CARD == 0);
+
+                const size_in_cards = @divExact(size, BYTES_PER_CARD);
+                const cards = try allocator.alloc(Card, size_in_cards);
+                @memset(cards, .Empty);
+
+                return .{ .cards = cards };
+            }
+
+            /// Destroy this remembered set.
+            pub fn destroy(self: *RememberedSet, allocator: Allocator) void {
+                allocator.free(self.cards);
+            }
+
+            /// Get the index in the cards array for this offset (in bytes)
+            /// inside the memory region.
+            fn cardIndex(offset: usize) usize {
+                return offset >> CARD_INDEX_SHIFT;
+            }
+
+            /// Mark the card corresponding to the given offset (in bytes).
+            pub fn mark(self: *RememberedSet, offset: usize) void {
+                const index = cardIndex(offset);
+                std.debug.assert(index < self.cards.len);
+
+                const card_offset: u16 = @intCast(offset % BYTES_PER_CARD);
+                const new_card = Card.fromOffset(card_offset);
+                // NOTE: The new generation will scan until the next card, so
+                //       we have to always point to the *first* object in the
+                //       region that must be remembered.
+                if (self.cards[index] == .Empty or
+                    self.cards[index].wordOffset() > new_card.wordOffset())
+                {
+                    self.cards[index] = new_card;
                 }
             }
-        }
 
-        // Go through any memory regions in newer spaces, and copy any
-        // referenced objects (and update these newer spaces' remembered sets).
-        // This ensures that new->old references are also preserved.
-        var newer_generation_link_it = newer_generation_link;
-        while (newer_generation_link_it) |link| {
-            if (GC_DEBUG) std.debug.print("Space.cheneyCommon: Scanning newer generation {s}\n", .{link.space.name});
+            /// Reset the remembered set.
+            pub fn reset(self: *RememberedSet) void {
+                @memset(self.cards, .Empty);
+            }
+        };
 
-            const newer_generation_space = link.space;
+        /// A single region within the old generation.
+        const Region = struct {
+            memory: []align(@alignOf(u64)) u8,
 
-            // Update all the addresses in the newer space with the new
-            // locations in the target space
-            for (newer_generation_space.object_segment) |*word| {
-                const value: Value = @bitCast(word.*);
-                if (value.asReference()) |reference| {
-                    if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon: Scanning newer generation reference {*} ({*})\n", .{ reference.getAddress(), word });
-                    if (try self.copyAddress(allocator, reference.getAddress(), target_space, false)) |new_address| {
-                        if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon:   -> copied to {*}\n", .{new_address});
-                        word.* = @bitCast(Value.fromObjectAddress(new_address));
+            /// The next region in the list.
+            next: ?*Region,
+            /// How many bytes are currently used within this region.
+            used: usize,
+
+            remembered_set: RememberedSet,
+
+            pub fn create(allocator: Allocator) !*Region {
+                // TODO: Instead of doing two disjoint allocations, allocate
+                //       OLD_GENERATION_REGION_SIZE + @sizeOf(Region) and then
+                //       split it up into the region and the memory.
+                const self = try allocator.create(Region);
+                errdefer allocator.destroy(self);
+
+                const memory = try allocator.alignedAlloc(u8, .of(u64), OLD_GENERATION_REGION_SIZE);
+                errdefer allocator.free(memory);
+
+                const remembered_set = try RememberedSet.createFromSize(allocator, OLD_GENERATION_REGION_SIZE);
+
+                self.* = .{
+                    .memory = memory,
+                    .next = null,
+                    .used = 0,
+                    .remembered_set = remembered_set,
+                };
+
+                return self;
+            }
+
+            pub fn destroy(self: *Region, allocator: Allocator) void {
+                self.remembered_set.destroy(allocator);
+                allocator.free(self.memory);
+                allocator.destroy(self);
+            }
+
+            /// Reset this region's state. All contents will be assumed to be
+            /// garbage.
+            pub fn reset(self: *Region) void {
+                self.used = 0;
+                self.remembered_set.reset();
+            }
+
+            // --- Memory Stats ---
+
+            /// Get the number of bytes available in this region.
+            pub fn availableMemory(self: *Region) usize {
+                return self.memory.len - self.used;
+            }
+
+            // --- Allocation ---
+
+            /// Allocate the given number of bytes from this region.
+            fn allocate(self: *Region, bytes: usize) ![]u64 {
+                std.debug.assert(bytes % @sizeOf(u64) == 0);
+
+                if (self.used + bytes > self.memory.len) {
+                    return error.OutOfMemory;
+                }
+
+                const memory: []align(@alignOf(u64)) u8 = @alignCast(self.memory[self.used..][0..bytes]);
+                self.used += bytes;
+
+                return std.mem.bytesAsSlice(u64, memory);
+            }
+
+            // --- Remembered Set Handling ---
+
+            /// Remember the given absolute memory address by marking it down
+            /// in the remembered set.
+            /// Returns true if the address was recorded, or false if the
+            /// address doesn't belong to this region.
+            pub fn rememberAddress(self: *Region, address: [*]u64) bool {
+                const address_value = @intFromPtr(address);
+                const region_start = @intFromPtr(self.memory.ptr);
+                const region_end = @intFromPtr(self.memory.ptr + self.memory.len);
+
+                if (!(address_value >= region_start and address_value < region_end))
+                    return false;
+
+                self.remembered_set.mark(address_value - region_start);
+                return true;
+            }
+        };
+
+        /// The old generation. This is a mark-compact garbage collector. The
+        /// memory is split into regions to allow it to grow dynamically.
+        const OldGeneration = struct {
+            /// The first region in the list of regions. The regions are linked
+            /// together in a singly-linked list.
+            first_region: ?*Region,
+            /// The latest region in the list of regions. This is used to
+            /// allocate new memory.
+            latest_region: ?*Region,
+
+            /// Singly-linked list of regions that can be reused. When regions
+            /// are freed, they are added to this list (up to a certain limit).
+            first_free_region: ?*Region,
+
+            /// The number of regions that remained allocated the last time a
+            /// major garbage collection cycle was performed. This is used to
+            /// determine whether we should collect or not.
+            high_water_mark: u32,
+            /// The number of currently-allocated regions (does not include regions
+            /// that are in the free list).
+            active_regions: u32,
+            /// The number of free regions that are currently available.
+            free_regions: u32,
+
+            /// The total number of bytes used in the old generation.
+            used: usize,
+
+            finalization_set: FinalizationSet,
+
+            /// Initialize the old generation.
+            pub fn create(allocator: Allocator) !*OldGeneration {
+                const self = try allocator.create(OldGeneration);
+                errdefer allocator.destroy(self);
+
+                self.* = .{
+                    .first_region = null,
+                    .latest_region = null,
+                    .first_free_region = null,
+                    .high_water_mark = INITIAL_HIGH_WATER_MARK,
+                    .active_regions = 0,
+                    .free_regions = 0,
+                    .used = 0,
+                    .finalization_set = .empty,
+                };
+
+                return self;
+            }
+
+            /// Deinitialize the old generation.
+            pub fn destroy(self: *OldGeneration, allocator: Allocator) void {
+                var region = self.first_free_region;
+                while (region) |r| {
+                    const next = r.next;
+                    r.destroy(allocator);
+                    region = next;
+                }
+
+                region = self.first_region;
+                while (region) |r| {
+                    const next = r.next;
+                    r.destroy(allocator);
+                    region = next;
+                }
+
+                // Finalize everything in the finalization set.
+                for (self.finalization_set.keys()) |address| {
+                    const reference = Reference.createRegular(address);
+                    const object = reference.asBaseObject();
+                    std.debug.assert(object.canFinalize());
+                    object.finalize(allocator);
+                }
+
+                self.finalization_set.deinit(allocator);
+                allocator.destroy(self);
+            }
+
+            // --- Heap Traversal ---
+
+            /// Visit all objects on the heap. Not all objects may be alive, but all
+            /// objects will be valid.
+            pub fn visitAllObjects(self: *const OldGeneration, visitor: anytype) !void {
+                var current_region = self.first_region;
+                while (current_region) |region| {
+                    current_region = region.next;
+
+                    var current_offset: usize = 0;
+                    while (current_offset < region.used) {
+                        const address: [*]u64 = @alignCast(@ptrCast(region.memory.ptr + current_offset));
+                        const reference = Reference.createRegular(address);
+                        const object = reference.asBaseObject();
+                        // XXX: Dynamic dispatch
+                        const object_size_bytes = object.getSizeInMemory();
+
+                        try object.visitEdges(visitor);
+
+                        current_offset += object_size_bytes;
                     }
                 }
             }
 
-            newer_generation_link_it = link.previous;
-        }
+            // --- Allocation ---
 
-        if (GC_DEBUG) std.debug.print(
-            "Space.cheneyCommon: Trying to catch up from object segment offset {} to {}\n",
-            .{ target_object_segment_index, target_space.object_segment.len },
-        );
+            /// Allocate the given number of bytes from the old generation.
+            pub fn allocate(self: *OldGeneration, allocator: Allocator, bytes: usize) ![]u64 {
+                std.debug.assert(bytes % @sizeOf(u64) == 0);
 
-        // Try to catch up to the target space's object and byte array cursors,
-        // copying any other objects/byte arrays that still exist in this
-        // space.
-        while (target_object_segment_index < target_space.object_segment.len) : (target_object_segment_index += 1) {
-            const word_ptr = &target_space.object_segment[target_object_segment_index];
-            const value: Value = @bitCast(word_ptr.*);
+                const latest_region = self.latest_region orelse {
+                    // No regions have been allocated yet. Allocate a new one.
+                    try self.makeFreeRegion(allocator);
+                    return try self.allocate(allocator, bytes);
+                };
 
-            if (value.asReference()) |reference| {
-                if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon: Scanning copied reference {*} ({*})\n", .{ reference.getAddress(), word_ptr });
-                if (try self.copyAddress(allocator, reference.getAddress(), target_space, false)) |new_address| {
-                    if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon:   -> copied to {*}\n", .{new_address});
-                    word_ptr.* = @bitCast(Value.fromObjectAddress(new_address));
-                }
+                const memory = latest_region.allocate(bytes) catch |err| switch (err) {
+                    error.OutOfMemory => {
+                        // The latest region is full. Try to allocate a new one.
+                        try self.makeFreeRegion(allocator);
+                        return try self.allocate(allocator, bytes);
+                    },
+                };
+
+                self.used += bytes;
+                return memory;
             }
-        }
 
-        std.debug.assert(target_object_segment_index == target_space.object_segment.len);
+            /// Get the number of bytes available in the old generation. Any
+            /// wasted space at the end of regions except the latest isn't
+            /// counted.
+            pub fn availableMemory(self: *OldGeneration) usize {
+                return if (self.latest_region) |region| region.availableMemory() else 0;
+            }
 
-        // Notify any object who didn't make it out of this space and wanted to
-        // be notified about being finalized.
-        for (self.finalization_set.keys()) |address| {
-            const base_object = BaseObject.fromAddress(address);
-            base_object.finalize(allocator);
-        }
+            /// Return whether the old generation contains the given reference.
+            pub fn contains(self: *OldGeneration, heap: *Self, reference: Reference) bool {
+                _ = self;
+                return !heap.new_generation.contains(reference);
+            }
 
-        // Go through all the newer generations again, and remove or replace all
-        // the items in the remembered set which point to this space.
-        //
-        // NOTE: Must happen AFTER all copying of objects is finished, as we
-        //       need to know which objects survived the scavenge and which ones
-        //       did not - the ones which didn't survive the scavenge will
-        //       simply be removed from the remembered set, while the ones which
-        //       did must be replaced with the new object in the target space.
-        newer_generation_link_it = newer_generation_link;
-        while (newer_generation_link_it) |link| {
-            if (GC_DEBUG) std.debug.print("Space.cheneyCommon: Updating remembered set of newer generation {s}\n", .{link.space.name});
+            // --- Remembered Set Handling ---
 
-            const newer_generation_space = link.space;
-            // NOTE: Must create a copy, as we're modifying entries in the
-            //       remembered set
-            var remembered_set_copy = try newer_generation_space.remembered_set.clone(allocator);
-            defer remembered_set_copy.deinit(allocator);
+            /// Remember the given absolute memory address by marking it down in
+            /// the respective region's remembered set.
+            /// Returns true if the address was recorded, or false if the address
+            /// doesn't belong to the old generation.
+            pub fn rememberAddress(self: *OldGeneration, address: [*]u64) bool {
+                var current_region = self.first_region;
+                while (current_region) |region| {
+                    current_region = region.next;
 
-            var remembered_set_iterator = remembered_set_copy.iterator();
-            while (remembered_set_iterator.next()) |entry| {
-                const object_address = entry.key_ptr.*;
-                const object_size = entry.value_ptr.*;
+                    if (region.rememberAddress(address)) return true;
+                }
 
-                if (self.objectSegmentContains(object_address)) {
-                    if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon: Updating remembered set entry {*} ({} bytes)\n", .{ object_address, object_size });
+                return false;
+            }
 
-                    if (Reference.tryFromForwarding(object_address)) |forwarding_reference| {
-                        if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon:   -> forwarding reference, updating to {*}\n", .{forwarding_reference.getAddress()});
-                        // Yes, the object's been copied. Replace the entry in
-                        // the remembered set.
-                        const new_address = forwarding_reference.getAddress();
-                        newer_generation_space.removeFromRememberedSet(object_address) catch unreachable;
-                        // Hopefully the object size has not changed somehow
-                        // during a GC. :^)
-                        try newer_generation_space.addToRememberedSet(allocator, new_address, object_size);
+            // --- Region Management ---
+
+            /// Try to find a free region, either through the free region list or by
+            /// allocating a new one.
+            fn makeFreeRegion(self: *OldGeneration, allocator: Allocator) !void {
+                const new_region = new_region: {
+                    if (self.first_free_region) |free_region| {
+                        // Recycle a free region.
+                        self.first_free_region = free_region.next;
+                        free_region.next = null;
+                        self.free_regions -= 1;
+
+                        break :new_region free_region;
                     } else {
-                        if (GC_SPAMMY_DEBUG) std.debug.print("Space.cheneyCommon:   -> object didn't survive the scavenge, removing\n", .{});
-                        // No, the object didn't survive the scavenge.
-                        newer_generation_space.removeFromRememberedSet(object_address) catch unreachable;
+                        // No free regions available. Allocate a new one.
+                        const region = try Region.create(allocator);
+                        break :new_region region;
+                    }
+                };
+
+                if (self.latest_region) |latest_region| {
+                    latest_region.next = new_region;
+                } else {
+                    // If we don't have a latest region, then we don't have a first
+                    // region either.
+                    self.first_region = new_region;
+                }
+
+                self.latest_region = new_region;
+                self.active_regions += 1;
+            }
+
+            // --- Garbage Collection ---
+
+            pub fn shouldCollect(self: *OldGeneration) bool {
+                // TODO: Currently we use the very simple heuristic of region
+                //       count. In the future, we could use a more sophisticated
+                //       approach like:
+                //       1. Time-based major GC for programs with stable memory
+                //          footprint.
+                //       2. Increase or decrease collection multiplier based on
+                //          allocation and garbage collection rate.
+
+                return self.active_regions >= self.high_water_mark * COLLECTION_HWM_MULTIPLIER;
+            }
+
+            fn visitRootsAndNewGeneration(heap: *Self, visitor: anytype) !void {
+                // Visit the heap roots (whatever they may be).
+                if (GC_SPAMMY_DEBUG) std.debug.print("OldGeneration.collect: Visiting heap roots\n", .{});
+                try heap.root.visitEdges(visitor);
+
+                // Visit the heap handles.
+                if (GC_SPAMMY_DEBUG) std.debug.print("OldGeneration.collect: Visiting handles\n", .{});
+                for (&heap.handles) |*handle| {
+                    if (handle.*) |h| {
+                        var value = Value.fromObjectAddress(h);
+                        try visitor.visit(&value);
+                    }
+                }
+
+                // Visit eden and the past survivor space, since they can point into
+                // the old generation.
+                var current_offset: usize = 0;
+
+                if (GC_SPAMMY_DEBUG) std.debug.print("OldGeneration.collect: Visiting all eden objects\n", .{});
+                while (current_offset < heap.new_generation.eden_used) {
+                    const address: [*]u64 = @alignCast(@ptrCast(heap.new_generation.eden.ptr + current_offset));
+                    const reference = Reference.createRegular(address);
+
+                    const object = reference.asBaseObject();
+                    try object.visitEdges(visitor);
+
+                    current_offset += object.getSizeInMemory();
+                }
+
+                if (GC_SPAMMY_DEBUG) std.debug.print("OldGeneration.collect: Visiting all past survivor objects\n", .{});
+                while (current_offset < heap.new_generation.past_survivor_used) {
+                    const address: [*]u64 = @alignCast(@ptrCast(heap.new_generation.past_survivor.ptr + current_offset));
+                    const reference = Reference.createRegular(address);
+
+                    const object = reference.asBaseObject();
+                    try object.visitEdges(visitor);
+
+                    current_offset += object.getSizeInMemory();
+                }
+            }
+
+            /// Collect garbage in the old generation using a mark-compact algorithm.
+            pub fn collect(self: *OldGeneration, heap: *Self, stats: *GarbageCollectionStats) !void {
+                if (GC_DEBUG) std.debug.print("OldGeneration.collect: Performing major collection\n", .{});
+
+                const first_region = self.first_region orelse {
+                    // No regions have been allocated yet! There's no garbage to collect.
+                    if (GC_DEBUG) std.debug.print("OldGeneration.collect: No regions allocated, nothing to collect\n", .{});
+                    return;
+                };
+
+                // Assume everything is garbage at the start of the cycle.
+                const initial_used = self.used;
+                stats.freed_bytes += self.used;
+
+                if (GC_SPAMMY_DEBUG) std.debug.print("OldGeneration.collect: Initial used size: {} bytes\n", .{initial_used});
+
+                var arena: std.heap.ArenaAllocator = .init(heap.allocator);
+                defer arena.deinit();
+                const allocator = arena.allocator();
+
+                // NOTE: All allocations in the code below are done with the arena above,
+                //       so deinitialization steps are intentionally omitted.
+
+                var gray_queue: std.ArrayListUnmanaged([*]u64) = .empty;
+                var black_set: std.AutoArrayHashMapUnmanaged([*]u64, void) = .empty;
+
+                const MarkVisitor = struct {
+                    allocator: Allocator,
+                    new_generation: *NewGeneration,
+                    gray_queue: *std.ArrayListUnmanaged([*]u64),
+                    black_set: *std.AutoArrayHashMapUnmanaged([*]u64, void),
+
+                    pub fn visit(visitor: *const @This(), value: *Value) !void {
+                        const reference = value.asReference() orelse return;
+                        const address = reference.getAddress();
+
+                        // If the object is already known to be alive, we don't need to visit it.
+                        if (visitor.black_set.contains(address)) {
+                            return;
+                        }
+
+                        // Make sure we only include objects that are actually in the old
+                        // generation. If the heap is sound, this means that the object
+                        // is *not* in the new generation (so we don't have to linearly
+                        // check all of our regions for it).
+                        if (visitor.new_generation.referenceLocation(reference) != .Outside) {
+                            return;
+                        }
+
+                        if (GC_SPAMMY_DEBUG) std.debug.print("OldGeneration.collect: Found object at {*} to mark\n", .{address});
+                        try visitor.gray_queue.append(visitor.allocator, address);
+                        try visitor.black_set.put(visitor.allocator, address, {});
+                    }
+                };
+                const mark_visitor: MarkVisitor = .{
+                    .allocator = allocator,
+                    .new_generation = heap.new_generation,
+                    .gray_queue = &gray_queue,
+                    .black_set = &black_set,
+                };
+
+                // Kick off the marking process by visiting all the roots.
+                if (GC_SPAMMY_DEBUG) std.debug.print("OldGeneration.collect: Performing initial mark\n", .{});
+                try visitRootsAndNewGeneration(heap, mark_visitor);
+
+                // Start popping from the gray queue, and visit all the objects reachable
+                // from there.
+                if (GC_SPAMMY_DEBUG) std.debug.print("OldGeneration.collect: Visiting gray queue\n", .{});
+                while (gray_queue.pop()) |address| {
+                    const reference = Reference.createRegular(address);
+
+                    const object = reference.asBaseObject();
+                    try object.visitEdges(mark_visitor);
+                }
+
+                // Now that we've marked all the live objects, we can compact the heap.
+                // Note that unlike with the new generation, which is a moving collector,
+                // we have to store the new addresses of the objects in an out-of-band table
+                // since we will most likely overwrite the forwarding addresses.
+                var remap_table: std.AutoArrayHashMapUnmanaged([*]u64, [*]u64) = .empty;
+                var current_total_used: usize = 0;
+                var first_empty_region: ?*Region = null;
+                var new_active_regions: u32 = 0;
+
+                // Go through every object and find the ones in the black set, and compact
+                // them to the left. For all the ones that are not in the black set, finalize
+                // them if necessary.
+                //
+                // NOTE: We can't just go through the black set, since this is an overwriting
+                //       GC method, and we need to maintain a strict ordering of the
+                //       objects to scan.
+                {
+                    var current_scanned_region: ?*Region = first_region;
+                    var current_allocation_region = first_region;
+                    while (current_scanned_region) |scanned_region| {
+                        const previously_used = scanned_region.used;
+                        var offset: usize = 0;
+
+                        // NOTE: We conceptually create a "shadow copy" of the region here by
+                        //       resetting it (which essentially means everything is treated
+                        //       as garbage). Afterwards we will pick the objects that are
+                        //       still alive and compact them to the left. This is guaranteed
+                        //       to be safe since it's impossible to have more surviving
+                        //       objects than the objects that were in the region initially.
+                        scanned_region.reset();
+
+                        while (offset < previously_used) {
+                            const address: [*]u64 = @alignCast(@ptrCast(scanned_region.memory.ptr + offset));
+                            const reference = Reference.createRegular(address);
+
+                            const object = reference.asBaseObject();
+                            // XXX: Dynamic dispatch happens here. If there is a heap corruption
+                            //      bug, it will likely start here.
+                            const object_size_bytes = object.getSizeInMemory();
+
+                            if (black_set.contains(address)) {
+                                const old_memory = address[0..@divExact(object_size_bytes, @sizeOf(u64))];
+                                const new_memory = current_allocation_region.allocate(object_size_bytes) catch |err| new_address: switch (err) {
+                                    error.OutOfMemory => {
+                                        // Switch over to the next region to begin allocating.
+                                        current_allocation_region = current_allocation_region.next orelse
+                                            @panic("!!! Somehow tried to allocate more memory while garbage collecting than what was previously used?!");
+                                        if (current_allocation_region.used != 0)
+                                            @panic("!!! Allocation region is ahead of scan region?!");
+
+                                        new_active_regions += 1;
+                                        break :new_address current_allocation_region.allocate(object_size_bytes) catch
+                                            @panic("!!! Failed to allocate even after switching allocation regions!");
+                                    },
+                                };
+
+                                if (GC_SPAMMY_DEBUG) std.debug.print("OldGeneration.collect: Copying alive object {*} to {*}\n", .{ old_memory, new_memory });
+                                try remap_table.put(allocator, address, new_memory.ptr);
+                                std.mem.copyForwards(u64, new_memory, old_memory);
+                                current_total_used += object_size_bytes;
+
+                                if (self.finalization_set.swapRemove(address)) {
+                                    // If this object was in the finalization set, we need to
+                                    // update the entry to point to the new address.
+                                    self.finalization_set.putAssumeCapacity(new_memory.ptr, {});
+                                }
+                            } else {
+                                if (self.finalization_set.swapRemove(address)) {
+                                    std.debug.assert(object.canFinalize());
+                                    object.finalize(heap.allocator);
+                                }
+                            }
+
+                            offset += object_size_bytes;
+                        }
+
+                        current_scanned_region = scanned_region.next;
+                    }
+
+                    // Ensure that we reset all the remaining regions beyond the
+                    // current allocation, since anything beyond the current
+                    // region is only dead objects.
+                    //
+                    // TODO: Support compacting away even the first region if
+                    //       no objects survived.
+                    first_empty_region = current_allocation_region.next;
+                    current_allocation_region.next = null;
+                    self.latest_region = current_allocation_region;
+                    if (first_empty_region) |empty_region| {
+                        var region: ?*Region = empty_region;
+                        while (region) |r| {
+                            r.reset();
+                            region = r.next;
+                        }
+                    }
+                }
+
+                self.used = current_total_used;
+                self.active_regions = new_active_regions;
+                self.high_water_mark = new_active_regions;
+
+                const RemapVisitor = struct {
+                    remap_table: *std.AutoArrayHashMapUnmanaged([*]u64, [*]u64),
+
+                    pub fn visit(visitor: *const @This(), value: *Value) !void {
+                        const reference = value.asReference() orelse return;
+                        const address = reference.getAddress();
+
+                        if (visitor.remap_table.get(address)) |new_address| {
+                            value.* = Value.fromObjectAddress(new_address);
+                        }
+                    }
+                };
+                const remap_visitor: RemapVisitor = .{ .remap_table = &remap_table };
+
+                // Go through all the existing objects and remap the references.
+                if (GC_SPAMMY_DEBUG) std.debug.print("OldGeneration.collect: Remapping all external objects\n", .{});
+                try visitRootsAndNewGeneration(heap, remap_visitor);
+
+                // Do the same for all of our surviving objects in the old generation.
+                {
+                    var current_remap_region: ?*Region = first_region;
+                    while (current_remap_region) |remap_region| {
+                        var offset: usize = 0;
+                        while (offset < remap_region.used) {
+                            const address: [*]u64 = @alignCast(@ptrCast(remap_region.memory.ptr + offset));
+                            const reference = Reference.createRegular(address);
+
+                            const object = reference.asBaseObject();
+                            try object.visitEdges(remap_visitor);
+
+                            offset += object.getSizeInMemory();
+                        }
+
+                        current_remap_region = remap_region.next;
+                    }
+                }
+
+                const RememberedSetVisitor = struct {
+                    new_generation: *NewGeneration,
+                    old_generation: *OldGeneration,
+                    found: bool,
+
+                    pub fn visit(visitor: *@This(), value: *Value) !void {
+                        const reference = value.asReference() orelse return;
+                        const address = reference.getAddress();
+
+                        switch (visitor.new_generation.referenceLocation(reference)) {
+                            .Outside => return,
+                            .FutureSurvivor => std.debug.panic("!!! Old generation object pointing to future survivor space address {*}?!", .{address}),
+                            .Eden, .PastSurvivor => {},
+                        }
+
+                        // TODO: Find a way to short-circuit this.
+                        visitor.found = true;
+                    }
+                };
+                var remembered_set_visitor: RememberedSetVisitor = .{
+                    .new_generation = heap.new_generation,
+                    .old_generation = self,
+                    .found = false,
+                };
+
+                // Go through all objects once more and reconstruct the
+                // remembered sets for each region.
+                {
+                    var current_rs_region: ?*Region = first_region;
+                    while (current_rs_region) |rs_region| {
+                        var offset: usize = 0;
+                        while (offset < rs_region.used) {
+                            remembered_set_visitor.found = false;
+
+                            const address: [*]u64 = @alignCast(@ptrCast(rs_region.memory.ptr + offset));
+                            const reference = Reference.createRegular(address);
+
+                            const object = reference.asBaseObject();
+                            try object.visitEdges(&remembered_set_visitor);
+
+                            if (remembered_set_visitor.found) {
+                                const did_remember = rs_region.rememberAddress(reference.getAddress());
+                                std.debug.assert(did_remember);
+                            }
+
+                            offset += object.getSizeInMemory();
+                        }
+
+                        current_rs_region = rs_region.next;
+                    }
+                }
+
+                stats.old_compacted_bytes = initial_used - self.used;
+                stats.freed_bytes -= self.used;
+
+                if (GC_DEBUG) std.debug.print("OldGeneration.collect: Collected {} bytes, {} bytes remain in old generation\n", .{ stats.old_compacted_bytes, self.used });
+
+                self.compactRegions(heap.allocator, first_empty_region);
+            }
+
+            /// Recycle or free all the regions starting from the given region.
+            /// This will free the regions if the number of regions is greater
+            /// than MAX_RECYCLED_REGIONS, otherwise it will recycle them.
+            fn compactRegions(self: *OldGeneration, allocator: Allocator, first_region: ?*Region) void {
+                var current_region = first_region;
+                while (current_region) |r| {
+                    current_region = r.next;
+
+                    if (self.free_regions == MAX_RECYCLED_REGIONS) {
+                        // Free the region.
+                        r.destroy(allocator);
+                    } else {
+                        // Recycle the region.
+                        r.next = self.first_free_region;
+                        self.first_free_region = r;
+                        self.free_regions += 1;
                     }
                 }
             }
+        };
 
-            newer_generation_link_it = link.previous;
-        }
+        // TODO: This is a silly way of implementing handles, because we have to
+        //       manually load in the new values after every safepoint when the GC
+        //       can do that for us if we just tell it where the values are. Additionally,
+        //       we have to make the handles heap-global. Instead, reimplement it like in
+        //       https://bernsteinbear.com/blog/scrapscript-baseline/#inside-the-runtime-handles
+        //       where the handles are stored locally in the stack frame (forming a
+        //       linked list of arrays) and assign pointers to stack locals inside
+        //       the handle slots instead of the other way around. This way we don't
+        //       really have to worry about safe points at all (so AllocationToken
+        //       may also become unnecessary).
+        /// A handle. This can be in one of two states:
+        /// - Literal: Holds a non-reference value. In this state no heap interaction
+        ///   is necessary.
+        /// - Reference: Holds a reference value. In this state, a handle slot is
+        ///   allocated in the heap.
+        pub const Handle = struct {
+            value: union(enum) {
+                Literal: Value,
+                Reference: *?[*]u64,
+            },
 
-        // REVIEW: When Zig fixes its zero-length arrays to not create a slice
-        //         with an undefined address, get rid of this and just use
-        //         memory[0..0].
-        var runtime_zero: usize = 0;
-        _ = &runtime_zero;
+            /// Initialize this handle.
+            pub fn init(heap: *Self, value: Value) Handle {
+                return switch (value.type) {
+                    .Integer => .{ .value = .{ .Literal = value } },
+                    .Object => {
+                        const reference = value.asReference().?;
 
-        // Reset this space's segments, tracked set, remembered set and
-        // finalization set, as it is now effectively empty.
-        self.object_segment = self.memory[0..runtime_zero];
-        self.byte_array_segment = (self.memory.ptr + self.memory.len)[0..runtime_zero];
-        self.remembered_set.clearRetainingCapacity();
-        self.finalization_set.clearRetainingCapacity();
-    }
-
-    /// Performs a garbage collection operation on this space.
-    ///
-    /// This method performs either a scavenge or a tenure; if a scavenge target
-    /// is defined for this space, it first attempts a scavenge. If not enough
-    /// memory is cleaned up by a scavenge operation, or there wasn't a defined
-    /// scavenge target, a *tenure* is attempted towards the tenure target of
-    /// this space. If a tenure target is not specified either, then the heap is
-    /// simply expanded to accomodate the new objects.
-    pub fn collectGarbage(self: *Space, allocator: Allocator, required_memory: usize) !void {
-        try self.collectGarbageInternal(allocator, required_memory, null);
-    }
-
-    /// Performs the actual operation as described in collectGarbage. Takes an
-    /// additional memory_link argument, which describes a set of memory areas
-    /// to scan after a garbage collection is done for stale references.
-    fn collectGarbageInternal(
-        self: *Space,
-        allocator: Allocator,
-        required_memory: usize,
-        newer_generation_link: ?*const NewerGenerationLink,
-    ) !void {
-        // See if we already have the required memory amount.
-        if (self.freeMemory() >= required_memory) return;
-
-        if (GC_DEBUG) std.debug.print("Space.collectGarbage: Attempting to garbage collect in {s}\n", .{self.name});
-
-        const gc_zone_name = if (tracy.enable) try std.fmt.allocPrint(allocator, "Garbage Collection in {s}", .{self.name}) else {};
-        defer if (tracy.enable) allocator.free(gc_zone_name);
-        const gc_zone = tracy.trace(@src());
-        if (tracy.enable) gc_zone.setName(gc_zone_name);
-        defer gc_zone.end();
-
-        // See if we can perform a scavenge first.
-        if (self.scavenge_target) |scavenge_target| {
-            if (GC_DEBUG) std.debug.print("Space.collectGarbage: Attempting to perform a scavenge to my scavenge target, {s}\n", .{scavenge_target.name});
-            try self.cheneyCommon(allocator, scavenge_target, newer_generation_link);
-            self.swapMemoryWith(scavenge_target);
-
-            if (self.freeMemory() >= required_memory) {
-                if (GC_DEBUG) std.debug.print("Space.collectGarbage: Scavenging was sufficient. {} bytes now free in {s}.\n", .{ self.freeMemory(), self.name });
-                return;
-            }
-        }
-
-        // Looks like the scavenge didn't give us enough memory. Let's attempt a
-        // tenure.
-        if (self.tenure_target) |tenure_target| {
-            const tenure_target_previous_free_memory: isize = @intCast(tenure_target.freeMemory());
-
-            if (GC_DEBUG) std.debug.print("Space.collectGarbage: Attempting to tenure to {s}\n", .{tenure_target.name});
-            try self.cheneyCommon(allocator, tenure_target, newer_generation_link);
-
-            // FIXME: Return an error instead of panicing when the allocation
-            //        is too large for this space. How should we handle large
-            //        allocations anyway?
-            if (self.freeMemory() < required_memory) {
-                std.debug.panic("!!! Could not free enough space in {s} even after tenuring! ({} bytes free, {} required)\n", .{ self.name, self.freeMemory(), required_memory });
+                        const handle = heap.allocateHandleSlot();
+                        handle.* = reference.getAddress();
+                        return .{ .value = .{ .Reference = handle } };
+                    },
+                };
             }
 
-            if (GC_DEBUG) {
-                const tenure_target_current_free_memory: isize = @intCast(tenure_target.freeMemory());
-                const free_memory_diff = tenure_target_previous_free_memory - tenure_target_current_free_memory;
-
-                std.debug.print("Space.collectGarbage: Successfully tenured, {} bytes now free in {s}.\n", .{ self.freeMemory(), self.name });
-                if (free_memory_diff < 0) {
-                    std.debug.print("Space.collectGarbage: (Tenure target {s} LOST {} bytes, target did a GC?)\n", .{ tenure_target.name, -free_memory_diff });
-                } else {
-                    std.debug.print("Space.collectGarbage: (Tenure target {s} gained {} bytes)\n", .{ tenure_target.name, free_memory_diff });
+            /// Stop tracking the value in this handle.
+            pub fn deinit(self: *Handle, heap: *Self) void {
+                switch (self.value) {
+                    .Literal => {},
+                    .Reference => |handle| {
+                        heap.freeHandleSlot(handle);
+                    },
                 }
             }
-            return;
-        }
 
-        if (GC_TRACK_SOURCE_DEBUG) {
-            self.heap.printTrackLocationCounts();
-        }
-
-        std.debug.panic("TODO expanding a space which doesn't have a tenure or scavenge target", .{});
-    }
-
-    fn swapMemoryWith(self: *Space, target_space: *Space) void {
-        std.mem.swap([]u64, &self.memory, &target_space.memory);
-        std.mem.swap([]u64, &self.object_segment, &target_space.object_segment);
-        std.mem.swap([]u64, &self.byte_array_segment, &target_space.byte_array_segment);
-        std.mem.swap(RememberedSet, &self.remembered_set, &target_space.remembered_set);
-        std.mem.swap(FinalizationSet, &self.finalization_set, &target_space.finalization_set);
-    }
-
-    fn objectSegmentContains(self: *Space, address: [*]u64) bool {
-        if (self.lazy_allocate)
-            return false;
-
-        const start_of_object_segment = @intFromPtr(self.object_segment.ptr);
-        const end_of_object_segment = @intFromPtr(self.object_segment.ptr + self.object_segment.len);
-        const address_value = @intFromPtr(address);
-
-        return address_value >= start_of_object_segment and address_value < end_of_object_segment;
-    }
-
-    fn byteArraySegmentContains(self: *Space, address: [*]u64) bool {
-        if (self.lazy_allocate)
-            return false;
-
-        const start_of_byte_array_segment = @intFromPtr(self.byte_array_segment.ptr);
-        const end_of_byte_array_segment = @intFromPtr(self.byte_array_segment.ptr + self.byte_array_segment.len);
-        const address_value = @intFromPtr(address);
-
-        return address_value >= start_of_byte_array_segment and address_value < end_of_byte_array_segment;
-    }
-
-    /// Allocates the requested amount in bytes in the object segment of this
-    /// space. Panics if there isn't enough memory.
-    fn allocateInObjectSegment(self: *Space, allocator: Allocator, size: usize) ![*]u64 {
-        if (self.lazy_allocate)
-            try self.allocateMemory(allocator);
-
-        const size_in_words = @divExact(size, @sizeOf(u64));
-        const current_object_segment_offset = self.object_segment.len;
-        self.object_segment.len += size_in_words;
-        const start_of_object: [*]u64 = @ptrCast(&self.object_segment[current_object_segment_offset]);
-
-        if (builtin.mode == .Debug) {
-            const start_of_object_aligned: [*]align(@alignOf(u64)) u8 = @ptrCast(start_of_object);
-            @memset(start_of_object_aligned[0..size], UninitializedHeapScrubByte);
-        }
-
-        return start_of_object;
-    }
-
-    /// Allocates the requested amount in bytes in the byte array segment of
-    /// this space. Panics if there isn't enough memory.
-    fn allocateInByteArraySegment(self: *Space, allocator: Allocator, size: usize) ![*]u64 {
-        if (self.lazy_allocate)
-            try self.allocateMemory(allocator);
-
-        const size_in_words = @divExact(size, @sizeOf(u64));
-        self.byte_array_segment.ptr -= size_in_words;
-        self.byte_array_segment.len += size_in_words;
-
-        if (builtin.mode == .Debug) {
-            const array_segment_ptr_aligned: [*]align(@alignOf(u64)) u8 = @ptrCast(self.byte_array_segment.ptr);
-            @memset(array_segment_ptr_aligned[0..size], UninitializedHeapScrubByte);
-        }
-
-        return self.byte_array_segment.ptr;
-    }
-
-    pub fn allocateInSegment(self: *Space, allocator: Allocator, segment: Segment, size: usize) Allocator.Error![*]u64 {
-        return switch (segment) {
-            .Object => self.allocateInObjectSegment(allocator, size),
-            .ByteArray => self.allocateInByteArraySegment(allocator, size),
+            /// Get the value in this handle.
+            pub fn get(self: *const Handle) Value {
+                return switch (self.value) {
+                    .Literal => self.value.Literal,
+                    .Reference => Value.fromObjectAddress(self.value.Reference.*.?),
+                };
+            }
         };
-    }
+    };
+}
 
-    /// Allocates the requested amount of bytes in the appropriate segment of
-    /// this space.
-    /// Adds the given address to the finalization set of this space.
-    pub fn addToFinalizationSet(self: *Space, allocator: Allocator, address: [*]u64) !void {
-        std.debug.assert(!self.lazy_allocate);
-        try self.finalization_set.put(allocator, address, {});
-    }
+const GarbageCollectionStats = struct {
+    /// The total number of bytes freed during this cycle, including both the
+    /// new and old generations.
+    freed_bytes: usize,
+    /// The number of bytes that were in the past survivor space and survived
+    /// this garbage collection cycle. This value is greater than 0 only if
+    /// a minor garbage collection cycle was triggered.
+    existing_survived_bytes: usize,
+    /// The number of bytes that were allocated during this garbage collection
+    /// cycle and survived. This value is greater than 0 only if a minor garbage
+    /// collection cycle was triggered.
+    new_survived_bytes: usize,
+    /// The number of bytes that were tenured to the old generation during this
+    /// garbage collection cycle. This value is greater than 0 only if a minor
+    /// garbage collection cycle was triggered.
+    tenured_bytes: usize,
+    /// The number of bytes that were compacted in the old generation during this
+    /// garbage collection cycle. This value is greater than 0 only if a major
+    /// garbage collection cycle was triggered.
+    old_compacted_bytes: usize,
+};
 
-    /// Returns whether the finalization set contains the given address.
-    pub fn finalizationSetContains(self: *Space, address: [*]u64) bool {
-        return self.finalization_set.contains(address);
-    }
+/// An allocation token. This is used as a way to obtain "safepoints" for
+/// allocations. Once a token is allocated, the VM code can be certain that no
+/// garbage collection will occur for the given amount of bytes.
+///
+/// The allocation token is also useful for verifying that the correct amount of
+/// bytes are allocated for each object. AllocationToken.deinit will check that
+/// the token has been fully used.
+pub const AllocationToken = struct {
+    /// The slice of memory that this token represents. This will always be
+    /// inside eden.
+    slice: []u64,
+    /// The number of bytes used so far.
+    used: usize,
 
-    pub const RemoveFromFinalizationSetError = error{AddressNotInFinalizationSet};
-    /// Removes the given address from the finalization set of this space.
-    /// Returns AddressNotInFinalizationSet if the address was not in the
-    /// finalization set.
-    pub fn removeFromFinalizationSet(self: *Space, address: [*]u64) !void {
-        if (!self.finalization_set.swapRemove(address)) {
-            return RemoveFromFinalizationSetError.AddressNotInFinalizationSet;
-        }
-    }
+    /// Allocate the given number of bytes from this token. This will panic if
+    /// the token is used up.
+    pub fn allocate(self: *@This(), bytes: usize) [*]u64 {
+        std.debug.assert(bytes % @sizeOf(u64) == 0);
+        const size = self.slice.len * @sizeOf(u64);
 
-    /// Adds the given address into the remembered set of this space.
-    pub fn addToRememberedSet(self: *Space, allocator: Allocator, address: [*]u64, size: usize) !void {
-        std.debug.assert(!self.lazy_allocate);
-        try self.remembered_set.put(allocator, address, size);
-    }
-
-    pub const RemoveFromRememberedSetError = error{AddressNotInRememberedSet};
-    /// Removes the given address from the remembered set of this space. Returns
-    /// AddressNotInRememberedSet if the address was not in the remembered set.
-    pub fn removeFromRememberedSet(self: *Space, address: [*]u64) !void {
-        if (!self.remembered_set.swapRemove(address)) {
-            return RemoveFromRememberedSetError.AddressNotInRememberedSet;
-        }
-    }
-
-    pub fn updateAllReferencesToImpl(
-        self: *Space,
-        allocator: Allocator,
-        old_address: [*]u64,
-        new_address: [*]u64,
-    ) !void {
-        if (self.lazy_allocate) {
-            // This space hasn't been allocated yet, so there's no reason to
-            // check it.
-            return;
-        }
-
-        const new_address_value = Value.fromObjectAddress(new_address);
-        const old_address_as_reference: u64 = @bitCast(Value.fromObjectAddress(old_address));
-        const new_address_as_reference: u64 = @bitCast(new_address_value);
-
-        for (self.object_segment) |*word| {
-            if (word.* == old_address_as_reference)
-                word.* = new_address_as_reference;
+        if (self.used + bytes > size) {
+            std.debug.panic(
+                "!!! Attempted to allocate {} bytes from {} byte-sized allocation token with {} bytes remaining!",
+                .{ bytes, size, size - self.used },
+            );
         }
 
-        // If the new object is in the current space and should be finalized,
-        // then put it in the finalization set.
-        if (self.objectSegmentContains(new_address) and new_address_value.asObject().?.canFinalize())
-            try self.finalization_set.put(allocator, new_address, {});
+        const address = self.slice.ptr + (self.used / @sizeOf(u64));
+        self.used += bytes;
+        if (GC_TOKEN_ALLOCATION_DEBUG) std.debug.print("AllocationToken.allocate: {}/{} bytes allocated at {*} (requested {})\n", .{ self.used, size, address, bytes });
+        return address;
     }
 
-    /// Update all references to the given object in the current space and
-    /// its tenure target.
-    pub fn updateAllReferencesTo(
-        self: *Space,
-        allocator: Allocator,
-        old_address: [*]u64,
-        new_address: [*]u64,
-    ) Allocator.Error!void {
-        try self.updateAllReferencesToImpl(allocator, old_address, new_address);
-
-        if (self.tenure_target) |tenure_target| {
-            try tenure_target.updateAllReferencesTo(allocator, old_address, new_address);
+    /// Deinitialize this allocation token. In safe modes, this will check that
+    /// the token has been fully used up.
+    pub fn deinit(self: @This()) void {
+        if (std.debug.runtime_safety) {
+            const size = self.slice.len * @sizeOf(u64);
+            if (self.used != size) {
+                std.debug.panic("!!! Only {} out of {} bytes consumed from the allocation token!", .{ self.used, size });
+            }
         }
     }
 };
 
-/// A tracked heap value. This value is updated whenever garbage collection
-/// occurs and the object moves.
-pub const Tracked = struct {
-    value: union(enum) {
-        Object: *[*]u64,
-        Literal: Value,
-    },
+// --- Integration Tests ---
 
-    pub fn createWithObject(handle: *[*]u64) Tracked {
-        return Tracked{ .value = .{ .Object = handle } };
-    }
+const TestRoot = struct {
+    pub fn visitEdges(self: *TestRoot, visitor: anytype) !void {
+        _ = self;
+        _ = visitor;
 
-    pub fn createWithLiteral(value: Value) Tracked {
-        std.debug.assert(value.type != .Object);
-        return Tracked{ .value = .{ .Literal = value } };
-    }
-
-    pub fn untrack(self: Tracked, heap: *Heap) void {
-        if (self.value == .Object) {
-            heap.untrack(self);
-        }
-    }
-
-    pub fn getValue(self: Tracked) Value {
-        return switch (self.value) {
-            .Object => |t| Value.fromObjectAddress(t.*),
-            .Literal => |t| t,
-        };
+        // Do nothing.
     }
 };
 
-test "allocate one object's worth of space on the heap" {
+test "basic heap allocation" {
+    const ArrayMap = @import("objects/array.zig").ArrayMap;
+    const ArrayObject = @import("objects/array.zig").Array;
     const allocator = std.testing.allocator;
 
-    var heap = try Heap.create(allocator);
-    defer heap.destroy();
+    var root: TestRoot = .{};
 
-    const eden_free_memory = heap.eden.freeMemory();
-    _ = try heap.allocateInObjectSegment(16);
-    try std.testing.expectEqual(eden_free_memory - 16, heap.eden.freeMemory());
+    var heap = try Heap(TestRoot).init(allocator, &root);
+    defer heap.deinit();
+
+    const required_memory = ArrayMap.requiredSizeForAllocation() + ArrayObject.requiredSizeForAllocation(0);
+    var token = try heap.allocate(required_memory);
+    defer token.deinit();
+
+    const array_map = ArrayMap.create(&token, 0);
+    var array = ArrayObject.createWithValues(&token, .Global, array_map, &.{}, null);
+
+    // Root the object so it doesn't get collected.
+    var handle = heap.track(array.asValue());
+    defer handle.deinit(&heap);
+
+    const stats = try heap.collect(.{});
+
+    // Shouldn't have collected anything...
+    try std.testing.expectEqual(0, stats.freed_bytes);
+    // But should have still moved the object (including its transitive reference,
+    // the slots map) to the survivor space.
+    try std.testing.expectEqual(0, stats.existing_survived_bytes);
+    try std.testing.expectEqual(required_memory, stats.new_survived_bytes);
+    // Shouldn't have tenured anything because our survivor space isn't full
+    // yet.
+    try std.testing.expectEqual(0, stats.tenured_bytes);
+    try std.testing.expectEqual(0, stats.old_compacted_bytes);
+
+    // Slots object should have moved to future (now past) survivor space.
+    try std.testing.expect(array.asObjectAddress() != handle.get().asReference().?.getAddress());
+    try std.testing.expectEqual(.PastSurvivor, heap.new_generation.referenceLocation(handle.get().asReference().?));
 }
 
-test "fill up the eden with objects and attempt to allocate one more" {
+test "spill to old space" {
+    const ArrayMap = @import("objects/array.zig").ArrayMap;
+    const ArrayObject = @import("objects/array.zig").Array;
+    const ByteArray = @import("ByteArray.zig");
     const allocator = std.testing.allocator;
 
-    var heap = try Heap.create(allocator);
-    defer heap.destroy();
+    var root: TestRoot = .{};
 
-    const eden_free_memory = heap.eden.freeMemory();
-    while (heap.eden.freeMemory() > 0) {
-        _ = try heap.allocateInObjectSegment(8);
+    var heap = try Heap(TestRoot).init(allocator, &root);
+    defer heap.deinit();
+
+    const map_required_memory = ArrayMap.requiredSizeForAllocation();
+    const required_memory_per_object = ArrayObject.requiredSizeForAllocation(1);
+    // Exactly one more object than can fit in the future survivor space.
+    const object_count = @divFloor((heap.new_generation.future_survivor.len - map_required_memory), required_memory_per_object) + 1;
+
+    var token = try heap.allocate(map_required_memory + (required_memory_per_object * object_count));
+    defer token.deinit();
+
+    const slot_name = try ByteArray.createFromString(allocator, "prev");
+    defer slot_name.deinit(allocator);
+
+    const array_map = ArrayMap.create(&token, 1);
+
+    // Chain a whole bunch of objects together.
+
+    var array = ArrayObject.createWithValues(&token, .Global, array_map, &.{Value.fromUnsignedInteger(0)}, null);
+    array.getValues()[0] = array.asValue();
+
+    for (1..object_count) |_| {
+        const prev_array = array;
+        array = ArrayObject.createWithValues(&token, .Global, array_map, &.{prev_array.asValue()}, null);
     }
 
-    _ = try heap.allocateInObjectSegment(16);
-    try std.testing.expectEqual(eden_free_memory - 16, heap.eden.freeMemory());
-    // Expect the from space to be empty, as there were no object refs this
-    // entire time
-    try std.testing.expectEqual(heap.from_space.memory.ptr, heap.from_space.object_segment.ptr);
+    // Root the last object so the whole chain doesn't get collected.
+    var handle = heap.track(array.asValue());
+    defer handle.deinit(&heap);
+
+    const stats = try heap.collect(.{});
+
+    // Shouldn't have collected anything.
+    try std.testing.expectEqual(0, stats.freed_bytes);
+    // All objects must have survived.
+    try std.testing.expectEqual(0, stats.existing_survived_bytes);
+    try std.testing.expectEqual(map_required_memory + (required_memory_per_object * object_count), stats.new_survived_bytes);
+    // Should have tenured exactly one slots object to the old generation.
+    try std.testing.expectEqual(required_memory_per_object * 1, stats.tenured_bytes);
+    try std.testing.expectEqual(0, stats.old_compacted_bytes);
 }
 
-test "link an object to another and perform scavenge" {
+test "past survivor space tenuring" {
+    const ArrayMap = @import("objects/array.zig").ArrayMap;
+    const ArrayObject = @import("objects/array.zig").Array;
     const allocator = std.testing.allocator;
 
-    var heap = try Heap.create(allocator);
-    defer heap.destroy();
+    var root: TestRoot = .{};
 
-    // The object being referenced
-    var referenced_object_map = try Object.Map.Slots.create(heap, 1);
-    const actual_name = try ByteArray.createFromString(heap, "actual");
-    referenced_object_map.getSlots()[0].initConstant(actual_name, .NotParent, Value.fromUnsignedInteger(0xDEADBEEF));
-    var referenced_object = try Object.Slots.create(heap, referenced_object_map, &[_]Value{});
+    var heap = try Heap(TestRoot).init(allocator, &root);
+    defer heap.deinit();
 
-    // The "activation object", which is how we get a reference to the object in
-    // the from space after the tenure is done
-    var activation_object_map = try Object.Map.Slots.create(heap, 1);
-    const reference_name = try ByteArray.createFromString(heap, "reference");
-    activation_object_map.getSlots()[0].initMutable(Object.Map.Slots, activation_object_map, reference_name, .NotParent);
-    var activation_object = try Object.Slots.create(heap, activation_object_map, &[_]Value{referenced_object.asValue()});
+    // Fill up the heap with enough objects to trigger the tenuring threshold, but
+    // not so much that we spill to the old generation.
+    const map_required_memory = ArrayMap.requiredSizeForAllocation();
+    const required_memory_per_object = ArrayObject.requiredSizeForAllocation(1);
+    const object_count = @divFloor((((heap.new_generation.past_survivor.len - map_required_memory) * TENURE_THRESHOLD_PERCENT) / 100), required_memory_per_object) + 1;
 
-    // Create the activation
-    var activation = Activation{ .activation_object = activation_object.asValue() };
+    var token = try heap.allocate(map_required_memory + (required_memory_per_object * object_count));
+    defer token.deinit();
 
-    // Activate the garbage collection, tenuring from the eden to from space
-    try heap.eden.collectGarbage(allocator, EdenSize, &[_]*Activation{&activation});
+    const array_map = ArrayMap.create(&token, 1);
 
-    // Find the new activation object
-    var new_activation_object = activation.activation_object.asObject().asSlotsObject();
-    try std.testing.expect(activation_object != new_activation_object);
-    var new_activation_object_map = new_activation_object.getMap();
-    try std.testing.expect(activation_object_map != new_activation_object_map);
-    try std.testing.expect(activation_object_map.getSlots()[0].name.asReference() != new_activation_object_map.getSlots()[0].name.asObjectAddress());
-    try std.testing.expectEqualStrings("reference", new_activation_object_map.getSlots()[0].name.asByteArray().getValues());
+    // Chain a whole bunch of objects together.
+    var array = ArrayObject.createWithValues(&token, .Global, array_map, &.{Value.fromUnsignedInteger(0)}, null);
 
-    // Find the new referenced object
-    var new_referenced_object = new_activation_object.getAssignableSlotValueByName("reference").?.asObject().asSlotsObject();
-    try std.testing.expect(referenced_object != new_referenced_object);
-    var new_referenced_object_map = new_referenced_object.getMap();
-    try std.testing.expect(referenced_object_map != new_referenced_object_map);
-    try std.testing.expect(referenced_object_map.getSlots()[0].name.asObjectAddress() != new_referenced_object_map.getSlots()[0].name.asObjectAddress());
-    try std.testing.expectEqualStrings("actual", new_referenced_object_map.getSlots()[0].name.asByteArray().getValues());
+    for (1..object_count) |_| {
+        const prev_array = array;
+        array = ArrayObject.createWithValues(&token, .Global, array_map, &.{prev_array.asValue()}, null);
+    }
 
-    // Verify that the map map is shared (aka forwarding addresses work)
-    try std.testing.expectEqual(
-        new_activation_object_map.map.object.getMap(),
-        new_referenced_object_map.map.object.getMap(),
-    );
+    // Root the last object so the whole chain doesn't get collected.
+    var handle = heap.track(array.asValue());
+    defer handle.deinit(&heap);
 
-    // Get the value we stored and compare it
-    var referenced_object_value = new_referenced_object.getMap().getSlotByName("actual").?.value;
-    try std.testing.expectEqual(@as(u64, 0xDEADBEEF), referenced_object_value.asUnsignedInteger());
+    const stats = try heap.collect(.{});
+
+    // For this first run, we shouldn't have freed or tenured anything; everything should
+    // be in the past survivor space now.
+    try std.testing.expectEqual(0, stats.freed_bytes);
+    try std.testing.expectEqual(0, stats.existing_survived_bytes);
+    try std.testing.expectEqual(map_required_memory + (required_memory_per_object * object_count), stats.new_survived_bytes);
+    try std.testing.expectEqual(0, stats.tenured_bytes);
+    try std.testing.expectEqual(0, stats.old_compacted_bytes);
+
+    const stats2 = try heap.collect(.{});
+
+    // Now, since we are above the tenuring threshold, we should have tenured all the objects
+    // to the old generation.
+    try std.testing.expectEqual(0, stats2.freed_bytes);
+    try std.testing.expectEqual(map_required_memory + (required_memory_per_object * object_count), stats2.existing_survived_bytes);
+    try std.testing.expectEqual(0, stats2.new_survived_bytes);
+    try std.testing.expectEqual(map_required_memory + (required_memory_per_object * object_count), stats2.tenured_bytes);
+    try std.testing.expectEqual(0, stats2.old_compacted_bytes);
+}
+
+test "finalization" {
+    const managed = @import("objects/managed.zig");
+    const ManagedObject = managed.Managed;
+    const FileDescriptor = managed.FileDescriptor;
+    const allocator = std.testing.allocator;
+
+    var root: TestRoot = .{};
+
+    var heap = try Heap(TestRoot).init(allocator, &root);
+    defer heap.deinit();
+
+    // Just open some dummy file.
+    const file = try std.posix.openZ("/dev/null", .{}, 0);
+    const fd_object = FileDescriptor.adopt(file, .{ .close_during_finalization = true });
+
+    const required_memory = ManagedObject.requiredSizeForAllocation();
+    var token = try heap.allocate(required_memory);
+    defer token.deinit();
+
+    var object = try ManagedObject.create(&heap, &token, .Global, .FileDescriptor, fd_object.toValue());
+
+    // Root the object so it doesn't get collected.
+    var handle = heap.track(object.asValue());
+
+    // First, collect to make sure the object's finalizer isn't run while it's still
+    // alive.
+    const stats1 = try heap.collect(.{});
+
+    try std.testing.expectEqual(0, stats1.freed_bytes);
+    try std.testing.expectEqual(0, stats1.existing_survived_bytes);
+    try std.testing.expectEqual(required_memory, stats1.new_survived_bytes);
+    try std.testing.expectEqual(0, stats1.tenured_bytes);
+    try std.testing.expectEqual(0, stats1.old_compacted_bytes);
+
+    // Release the handle so the object can be collected.
+    handle.deinit(&heap);
+
+    // Now, collect again to make sure the finalizer is run.
+    const stats2 = try heap.collect(.{});
+
+    try std.testing.expectEqual(required_memory, stats2.freed_bytes);
+    try std.testing.expectEqual(0, stats2.existing_survived_bytes);
+    try std.testing.expectEqual(0, stats2.new_survived_bytes);
+    try std.testing.expectEqual(0, stats2.tenured_bytes);
+    try std.testing.expectEqual(0, stats2.old_compacted_bytes);
+
+    // The finalizer should have run, which means the file descriptor should have been closed.
+    var buffer: [1]u8 = undefined;
+    _ = std.posix.read(file, buffer[0..]) catch |err| {
+        try std.testing.expectEqual(error.NotOpenForReading, err);
+    };
+}
+
+test "major garbage collection" {
+    const ArrayMap = @import("objects/array.zig").ArrayMap;
+    const ArrayObject = @import("objects/array.zig").Array;
+    const allocator = std.testing.allocator;
+
+    var root: TestRoot = .{};
+
+    var heap = try Heap(TestRoot).init(allocator, &root);
+    defer heap.deinit();
+
+    const map_required_memory = ArrayMap.requiredSizeForAllocation();
+    const array_required_memory = ArrayObject.requiredSizeForAllocation(0);
+
+    // Allocate one object directly into the old generation.
+    const map: ArrayMap.Ptr = @ptrCast(try heap.old_generation.allocate(heap.allocator, map_required_memory));
+    map.init(0);
+
+    // Allocate the array that uses the map into the new generation.
+    var token = try heap.allocate(array_required_memory);
+    const array = ArrayObject.createWithValues(&token, .Global, map, &.{}, null);
+
+    // Hold onto the array.
+    var handle = heap.track(array.asValue());
+
+    // Force a major+minor garbage collection. This should not clear anything.
+    const stats1 = try heap.collect(.{ .major = .Force });
+    try std.testing.expectEqual(0, stats1.freed_bytes);
+    try std.testing.expectEqual(0, stats1.existing_survived_bytes);
+    try std.testing.expectEqual(array_required_memory, stats1.new_survived_bytes);
+    try std.testing.expectEqual(0, stats1.tenured_bytes);
+    try std.testing.expectEqual(0, stats1.old_compacted_bytes);
+
+    // Release the handle so there are no more roots to the array.
+    handle.deinit(&heap);
+
+    // Force one *minor*, and one *major* collection. The former is to remove
+    // the array->map reference, and the latter is to remove the map itself.
+    const stats2 = try heap.collect(.{ .minor = .Force, .major = .Disable });
+    try std.testing.expectEqual(array_required_memory, stats2.freed_bytes);
+    try std.testing.expectEqual(0, stats2.new_survived_bytes);
+    try std.testing.expectEqual(0, stats2.existing_survived_bytes);
+    try std.testing.expectEqual(0, stats2.tenured_bytes);
+    try std.testing.expectEqual(0, stats2.old_compacted_bytes);
+
+    const stats3 = try heap.collect(.{ .minor = .Disable, .major = .Force });
+    try std.testing.expectEqual(map_required_memory, stats3.freed_bytes);
+    try std.testing.expectEqual(0, stats3.new_survived_bytes);
+    try std.testing.expectEqual(0, stats3.existing_survived_bytes);
+    try std.testing.expectEqual(0, stats3.tenured_bytes);
+    try std.testing.expectEqual(map_required_memory, stats3.old_compacted_bytes);
+}
+
+test "remembered set" {
+    const ArrayMap = @import("objects/array.zig").ArrayMap;
+    const ArrayObject = @import("objects/array.zig").Array;
+    const allocator = std.testing.allocator;
+
+    var root: TestRoot = .{};
+
+    var heap = try Heap(TestRoot).init(allocator, &root);
+    defer heap.deinit();
+
+    const map_required_memory = ArrayMap.requiredSizeForAllocation();
+    const array_required_memory = ArrayObject.requiredSizeForAllocation(0);
+
+    // Place a random object into the old generation (used for testing whether
+    // remembered set reconstruction is successful). This will be cleared with
+    // the first major GC.
+    const unused_map: ArrayMap.Ptr = @ptrCast(try heap.old_generation.allocate(heap.allocator, map_required_memory));
+    unused_map.init(0);
+
+    // Place the actually used map in new generation. The array object will point
+    // to it.
+    const used_map: ArrayMap.Ptr = @ptrCast(try heap.new_generation.allocate(map_required_memory));
+    used_map.init(0);
+
+    // Place the array itself in the old generation.
+    const array: ArrayObject.Ptr = @ptrCast(try heap.old_generation.allocate(heap.allocator, array_required_memory));
+    array.init(.Global, used_map, &.{}, null);
+    // Remember the address since it will point to the new generation.
+    const did_remember = heap.old_generation.rememberAddress(array.asValue().asReference().?.getAddress());
+    try std.testing.expect(did_remember);
+
+    // First perform a minor collection. At the end of this collection, the
+    // array map should still be alive because the array in the old generation
+    // is pointing to it.
+    const stats1 = try heap.collect(.{ .minor = .Force, .major = .Disable });
+    try std.testing.expectEqual(0, stats1.freed_bytes);
+    try std.testing.expectEqual(0, stats1.existing_survived_bytes);
+    try std.testing.expectEqual(array_required_memory, stats1.new_survived_bytes);
+    try std.testing.expectEqual(0, stats1.tenured_bytes);
+    try std.testing.expectEqual(0, stats1.old_compacted_bytes);
+
+    // XXX: Beyond this point used_map is invalid.
+
+    // Check whether the map moved successfully to past survivor.
+    const new_used_map = array.getMap();
+    const new_used_map_ref = new_used_map.asValue().asReference().?;
+    try std.testing.expectEqual(.PastSurvivor, heap.new_generation.referenceLocation(new_used_map_ref));
+
+    // Ensure that the card offset for the first card is *not* 0 (since we
+    // allocated an object before the array).
+    var card = heap.old_generation.first_region.?.remembered_set.cards[0];
+    try std.testing.expect(card != .Empty);
+    try std.testing.expect(card.wordOffset() != 0);
+
+    // Hold onto the array so that it doesn't go away.
+    var array_handle = heap.track(array.asValue());
+
+    // Now perform a major GC. This will:
+    // - Compact away unused_map.
+    // - Move array to a new location.
+    // - Update the remembered set so that the first card now has index 0.
+    const stats2 = try heap.collect(.{ .minor = .Disable, .major = .Force });
+    try std.testing.expectEqual(map_required_memory, stats2.freed_bytes);
+    try std.testing.expectEqual(0, stats2.existing_survived_bytes); // 0 because no minor was performed
+    try std.testing.expectEqual(0, stats2.new_survived_bytes);
+    try std.testing.expectEqual(0, stats2.tenured_bytes);
+    try std.testing.expectEqual(map_required_memory, stats2.old_compacted_bytes);
+
+    // XXX: Beyond this point unused_map is dead and array is invalid.
+
+    // Ensure that the card offset is now 0.
+    card = heap.old_generation.first_region.?.remembered_set.cards[0];
+    try std.testing.expect(card != .Empty);
+    try std.testing.expectEqual(0, card.wordOffset());
+
+    array_handle.deinit(&heap);
+
+    // Now, perform one final minor GC. Nothing should be collected.
+    const stats3 = try heap.collect(.{ .minor = .Force, .major = .Disable });
+    try std.testing.expectEqual(0, stats3.freed_bytes);
+    try std.testing.expectEqual(map_required_memory, stats3.existing_survived_bytes);
+    try std.testing.expectEqual(0, stats3.new_survived_bytes);
+    try std.testing.expectEqual(0, stats3.tenured_bytes);
+    try std.testing.expectEqual(0, stats3.old_compacted_bytes);
 }

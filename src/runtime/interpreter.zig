@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -6,7 +6,7 @@ const std = @import("std");
 const tracy = @import("tracy");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("./Heap.zig");
+const Heap = VirtualMachine.Heap;
 const Slot = @import("./slot.zig").Slot;
 const debug = @import("../debug.zig");
 const Actor = @import("./Actor.zig");
@@ -16,8 +16,8 @@ const Selector = @import("Selector.zig");
 const bytecode = @import("./bytecode.zig");
 const BlockMap = objects_block.BlockMap;
 const SlotsMap = objects_slots.SlotsMap;
-const ByteArray = @import("./ByteArray.zig");
 const MethodMap = objects_method.MethodMap;
+const ByteArray = @import("objects/byte_array.zig").ByteArray;
 const traversal = @import("./object_traversal.zig");
 const Activation = @import("./Activation.zig");
 const BaseObject = @import("./base_object.zig").BaseObject;
@@ -34,7 +34,6 @@ const objects_slots = @import("objects/slots.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const objects_method = @import("objects/method.zig");
 const ExecutionResult = @import("execution_result.zig").ExecutionResult;
-const ByteArrayObject = @import("objects/byte_array.zig").ByteArray;
 const ActivationObject = @import("objects/activation.zig").Activation;
 
 const EXECUTION_DEBUG = debug.EXECUTION_DEBUG;
@@ -178,7 +177,7 @@ pub fn makeSpecializedExecutor(comptime opcode: bytecode.Instruction.Opcode) Exe
                 std.debug.print("[#{} {s} {s}] Executing: {} = {}\n", .{
                     context.actor.id,
                     context.getDefinitionExecutable().value.definition_script.value.file_path,
-                    context.getCurrentActivation().creator_message.asByteArray().?.getValues(),
+                    context.getCurrentActivation().creator_message.getValues(),
                     inst.target,
                     inst,
                 });
@@ -258,7 +257,7 @@ fn opcodePushConstantSlot(context: *InterpreterContext) InterpreterError!Executi
     const name_byte_array_object = name_value.asObject().?.asType(.ByteArray).?;
     const value = context.vm.readRegister(payload.value_location);
 
-    try context.actor.slot_stack.push(context.vm.allocator, Slot.initConstant(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
+    try context.actor.slot_stack.push(context.vm.allocator, Slot.initConstant(name_byte_array_object, if (payload.is_parent) .Parent else .NotParent, value));
     return ExecutionResult.normal();
 }
 
@@ -268,7 +267,7 @@ fn opcodePushAssignableSlot(context: *InterpreterContext) InterpreterError!Execu
     const name_byte_array_object = name_value.asObject().?.asType(.ByteArray).?;
     const value = context.vm.readRegister(payload.value_location);
 
-    try context.actor.slot_stack.push(context.vm.allocator, Slot.initAssignable(name_byte_array_object.getByteArray(), if (payload.is_parent) .Parent else .NotParent, value));
+    try context.actor.slot_stack.push(context.vm.allocator, Slot.initAssignable(name_byte_array_object, if (payload.is_parent) .Parent else .NotParent, value));
     return ExecutionResult.normal();
 }
 
@@ -277,7 +276,7 @@ fn opcodePushArgumentSlot(context: *InterpreterContext) InterpreterError!Executi
     const name_value = context.vm.readRegister(payload.name_location);
     const name_byte_array_object = name_value.asObject().?.asType(.ByteArray).?;
 
-    try context.actor.slot_stack.push(context.vm.allocator, Slot.initArgument(name_byte_array_object.getByteArray()));
+    try context.actor.slot_stack.push(context.vm.allocator, Slot.initArgument(name_byte_array_object));
     return ExecutionResult.normal();
 }
 
@@ -292,7 +291,7 @@ fn opcodeCreateFloatingPoint(context: *InterpreterContext) InterpreterError!Exec
     const block = context.getCurrentBytecodeBlock();
     const index = context.getInstructionIndex();
 
-    var token = try context.vm.heap.getAllocation(FloatObject.requiredSizeForAllocation());
+    var token = try context.vm.heap.allocate(FloatObject.requiredSizeForAllocation());
     defer token.deinit();
 
     const value = block.getTypedPayload(index, .CreateFloatingPoint);
@@ -307,10 +306,10 @@ fn opcodeCreateByteArray(context: *InterpreterContext) InterpreterError!Executio
     const index = context.getInstructionIndex();
 
     const payload = block.getTypedPayload(index, .CreateByteArray);
-    var token = try context.vm.heap.getAllocation(ByteArrayObject.requiredSizeForAllocation(payload.len));
+    var token = try context.vm.heap.allocate(ByteArray.requiredSizeForAllocation());
     defer token.deinit();
 
-    const byte_array = ByteArrayObject.createWithValues(&token, context.actor.id, payload);
+    const byte_array = try ByteArray.createWithValues(context.vm.allocator, &context.vm.heap, &token, context.actor.id, payload);
     context.vm.writeRegister(block.getTargetLocation(index), byte_array.asValue());
     return ExecutionResult.normal();
 }
@@ -331,11 +330,11 @@ fn opcodeCreateMethod(context: *InterpreterContext) InterpreterError!ExecutionRe
     const index = context.getInstructionIndex();
 
     const payload = block.getTypedPayload(index, .CreateMethod);
-    const method_name_byte_array = context.vm.readRegister(payload.method_name_location).asObject().?.asType(.ByteArray).?.getByteArray();
+    const method_name = context.vm.readRegister(payload.method_name_location).asObject().?.asType(.ByteArray).?;
 
     try createMethod(
         context.getDefinitionExecutable(),
-        method_name_byte_array,
+        method_name,
         payload.slot_count,
         payload.block_index,
         block.getTargetLocation(index),
@@ -483,8 +482,8 @@ fn performPrimitiveSend(
     }
 
     const heap = vm_context.getHeap();
-    const tracked_receiver = try heap.track(receiver);
-    defer tracked_receiver.untrack(heap);
+    var tracked_receiver = heap.track(receiver);
+    defer tracked_receiver.deinit(heap);
 
     const actor = vm_context.getActor();
     const argument_slice = vm_context.getActor().argument_stack.lastNItems(primitive.arity);
@@ -614,7 +613,7 @@ pub fn sendMessage(
             value_ptr.* = argument;
 
             // David will remember that.
-            try vm_context.getHeap().rememberObjectReference(object_that_has_the_assignable_slot.asValue(), argument);
+            _ = try vm_context.getHeap().rememberObjectReference(object_that_has_the_assignable_slot.asValue(), argument);
 
             actor.argument_stack.popNItems(1);
             return ExecutionResult.resolve(receiver);
@@ -663,28 +662,21 @@ fn executeBlock(
     const message_name = try vm_context.getVM().getOrCreateBlockMessageName(@intCast(arguments.len));
     var block = block_receiver;
 
-    var required_memory = ActivationObject.requiredSizeForAllocation(
+    const required_memory = ActivationObject.requiredSizeForAllocation(
         block.getArgumentSlotCount(),
         block.getAssignableSlotCount(),
     );
-    if (!message_name.exists) required_memory += message_name.requiredSize();
 
     const heap = vm_context.getHeap();
     var token = token: {
-        var tracked_block: ?Heap.Tracked = null;
-        defer if (tracked_block) |t| t.untrack(heap);
-
-        if (heap.needsToGarbageCollectToProvide(required_memory)) {
-            tracked_block = try heap.track(block.asValue());
-        }
+        var tracked_block = heap.track(block.asValue());
+        defer tracked_block.deinit(heap);
 
         // Ensure that we won't GC by creating an activation.
-        const token = try heap.getAllocation(required_memory);
+        const token = try heap.allocate(required_memory);
 
-        if (tracked_block) |t| {
-            // Refresh the pointer to the block.
-            block = t.getValue().asObject().?.asType(.Block).?;
-        }
+        // Refresh the pointer to the block.
+        block = tracked_block.get().asObject().?.asType(.Block).?;
 
         break :token token;
     };
@@ -698,7 +690,7 @@ fn executeBlock(
         parent_activation_object.value,
         arguments,
         target_location,
-        try message_name.get(&token),
+        try message_name.get(vm_context.getVM().allocator),
         source_range,
         activation_slot,
     );
@@ -721,27 +713,17 @@ fn executeMethod(
 
     const heap = vm_context.getHeap();
     var token = token: {
-        var tracked_receiver: ?Heap.Tracked = null;
-        var tracked_method: ?Heap.Tracked = null;
-
-        defer if (tracked_receiver) |t| {
-            tracked_method.?.untrack(heap);
-            t.untrack(heap);
-        };
-
-        if (heap.needsToGarbageCollectToProvide(required_memory)) {
-            tracked_receiver = try heap.track(receiver_of_method);
-            tracked_method = try heap.track(method.asValue());
-        }
+        var tracked_receiver = heap.track(receiver_of_method);
+        defer tracked_receiver.deinit(heap);
+        var tracked_method = heap.track(method.asValue());
+        defer tracked_method.deinit(heap);
 
         // Get the allocation token for the method
-        const token = try heap.getAllocation(required_memory);
+        const token = try heap.allocate(required_memory);
 
-        if (tracked_receiver) |t| {
-            // Refresh the pointers to the method and its receiver.
-            receiver_of_method = t.getValue();
-            method = tracked_method.?.getValue().asObject().?.asType(.Method).?;
-        }
+        // Refresh the pointers to the method and its receiver.
+        receiver_of_method = tracked_receiver.get();
+        method = tracked_method.get().asObject().?.asType(.Method).?;
 
         break :token token;
     };
@@ -776,7 +758,7 @@ fn createObject(
         total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots[0..i]));
     }
 
-    var token = try vm_context.getHeap().getAllocation(
+    var token = try vm_context.getHeap().allocate(
         SlotsMap.requiredSizeForAllocation(total_slot_count) +
             SlotsObject.requiredSizeForAllocation(total_assignable_slot_count),
     );
@@ -796,7 +778,7 @@ fn createObject(
 
 fn createMethod(
     executable: bytecode.Executable.Ref,
-    method_name: ByteArray,
+    method_name: ByteArray.Ptr,
     slot_count: u16,
     block_index: u32,
     target_location: bytecode.RegisterLocation,
@@ -818,7 +800,7 @@ fn createMethod(
             argument_slot_count += 1;
     }
 
-    var token = try vm_context.getHeap().getAllocation(
+    var token = try vm_context.getHeap().allocate(
         MethodMap.requiredSizeForAllocation(total_slot_count) +
             MethodObject.requiredSizeForAllocation(total_assignable_slot_count),
     );
@@ -826,6 +808,7 @@ fn createMethod(
 
     const block = executable.value.getBlock(block_index);
     var method_map = try MethodMap.create(
+        vm_context.getHeap(),
         &token,
         argument_slot_count,
         total_slot_count,
@@ -884,13 +867,14 @@ fn createBlock(
         parent_activation.takeRef(actor.activation_stack);
     std.debug.assert(nonlocal_return_target_activation.get(actor.activation_stack).?.nonlocal_return_target_activation == null);
 
-    var token = try vm_context.getHeap().getAllocation(
+    var token = try vm_context.getHeap().allocate(
         BlockMap.requiredSizeForAllocation(total_slot_count) +
             BlockObject.requiredSizeForAllocation(total_assignable_slot_count),
     );
     defer token.deinit();
 
     var block_map = try BlockMap.create(
+        vm_context.getHeap(),
         &token,
         argument_slot_count,
         total_slot_count,

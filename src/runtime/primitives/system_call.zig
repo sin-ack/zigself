@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -36,11 +36,11 @@ fn callFailureBlock(
 
 /// Create a managed FD out of a native FD value.
 fn makeManagedFD(context: *PrimitiveContext, native_fd: std.posix.fd_t, flags: FileDescriptor.Flags) !ExecutionResult {
-    var token = try context.vm.heap.getAllocation(ManagedObject.requiredSizeForAllocation());
+    var token = try context.vm.heap.allocate(ManagedObject.requiredSizeForAllocation());
     defer token.deinit();
 
     var fd = FileDescriptor.adopt(native_fd, flags);
-    const managed_fd = try ManagedObject.create(&token, context.actor.id, .FileDescriptor, fd.toValue());
+    const managed_fd = try ManagedObject.create(&context.vm.heap, &token, context.actor.id, .FileDescriptor, fd.toValue());
     return ExecutionResult.resolve(managed_fd.asValue());
 }
 
@@ -411,7 +411,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     {
         var it: ?*std.posix.addrinfo = result_ptr;
         while (it) |result| : (it = result.next) {
-            required_memory += AddrInfoMap.requiredSizeToCreateFromAddrinfo(result);
+            required_memory += AddrInfoMap.requiredSizeToCreateFromAddrinfo();
             required_memory += AddrInfoObject.requiredSizeForAllocation();
             result_count += 1;
         }
@@ -420,7 +420,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     required_memory += array_object.ArrayMap.requiredSizeForAllocation();
     required_memory += array_object.Array.requiredSizeForAllocation(result_count);
 
-    var token = try context.vm.heap.getAllocation(required_memory);
+    var token = try context.vm.heap.allocate(required_memory);
     defer token.deinit();
 
     const result_array_map = array_object.ArrayMap.create(&token, result_count);
@@ -434,7 +434,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
             it = result.next;
             i += 1;
         }) {
-            const addrinfo_map = AddrInfoMap.createFromAddrinfo(&token, context.actor.id, result);
+            const addrinfo_map = try AddrInfoMap.createFromAddrinfo(context.vm.allocator, &context.vm.heap, &token, context.actor.id, result);
             const addrinfo = addrinfo_map.createObject(&token, context.actor.id);
 
             result_values[i] = addrinfo.asValue();

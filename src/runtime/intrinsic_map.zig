@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2023-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -6,7 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
-const Heap = @import("Heap.zig");
+const heap = @import("Heap.zig");
 const Actor = @import("Actor.zig");
 const value = @import("value.zig");
 const pointer = @import("../utility/pointer.zig");
@@ -28,11 +28,11 @@ const LookupResult = @import("object_lookup.zig").LookupResult;
 ///         value1: Value align(@alignOf(u64)),
 ///         value2: Value align(@alignOf(u64)),
 ///
-///         pub fn create(token: *Heap.AllocationToken, ...) MyObjectMap {
+///         pub fn create(token: *heap.AllocationToken, ...) MyObjectMap {
 ///             // Do allocation, initialization here...
 ///         }
 ///
-///         pub fn clone(self: MyObjectMap.Ptr, token: *Heap.AllocationToken) MyObjectMap.Ptr {
+///         pub fn clone(self: MyObjectMap.Ptr, token: *heap.AllocationToken) MyObjectMap.Ptr {
 ///             return create(map_map, token, ...);
 ///         }
 ///
@@ -99,11 +99,18 @@ pub fn IntrinsicMap(comptime MapT: type, comptime object_type: ObjectType) type 
             unreachable;
         }
 
+        /// Visit edges of this object using the given visitor.
+        pub fn visitEdges(self: Ptr, visitor: anytype) !void {
+            inline for (struct_fields[1..]) |field| {
+                try visitor.visit(&@field(self, field.name));
+            }
+        }
+
         pub fn requiredSizeForAllocation() usize {
             return @sizeOf(MapT);
         }
 
-        pub fn createObject(self: Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) @This().ObjectType.Ptr {
+        pub fn createObject(self: Ptr, token: *heap.AllocationToken, actor_id: Actor.ActorID) @This().ObjectType.Ptr {
             return @This().ObjectType.create(token, self, actor_id);
         }
     };
@@ -128,8 +135,8 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
         pub const Type = object_type;
         pub const Value = value.ObjectValue(Self);
 
-        pub fn create(token: *Heap.AllocationToken, map: MapT.Ptr, actor_id: Actor.ActorID) Ptr {
-            const memory = token.allocate(.Object, requiredSizeForAllocation());
+        pub fn create(token: *heap.AllocationToken, map: MapT.Ptr, actor_id: Actor.ActorID) Ptr {
+            const memory = token.allocate(requiredSizeForAllocation());
             const self: Ptr = @ptrCast(memory);
 
             self.init(actor_id, map);
@@ -171,6 +178,11 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
             _ = self;
             _ = allocator;
             unreachable;
+        }
+
+        /// Visit edges of this object using the given visitor.
+        pub fn visitEdges(self: Ptr, visitor: anytype) !void {
+            try self.object.visitEdges(visitor);
         }
 
         pub fn lookup(

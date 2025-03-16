@@ -7,12 +7,13 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
-const Heap = @import("Heap.zig");
 const Actor = @import("Actor.zig");
 const Value = @import("value.zig").Value;
 const Object = @import("object.zig").Object;
 const pointer = @import("../utility/pointer.zig");
 const ObjectLike = @import("value.zig").ObjectLike;
+const heap_import = @import("Heap.zig");
+const VirtualMachine = @import("VirtualMachine.zig");
 
 fn BaseObjectT(comptime object_type: BaseObject.Type) type {
     return switch (object_type) {
@@ -105,14 +106,14 @@ pub const BaseObject = extern struct {
     }
 
     /// Create a new shallow copy of this object. The map is not affected.
-    pub fn clone(self: BaseObject.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) Allocator.Error!BaseObject.Ptr {
+    pub fn clone(self: BaseObject.Ptr, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID) Allocator.Error!BaseObject.Ptr {
         // NOTE: Inlining the delegation here because we need to cast the result into the base object.
         return switch (self.metadata.type) {
             inline else => |t| {
                 if (!@hasDecl(BaseObjectT(t), "clone")) unreachable;
 
                 const self_ptr: BaseObjectT(t).Ptr = @ptrCast(self);
-                return @ptrCast(try self_ptr.clone(token, actor_id));
+                return @ptrCast(try self_ptr.clone(allocator, heap, token, actor_id));
             },
         };
     }
@@ -125,5 +126,20 @@ pub const BaseObject = extern struct {
     /// Finalize this object. Skip if the object does not support finalization.
     pub fn finalize(self: BaseObject.Ptr, allocator: Allocator) void {
         self.dispatch(void, "finalize", .{allocator});
+    }
+
+    /// Visit all the edges of this object.
+    pub fn visitEdges(self: BaseObject.Ptr, visitor: anytype) !void {
+        const Error = blk: {
+            comptime var Visitor = @TypeOf(visitor);
+            if (@typeInfo(Visitor) == .pointer) {
+                Visitor = @typeInfo(Visitor).pointer.child;
+            }
+
+            const visit_info = @typeInfo(@TypeOf(Visitor.visit));
+            break :blk @typeInfo(visit_info.@"fn".return_type.?).error_union.error_set;
+        };
+
+        return self.dispatch(Error!void, "visitEdges", .{visitor});
     }
 };

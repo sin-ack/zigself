@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -6,7 +6,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Map = @import("../map.zig").Map;
-const Heap = @import("../Heap.zig");
 const Slot = @import("../slot.zig").Slot;
 const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
@@ -18,7 +17,9 @@ const traversal = @import("../object_traversal.zig");
 const MapObject = @import("../object.zig").MapObject;
 const BaseObject = @import("../base_object.zig").BaseObject;
 const MapBuilder = @import("../map_builder.zig").MapBuilder;
+const heap_import = @import("../Heap.zig");
 const LookupResult = @import("../object_lookup.zig").LookupResult;
+const VirtualMachine = @import("../VirtualMachine.zig");
 
 const SLOTS_LOOKUP_DEBUG = debug.SLOTS_LOOKUP_DEBUG;
 
@@ -99,8 +100,18 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
         }
 
         /// Return a shallow copy of this object.
-        pub fn clone(self: ObjectT.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) ObjectT.Ptr {
+        pub fn clone(self: ObjectT.Ptr, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID) ObjectT.Ptr {
+            _ = allocator;
+            _ = heap;
             return ObjectT.create(token, actor_id, self.getMap(), getAssignableSlots(self));
+        }
+
+        /// Visit the assignable slot values in this object with the given
+        /// visitor.
+        pub fn visitAssignableSlotValues(self: ObjectT.Ptr, visitor: anytype) !void {
+            for (self.getAssignableSlots()) |*slot| {
+                try visitor.visit(slot);
+            }
         }
     };
 }
@@ -183,7 +194,7 @@ pub const Slots = extern struct {
     pub usingnamespace SlotsLikeObjectBase(Slots);
     pub usingnamespace AssignableSlotsMixin(Slots);
 
-    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, map: SlotsMap.Ptr, assignable_slots: []const Value) Slots.Ptr {
+    pub fn create(token: *heap_import.AllocationToken, actor_id: Actor.ActorID, map: SlotsMap.Ptr, assignable_slots: []const Value) Slots.Ptr {
         if (assignable_slots.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -193,7 +204,7 @@ pub const Slots = extern struct {
 
         const size = Slots.requiredSizeForAllocation(@intCast(assignable_slots.len));
 
-        const memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(size);
         var self: Slots.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map);
         @memcpy(self.getAssignableSlots(), assignable_slots);
@@ -256,7 +267,7 @@ pub const Slots = extern struct {
     ///
     /// The token must have at least `self.requiredSizeForMerging(source_object)`
     /// bytes available.
-    pub fn addSlotsFrom(self: Slots.Ptr, source_object: Slots.Ptr, allocator: Allocator, token: *Heap.AllocationToken) !Slots.Ptr {
+    pub fn addSlotsFrom(self: Slots.Ptr, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, source_object: Slots.Ptr) !Slots.Ptr {
         const merge_info = try self.calculateMergeOf(source_object, allocator);
 
         // If there is anything that could change any of the slots, then we need
@@ -309,14 +320,14 @@ pub const Slots = extern struct {
             // references to it.
             const new_object = map_builder.createObject();
             new_object.object.getMetadata().reachability = self.object.getMetadata().reachability;
-            try token.heap.updateAllReferencesTo(self.asValue(), new_object.asValue());
+            heap.updateAllReferencesTo(self.asValue(), new_object.asValue());
             return new_object;
         }
 
         // We can simply update the assignable slots and map pointer of the
         // object.
         self.object.map = map_builder.map.asValue();
-        try token.heap.rememberObjectReference(self.asValue(), self.object.map);
+        _ = try heap.rememberObjectReference(self.asValue(), self.object.map);
         const assignable_values = self.getAssignableSlots();
         map_builder.writeAssignableSlotValuesTo(assignable_values);
         return self;
@@ -414,6 +425,12 @@ pub const Slots = extern struct {
         @panic("Attempted to call Slots.finalize");
     }
 
+    /// Visit the edges on this object with the given visitor.
+    pub fn visitEdges(self: Slots.Ptr, visitor: anytype) !void {
+        try self.object.visitEdges(visitor);
+        try self.visitAssignableSlotValues(visitor);
+    }
+
     pub fn lookup(self: Slots.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         return slotsLookup(Slots, self, selector, previously_visited);
     }
@@ -463,8 +480,17 @@ pub fn SlotsLikeMapBase(comptime MapT: type) type {
             return @ptrCast(self);
         }
 
-        pub fn getMapBuilder(self: MapT.Ptr, token: *Heap.AllocationToken) MapBuilder(MapT, MapT.ObjectType) {
+        pub fn getMapBuilder(self: MapT.Ptr, token: *heap_import.AllocationToken) MapBuilder(MapT, MapT.ObjectType) {
             return MapBuilder(MapT, MapT.ObjectType).init(token, self);
+        }
+
+        /// Visit the slots in this map with the given visitor. Call this
+        /// from the `visitEdges` in the map implementation.
+        pub fn visitSlots(self: MapT.Ptr, visitor: anytype) !void {
+            for (self.getSlots()) |*slot| {
+                try visitor.visit(&slot.name.value);
+                try visitor.visit(&slot.value);
+            }
         }
     };
 }
@@ -481,10 +507,10 @@ pub const SlotsMap = extern struct {
     /// Create a new slots map. Takes the amount of slots this object will have.
     ///
     /// IMPORTANT: All slots *must* be initialized right after creation.
-    pub fn create(token: *Heap.AllocationToken, slot_count: u16) SlotsMap.Ptr {
+    pub fn create(token: *heap_import.AllocationToken, slot_count: u16) SlotsMap.Ptr {
         const size = SlotsMap.requiredSizeForAllocation(slot_count);
 
-        const memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(size);
         var self: SlotsMap.Ptr = @ptrCast(memory_area);
         self.init(slot_count);
 
@@ -496,7 +522,8 @@ pub const SlotsMap = extern struct {
         self.map.getMetadata().slots = slot_count;
     }
 
-    pub fn clone(self: SlotsMap.Ptr, token: *Heap.AllocationToken) SlotsMap.Ptr {
+    pub fn clone(self: SlotsMap.Ptr, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken) SlotsMap.Ptr {
+        _ = heap;
         const new_map = create(token, self.map.getMetadata().slots);
 
         new_map.setAssignableSlotCount(self.getAssignableSlotCount());
@@ -514,6 +541,11 @@ pub const SlotsMap = extern struct {
         _ = self;
         _ = allocator;
         @panic("Attempted to call SlotsMap.finalize");
+    }
+
+    /// Visit the edges on this map with the given visitor.
+    pub fn visitEdges(self: SlotsMap.Ptr, visitor: anytype) !void {
+        try self.visitSlots(visitor);
     }
 
     pub fn getSizeInMemory(self: SlotsMap.Ptr) usize {

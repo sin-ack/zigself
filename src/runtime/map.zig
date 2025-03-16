@@ -1,17 +1,18 @@
-// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("Heap.zig");
 const Actor = @import("Actor.zig");
 const Value = @import("value.zig").Value;
 const pointer = @import("../utility/pointer.zig");
 const BaseObject = @import("base_object.zig").BaseObject;
 const ObjectLike = @import("value.zig").ObjectLike;
+const heap_import = @import("Heap.zig");
 const scoped_bits = @import("../utility/scoped_bits.zig");
+const VirtualMachine = @import("VirtualMachine.zig");
 
 // TODO: Unify MapType and MapRegistry once Zig stops raising false dependency loops.
 pub const MapType = enum(u5) {
@@ -130,6 +131,21 @@ pub const Map = extern struct {
         self.dispatch(void, "finalize", .{allocator});
     }
 
+    /// Visit all the edges of this object.
+    pub fn visitEdges(self: Map.Ptr, visitor: anytype) !void {
+        const Error = blk: {
+            comptime var Visitor = @TypeOf(visitor);
+            if (@typeInfo(Visitor) == .pointer) {
+                Visitor = @typeInfo(Visitor).pointer.child;
+            }
+
+            const visit_info = @typeInfo(@TypeOf(Visitor.visit));
+            break :blk @typeInfo(visit_info.@"fn".return_type.?).error_union.error_set;
+        };
+
+        return self.dispatch(Error!void, "visitEdges", .{visitor});
+    }
+
     pub fn getSizeInMemory(self: Map.Ptr) usize {
         return self.dispatch(usize, "getSizeInMemory", .{});
     }
@@ -138,7 +154,8 @@ pub const Map = extern struct {
         return self.dispatch(usize, "getSizeForCloning", .{});
     }
 
-    pub fn clone(self: Map.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) Allocator.Error!Map.Ptr {
+    pub fn clone(self: Map.Ptr, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID) Allocator.Error!Map.Ptr {
+        _ = allocator;
         _ = actor_id;
 
         // NOTE: Inlining the dispatch here because we need to cast the result into the generic object type.
@@ -147,7 +164,7 @@ pub const Map = extern struct {
                 if (!@hasDecl(MapT(t), "clone")) unreachable;
 
                 const map_ptr: MapT(t).Ptr = @ptrCast(self);
-                const result_or_error = map_ptr.clone(token);
+                const result_or_error = map_ptr.clone(heap, token);
                 const result = if (@typeInfo(@TypeOf(result_or_error)) == .error_union) try result_or_error else result_or_error;
                 return @ptrCast(result);
             },

@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -28,7 +28,7 @@ pub fn ArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !ExecutionRes
     if (try context.wouldOverflow(usize, size, "size")) |result| return result;
 
     const required_memory = array_object.ArrayMap.requiredSizeForAllocation() + array_object.Array.requiredSizeForAllocation(@intCast(size));
-    var token = try context.vm.heap.getAllocation(required_memory);
+    var token = try context.vm.heap.allocate(required_memory);
     defer token.deinit();
 
     if (size == 0) {
@@ -94,7 +94,7 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
 
     if (try context.wouldOverflow(usize, position, "position")) |result| return result;
 
-    if (!context.actor.canWriteTo(context.receiver.getValue())) {
+    if (!context.actor.canWriteTo(context.receiver.get())) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "_ArrayAt:Put: receiver is not writable for actor",
@@ -127,7 +127,7 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
 
     // Since the array object could potentially be in an older space than the
     // value stored in it, let's add the array object to the remembered set.
-    try context.vm.heap.rememberObjectReference(receiver.asValue(), new_value);
+    _ = try context.vm.heap.rememberObjectReference(receiver.asValue(), new_value);
 
     return ExecutionResult.resolve(receiver.asValue());
 }

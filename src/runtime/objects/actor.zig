@@ -1,11 +1,11 @@
-// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("../Heap.zig");
+const heap = @import("../Heap.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
 const VMActor = @import("../Actor.zig");
@@ -15,6 +15,7 @@ const GenericValue = value_import.Value;
 const PointerValue = value_import.PointerValue;
 const value_import = @import("../value.zig");
 const LookupResult = @import("../object_lookup.zig").LookupResult;
+const VirtualMachine = @import("../VirtualMachine.zig");
 
 /// An actor object which is the object that the genesis actor interacts with in
 /// Self code.
@@ -30,12 +31,12 @@ pub const Actor = extern struct {
     pub const Type = .Actor;
     pub const Value = value_import.ObjectValue(Actor);
 
-    pub fn create(token: *Heap.AllocationToken, genesis_actor_id: VMActor.ActorID, actor: *VMActor, context: GenericValue) !Actor.Ptr {
-        const memory_area = token.allocate(.Object, requiredSizeForAllocation());
+    pub fn create(vm: *VirtualMachine, token: *heap.AllocationToken, genesis_actor_id: VMActor.ActorID, actor: *VMActor, context: GenericValue) !Actor.Ptr {
+        const memory_area = token.allocate(requiredSizeForAllocation());
         const self: Actor.Ptr = @ptrCast(memory_area);
         self.init(genesis_actor_id, actor, context);
 
-        try token.heap.markAddressAsNeedingFinalization(memory_area);
+        try vm.heap.markAddressAsNeedingFinalization(memory_area);
         return self;
     }
 
@@ -82,6 +83,11 @@ pub const Actor = extern struct {
         // FIXME: Ask the VM whether the actor has been quit by the time we
         //        reach here.
         self.actor.get().destroy(allocator);
+    }
+
+    /// Visit edges of this object using the given visitor.
+    pub fn visitEdges(self: Actor.Ptr, visitor: anytype) !void {
+        try visitor.visit(&self.context);
     }
 
     pub fn lookup(self: Actor.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {

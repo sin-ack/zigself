@@ -1,4 +1,4 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -57,7 +57,7 @@ pub fn write(self: *RegisterFile, location: RegisterLocation, value: Value) void
     }
 }
 
-pub fn visitValues(
+pub fn visitEdges(
     self: *RegisterFile,
     // TODO: Write interfaces proposal for Zig
     visitor: anytype,

@@ -1,19 +1,20 @@
-// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
 const pointer = @import("../../utility/pointer.zig");
 const Selector = @import("../Selector.zig");
+const heap_import = @import("../Heap.zig");
 const value_import = @import("../value.zig");
 const GenericValue = value_import.Value;
 const LookupResult = @import("../object_lookup.zig").LookupResult;
+const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
@@ -77,12 +78,12 @@ pub const Managed = extern struct {
     };
     pub const ExtraBits = Object.ExtraBits.reserve(ManagedType);
 
-    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, managed_type: ManagedType, value: GenericValue) !Managed.Ptr {
-        const memory_area = token.allocate(.Object, requiredSizeForAllocation());
+    pub fn create(heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID, managed_type: ManagedType, value: GenericValue) !Managed.Ptr {
+        const memory_area = token.allocate(requiredSizeForAllocation());
         const self: Managed.Ptr = @ptrCast(memory_area);
         self.init(actor_id, managed_type, value);
 
-        try token.heap.markAddressAsNeedingFinalization(memory_area);
+        try heap.markAddressAsNeedingFinalization(memory_area);
         return self;
     }
 
@@ -114,6 +115,12 @@ pub const Managed = extern struct {
             },
         }
     }
+
+    /// Visit edges of this object using the given visitor.
+    pub fn visitEdges(self: Managed.Ptr, visitor: anytype) !void {
+        try visitor.visit(&self.value);
+    }
+
     pub fn lookup(self: Managed.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         _ = previously_visited;
 

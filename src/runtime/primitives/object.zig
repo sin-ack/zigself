@@ -22,7 +22,7 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
     var receiver = try arguments.getObject(PrimitiveContext.Receiver, .Slots);
     var argument = try arguments.getObject(0, .Slots);
 
-    if (!context.actor.canWriteTo(context.receiver.getValue())) {
+    if (!context.actor.canWriteTo(context.receiver.get())) {
         return ExecutionResult.runtimeError(
             RuntimeError.initLiteral(
                 context.source_range,
@@ -31,16 +31,16 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
         );
     }
 
-    var token = try context.vm.heap.getAllocation(
+    var token = try context.vm.heap.allocate(
         try SlotsObject.requiredSizeForMerging(receiver, argument, context.vm.allocator),
     );
     defer token.deinit();
 
     // Refresh the pointers in case that caused a GC
-    receiver = context.receiver.getValue().asObject().?.asType(.Slots).?;
+    receiver = context.receiver.get().asObject().?.asType(.Slots).?;
     argument = context.arguments[0].asObject().?.asType(.Slots).?;
 
-    const new_object = try receiver.addSlotsFrom(argument, context.vm.allocator, &token);
+    const new_object = try receiver.addSlotsFrom(context.vm.allocator, &context.vm.heap, &token, argument);
     return ExecutionResult.resolve(new_object.asValue());
 }
 
@@ -48,9 +48,9 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
 /// Removes the given slot. If the slot isn't found or otherwise cannot be
 /// removed, the second argument is evaluated as a block.
 pub fn RemoveSlot_IfFail(context: *PrimitiveContext) !ExecutionResult {
-    var receiver = context.receiver.getValue();
-    var slot_name = context.arguments[0].getValue();
-    var fail_block = context.arguments[1].getValue();
+    var receiver = context.receiver.get();
+    var slot_name = context.arguments[0].get();
+    var fail_block = context.arguments[1].get();
 
     if (!slot_name.value.is(.ByteVector)) {
         return ExecutionResult.runtimeError(try RuntimeError.initFormatted(
@@ -93,7 +93,7 @@ pub fn Inspect(context: *PrimitiveContext) !ExecutionResult {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const receiver = context.receiver.getValue();
+    const receiver = context.receiver.get();
     try value_inspector.inspectValue(.Multiline, context.vm, receiver);
     return ExecutionResult.resolve(receiver);
 }
@@ -103,19 +103,19 @@ pub fn Clone(context: *PrimitiveContext) !ExecutionResult {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var receiver = context.receiver.getValue();
+    var receiver = context.receiver.get();
 
     const required_memory = if (receiver.asObject()) |object|
         object.getSizeForCloning()
     else
         0;
 
-    var token = try context.vm.heap.getAllocation(required_memory);
+    var token = try context.vm.heap.allocate(required_memory);
     defer token.deinit();
 
-    receiver = context.receiver.getValue();
+    receiver = context.receiver.get();
 
-    return ExecutionResult.resolve(receiver.clone(&token, context.actor.id));
+    return ExecutionResult.resolve(receiver.clone(context.vm.allocator, &context.vm.heap, &token, context.actor.id));
 }
 
 /// Return whether the receiver and argument are identical. Returns either
@@ -125,7 +125,7 @@ pub fn Eq(context: *PrimitiveContext) error{}!ExecutionResult {
     defer tracy_zone.end();
 
     return ExecutionResult.resolve(
-        if (context.receiver.getValue().data == context.arguments[0].data)
+        if (context.receiver.get().data == context.arguments[0].data)
             context.vm.getTrue()
         else
             context.vm.getFalse(),

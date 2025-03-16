@@ -1,11 +1,10 @@
-// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("../Heap.zig");
 const Slot = @import("../slot.zig").Slot;
 const Actor = @import("../Actor.zig");
 const slots = @import("slots.zig");
@@ -13,14 +12,17 @@ const context = @import("../context.zig");
 const pointer = @import("../../utility/pointer.zig");
 const Selector = @import("../Selector.zig");
 const bytecode = @import("../bytecode.zig");
-const ByteArray = @import("../ByteArray.zig");
+const ByteArray = @import("byte_array.zig").ByteArray;
 const Activation = @import("../Activation.zig");
 const SlotsObject = slots.Slots;
+const heap_import = @import("../Heap.zig");
+const ObjectValue = value_import.ObjectValue;
 const SourceRange = @import("../SourceRange.zig");
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
 const LookupResult = @import("../object_lookup.zig").LookupResult;
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
+const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationObject = @import("activation.zig").Activation;
 const SlotsLikeMapBase = slots.SlotsLikeMapBase;
 const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;
@@ -38,7 +40,7 @@ pub const Method = extern struct {
     pub usingnamespace SlotsLikeObjectBase(Method);
     pub usingnamespace AssignableSlotsMixin(Method);
 
-    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, map: MethodMap.Ptr, assignable_slot_values: []const GenericValue) Method.Ptr {
+    pub fn create(token: *heap_import.AllocationToken, actor_id: Actor.ActorID, map: MethodMap.Ptr, assignable_slot_values: []const GenericValue) Method.Ptr {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -48,7 +50,7 @@ pub const Method = extern struct {
 
         const size = Method.requiredSizeForAllocation(@intCast(assignable_slot_values.len));
 
-        const memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(size);
         var self: Method.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map);
         @memcpy(self.getAssignableSlots(), assignable_slot_values);
@@ -79,6 +81,12 @@ pub const Method = extern struct {
         @panic("Attempted to call Method.finalize");
     }
 
+    /// Visit edges of this object using the given visitor.
+    pub fn visitEdges(self: Method.Ptr, visitor: anytype) !void {
+        try self.slots.object.visitEdges(visitor);
+        try self.visitAssignableSlotValues(visitor);
+    }
+
     pub fn lookup(self: Method.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         _ = self;
         _ = selector;
@@ -90,21 +98,23 @@ pub const Method = extern struct {
 
     const toplevel_context_string = "<top level>";
     pub fn createTopLevelContextForExecutable(
-        token: *Heap.AllocationToken,
+        allocator: Allocator,
+        heap: *VirtualMachine.Heap,
+        token: *heap_import.AllocationToken,
         executable: bytecode.Executable.Ref,
         block: *bytecode.Block,
     ) !Method.Ptr {
         const toplevel_context_method_map = blk: {
-            const toplevel_context_name = ByteArray.createFromString(token, toplevel_context_string);
-            break :blk try MethodMap.create(token, 0, 0, false, toplevel_context_name, block, executable);
+            const toplevel_context_name = try ByteArray.createWithValues(allocator, heap, token, .Global, toplevel_context_string);
+            break :blk try MethodMap.create(heap, token, 0, 0, false, toplevel_context_name, block, executable);
         };
         return create(token, context.getActor().id, toplevel_context_method_map, &.{});
     }
 
     pub fn requiredSizeForCreatingTopLevelContext() usize {
-        return ByteArray.requiredSizeForAllocation(toplevel_context_string.len) +
-            MethodMap.requiredSizeForAllocation(0) +
-            Method.requiredSizeForAllocation(0);
+        return MethodMap.requiredSizeForAllocation(0) +
+            Method.requiredSizeForAllocation(0) +
+            ByteArray.requiredSizeForAllocation();
     }
 
     // --- Map forwarding ---
@@ -129,7 +139,7 @@ pub const Method = extern struct {
     /// Copies `source_range`.
     pub fn activateMethod(
         self: Method.Ptr,
-        token: *Heap.AllocationToken,
+        token: *heap_import.AllocationToken,
         actor_id: Actor.ActorID,
         receiver: GenericValue,
         arguments: []const GenericValue,
@@ -138,7 +148,7 @@ pub const Method = extern struct {
         out_activation: *Activation,
     ) void {
         const activation_object = ActivationObject.create(token, actor_id, .Method, self.slots.object.getMap(), arguments, self.getAssignableSlots(), receiver);
-        out_activation.initInPlace(ActivationObject.Value.init(activation_object), target_location, self.getMap().method_name, created_from);
+        out_activation.initInPlace(ActivationObject.Value.init(activation_object), target_location, self.getMap().method_name.get().getByteArray(), created_from);
     }
 
     pub fn requiredSizeForActivation(self: Method.Ptr) usize {
@@ -154,7 +164,7 @@ pub const Method = extern struct {
 pub const MethodMap = extern struct {
     base_map: ExecutableMap align(@alignOf(u64)),
     /// What the method is called.
-    method_name: GenericValue align(@alignOf(u64)),
+    method_name: ObjectValue(ByteArray) align(@alignOf(u64)),
 
     pub const Ptr = pointer.HeapPtr(MethodMap, .Mutable);
     pub const ObjectType = Method;
@@ -167,21 +177,22 @@ pub const MethodMap = extern struct {
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
-        token: *Heap.AllocationToken,
+        heap: *VirtualMachine.Heap,
+        token: *heap_import.AllocationToken,
         argument_slot_count: u8,
         total_slot_count: u16,
         is_inline_method: bool,
-        method_name: ByteArray,
+        method_name: ByteArray.Ptr,
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
     ) !MethodMap.Ptr {
         const size = MethodMap.requiredSizeForAllocation(total_slot_count);
 
-        const memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(size);
         var self: MethodMap.Ptr = @ptrCast(memory_area);
         self.init(argument_slot_count, total_slot_count, is_inline_method, method_name, block, executable);
 
-        try token.heap.markAddressAsNeedingFinalization(memory_area);
+        try heap.markAddressAsNeedingFinalization(memory_area);
         return self;
     }
 
@@ -190,13 +201,13 @@ pub const MethodMap = extern struct {
         argument_slot_count: u8,
         total_slot_count: u16,
         is_inline_method: bool,
-        method_name: ByteArray,
+        method_name: ByteArray.Ptr,
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
     ) void {
         self.base_map.init(.Method, argument_slot_count, total_slot_count, block, executable);
         self.setInlineMethod(is_inline_method);
-        self.method_name = method_name.asValue();
+        self.method_name = .init(method_name);
     }
 
     fn setInlineMethod(self: MethodMap.Ptr, is_inline_method: bool) void {
@@ -220,17 +231,24 @@ pub const MethodMap = extern struct {
         self.base_map.finalize(allocator);
     }
 
+    /// Visit edges of this object using the given visitor.
+    pub fn visitEdges(self: MethodMap.Ptr, visitor: anytype) !void {
+        try visitor.visit(&self.method_name.value);
+        try self.visitSlots(visitor);
+    }
+
     pub fn getArgumentSlotCount(self: MethodMap.Ptr) u8 {
         return self.base_map.getArgumentSlotCount();
     }
 
-    pub fn clone(self: MethodMap.Ptr, token: *Heap.AllocationToken) !MethodMap.Ptr {
+    pub fn clone(self: MethodMap.Ptr, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken) !MethodMap.Ptr {
         const new_map = try create(
+            heap,
             token,
             self.getArgumentSlotCount(),
             self.getSlotCount(),
             self.isInlineMethod(),
-            self.method_name.asByteArray().?,
+            self.method_name.get(),
             self.base_map.block.get(),
             self.base_map.definition_executable_ref.get(),
         );

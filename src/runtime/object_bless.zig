@@ -1,16 +1,17 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("Heap.zig");
 const Actor = @import("Actor.zig");
 const Value = @import("value.zig").Value;
-const BaseObject = @import("base_object.zig").BaseObject;
 const context = @import("context.zig");
 const traversal = @import("object_traversal.zig");
+const BaseObject = @import("base_object.zig").BaseObject;
+const heap_import = @import("Heap.zig");
+const VirtualMachine = @import("VirtualMachine.zig");
 
 const SeenObjectsSet = std.AutoHashMap([*]u64, void);
 const RequiredMemoryCalculator = struct {
@@ -43,7 +44,9 @@ fn calculateRequiredMemoryForBlessing(allocator: Allocator, value: Value) Alloca
 const CopiedObjectsMap = std.AutoHashMap([*]u64, [*]u64);
 const ObjectGraphCopier = struct {
     copied_objects_map: *CopiedObjectsMap,
-    token: *Heap.AllocationToken,
+    allocator: Allocator,
+    heap: *VirtualMachine.Heap,
+    token: *heap_import.AllocationToken,
     actor_id: Actor.ActorID,
 
     pub fn visit(self: @This(), old_base_object: BaseObject.Ptr) Allocator.Error!BaseObject.Ptr {
@@ -52,19 +55,25 @@ const ObjectGraphCopier = struct {
             return BaseObject.fromAddress(gop.value_ptr.*);
         }
 
-        const new_object = try old_base_object.clone(self.token, self.actor_id);
+        const new_object = try old_base_object.clone(self.allocator, self.heap, self.token, self.actor_id);
         gop.value_ptr.* = new_object.getAddress();
         return @ptrCast(new_object);
     }
 };
 
-fn copyObjectGraphForNewActor(allocator: Allocator, token: *Heap.AllocationToken, target_actor_id: Actor.ActorID, value: Value) Allocator.Error!Value {
+fn copyObjectGraphForNewActor(allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, target_actor_id: Actor.ActorID, value: Value) Allocator.Error!Value {
     var copied_objects_map = CopiedObjectsMap.init(allocator);
     defer copied_objects_map.deinit();
 
     return traversal.traverseNonGloballyReachableObjectGraph(
         value,
-        ObjectGraphCopier{ .copied_objects_map = &copied_objects_map, .token = token, .actor_id = target_actor_id },
+        ObjectGraphCopier{
+            .copied_objects_map = &copied_objects_map,
+            .allocator = allocator,
+            .heap = heap,
+            .token = token,
+            .actor_id = target_actor_id,
+        },
     ) catch |err| return @as(Allocator.Error, @errorCast(err));
 }
 
@@ -80,20 +89,20 @@ pub fn bless(target_actor_id: Actor.ActorID, const_value: Value) !Value {
     // Pass 1: Figure out the required memory for blessing this object graph.
     const required_memory = try calculateRequiredMemoryForBlessing(allocator, value);
 
-    const tracked_value = try heap.track(value);
+    var tracked_value = heap.track(value);
 
     var token = token: {
-        defer tracked_value.untrack(heap);
+        defer tracked_value.deinit(heap);
 
-        const token = try heap.getAllocation(required_memory);
+        const token = try heap.allocate(required_memory);
 
-        value = tracked_value.getValue();
+        value = tracked_value.get();
         break :token token;
     };
     defer token.deinit();
 
     // Pass 2: Actually copy the objects.
-    const new_value = try copyObjectGraphForNewActor(allocator, &token, target_actor_id, value);
+    const new_value = try copyObjectGraphForNewActor(allocator, heap, &token, target_actor_id, value);
 
     return new_value;
 }

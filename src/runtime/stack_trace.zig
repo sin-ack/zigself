@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -46,7 +46,7 @@ pub fn printTraceFromActivationStackUntil(stack: []Activation, first_source_rang
             if (until_ptr == activation_ptr) break;
         }
 
-        const message_name = activation_ptr.creator_message.asByteArray().?.getValues();
+        const message_name = activation_ptr.creator_message.getValues();
         writeTraceForFrame(message_name, called_from);
 
         called_from = activation_ptr.created_from;

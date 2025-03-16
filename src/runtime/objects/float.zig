@@ -1,20 +1,21 @@
-// Copyright (c) 2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2024-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
 const context = @import("../context.zig");
 const pointer = @import("../../utility/pointer.zig");
 const Selector = @import("../Selector.zig");
+const heap_import = @import("../Heap.zig");
 const GenericValue = @import("../value.zig").Value;
 const IntegerValue = @import("../value.zig").IntegerValue;
 const LookupResult = @import("../object_lookup.zig").LookupResult;
+const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
@@ -34,8 +35,8 @@ pub const Float = extern struct {
     const ExtraBits = Object.ExtraBits.reserve(@Type(.{ .int = .{ .bits = BottomBitCount, .signedness = .unsigned } }));
 
     /// Create a new Float from the given 64-bit float.
-    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, value: f64) Float.Ptr {
-        const memory_area = token.allocate(.Object, requiredSizeForAllocation());
+    pub fn create(token: *heap_import.AllocationToken, actor_id: Actor.ActorID, value: f64) Float.Ptr {
+        const memory_area = token.allocate(requiredSizeForAllocation());
         var self: Float.Ptr = @ptrCast(memory_area);
         self.init(actor_id, value);
 
@@ -82,7 +83,10 @@ pub const Float = extern struct {
     }
 
     /// Clone this object.
-    pub fn clone(self: Float.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) !Float.Ptr {
+    pub fn clone(self: Float.Ptr, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID) !Float.Ptr {
+        _ = allocator;
+        _ = heap;
+
         return create(token, actor_id, self.get());
     }
 
@@ -99,13 +103,19 @@ pub const Float = extern struct {
         @panic("Float.finalize() should never be called");
     }
 
+    /// Visit edges of this object using the given visitor.
+    pub fn visitEdges(self: Float.Ptr, visitor: anytype) !void {
+        _ = self;
+        _ = visitor;
+    }
+
     /// Perform a lookup on this object.
     pub fn lookup(self: Float.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         _ = self;
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Float.lookup: Looking at traits float\n", .{});
-        const float_traits = context.getVM().float_traits.getValue();
+        const float_traits = context.getVM().float_traits.get();
         if (selector.equals(Selector.well_known.parent))
             return LookupResult{ .Regular = float_traits };
 

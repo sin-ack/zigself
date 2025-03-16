@@ -1,14 +1,16 @@
-// Copyright (c) 2023-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2023-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const Map = @import("../../map.zig").Map;
-const Heap = @import("../../Heap.zig");
 const Actor = @import("../../Actor.zig");
 const Value = @import("../../value.zig").Value;
+const heap_import = @import("../../Heap.zig");
 const IntrinsicMap = @import("../../intrinsic_map.zig").IntrinsicMap;
+const VirtualMachine = @import("../../VirtualMachine.zig");
 const ByteArrayObject = @import("../byte_array.zig").ByteArray;
 
 /// The addrinfo object is used by the _GetAddrInfoForHost:... primitive to
@@ -24,9 +26,9 @@ pub const AddrInfoMap = extern struct {
 
     pub usingnamespace IntrinsicMap(AddrInfoMap, .AddrInfo);
 
-    pub fn createFromAddrinfo(token: *Heap.AllocationToken, actor_id: Actor.ActorID, addrinfo: *std.posix.addrinfo) AddrInfoMap.Ptr {
+    pub fn createFromAddrinfo(allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID, addrinfo: *std.posix.addrinfo) !AddrInfoMap.Ptr {
         const sockaddr_memory: [*]u8 = @ptrCast(addrinfo.addr.?);
-        const sockaddr_bytes_object = ByteArrayObject.createWithValues(token, actor_id, sockaddr_memory[0..addrinfo.addrlen]);
+        const sockaddr_bytes_object = try ByteArrayObject.createWithValues(allocator, heap, token, actor_id, sockaddr_memory[0..addrinfo.addrlen]);
 
         const self = create(token);
         self.family = Value.fromInteger(addrinfo.family);
@@ -38,8 +40,8 @@ pub const AddrInfoMap = extern struct {
         return self;
     }
 
-    fn create(token: *Heap.AllocationToken) AddrInfoMap.Ptr {
-        const memory = token.allocate(.Object, AddrInfoMap.requiredSizeForAllocation());
+    fn create(token: *heap_import.AllocationToken) AddrInfoMap.Ptr {
+        const memory = token.allocate(AddrInfoMap.requiredSizeForAllocation());
         const self: AddrInfoMap.Ptr = @ptrCast(memory);
 
         self.init();
@@ -50,7 +52,9 @@ pub const AddrInfoMap = extern struct {
         self.map.init(.AddrInfo);
     }
 
-    pub fn clone(self: AddrInfoMap.Ptr, token: *Heap.AllocationToken) AddrInfoMap.Ptr {
+    pub fn clone(self: AddrInfoMap.Ptr, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken) AddrInfoMap.Ptr {
+        _ = heap;
+
         const new_map = create(token);
         new_map.flags = self.flags;
         new_map.family = self.family;
@@ -61,7 +65,7 @@ pub const AddrInfoMap = extern struct {
         return new_map;
     }
 
-    pub fn requiredSizeToCreateFromAddrinfo(addrinfo: *std.posix.addrinfo) usize {
-        return AddrInfoMap.requiredSizeForAllocation() + ByteArrayObject.requiredSizeForAllocation(addrinfo.addrlen);
+    pub fn requiredSizeToCreateFromAddrinfo() usize {
+        return AddrInfoMap.requiredSizeForAllocation() + ByteArrayObject.requiredSizeForAllocation();
     }
 };

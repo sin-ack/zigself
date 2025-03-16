@@ -1,11 +1,11 @@
-// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("./Heap.zig");
+const heap = @import("./Heap.zig");
 const Slot = @import("./slot.zig").Slot;
 const debug = @import("../debug.zig");
 const Value = value_import.Value;
@@ -75,7 +75,7 @@ const Mailbox = std.DoublyLinkedList;
 
 // Sentinel values for the stacks
 pub const ValueSentinel: Value = @bitCast(@as(u64, 0xCCCCCCCCCCCCCCCC));
-pub const SlotSentinel = Slot{ .name = ValueSentinel, .properties = .{ .properties = ValueSentinel }, .value = ValueSentinel };
+pub const SlotSentinel = Slot{ .name = @bitCast(ValueSentinel), .properties = .{ .properties = ValueSentinel }, .value = ValueSentinel };
 
 pub const MaximumStackDepth = 2048;
 
@@ -182,7 +182,7 @@ pub const ActorID = enum(u31) {
     _,
 };
 
-pub fn create(vm: *VirtualMachine, token: *Heap.AllocationToken, actor_context: Value) !*Actor {
+pub fn create(vm: *VirtualMachine, token: *heap.AllocationToken, actor_context: Value) !*Actor {
     const self = try vm.allocator.create(Actor);
     errdefer vm.allocator.destroy(self);
 
@@ -190,7 +190,7 @@ pub fn create(vm: *VirtualMachine, token: *Heap.AllocationToken, actor_context: 
     //       first call to create); otherwise, we are always owned by the genesis actor.
     const owning_actor_id = if (vm.isInActorMode()) vm.genesis_actor.?.id else .Global;
 
-    const actor_object = try ActorObject.create(token, owning_actor_id, self, actor_context);
+    const actor_object = try ActorObject.create(vm, token, owning_actor_id, self, actor_context);
 
     self.init(actor_object);
     return self;
@@ -225,7 +225,7 @@ fn deinit(self: *Actor, allocator: Allocator) void {
 
 pub fn activateMethod(
     self: *Actor,
-    token: *Heap.AllocationToken,
+    token: *heap.AllocationToken,
     method: MethodObject.Ptr,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
@@ -235,7 +235,7 @@ pub fn activateMethod(
 
 pub fn activateMethodWithContext(
     self: *Actor,
-    token: *Heap.AllocationToken,
+    token: *heap.AllocationToken,
     actor_context: Value,
     method: MethodObject.Ptr,
     target_location: bytecode.RegisterLocation,
@@ -270,7 +270,7 @@ pub fn execute(self: *Actor) !ActorResult {
 
             var method = message.method.get();
 
-            var token = try vm.heap.getAllocation(method.requiredSizeForActivation());
+            var token = try vm.heap.allocate(method.requiredSizeForActivation());
             defer token.deinit();
             method = message.method.get();
 
@@ -400,7 +400,7 @@ pub fn writeRegister(self: *Actor, location: bytecode.RegisterLocation, value: V
     self.register_file.write(location, value);
 }
 
-pub fn visitValues(
+pub fn visitEdges(
     self: *Actor,
     // TODO: Write interfaces proposal for Zig
     visitor: anytype,
@@ -408,7 +408,7 @@ pub fn visitValues(
     try visitor.visit(&self.actor_object.value);
 
     // Go through the register file.
-    try self.register_file.visitValues(visitor);
+    try self.register_file.visitEdges(visitor);
 
     if (self.entrypoint_selector) |*value|
         try visitor.visit(&value.value);
@@ -420,9 +420,9 @@ pub fn visitValues(
         try visitor.visit(&value.value);
 
     // Go through the activation stack.
+    // TODO: Move this into an ActivationStack.visitEdges method.
     for (self.activation_stack.getStack()) |*activation| {
         try visitor.visit(&activation.activation_object.value);
-        try visitor.visit(&activation.creator_message);
     }
 
     // Go through the slot, argument and saved register stacks.
@@ -430,7 +430,7 @@ pub fn visitValues(
         if (std.meta.eql(SlotSentinel, slot.*))
             continue;
 
-        try visitor.visit(&slot.name);
+        try visitor.visit(&slot.name.value);
         try visitor.visit(&slot.value);
     }
 

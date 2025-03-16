@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -102,17 +102,17 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
 
     const filler = filler_contents[0];
 
-    var token = try context.vm.heap.getAllocation(
-        ByteArrayObject.requiredSizeForAllocation(@intCast(size)),
-    );
+    var token = try context.vm.heap.allocate(ByteArrayObject.requiredSizeForAllocation());
     defer token.deinit();
 
     // Refresh pointers
-    receiver = context.receiver.getValue().asObject().?.asType(.ByteArray).?;
+    receiver = arguments.getObject(PrimitiveContext.Receiver, .ByteArray) catch unreachable;
 
     var values = receiver.getValues();
 
-    const new_byte_array = ByteArray.createUninitialized(&token, @intCast(size));
+    const new_byte_array = try ByteArray.createUninitialized(context.vm.allocator, @intCast(size));
+    errdefer new_byte_array.deinit(context.vm.allocator);
+
     const bytes_to_copy: usize = @intCast(@min(size, values.len));
     @memcpy(new_byte_array.getValues()[0..bytes_to_copy], values[0..bytes_to_copy]);
 
@@ -120,7 +120,7 @@ pub fn ByteArrayCopySize_FillingExtrasWith(context: *PrimitiveContext) !Executio
         @memset(new_byte_array.getValues()[bytes_to_copy..], filler);
     }
 
-    const byte_array_object = ByteArrayObject.create(&token, context.actor.id, new_byte_array);
+    const byte_array_object = try ByteArrayObject.create(&context.vm.heap, &token, context.actor.id, new_byte_array);
     return ExecutionResult.resolve(byte_array_object.asValue());
 }
 
@@ -161,19 +161,21 @@ pub fn ByteArrayConcatenate(context: *PrimitiveContext) !ExecutionResult {
     const receiver_size = receiver.getValues().len;
     const argument_size = argument.getValues().len;
 
-    var token = try context.vm.heap.getAllocation(
-        ByteArrayObject.requiredSizeForAllocation(receiver_size + argument_size),
+    var token = try context.vm.heap.allocate(
+        ByteArrayObject.requiredSizeForAllocation(),
     );
     defer token.deinit();
 
     // Refresh pointers
-    receiver = context.receiver.getValue().asObject().?.asType(.ByteArray).?;
-    argument = context.arguments[0].asObject().?.asType(.ByteArray).?;
+    receiver = arguments.getObject(PrimitiveContext.Receiver, .ByteArray) catch unreachable;
+    argument = arguments.getObject(0, .ByteArray) catch unreachable;
 
-    var new_byte_array = ByteArray.createUninitialized(&token, receiver_size + argument_size);
+    var new_byte_array = try ByteArray.createUninitialized(context.vm.allocator, receiver_size + argument_size);
+    errdefer new_byte_array.deinit(context.vm.allocator);
+
     @memcpy(new_byte_array.getValues()[0..receiver_size], receiver.getValues());
     @memcpy(new_byte_array.getValues()[receiver_size..], argument.getValues());
 
-    const byte_array_object = ByteArrayObject.create(&token, context.actor.id, new_byte_array);
+    const byte_array_object = try ByteArrayObject.create(&context.vm.heap, &token, context.actor.id, new_byte_array);
     return ExecutionResult.resolve(byte_array_object.asValue());
 }

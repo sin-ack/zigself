@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -103,7 +103,7 @@ fn inspectObject(
         .Method => {
             const method = object.asType(.Method).?;
 
-            std.debug.print("<method object \"{s}\"> ", .{method.getMap().method_name.asByteArray().?.getValues()});
+            std.debug.print("<method object \"{s}\"> ", .{method.getMap().method_name.get().getValues()});
 
             if (method.getSlots().len > 0) {
                 std.debug.print("(|{s}", .{separator});
@@ -207,7 +207,7 @@ fn inspectSlots(
     for (slots) |slot| {
         const parent_marker: []const u8 = if (slot.isParent()) "*" else "";
         const assignability_marker: []const u8 = if (slot.isAssignable()) "<-" else "=";
-        printWithIndent(display_type, indent, "{s}{s} {s} ", .{ slot.name.asByteArray().?.getValues(), parent_marker, assignability_marker });
+        printWithIndent(display_type, indent, "{s}{s} {s} ", .{ slot.name.get().getValues(), parent_marker, assignability_marker });
 
         if (slot.isParent()) {
             // FIXME: Figure out creator slots, and give the path to this object

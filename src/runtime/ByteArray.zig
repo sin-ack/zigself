@@ -1,6 +1,9 @@
-// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
+
+const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const Heap = @import("./Heap.zig");
 const value = @import("./value.zig");
@@ -12,19 +15,24 @@ const ByteArray = @This();
 
 header: Header.Ptr,
 
-pub fn createFromString(token: *Heap.AllocationToken, string: []const u8) ByteArray {
-    var self = createUninitialized(token, string.len);
+pub fn createFromString(allocator: Allocator, string: []const u8) !ByteArray {
+    var self = try createUninitialized(allocator, string.len);
     @memcpy(self.getValues(), string);
     return self;
 }
 
-pub fn createUninitialized(token: *Heap.AllocationToken, size: usize) ByteArray {
-    const memory_area = token.allocate(.ByteArray, requiredSizeForAllocation(size));
+pub fn createUninitialized(allocator: Allocator, size: usize) !ByteArray {
+    const memory_area = try allocator.alignedAlloc(u8, .of(u64), requiredSizeForAllocation(size));
     var header: Header.Ptr = @ptrCast(memory_area);
 
     header.init(size);
 
     return ByteArray{ .header = header };
+}
+
+pub fn deinit(self: ByteArray, allocator: Allocator) void {
+    const memory: [*]align(@alignOf(u64)) u8 = @ptrCast(self.header);
+    allocator.free(memory[0..self.header.length.get()]);
 }
 
 pub inline fn fromAddress(address: [*]u64) ByteArray {
@@ -43,21 +51,10 @@ pub fn getLength(self: ByteArray) usize {
     return @intCast(self.header.length.get() - @sizeOf(Header));
 }
 
-pub fn asValue(self: ByteArray) Value {
-    return Value.fromObjectAddress(@ptrCast(@alignCast(self.header)));
-}
-
-pub fn getSizeInMemory(self: ByteArray) usize {
-    return requiredSizeForAllocation(self.getLength());
-}
-
 /// Return the size required for the byte vector with `length` amount of
 /// bytes to be stored inside.
-pub fn requiredSizeForAllocation(length: usize) usize {
-    // A basic ceil
-    const required_words = if (length == 0) 0 else ((length - 1) / @sizeOf(u64)) + 1;
-
-    return @sizeOf(Header) + required_words * @sizeOf(u64);
+fn requiredSizeForAllocation(length: usize) usize {
+    return @sizeOf(Header) + length;
 }
 
 pub const Header = extern struct {
@@ -71,7 +68,7 @@ pub const Header = extern struct {
         self.length = IntegerValue(.Unsigned).init(@intCast(@sizeOf(Header) + byte_array_length));
     }
 
-    pub fn asByteVector(self: Header.Ptr) ByteArray {
-        return .{ .header = @alignCast(self) };
+    pub fn asByteArray(self: Header.Ptr) ByteArray {
+        return ByteArray{ .header = self };
     }
 };

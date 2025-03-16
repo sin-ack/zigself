@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -7,7 +7,6 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
-const Heap = @import("./Heap.zig");
 const Actor = @import("./Actor.zig");
 const debug = @import("../debug.zig");
 const Object = @import("object.zig").Object;
@@ -16,8 +15,10 @@ const context = @import("context.zig");
 const Selector = @import("Selector.zig");
 const ByteArray = @import("./ByteArray.zig");
 const BaseObject = @import("base_object.zig").BaseObject;
+const heap_import = @import("./Heap.zig");
 const LookupResult = object_lookup.LookupResult;
 const object_lookup = @import("object_lookup.zig");
+const VirtualMachine = @import("VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
@@ -126,7 +127,7 @@ pub const Value = packed struct(u64) {
             .Object => selector.lookupObject(self.asObject().?),
             .Integer => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up on traits integer\n", .{});
-                const integer_traits = vm.integer_traits.getValue();
+                const integer_traits = vm.integer_traits.get();
                 if (selector.equals(Selector.well_known.parent))
                     return LookupResult{ .Regular = integer_traits };
 
@@ -136,12 +137,12 @@ pub const Value = packed struct(u64) {
     }
 
     /// Clone this value on the heap and return a reference to the new copy.
-    pub fn clone(self: Value, token: *Heap.AllocationToken, actor_id: Actor.ActorID) Value {
+    pub fn clone(self: Value, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID) Value {
         return switch (self.type) {
             .Integer => self,
             // NOTE: The only error condition that can happen here is during method and block map cloning.
             //       Since user code is unable to do this, there is no reason to propagate a try here.
-            .Object => (self.asObject().?.clone(token, actor_id) catch unreachable).asValue(),
+            .Object => (self.asObject().?.clone(allocator, heap, token, actor_id) catch unreachable).asValue(),
         };
     }
 };
@@ -231,6 +232,22 @@ pub const Reference = packed struct(u64) {
         if (reference.type != .Forwarding) return null;
 
         return reference;
+    }
+
+    /// Attempt to convert the given heap reference to a forwarding
+    /// reference, returning null if it doesn't look like one.
+    pub inline fn tryFromForwarding2(reference: Reference) ?Reference {
+        const target_reference: Reference = @bitCast(reference.getAddress()[0]);
+        if (target_reference.value_type != .Object) return null;
+        if (target_reference.object_like_type != .Reference) return null;
+        if (target_reference.type != .Forwarding) return null;
+
+        return target_reference;
+    }
+
+    /// Return this reference as a Value.
+    pub inline fn asValue(self: Reference) Value {
+        return @bitCast(self);
     }
 
     pub inline fn getAddress(self: Reference) [*]u64 {

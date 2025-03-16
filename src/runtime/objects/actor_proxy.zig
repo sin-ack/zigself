@@ -1,11 +1,10 @@
-// Copyright (c) 2022-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
@@ -13,9 +12,11 @@ const context = @import("../context.zig");
 const pointer = @import("../../utility/pointer.zig");
 const Selector = @import("../Selector.zig");
 const ActorObject = @import("actor.zig").Actor;
+const heap_import = @import("../Heap.zig");
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
 const LookupResult = @import("../object_lookup.zig").LookupResult;
+const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
@@ -30,8 +31,8 @@ pub const ActorProxy = extern struct {
     pub const Value = value_import.ObjectValue(ActorProxy);
 
     /// Create the Actor object without sending a message to it.
-    pub fn create(token: *Heap.AllocationToken, current_actor_id: Actor.ActorID, actor_object: ActorObject.Ptr) ActorProxy.Ptr {
-        const memory_area = token.allocate(.Object, requiredSizeForAllocation());
+    pub fn create(token: *heap_import.AllocationToken, current_actor_id: Actor.ActorID, actor_object: ActorObject.Ptr) ActorProxy.Ptr {
+        const memory_area = token.allocate(requiredSizeForAllocation());
         const self: ActorProxy.Ptr = @ptrCast(memory_area);
         self.init(current_actor_id, actor_object);
         return self;
@@ -54,7 +55,10 @@ pub const ActorProxy = extern struct {
         return self.actor_object.get();
     }
 
-    pub fn clone(self: ActorProxy.Ptr, token: *Heap.AllocationToken, actor_id: Actor.ActorID) ActorProxy.Ptr {
+    pub fn clone(self: ActorProxy.Ptr, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID) ActorProxy.Ptr {
+        _ = allocator;
+        _ = heap;
+
         return create(token, actor_id, self.getActor());
     }
 
@@ -80,6 +84,11 @@ pub const ActorProxy = extern struct {
         _ = self;
         _ = allocator;
         @panic("Attempted to call ActorProxy.finalize");
+    }
+
+    /// Visit edges of this object using the given visitor.
+    pub fn visitEdges(self: ActorProxy.Ptr, visitor: anytype) !void {
+        try visitor.visit(&self.actor_object.value);
     }
 
     pub fn lookup(self: ActorProxy.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {

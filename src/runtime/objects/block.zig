@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -6,7 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Slot = @import("../slot.zig").Slot;
-const Heap = @import("../Heap.zig");
+const heap_import = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const Value = value_import.Value;
 const debug = @import("../../debug.zig");
@@ -15,12 +15,14 @@ const pointer = @import("../../utility/pointer.zig");
 const context = @import("../context.zig");
 const Selector = @import("../Selector.zig");
 const bytecode = @import("../bytecode.zig");
+const ByteArray = @import("../ByteArray.zig");
 const Activation = @import("../Activation.zig");
 const SlotsObject = slots.Slots;
 const SourceRange = @import("../SourceRange.zig");
 const LookupResult = @import("../object_lookup.zig").LookupResult;
 const value_import = @import("../value.zig");
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
+const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationObject = @import("activation.zig").Activation;
 const SlotsLikeMapBase = slots.SlotsLikeMapBase;
 const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;
@@ -39,7 +41,7 @@ pub const Block = extern struct {
     pub usingnamespace SlotsLikeObjectBase(Block);
     pub usingnamespace AssignableSlotsMixin(Block);
 
-    pub fn create(token: *Heap.AllocationToken, actor_id: Actor.ActorID, map: BlockMap.Ptr, assignable_slot_values: []const Value) Block.Ptr {
+    pub fn create(token: *heap_import.AllocationToken, actor_id: Actor.ActorID, map: BlockMap.Ptr, assignable_slot_values: []const Value) Block.Ptr {
         if (assignable_slot_values.len != map.getAssignableSlotCount()) {
             std.debug.panic(
                 "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
@@ -49,7 +51,7 @@ pub const Block = extern struct {
 
         const size = Block.requiredSizeForAllocation(@intCast(assignable_slot_values.len));
 
-        const memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(size);
         var self: Block.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map);
         @memcpy(self.getAssignableSlots(), assignable_slot_values);
@@ -80,13 +82,19 @@ pub const Block = extern struct {
         @panic("Attempted to call Block.finalize");
     }
 
+    /// Visit edges of this object using the given visitor.
+    pub fn visitEdges(self: Block.Ptr, visitor: anytype) !void {
+        try self.slots.object.visitEdges(visitor);
+        try self.visitAssignableSlotValues(visitor);
+    }
+
     pub fn lookup(self: Block.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         // NOTE: executeMessage will handle the execution of the block itself.
         _ = self;
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Block.lookup: Looking at traits block\n", .{});
-        const block_traits = context.getVM().block_traits.getValue();
+        const block_traits = context.getVM().block_traits.get();
         if (selector.equals(Selector.well_known.parent))
             return LookupResult{ .Regular = block_traits };
 
@@ -141,11 +149,11 @@ pub const Block = extern struct {
     /// `source_range`.
     pub fn activateBlock(
         self: Block.Ptr,
-        token: *Heap.AllocationToken,
+        token: *heap_import.AllocationToken,
         receiver: Value,
         arguments: []const Value,
         target_location: bytecode.RegisterLocation,
-        creator_message: Value,
+        creator_message: ByteArray,
         created_from: SourceRange,
         out_activation: *Activation,
     ) void {
@@ -176,7 +184,8 @@ pub const BlockMap = extern struct {
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
-        token: *Heap.AllocationToken,
+        heap: *VirtualMachine.Heap,
+        token: *heap_import.AllocationToken,
         argument_slot_count: u8,
         total_slot_count: u16,
         parent_activation: Activation.ActivationRef,
@@ -186,11 +195,11 @@ pub const BlockMap = extern struct {
     ) !BlockMap.Ptr {
         const size = BlockMap.requiredSizeForAllocation(total_slot_count);
 
-        const memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(size);
         var self: BlockMap.Ptr = @ptrCast(memory_area);
         self.init(argument_slot_count, total_slot_count, parent_activation, nonlocal_return_target_activation, block, executable);
 
-        try token.heap.markAddressAsNeedingFinalization(memory_area);
+        try heap.markAddressAsNeedingFinalization(memory_area);
         return self;
     }
 
@@ -217,12 +226,18 @@ pub const BlockMap = extern struct {
         self.base_map.finalize(allocator);
     }
 
+    /// Visit edges of this object using the given visitor.
+    pub fn visitEdges(self: BlockMap.Ptr, visitor: anytype) !void {
+        try self.visitSlots(visitor);
+    }
+
     pub fn getArgumentSlotCount(self: BlockMap.Ptr) u8 {
         return self.base_map.getArgumentSlotCount();
     }
 
-    pub fn clone(self: BlockMap.Ptr, token: *Heap.AllocationToken) !BlockMap.Ptr {
+    pub fn clone(self: BlockMap.Ptr, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken) !BlockMap.Ptr {
         const new_map = try create(
+            heap,
             token,
             self.getArgumentSlotCount(),
             self.getSlotCount(),

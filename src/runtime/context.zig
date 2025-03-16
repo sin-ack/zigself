@@ -1,4 +1,4 @@
-// Copyright (c) 2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2023-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -8,7 +8,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
-const Heap = @import("Heap.zig");
 const Actor = @import("Actor.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
 
@@ -24,8 +23,8 @@ pub fn getVM() *VirtualMachine {
     }
 }
 
-pub fn getHeap() *Heap {
-    return getVM().heap;
+pub fn getHeap() *VirtualMachine.Heap {
+    return &getVM().heap;
 }
 
 pub fn getActor() *Actor {

@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -7,7 +7,7 @@ const std = @import("std");
 const tracy = @import("tracy");
 const Allocator = std.mem.Allocator;
 
-const Heap = @import("./Heap.zig");
+const Heap = VirtualMachine.Heap;
 const Value = value_import.Value;
 const Actor = @import("./Actor.zig");
 const object = @import("./object.zig");
@@ -42,7 +42,7 @@ pub const PrimitiveContext = struct {
     /// self object (unless the self object is an activation object, in which
     /// case the receiver will be unwrapped before being passed to the
     /// primitive).
-    receiver: Heap.Tracked,
+    receiver: Heap.Handle,
     /// The arguments that were passed to this primitive. The amount is always
     /// equivalent to the amount of colons in the primitive name.
     arguments: []const Value,
@@ -102,7 +102,7 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
 
         pub inline fn getValue(self: Self, comptime index: isize) Value {
             return switch (index) {
-                PrimitiveContext.Receiver => self.context.receiver.getValue(),
+                PrimitiveContext.Receiver => self.context.receiver.get(),
                 0...std.math.maxInt(isize) => self.context.arguments[index],
                 else => unreachable,
             };
@@ -181,7 +181,7 @@ const PrimitiveSpec = struct {
 
     pub fn call(
         self: PrimitiveSpec,
-        receiver: Heap.Tracked,
+        receiver: Heap.Handle,
         arguments: []const Value,
         target_location: bytecode.RegisterLocation,
         source_range: SourceRange,
@@ -314,14 +314,14 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
     .{ .name = "Exit:", .arity = 1, .function = system_call_primitives.Exit },
     .{ .name = "PollFDs:Events:WaitingForMS:IfFail:", .arity = 4, .function = system_call_primitives.PollFDs_Events_WaitingForMS_IfFail },
 }
-// FIXME: This is just a very basic condition to make wasm builds work. Set up a proper conditional system so that we can have i.e. Linux-specific primitives also.
-++ conditionalPrimitives(builtin.os.tag != .wasi, system_call_primitives, &[_]ConditionalPrimitiveSpec{
-    .{ .name = "GetAddrInfoForHost:Port:Family:SocketType:Protocol:Flags:IfFail:", .arity = 7, .function_name = "GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail" },
-    .{ .name = "SocketWithFamily:Type:Protocol:IfFail:", .arity = 4, .function_name = "SocketWithFamily_Type_Protocol_IfFail" },
-    .{ .name = "BindFD:ToSockaddrBytes:IfFail:", .arity = 3, .function_name = "BindFD_ToSockaddrBytes_IfFail" },
-    .{ .name = "ListenOnFD:WithBacklog:IfFail:", .arity = 3, .function_name = "ListenOnFD_WithBacklog_IfFail" },
-    .{ .name = "AcceptFromFD:IfFail:", .arity = 2, .function_name = "AcceptFromFD_IfFail" },
-});
+    // FIXME: This is just a very basic condition to make wasm builds work. Set up a proper conditional system so that we can have i.e. Linux-specific primitives also.
+    ++ conditionalPrimitives(builtin.os.tag != .wasi, system_call_primitives, &[_]ConditionalPrimitiveSpec{
+        .{ .name = "GetAddrInfoForHost:Port:Family:SocketType:Protocol:Flags:IfFail:", .arity = 7, .function_name = "GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail" },
+        .{ .name = "SocketWithFamily:Type:Protocol:IfFail:", .arity = 4, .function_name = "SocketWithFamily_Type_Protocol_IfFail" },
+        .{ .name = "BindFD:ToSockaddrBytes:IfFail:", .arity = 3, .function_name = "BindFD_ToSockaddrBytes_IfFail" },
+        .{ .name = "ListenOnFD:WithBacklog:IfFail:", .arity = 3, .function_name = "ListenOnFD_WithBacklog_IfFail" },
+        .{ .name = "AcceptFromFD:IfFail:", .arity = 2, .function_name = "AcceptFromFD_IfFail" },
+    });
 
 pub const PrimitiveIndex = enum(u32) {
     _,

@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const Map = map_import.Map;
 const Slot = @import("../slot.zig").Slot;
-const Heap = @import("../Heap.zig");
+const heap = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
 const slots = @import("slots.zig");
 const Object = @import("../object.zig").Object;
@@ -42,7 +42,7 @@ pub const Activation = extern struct {
 
     /// Borrows a ref from `message_script`.
     pub fn create(
-        token: *Heap.AllocationToken,
+        token: *heap.AllocationToken,
         actor_id: Actor.ActorID,
         comptime map_type: MapType,
         map: Map.Ptr,
@@ -77,7 +77,7 @@ pub const Activation = extern struct {
 
         const size = requiredSizeForAllocation(argument_slot_count, assignable_slot_count);
 
-        const memory_area = token.allocate(.Object, size);
+        const memory_area = token.allocate(size);
         var self: Activation.Ptr = @ptrCast(memory_area);
         self.init(map_type, actor_id, map, receiver);
 
@@ -195,6 +195,15 @@ pub const Activation = extern struct {
         _ = self;
         _ = allocator;
         @panic("Attempted to call Activation.finalize");
+    }
+
+    /// Visit the edges on this object with the given visitor.
+    pub fn visitEdges(self: Activation.Ptr, visitor: anytype) !void {
+        try self.slots.object.visitEdges(visitor);
+        try visitor.visit(&self.receiver);
+        for (self.getAssignableSlots()) |*value| {
+            try visitor.visit(value);
+        }
     }
 
     pub fn lookup(self: Activation.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {

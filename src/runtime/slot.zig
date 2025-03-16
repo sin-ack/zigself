@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -9,9 +9,10 @@ const Heap = @import("./Heap.zig");
 const hash = @import("../utility/hash.zig");
 const Value = @import("./value.zig").Value;
 const AstGen = @import("./bytecode/AstGen.zig");
-const ByteArray = @import("./ByteArray.zig");
-const map_builder = @import("map_builder.zig");
 const pointer = @import("../utility/pointer.zig");
+const ByteArray = @import("objects/byte_array.zig").ByteArray;
+const map_builder = @import("map_builder.zig");
+const ObjectValue = @import("./value.zig").ObjectValue;
 
 /// The properties of a slot. This is shared by both ProtoSlot and Slot.
 const SlotProperties = extern struct {
@@ -95,7 +96,7 @@ const SlotProperties = extern struct {
 /// this slot.
 pub const Slot = extern struct {
     /// The slot name.
-    name: Value align(@alignOf(u64)),
+    name: ObjectValue(ByteArray) align(@alignOf(u64)),
     properties: SlotProperties align(@alignOf(u64)),
     /// The value stored in this slot.
     ///
@@ -113,21 +114,21 @@ pub const Slot = extern struct {
     pub const ConstPtr = pointer.HeapPtr(Slot, .Const);
     pub const Ptr = pointer.HeapPtr(Slot, .Mutable);
 
-    pub fn initConstant(name: ByteArray, parent: SlotProperties.ParentFlag, value: Value) Slot {
+    pub fn initConstant(name: ByteArray.Ptr, parent: SlotProperties.ParentFlag, value: Value) Slot {
         return init(name, parent, .Constant, .NotArgument, value);
     }
 
-    pub fn initAssignable(name: ByteArray, parent: SlotProperties.ParentFlag, value: Value) Slot {
+    pub fn initAssignable(name: ByteArray.Ptr, parent: SlotProperties.ParentFlag, value: Value) Slot {
         return init(name, parent, .Assignable, .NotArgument, value);
     }
 
-    pub fn initArgument(name: ByteArray) Slot {
+    pub fn initArgument(name: ByteArray.Ptr) Slot {
         // FIXME: Somehow obtain vm.nil()
         return init(name, .NotParent, .Assignable, .Argument, Value.fromUnsignedInteger(0));
     }
 
     fn init(
-        name: ByteArray,
+        name: ByteArray.Ptr,
         parent: SlotProperties.ParentFlag,
         assignable: SlotProperties.AssignableFlag,
         argument: SlotProperties.ArgumentFlag,
@@ -136,7 +137,7 @@ pub const Slot = extern struct {
         const properties = SlotProperties.init(name.getValues(), parent, assignable, argument);
 
         return .{
-            .name = name.asValue(),
+            .name = .init(name),
             .properties = properties,
             .value = value,
         };
@@ -183,7 +184,7 @@ pub const Slot = extern struct {
     }
 
     pub fn getName(self: Slot) []const u8 {
-        return self.name.asByteArray().?.getValues();
+        return self.name.get().getValues();
     }
 
     pub fn getHash(self: Slot) u32 {
@@ -193,18 +194,16 @@ pub const Slot = extern struct {
     /// Creates a copy of this slot with the original value, reverting any index
     /// assignment. Requires access to the object which holds this slot.
     pub fn copy(self: Slot, holder: anytype) Slot {
-        const name = self.name.asByteArray().?;
-
         if (self.isArgument()) {
-            return initArgument(name);
+            return initArgument(self.name.get());
         }
 
         if (self.isAssignable()) {
             const slot_value = holder.getAssignableSlotValue(self);
-            return initAssignable(name, if (self.isParent()) .Parent else .NotParent, slot_value.*);
+            return initAssignable(self.name.get(), if (self.isParent()) .Parent else .NotParent, slot_value.*);
         }
 
-        return initConstant(name, if (self.isParent()) .Parent else .NotParent, self.value);
+        return initConstant(self.name.get(), if (self.isParent()) .Parent else .NotParent, self.value);
     }
 
     fn GetSlotWithMyNameResult(comptime previous_slots_type: type) type {
@@ -260,14 +259,12 @@ pub const Slot = extern struct {
     /// written.
     pub fn writeContentsTo(
         self: Slot,
-        heap: *Heap,
         target_slots: Slot.Slice,
         assignable_slot_values: *map_builder.AssignableSlotValues,
         slot_index: *usize,
         assignable_slot_index: *usize,
         argument_slot_index: *usize,
     ) void {
-        _ = heap;
         const previous_slots = target_slots[0..slot_index.*];
         var current_slot_ptr: Slot.Ptr = undefined;
 

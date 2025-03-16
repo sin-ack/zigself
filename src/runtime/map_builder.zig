@@ -1,10 +1,10 @@
-// Copyright (c) 2021-2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 const std = @import("std");
 
-const Heap = @import("Heap.zig");
+const heap = @import("Heap.zig");
 const Slot = @import("slot.zig").Slot;
 const Value = @import("value.zig").Value;
 const AstGen = @import("bytecode/AstGen.zig");
@@ -24,7 +24,7 @@ pub const AssignableSlotValues = std.BoundedArray(Value, AstGen.MaximumAssignabl
 /// to it using createObject().
 pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
     return struct {
-        token: *Heap.AllocationToken,
+        token: *heap.AllocationToken,
         map: MapType.Ptr,
         assignable_slot_values: AssignableSlotValues,
 
@@ -37,7 +37,7 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
         // Marker for typechecking.
         pub const is_map_builder = true;
 
-        pub fn init(token: *Heap.AllocationToken, map: MapType.Ptr) Self {
+        pub fn init(token: *heap.AllocationToken, map: MapType.Ptr) Self {
             return Self{
                 .token = token,
                 .map = map,
@@ -47,7 +47,6 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
 
         pub fn addSlot(self: *Self, slot: Slot) void {
             slot.writeContentsTo(
-                self.token.heap,
                 self.map.getSlots(),
                 &self.assignable_slot_values,
                 &self.slot_index,
