@@ -1,5 +1,6 @@
 .{
-    .name = "zigself",
+    .name = .zigself,
+    .fingerprint = 0x8b9243aba9e3eea1,
     .version = "0.0.0",
     .minimum_zig_version = "0.13.0",
     .paths = .{

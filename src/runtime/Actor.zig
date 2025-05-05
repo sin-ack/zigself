@@ -71,7 +71,7 @@ range: Range = .{ .start = 0, .end = 0 },
 id: ActorID,
 
 const Actor = @This();
-const Mailbox = std.DoublyLinkedList(Message);
+const Mailbox = std.DoublyLinkedList;
 
 // Sentinel values for the stacks
 pub const ValueSentinel: Value = @bitCast(@as(u64, 0xCCCCCCCCCCCCCCCC));
@@ -151,9 +151,27 @@ pub const Message = struct {
     arguments: []Value,
     /// The SourceRange which spawned this message.
     source_range: SourceRange,
+    /// The linked list node for this message.
+    node: Mailbox.Node = .{},
 
-    pub fn deinit(self: *Message, allocator: Allocator) void {
+    pub fn create(
+        allocator: Allocator,
+        message: Message,
+    ) !*Message {
+        const self = try allocator.create(Message);
+        errdefer allocator.destroy(self);
+
+        self.* = message;
+        return self;
+    }
+
+    fn deinit(self: *Message, allocator: Allocator) void {
         allocator.free(self.arguments);
+    }
+
+    pub fn destroy(self: *Message, allocator: Allocator) void {
+        self.deinit(allocator);
+        allocator.destroy(self);
     }
 };
 
@@ -248,22 +266,24 @@ pub fn execute(self: *Actor) !ActorResult {
     {
         var it = self.mailbox.first;
         while (it) |node| : (it = node.next) {
-            var method = node.data.method.get();
+            const message: *Message = @fieldParentPtr("node", node);
+
+            var method = message.method.get();
 
             var token = try vm.heap.getAllocation(method.requiredSizeForActivation());
             defer token.deinit();
-            method = node.data.method.get();
+            method = message.method.get();
 
             const actor_context = self.actor_object.get().context;
             const new_activation = try self.activation_stack.getNewActivationSlot(vm.allocator);
-            method.activateMethod(&token, self.id, actor_context, node.data.arguments, .zero, node.data.source_range, new_activation);
+            method.activateMethod(&token, self.id, actor_context, message.arguments, .zero, message.source_range, new_activation);
 
-            self.message_sender = node.data.sender;
+            self.message_sender = message.sender;
 
             switch (try self.executeUntil(current_activation_ref)) {
                 .Switched => {
                     return ActorResult{
-                        .RuntimeError = RuntimeError.initLiteral(node.data.source_range, "Actor message caused actor switch"),
+                        .RuntimeError = RuntimeError.initLiteral(message.source_range, "Actor message caused actor switch"),
                     };
                 },
                 .Finished => {},
@@ -428,9 +448,10 @@ pub fn visitValues(
     {
         var it = self.mailbox.first;
         while (it) |node| : (it = node.next) {
-            try visitor.visit(&node.data.sender.value);
-            try visitor.visit(&node.data.method.value);
-            for (node.data.arguments) |*argument| {
+            const message: *Message = @fieldParentPtr("node", node);
+            try visitor.visit(&message.sender.value);
+            try visitor.visit(&message.method.value);
+            for (message.arguments) |*argument| {
                 try visitor.visit(argument);
             }
         }
@@ -458,17 +479,14 @@ pub fn putMessageInMailbox(
     arguments: []Value,
     source_range: SourceRange,
 ) !void {
-    const node = try allocator.create(Mailbox.Node);
-    node.* = .{
-        .data = .{
-            .sender = ActorObject.Value.init(sender),
-            .method = MethodObject.Value.init(method),
-            .arguments = arguments,
-            .source_range = source_range,
-        },
-    };
+    const message = try Message.create(allocator, .{
+        .sender = ActorObject.Value.init(sender),
+        .method = MethodObject.Value.init(method),
+        .arguments = arguments,
+        .source_range = source_range,
+    });
 
-    self.mailbox.append(node);
+    self.mailbox.append(&message.node);
 }
 
 /// Clear all items in the mailbox.
@@ -478,8 +496,8 @@ pub fn clearMailbox(self: *Actor, allocator: Allocator) void {
     while (it) |node| : (it = next) {
         next = node.next;
 
-        node.data.deinit(allocator);
-        allocator.destroy(node);
+        const message: *Message = @fieldParentPtr("node", node);
+        message.destroy(allocator);
     }
 
     self.mailbox = .{};

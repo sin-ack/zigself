@@ -115,6 +115,8 @@ fn Instruction(comptime RegisterLocationT: type) type {
             }
 
             pub fn PayloadT(comptime opcode: Opcode) type {
+                @setEvalBranchQuota(10000);
+
                 const opcode_field = opcode.payloadField();
                 inline for (@typeInfo(Payload).@"union".fields) |field| {
                     if (std.mem.eql(u8, opcode_field, field.name))

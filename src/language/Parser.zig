@@ -34,7 +34,7 @@ pub fn createFromFile(allocator: Allocator, file_path: []const u8) !*Parser {
     const file = try cwd.openFile(file_path, .{});
     defer file.close();
 
-    const file_contents = try file.readToEndAllocOptions(allocator, std.math.maxInt(usize), null, @alignOf(u8), 0);
+    const file_contents = try file.readToEndAllocOptions(allocator, std.math.maxInt(usize), null, .of(u8), 0);
     errdefer allocator.free(file_contents);
 
     var self = try allocator.create(Parser);
