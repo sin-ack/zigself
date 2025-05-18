@@ -70,8 +70,15 @@ pub fn build(b: *std.Build) void {
     }
     test_harness_run_cmd.cwd = b.path(".");
 
-    const test_harness_step = b.step("test", "Run zigSelf test harness");
-    test_harness_step.dependOn(&test_harness_run_cmd.step);
+    const zig_tests = b.addTest(.{
+        .name = "Zig-based tests",
+        .root_module = zigself,
+    });
+    const zig_tests_run_cmd = b.addRunArtifact(zig_tests);
+
+    const test_step = b.step("test", "Run zigSelf tests");
+    test_step.dependOn(&test_harness_run_cmd.step);
+    test_step.dependOn(&zig_tests_run_cmd.step);
 }
 
 fn getTracyModule(
