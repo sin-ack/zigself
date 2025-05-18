@@ -184,10 +184,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
                 void,
         };
 
-        pub fn init(target: RegisterLocation, value: Payload) Self {
-            return .{ .target = target, .value = value };
-        }
-
         pub fn format(
             inst: Self,
             comptime fmt: []const u8,

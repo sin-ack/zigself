@@ -112,12 +112,12 @@ pub const ActorResult = union(enum) {
     /// An unrecoverable runtime error occurred.
     RuntimeError: RuntimeError,
 
-    pub fn deinit(self: ActorResult, allocator: Allocator) void {
-        switch (self) {
+    pub fn deinit(self: *ActorResult, allocator: Allocator) void {
+        switch (self.*) {
             .Switched,
             .Finished,
             => {},
-            .RuntimeError => |e| e.deinit(allocator),
+            .RuntimeError => |*e| e.deinit(allocator),
         }
     }
 };

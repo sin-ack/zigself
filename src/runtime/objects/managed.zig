@@ -14,7 +14,6 @@ const heap_import = @import("../Heap.zig");
 const value_import = @import("../value.zig");
 const GenericValue = value_import.Value;
 const LookupResult = @import("../object_lookup.zig").LookupResult;
-const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
@@ -78,7 +77,10 @@ pub const Managed = extern struct {
     };
     pub const ExtraBits = Object.ExtraBits.reserve(ManagedType);
 
-    pub fn create(heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID, managed_type: ManagedType, value: GenericValue) !Managed.Ptr {
+    // XXX: heap is really Heap(anytype), but can't express that in Zig. This is required because
+    //      Managed.create is used in a Heap test.
+    // TODO: Write Zig interfaces proposal
+    pub fn create(heap: anytype, token: *heap_import.AllocationToken, actor_id: Actor.ActorID, managed_type: ManagedType, value: GenericValue) !Managed.Ptr {
         const memory_area = token.allocate(requiredSizeForAllocation());
         const self: Managed.Ptr = @ptrCast(memory_area);
         self.init(actor_id, managed_type, value);
