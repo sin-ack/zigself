@@ -373,9 +373,6 @@ pub fn Heap(comptime Root: type) type {
 
             finalization_set: FinalizationSet,
 
-            // TODO: Remembered set (keeping track of old->new references)
-            //       A lot of languages seem to do this with a bitmap, try that out.
-
             // --- Initialization ---
 
             pub fn create(allocator: Allocator) !*NewGeneration {
