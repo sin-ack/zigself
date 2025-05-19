@@ -1627,6 +1627,10 @@ const TestRoot = struct {
     }
 };
 
+test Heap {
+    std.testing.refAllDecls(Heap(TestRoot));
+}
+
 test "basic heap allocation" {
     const ArrayMap = @import("objects/array.zig").ArrayMap;
     const ArrayObject = @import("objects/array.zig").Array;
