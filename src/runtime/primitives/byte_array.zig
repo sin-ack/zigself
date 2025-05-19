@@ -135,14 +135,14 @@ pub fn ByteArrayEq(context: *PrimitiveContext) !ExecutionResult {
     const receiver = try arguments.getObject(PrimitiveContext.Receiver, .ByteArray);
     const argument = arguments.getValue(0);
 
-    const object = argument.asObject() orelse return ExecutionResult.resolve(context.vm.getFalse());
-    const byte_array = object.asType(.ByteArray) orelse return ExecutionResult.resolve(context.vm.getFalse());
+    const object = argument.asObject() orelse return ExecutionResult.resolve(context.vm.global_false);
+    const byte_array = object.asType(.ByteArray) orelse return ExecutionResult.resolve(context.vm.global_false);
 
     return ExecutionResult.resolve(
         if (std.mem.eql(u8, receiver.getValues(), byte_array.getValues()))
-            context.vm.getTrue()
+            context.vm.global_true
         else
-            context.vm.getFalse(),
+            context.vm.global_false,
     );
 }
 

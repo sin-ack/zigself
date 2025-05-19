@@ -115,7 +115,7 @@ pub const ByteArray = extern struct {
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("ByteArray.lookup: Looking at traits string\n", .{});
-        const string_traits = context.getVM().string_traits.get();
+        const string_traits = context.getVM().string_traits;
         if (selector.equals(Selector.well_known.parent))
             return LookupResult{ .Regular = string_traits };
 

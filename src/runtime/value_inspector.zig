@@ -62,17 +62,17 @@ fn inspectObject(
     // If the global objects are printed during inspect and they haven't been
     // printed directly, then print them as a summary.
     if (!is_root_object) {
-        if (object.asValue().data == vm.nil().data) {
+        if (object.asValue().data == vm.global_nil.data) {
             std.debug.print("<global nil>", .{});
             return;
         }
 
-        if (object.asValue().data == vm.getTrue().data) {
+        if (object.asValue().data == vm.global_true.data) {
             std.debug.print("<global true>", .{});
             return;
         }
 
-        if (object.asValue().data == vm.getFalse().data) {
+        if (object.asValue().data == vm.global_false.data) {
             std.debug.print("<global false>", .{});
             return;
         }

@@ -224,7 +224,7 @@ pub fn Close(context: *PrimitiveContext) !ExecutionResult {
     // NOTE: Now that we closed the fd, we need to stuff this value back into
     //       the managed object as it operates independently.
     fd_object.value = fd.toValue();
-    return ExecutionResult.resolve(context.vm.nil());
+    return ExecutionResult.resolve(context.vm.global_nil);
 }
 
 /// Exit with the given return code.
@@ -360,7 +360,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     };
 
     const node_c: ?[:0]const u8 = node_c: {
-        if (host.data == context.vm.nil().data) {
+        if (host.data == context.vm.global_nil.data) {
             break :node_c null;
         }
 
@@ -424,7 +424,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     defer token.deinit();
 
     const result_array_map = array_object.ArrayMap.create(&token, result_count);
-    const result_array = array_object.Array.createWithValues(&token, context.actor.id, result_array_map, &.{}, context.vm.nil());
+    const result_array = array_object.Array.createWithValues(&token, context.actor.id, result_array_map, &.{}, context.vm.global_nil);
 
     const result_values = result_array.getValues();
     {
@@ -497,7 +497,7 @@ pub fn BindFD_ToSockaddrBytes_IfFail(context: *PrimitiveContext) !ExecutionResul
     const rc = std.posix.system.bind(fd.fd, @ptrCast(@alignCast(sockaddr_bytes.ptr)), @intCast(sockaddr_bytes.len));
     const errno = std.posix.errno(rc);
     if (errno == .SUCCESS) {
-        return ExecutionResult.resolve(context.vm.nil());
+        return ExecutionResult.resolve(context.vm.global_nil);
     }
 
     return try callFailureBlock(context, errno, failure_block);
@@ -525,7 +525,7 @@ pub fn ListenOnFD_WithBacklog_IfFail(context: *PrimitiveContext) !ExecutionResul
     const rc = std.posix.system.listen(fd.fd, @intCast(backlog));
     const errno = std.posix.errno(rc);
     if (errno == .SUCCESS) {
-        return ExecutionResult.resolve(context.vm.nil());
+        return ExecutionResult.resolve(context.vm.global_nil);
     }
 
     return try callFailureBlock(context, errno, failure_block);

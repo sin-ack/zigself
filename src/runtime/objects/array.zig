@@ -99,7 +99,7 @@ pub const Array = extern struct {
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Array.lookup: Looking at traits array\n", .{});
-        const array_traits = context.getVM().array_traits.get();
+        const array_traits = context.getVM().array_traits;
         if (selector.equals(Selector.well_known.parent))
             return LookupResult{ .Regular = array_traits };
 

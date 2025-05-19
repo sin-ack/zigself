@@ -94,7 +94,7 @@ pub fn ArrayAt_Put(context: *PrimitiveContext) !ExecutionResult {
 
     if (try context.wouldOverflow(usize, position, "position")) |result| return result;
 
-    if (!context.actor.canWriteTo(context.receiver.get())) {
+    if (!context.actor.canWriteTo(context.receiver)) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "_ArrayAt:Put: receiver is not writable for actor",

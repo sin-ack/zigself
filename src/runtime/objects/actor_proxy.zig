@@ -118,7 +118,7 @@ pub const ActorProxy = extern struct {
                 //       message to a non-method slot will not return any
                 //       meaningful value to the user. However it should also
                 //       still be valid, so we cannot return nothing here.
-                break :blk LookupResult{ .Regular = context.getVM().nil() };
+                break :blk LookupResult{ .Regular = context.getVM().global_nil };
             },
             .ActorMessage => unreachable,
         };

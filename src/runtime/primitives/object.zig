@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 
 const SlotsObject = @import("../objects/slots.zig").Slots;
 const RuntimeError = @import("../RuntimeError.zig");
+const VirtualMachine = @import("../VirtualMachine.zig");
 const value_inspector = @import("../value_inspector.zig");
 const ExecutionResult = @import("../execution_result.zig").ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
@@ -18,11 +19,17 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
+    var handles: VirtualMachine.Heap.Handles = undefined;
+    handles.init(&context.vm.heap);
+    defer handles.deinit(&context.vm.heap);
+
     const arguments = context.getArguments("_AddSlots:");
     var receiver = try arguments.getObject(PrimitiveContext.Receiver, .Slots);
+    handles.trackObject(@ptrCast(&receiver));
     var argument = try arguments.getObject(0, .Slots);
+    handles.trackObject(@ptrCast(&argument));
 
-    if (!context.actor.canWriteTo(context.receiver.get())) {
+    if (!context.actor.canWriteTo(context.receiver)) {
         return ExecutionResult.runtimeError(
             RuntimeError.initLiteral(
                 context.source_range,
@@ -35,10 +42,6 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
         try SlotsObject.requiredSizeForMerging(receiver, argument, context.vm.allocator),
     );
     defer token.deinit();
-
-    // Refresh the pointers in case that caused a GC
-    receiver = context.receiver.get().asObject().?.asType(.Slots).?;
-    argument = context.arguments[0].asObject().?.asType(.Slots).?;
 
     const new_object = try receiver.addSlotsFrom(context.vm.allocator, &context.vm.heap, &token, argument);
     return ExecutionResult.resolve(new_object.asValue());
@@ -85,7 +88,7 @@ pub fn RemoveSlot_IfFail(context: *PrimitiveContext) !ExecutionResult {
         // returned_value.unrefWithAllocator(context.vm.allocator);
     }
 
-    return ExecutionResult.resolve(context.vm.nil());
+    return ExecutionResult.resolve(context.vm.global_nil);
 }
 
 /// Inspect the receiver and print it to stderr. Return the receiver.
@@ -93,9 +96,8 @@ pub fn Inspect(context: *PrimitiveContext) !ExecutionResult {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const receiver = context.receiver.get();
-    try value_inspector.inspectValue(.Multiline, context.vm, receiver);
-    return ExecutionResult.resolve(receiver);
+    try value_inspector.inspectValue(.Multiline, context.vm, context.receiver);
+    return ExecutionResult.resolve(context.receiver);
 }
 
 /// Make an identical shallow copy of the receiver and return it.
@@ -103,7 +105,12 @@ pub fn Clone(context: *PrimitiveContext) !ExecutionResult {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var receiver = context.receiver.get();
+    var handles: VirtualMachine.Heap.Handles = undefined;
+    handles.init(&context.vm.heap);
+    defer handles.deinit(&context.vm.heap);
+
+    var receiver = context.receiver;
+    handles.trackValue(&receiver);
 
     const required_memory = if (receiver.asObject()) |object|
         object.getSizeForCloning()
@@ -112,8 +119,6 @@ pub fn Clone(context: *PrimitiveContext) !ExecutionResult {
 
     var token = try context.vm.heap.allocate(required_memory);
     defer token.deinit();
-
-    receiver = context.receiver.get();
 
     return ExecutionResult.resolve(receiver.clone(context.vm.allocator, &context.vm.heap, &token, context.actor.id));
 }
@@ -125,9 +130,9 @@ pub fn Eq(context: *PrimitiveContext) error{}!ExecutionResult {
     defer tracy_zone.end();
 
     return ExecutionResult.resolve(
-        if (context.receiver.get().data == context.arguments[0].data)
-            context.vm.getTrue()
+        if (context.receiver.data == context.arguments[0].data)
+            context.vm.global_true
         else
-            context.vm.getFalse(),
+            context.vm.global_false,
     );
 }

@@ -123,7 +123,7 @@ pub const Slot = extern struct {
     }
 
     pub fn initArgument(name: ByteArray.Ptr) Slot {
-        // FIXME: Somehow obtain vm.nil()
+        // FIXME: Somehow obtain vm.global_nil
         return init(name, .NotParent, .Assignable, .Argument, Value.fromUnsignedInteger(0));
     }
 

@@ -34,24 +34,24 @@ block_message_names: std.AutoArrayHashMapUnmanaged(u8, ByteArray),
 // --- References to global objects ---
 
 /// The root of the current Self world.
-lobby_object: Heap.Handle = undefined,
+lobby_object: Value = undefined,
 
 /// The global nil object used to represent the default assignable slot value.
 /// Can also be used in place of "nothing".
-global_nil: Heap.Handle = undefined,
+global_nil: Value = undefined,
 /// The global truth value.
-global_true: Heap.Handle = undefined,
+global_true: Value = undefined,
 /// The global falsity value.
-global_false: Heap.Handle = undefined,
+global_false: Value = undefined,
 
 // --- Primitive object traits ---
 
-actor_traits: Heap.Handle = undefined,
-array_traits: Heap.Handle = undefined,
-block_traits: Heap.Handle = undefined,
-float_traits: Heap.Handle = undefined,
-string_traits: Heap.Handle = undefined,
-integer_traits: Heap.Handle = undefined,
+actor_traits: Value = undefined,
+array_traits: Value = undefined,
+block_traits: Value = undefined,
+float_traits: Value = undefined,
+string_traits: Value = undefined,
+integer_traits: Value = undefined,
 
 // --- Settings ---
 
@@ -106,51 +106,40 @@ pub fn create(allocator: Allocator) !*VirtualMachine {
 
     const empty_map = SlotsMap.create(&token, 0);
 
-    self.lobby_object = try makeEmptyGloballyReachableObject(&self.heap, &token, empty_map);
+    self.lobby_object = makeEmptyGloballyReachableObject(&token, empty_map);
 
-    self.global_nil = try makeEmptyGloballyReachableObject(&self.heap, &token, empty_map);
-    self.global_true = try makeEmptyGloballyReachableObject(&self.heap, &token, empty_map);
-    self.global_false = try makeEmptyGloballyReachableObject(&self.heap, &token, empty_map);
+    self.global_nil = makeEmptyGloballyReachableObject(&token, empty_map);
+    self.global_true = makeEmptyGloballyReachableObject(&token, empty_map);
+    self.global_false = makeEmptyGloballyReachableObject(&token, empty_map);
 
-    self.actor_traits = try makeEmptyGloballyReachableObject(&self.heap, &token, empty_map);
-    self.array_traits = try makeEmptyGloballyReachableObject(&self.heap, &token, empty_map);
-    self.block_traits = try makeEmptyGloballyReachableObject(&self.heap, &token, empty_map);
-    self.float_traits = try makeEmptyGloballyReachableObject(&self.heap, &token, empty_map);
-    self.string_traits = try makeEmptyGloballyReachableObject(&self.heap, &token, empty_map);
-    self.integer_traits = try makeEmptyGloballyReachableObject(&self.heap, &token, empty_map);
+    self.actor_traits = makeEmptyGloballyReachableObject(&token, empty_map);
+    self.array_traits = makeEmptyGloballyReachableObject(&token, empty_map);
+    self.block_traits = makeEmptyGloballyReachableObject(&token, empty_map);
+    self.float_traits = makeEmptyGloballyReachableObject(&token, empty_map);
+    self.string_traits = makeEmptyGloballyReachableObject(&token, empty_map);
+    self.integer_traits = makeEmptyGloballyReachableObject(&token, empty_map);
 
     // NOTE: The actor object of the global actor should never be reachable in the first place,
     //       so the global reachability bit does not matter here.
-    self.global_actor = try Actor.create(self, &token, self.lobby_object.get());
+    self.global_actor = try Actor.create(self, &token, self.lobby_object);
     self.current_actor = self.global_actor;
 
     return self;
 }
 
-fn makeEmptyGloballyReachableObject(heap: *Heap, token: *AllocationToken, map: SlotsMap.Ptr) !Heap.Handle {
+fn makeEmptyGloballyReachableObject(token: *AllocationToken, map: SlotsMap.Ptr) Value {
     // NOTE: These objects will always belong to the global actor, so we hardcode the actor ID 0 to them.
     //       Otherwise we would hit a chicken-and-egg situation where the global actor needs the lobby
     //       and the lobby needs the global actor.
     const slots = SlotsObject.create(token, .Global, map, &.{});
     slots.object.getMetadata().reachability = .Global;
-    return heap.track(slots.asValue());
+    return slots.asValue();
 }
 
 pub fn destroy(self: *VirtualMachine) void {
     // NOTE: All actors are finalized by the actor object that they're owned
     //       by when the heap is deallocated.
     self.regular_actors.deinit(self.allocator);
-
-    self.lobby_object.deinit(&self.heap);
-    self.global_nil.deinit(&self.heap);
-    self.global_true.deinit(&self.heap);
-    self.global_false.deinit(&self.heap);
-    self.actor_traits.deinit(&self.heap);
-    self.array_traits.deinit(&self.heap);
-    self.block_traits.deinit(&self.heap);
-    self.float_traits.deinit(&self.heap);
-    self.string_traits.deinit(&self.heap);
-    self.integer_traits.deinit(&self.heap);
 
     {
         var it = self.block_message_names.iterator();
@@ -162,22 +151,6 @@ pub fn destroy(self: *VirtualMachine) void {
 
     self.heap.deinit();
     self.allocator.destroy(self);
-}
-
-pub fn getTrue(self: VirtualMachine) Value {
-    return self.global_true.get();
-}
-
-pub fn getFalse(self: VirtualMachine) Value {
-    return self.global_false.get();
-}
-
-pub fn nil(self: VirtualMachine) Value {
-    return self.global_nil.get();
-}
-
-pub fn lobby(self: VirtualMachine) Value {
-    return self.lobby_object.get();
 }
 
 pub fn pushContext(self: *VirtualMachine) void {
@@ -329,7 +302,7 @@ pub fn executeEntrypointScript(self: *VirtualMachine, script: Script.Ref) !?Valu
 
 pub fn readRegister(self: VirtualMachine, location: RegisterLocation) Value {
     return switch (location) {
-        .zero => self.nil(),
+        .zero => self.global_nil,
         else => self.current_actor.readRegister(location),
     };
 }
@@ -351,7 +324,16 @@ pub fn visitEdges(
     // TODO: Write interfaces proposal for Zig
     visitor: anytype,
 ) !void {
-    // NOTE: The global objects are all handles so no need to visit them.
+    try visitor.visit(&self.lobby_object, null);
+    try visitor.visit(&self.global_nil, null);
+    try visitor.visit(&self.global_true, null);
+    try visitor.visit(&self.global_false, null);
+    try visitor.visit(&self.actor_traits, null);
+    try visitor.visit(&self.array_traits, null);
+    try visitor.visit(&self.block_traits, null);
+    try visitor.visit(&self.float_traits, null);
+    try visitor.visit(&self.string_traits, null);
+    try visitor.visit(&self.integer_traits, null);
 
     try self.global_actor.visitEdges(visitor);
     if (self.genesis_actor) |actor| {

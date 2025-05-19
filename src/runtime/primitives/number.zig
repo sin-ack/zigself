@@ -212,9 +212,9 @@ pub fn IntLT(context: *PrimitiveContext) !ExecutionResult {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             return ExecutionResult.resolve(
                 if (receiver < term)
-                    ctx.vm.getTrue()
+                    ctx.vm.global_true
                 else
-                    ctx.vm.getFalse(),
+                    ctx.vm.global_false,
             );
         }
     }.op);
@@ -230,9 +230,9 @@ pub fn IntGT(context: *PrimitiveContext) !ExecutionResult {
         pub fn op(ctx: PrimitiveContext, receiver: Value.SignedData, term: Value.SignedData) !ExecutionResult {
             return ExecutionResult.resolve(
                 if (receiver > term)
-                    ctx.vm.getTrue()
+                    ctx.vm.global_true
                 else
-                    ctx.vm.getFalse(),
+                    ctx.vm.global_false,
             );
         }
     }.op);
@@ -250,13 +250,13 @@ pub fn IntEq(context: *PrimitiveContext) !ExecutionResult {
     const term = arguments.getValue(0);
 
     if (term.type != .Integer) {
-        return ExecutionResult.resolve(context.vm.getFalse());
+        return ExecutionResult.resolve(context.vm.global_false);
     }
 
     return ExecutionResult.resolve(
         if (receiver == term.asInteger())
-            context.vm.getTrue()
+            context.vm.global_true
         else
-            context.vm.getFalse(),
+            context.vm.global_false,
     );
 }

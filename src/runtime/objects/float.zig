@@ -115,7 +115,7 @@ pub const Float = extern struct {
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Float.lookup: Looking at traits float\n", .{});
-        const float_traits = context.getVM().float_traits.get();
+        const float_traits = context.getVM().float_traits;
         if (selector.equals(Selector.well_known.parent))
             return LookupResult{ .Regular = float_traits };
 

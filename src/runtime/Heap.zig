@@ -84,6 +84,10 @@ const COLLECTION_HWM_MULTIPLIER = 2;
 /// The maximum number of free regions to keep around for reuse. When the number
 /// of free regions exceeds this value, any extra regions are freed.
 const MAX_RECYCLED_REGIONS = 3;
+/// The maximum number of handles that can be present in a single handle set.
+/// This directly affects how much stack space is used in VM calls, so be
+/// careful with this value.
+const MAX_HANDLES = 20;
 
 comptime {
     if (NEW_GENERATION_SIZE % @sizeOf(u64) != 0) {
@@ -136,13 +140,10 @@ pub fn Heap(comptime Root: type) type {
 
         root: *Root,
 
-        /// Holds the handles to heap values. The values stored here will be scanned
-        /// during heap allocations.
-        handles: [HANDLES_PER_HEAP]?[*]u64,
-        /// The index of the handle that was allocated most recently. We do a linear
-        /// search in a ring fashion from this offset to find a new slot.
-        // Begins from HandleAreaSize - 1 in order to search the first index first.
-        most_recent_handle_index: std.math.IntFittingRange(0, HANDLES_PER_HEAP - 1),
+        /// The first (technically last) handle set in use. Handle sets on the
+        /// stack form a linked list which can be scanned during garbage
+        /// collection.
+        first_handle_set: ?*Handles,
 
         const Self = @This();
         const FinalizationSet = std.AutoArrayHashMapUnmanaged([*]u64, void);
@@ -162,8 +163,7 @@ pub fn Heap(comptime Root: type) type {
 
                 .root = root,
 
-                .handles = .{null} ** HANDLES_PER_HEAP,
-                .most_recent_handle_index = HANDLES_PER_HEAP - 1,
+                .first_handle_set = null,
             };
         }
 
@@ -228,46 +228,6 @@ pub fn Heap(comptime Root: type) type {
                     return self.new_generation.allocate(bytes) catch @panic("!!! Out of memory after garbage collection!");
                 },
             };
-        }
-
-        // --- Handles ---
-
-        /// Create a handle for the given value.
-        pub fn track(self: *Self, value: Value) Handle {
-            return .init(self, value);
-        }
-
-        /// Allocate a handle slot. This is only used for Handles with reference
-        /// values.
-        fn allocateHandleSlot(self: *Self) *?[*]u64 {
-            var handle_index = self.most_recent_handle_index +% 1;
-            while (handle_index != self.most_recent_handle_index) : (handle_index +%= 1) {
-                const handle = &self.handles[handle_index];
-                if (handle.* != null) {
-                    if (HEAP_HANDLE_MISS_DEBUG) std.debug.print("Self.allocateHandle: Handle index {} was full, retrying\n", .{handle_index});
-                    continue;
-                }
-
-                self.most_recent_handle_index = handle_index;
-                return handle;
-            }
-
-            @panic("!!! Could not find a free handle slot!");
-        }
-
-        /// Free the given handle slot.
-        fn freeHandleSlot(self: *Self, handle: *?[*]u64) void {
-            if (CRASH_ON_OUT_OF_ORDER_HANDLE_FREES) {
-                if (handle != &self.handles[self.most_recent_handle_index]) {
-                    @panic("!!! Out-of-order handle free!");
-                }
-            }
-
-            const new_most_recent_handle_index: @TypeOf(self.most_recent_handle_index) = @intCast(@divExact(@intFromPtr(handle) - @intFromPtr(&self.handles), @sizeOf([*]u64)));
-            std.debug.assert(new_most_recent_handle_index < HANDLES_PER_HEAP);
-
-            self.most_recent_handle_index = new_most_recent_handle_index -% 1;
-            handle.* = null;
         }
 
         // --- Wololo ---
@@ -681,14 +641,8 @@ pub fn Heap(comptime Root: type) type {
 
                 // Kick off the process by visiting roots.
                 try heap.root.visitEdges(visitor);
-
-                // Visit the heap handles.
-                for (&heap.handles) |*handle| {
-                    if (handle.*) |h| {
-                        var value = Value.fromObjectAddress(h);
-                        try visitor.visit(&value, null);
-                        handle.* = value.asReference().?.getAddress();
-                    }
+                if (heap.first_handle_set) |handle_set| {
+                    try handle_set.visitEdges(visitor);
                 }
 
                 // Iterate through the old generation's regions and check each
@@ -1170,11 +1124,8 @@ pub fn Heap(comptime Root: type) type {
 
                 // Visit the heap handles.
                 if (GC_SPAMMY_DEBUG) std.debug.print("OldGeneration.collect: Visiting handles\n", .{});
-                for (&heap.handles) |*handle| {
-                    if (handle.*) |h| {
-                        var value = Value.fromObjectAddress(h);
-                        try visitor.visit(&value, null);
-                    }
+                if (heap.first_handle_set) |handle_set| {
+                    try handle_set.visitEdges(visitor);
                 }
 
                 // Visit eden and the past survivor space, since they can point into
@@ -1504,57 +1455,95 @@ pub fn Heap(comptime Root: type) type {
             }
         };
 
-        // TODO: This is a silly way of implementing handles, because we have to
-        //       manually load in the new values after every safepoint when the GC
-        //       can do that for us if we just tell it where the values are. Additionally,
-        //       we have to make the handles heap-global. Instead, reimplement it like in
-        //       https://bernsteinbear.com/blog/scrapscript-baseline/#inside-the-runtime-handles
-        //       where the handles are stored locally in the stack frame (forming a
-        //       linked list of arrays) and assign pointers to stack locals inside
-        //       the handle slots instead of the other way around. This way we don't
-        //       really have to worry about safe points at all (so AllocationToken
-        //       may also become unnecessary).
-        /// A handle. This can be in one of two states:
-        /// - Literal: Holds a non-reference value. In this state no heap interaction
-        ///   is necessary.
-        /// - Reference: Holds a reference value. In this state, a handle slot is
-        ///   allocated in the heap.
-        pub const Handle = struct {
-            value: union(enum) {
-                Literal: Value,
-                Reference: *?[*]u64,
-            },
+        /// A set of handles that can be used within a local stack frame to hold
+        /// references to objects which will be updated.
+        ///
+        /// Usage:
+        ///
+        ///     var handles: Heap.Handles = undefined;
+        ///     handles.init(&heap);
+        ///     defer handles.deinit(&heap);
+        ///
+        ///     // ...
+        ///
+        ///     var my_value = some_value;
+        ///     handles.trackValue(&my_value);
+        ///
+        ///     // ...
+        ///
+        ///     var my_object = SomeObject.create(&token, ...);
+        ///     handles.trackObject(@ptrCast(&my_object));
+        ///
+        /// The idea is taken from the legend:
+        /// https://bernsteinbear.com/blog/scrapscript-baseline/#inside-the-runtime-handles
+        pub const Handles = struct {
+            handles: [MAX_HANDLES]Handle,
+            len: usize,
+            next: ?*Handles,
 
-            /// Initialize this handle.
-            pub fn init(heap: *Self, value: Value) Handle {
-                return switch (value.type) {
-                    .Integer => .{ .value = .{ .Literal = value } },
-                    .Object => {
-                        const reference = value.asReference().?;
+            // TODO: See whether this representation can be improved as we're
+            //       only holding 1 bit per handle for info.
+            const Handle = union(enum) {
+                Value: *Value,
+                Object: *BaseObject.Ptr,
+            };
 
-                        const handle = heap.allocateHandleSlot();
-                        handle.* = reference.getAddress();
-                        return .{ .value = .{ .Reference = handle } };
-                    },
+            /// Initialize the handle set.
+            pub fn init(self: *Handles, heap: *Self) void {
+                self.* = .{
+                    .handles = undefined,
+                    .len = 0,
+                    .next = heap.first_handle_set,
                 };
+                heap.first_handle_set = self;
             }
 
-            /// Stop tracking the value in this handle.
-            pub fn deinit(self: *Handle, heap: *Self) void {
-                switch (self.value) {
-                    .Literal => {},
-                    .Reference => |handle| {
-                        heap.freeHandleSlot(handle);
-                    },
+            /// Deinitialize the handle set.
+            pub fn deinit(self: *Handles, heap: *Self) void {
+                heap.first_handle_set = self.next;
+            }
+
+            /// Store a handle to a Value. The Value that is being pointed to
+            /// does not have to be a reference.
+            pub fn trackValue(self: *Handles, value: *Value) void {
+                std.debug.assert(self.len < MAX_HANDLES);
+
+                self.handles[self.len] = .{ .Value = value };
+                self.len += 1;
+            }
+
+            /// Store a reference to some object. The object must descend from
+            /// (embed) BaseObject.
+            pub fn trackObject(self: *Handles, object: *BaseObject.Ptr) void {
+                std.debug.assert(self.len < MAX_HANDLES);
+
+                self.handles[self.len] = .{ .Object = object };
+                self.len += 1;
+            }
+
+            /// Visit all the values in this handle set and (if present) the
+            /// next one.
+            pub fn visitEdges(self: *const Handles, visitor: anytype) !void {
+                for (0..self.len) |i| {
+                    switch (self.handles[i]) {
+                        .Value => |v| try visitor.visit(v, null),
+                        .Object => |o| {
+                            var value = o.*.asValue();
+                            try visitor.visit(&value, null);
+                            if (value.asBaseObject()) |base_object| {
+                                @branchHint(.likely);
+                                o.* = base_object;
+                            } else {
+                                @branchHint(.cold);
+                                @panic("Object became non-object after visit?!");
+                            }
+                        },
+                    }
                 }
-            }
 
-            /// Get the value in this handle.
-            pub fn get(self: *const Handle) Value {
-                return switch (self.value) {
-                    .Literal => self.value.Literal,
-                    .Reference => Value.fromObjectAddress(self.value.Reference.*.?),
-                };
+                if (self.next) |next_set| {
+                    try next_set.visitEdges(visitor);
+                }
             }
         };
     };
@@ -1648,16 +1637,19 @@ test "basic heap allocation" {
     var heap = try Heap(TestRoot).init(allocator, &root);
     defer heap.deinit();
 
+    var handles: Heap(TestRoot).Handles = undefined;
+    handles.init(&heap);
+    defer handles.deinit(&heap);
+
     const required_memory = ArrayMap.requiredSizeForAllocation() + ArrayObject.requiredSizeForAllocation(0);
     var token = try heap.allocate(required_memory);
     defer token.deinit();
 
     const array_map = ArrayMap.create(&token, 0);
     var array = ArrayObject.createWithValues(&token, .Global, array_map, &.{}, null);
-
+    const previous_array_address = array;
     // Root the object so it doesn't get collected.
-    var handle = heap.track(array.asValue());
-    defer handle.deinit(&heap);
+    handles.trackObject(@ptrCast(&array));
 
     const stats = try heap.collect(.{});
 
@@ -1672,9 +1664,9 @@ test "basic heap allocation" {
     try std.testing.expectEqual(0, stats.tenured_bytes);
     try std.testing.expectEqual(0, stats.old_compacted_bytes);
 
-    // Slots object should have moved to future (now past) survivor space.
-    try std.testing.expect(array.asObjectAddress() != handle.get().asReference().?.getAddress());
-    try std.testing.expectEqual(.PastSurvivor, heap.new_generation.referenceLocation(handle.get().asReference().?));
+    // Array object should have moved to future (now past) survivor space.
+    try std.testing.expect(array != previous_array_address);
+    try std.testing.expectEqual(.PastSurvivor, heap.new_generation.referenceLocation(array.asValue().asReference().?));
 }
 
 test "spill to old space" {
@@ -1687,6 +1679,10 @@ test "spill to old space" {
 
     var heap = try Heap(TestRoot).init(allocator, &root);
     defer heap.deinit();
+
+    var handles: Heap(TestRoot).Handles = undefined;
+    handles.init(&heap);
+    defer handles.deinit(&heap);
 
     const map_required_memory = ArrayMap.requiredSizeForAllocation();
     const required_memory_per_object = ArrayObject.requiredSizeForAllocation(1);
@@ -1712,8 +1708,7 @@ test "spill to old space" {
     }
 
     // Root the last object so the whole chain doesn't get collected.
-    var handle = heap.track(array.asValue());
-    defer handle.deinit(&heap);
+    handles.trackObject(@ptrCast(&array));
 
     const stats = try heap.collect(.{});
 
@@ -1737,6 +1732,10 @@ test "past survivor space tenuring" {
     var heap = try Heap(TestRoot).init(allocator, &root);
     defer heap.deinit();
 
+    var handles: Heap(TestRoot).Handles = undefined;
+    handles.init(&heap);
+    defer handles.deinit(&heap);
+
     // Fill up the heap with enough objects to trigger the tenuring threshold, but
     // not so much that we spill to the old generation.
     const map_required_memory = ArrayMap.requiredSizeForAllocation();
@@ -1757,8 +1756,7 @@ test "past survivor space tenuring" {
     }
 
     // Root the last object so the whole chain doesn't get collected.
-    var handle = heap.track(array.asValue());
-    defer handle.deinit(&heap);
+    handles.trackObject(@ptrCast(&array));
 
     const stats = try heap.collect(.{});
 
@@ -1792,7 +1790,13 @@ test "finalization" {
     var heap = try Heap(TestRoot).init(allocator, &root);
     defer heap.deinit();
 
+    var handles: Heap(TestRoot).Handles = undefined;
+    handles.init(&heap);
+    // NOTE: deinit below
+
     // Just open some dummy file.
+    // FIXME: This test will fail on non-POSIX. Find something cross-platform
+    //        to open.
     const file = try std.posix.openZ("/dev/null", .{}, 0);
     const fd_object = FileDescriptor.adopt(file, .{ .close_during_finalization = true });
 
@@ -1803,7 +1807,7 @@ test "finalization" {
     var object = try ManagedObject.create(&heap, &token, .Global, .FileDescriptor, fd_object.toValue());
 
     // Root the object so it doesn't get collected.
-    var handle = heap.track(object.asValue());
+    handles.trackObject(@ptrCast(&object));
 
     // First, collect to make sure the object's finalizer isn't run while it's still
     // alive.
@@ -1815,8 +1819,8 @@ test "finalization" {
     try std.testing.expectEqual(0, stats1.tenured_bytes);
     try std.testing.expectEqual(0, stats1.old_compacted_bytes);
 
-    // Release the handle so the object can be collected.
-    handle.deinit(&heap);
+    // Deinitialize the handle set so the object can be collected.
+    handles.deinit(&heap);
 
     // Now, collect again to make sure the finalizer is run.
     const stats2 = try heap.collect(.{});
@@ -1844,6 +1848,10 @@ test "major garbage collection" {
     var heap = try Heap(TestRoot).init(allocator, &root);
     defer heap.deinit();
 
+    var handles: Heap(TestRoot).Handles = undefined;
+    handles.init(&heap);
+    // NOTE: deinit below
+
     const map_required_memory = ArrayMap.requiredSizeForAllocation();
     const array_required_memory = ArrayObject.requiredSizeForAllocation(0);
 
@@ -1853,10 +1861,10 @@ test "major garbage collection" {
 
     // Allocate the array that uses the map into the new generation.
     var token = try heap.allocate(array_required_memory);
-    const array = ArrayObject.createWithValues(&token, .Global, map, &.{}, null);
+    var array = ArrayObject.createWithValues(&token, .Global, map, &.{}, null);
 
     // Hold onto the array.
-    var handle = heap.track(array.asValue());
+    handles.trackObject(@ptrCast(&array));
 
     // Force a major+minor garbage collection. This should not clear anything.
     const stats1 = try heap.collect(.{ .major = .Force });
@@ -1866,8 +1874,8 @@ test "major garbage collection" {
     try std.testing.expectEqual(0, stats1.tenured_bytes);
     try std.testing.expectEqual(0, stats1.old_compacted_bytes);
 
-    // Release the handle so there are no more roots to the array.
-    handle.deinit(&heap);
+    // Deinitialize the handle set so there are no more roots to the array.
+    handles.deinit(&heap);
 
     // Force one *minor*, and one *major* collection. The former is to remove
     // the array->map reference, and the latter is to remove the map itself.
@@ -1896,6 +1904,10 @@ test "remembered set" {
     var heap = try Heap(TestRoot).init(allocator, &root);
     defer heap.deinit();
 
+    var handles: Heap(TestRoot).Handles = undefined;
+    handles.init(&heap);
+    defer handles.deinit(&heap);
+
     const map_required_memory = ArrayMap.requiredSizeForAllocation();
     const array_required_memory = ArrayObject.requiredSizeForAllocation(0);
 
@@ -1911,7 +1923,7 @@ test "remembered set" {
     used_map.init(0);
 
     // Place the array itself in the old generation.
-    const array: ArrayObject.Ptr = @ptrCast(try heap.old_generation.allocate(heap.allocator, array_required_memory));
+    var array: ArrayObject.Ptr = @ptrCast(try heap.old_generation.allocate(heap.allocator, array_required_memory));
     array.init(.Global, used_map, &.{}, null);
     // Remember the address since it will point to the new generation.
     const did_remember = heap.old_generation.rememberAddress(array.asValue().asReference().?.getAddress());
@@ -1941,7 +1953,7 @@ test "remembered set" {
     try std.testing.expect(card.wordOffset() != 0);
 
     // Hold onto the array so that it doesn't go away.
-    var array_handle = heap.track(array.asValue());
+    handles.trackObject(@ptrCast(&array));
 
     // Now perform a major GC. This will:
     // - Compact away unused_map.
@@ -1961,7 +1973,7 @@ test "remembered set" {
     try std.testing.expect(card != .Empty);
     try std.testing.expectEqual(0, card.wordOffset());
 
-    array_handle.deinit(&heap);
+    handles.deinit(&heap);
 
     // Now, perform one final minor GC. Nothing should be collected.
     const stats3 = try heap.collect(.{ .minor = .Force, .major = .Disable });
@@ -1970,4 +1982,48 @@ test "remembered set" {
     try std.testing.expectEqual(0, stats3.new_survived_bytes);
     try std.testing.expectEqual(0, stats3.tenured_bytes);
     try std.testing.expectEqual(0, stats3.old_compacted_bytes);
+}
+
+test "handle set updates pointers correctly" {
+    const ArrayMap = @import("objects/array.zig").ArrayMap;
+    const allocator = std.testing.allocator;
+
+    var root: TestRoot = .{};
+
+    var heap = try Heap(TestRoot).init(allocator, &root);
+    defer heap.deinit();
+
+    var handles: Heap(TestRoot).Handles = undefined;
+    handles.init(&heap);
+    defer handles.deinit(&heap);
+
+    const required_memory = ArrayMap.requiredSizeForAllocation();
+
+    var token = try heap.allocate(required_memory);
+    defer token.deinit();
+
+    var array_map = ArrayMap.create(&token, 0);
+    handles.trackObject(@ptrCast(&array_map));
+    var array_map_value = array_map.asValue();
+    handles.trackValue(&array_map_value);
+
+    const array_map_original = array_map;
+    const array_map_value_original = array_map_value;
+
+    // Force a minor collection, which will move the array map to a new location.
+    const stats = try heap.collect(.{ .minor = .Force, .major = .Disable });
+
+    // Since we're holding onto the array map, it should not have been collected.
+    try std.testing.expectEqual(0, stats.freed_bytes);
+    try std.testing.expectEqual(0, stats.existing_survived_bytes);
+    try std.testing.expectEqual(required_memory, stats.new_survived_bytes);
+    try std.testing.expectEqual(0, stats.tenured_bytes);
+    try std.testing.expectEqual(0, stats.old_compacted_bytes);
+
+    // The array map should have moved to a new location.
+    try std.testing.expect(array_map != array_map_original);
+    try std.testing.expect(array_map_value.data != array_map_value_original.data);
+
+    // Both the value and the object pointer should point to the same location.
+    try std.testing.expect(array_map.asValue().asReference().?.getAddress() == array_map_value.asReference().?.getAddress());
 }

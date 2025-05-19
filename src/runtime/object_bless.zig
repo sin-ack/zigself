@@ -81,24 +81,19 @@ pub fn bless(target_actor_id: Actor.ActorID, const_value: Value) !Value {
     if (const_value.type != .Object)
         return const_value;
 
-    var value = const_value;
-
     const allocator = context.getVM().allocator;
     const heap = context.getHeap();
 
+    var handles: VirtualMachine.Heap.Handles = undefined;
+    handles.init(heap);
+    defer handles.deinit(heap);
+
+    var value = const_value;
+    handles.trackValue(&value);
+
     // Pass 1: Figure out the required memory for blessing this object graph.
     const required_memory = try calculateRequiredMemoryForBlessing(allocator, value);
-
-    var tracked_value = heap.track(value);
-
-    var token = token: {
-        defer tracked_value.deinit(heap);
-
-        const token = try heap.allocate(required_memory);
-
-        value = tracked_value.get();
-        break :token token;
-    };
+    var token = try heap.allocate(required_memory);
     defer token.deinit();
 
     // Pass 2: Actually copy the objects.

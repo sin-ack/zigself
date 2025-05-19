@@ -235,7 +235,7 @@ pub const ActivationStack = struct {
 
         const toplevel_context_method = try MethodObject.createTopLevelContextForExecutable(vm.allocator, &vm.heap, &token, new_executable, new_executable.value.getEntrypointBlock());
         const activation_slot = try self.getNewActivationSlot(vm.allocator);
-        toplevel_context_method.activateMethod(&token, context.getActor().id, vm.lobby(), &.{}, target_location, source_range, activation_slot);
+        toplevel_context_method.activateMethod(&token, context.getActor().id, vm.lobby_object, &.{}, target_location, source_range, activation_slot);
     }
 };
 

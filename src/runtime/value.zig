@@ -127,7 +127,7 @@ pub const Value = packed struct(u64) {
             .Object => selector.lookupObject(self.asObject().?),
             .Integer => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up on traits integer\n", .{});
-                const integer_traits = vm.integer_traits.get();
+                const integer_traits = vm.integer_traits;
                 if (selector.equals(Selector.well_known.parent))
                     return LookupResult{ .Regular = integer_traits };
 

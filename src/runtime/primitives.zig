@@ -42,7 +42,7 @@ pub const PrimitiveContext = struct {
     /// self object (unless the self object is an activation object, in which
     /// case the receiver will be unwrapped before being passed to the
     /// primitive).
-    receiver: Heap.Handle,
+    receiver: Value,
     /// The arguments that were passed to this primitive. The amount is always
     /// equivalent to the amount of colons in the primitive name.
     arguments: []const Value,
@@ -102,7 +102,7 @@ fn PrimitiveArguments(comptime primitive_name: []const u8) type {
 
         pub inline fn getValue(self: Self, comptime index: isize) Value {
             return switch (index) {
-                PrimitiveContext.Receiver => self.context.receiver.get(),
+                PrimitiveContext.Receiver => self.context.receiver,
                 0...std.math.maxInt(isize) => self.context.arguments[index],
                 else => unreachable,
             };
@@ -179,13 +179,22 @@ const PrimitiveSpec = struct {
     arity: u8,
     function: PrimitiveFunction,
 
+    /// Receiver must be manually tracked. Arguments are automatically tracked.
     pub fn call(
         self: PrimitiveSpec,
-        receiver: Heap.Handle,
+        receiver: Value,
         arguments: []const Value,
         target_location: bytecode.RegisterLocation,
         source_range: SourceRange,
     ) !ExecutionResult {
+        // FIXME: Each primitive should have its own handle set which it only
+        //        puts the stuff it cares about in. This is here as a layer of
+        //        protection; remove once all primitives are audited for correct
+        //        use of heap references.
+        var handles: VirtualMachine.Heap.Handles = undefined;
+        handles.init(vm_context.getHeap());
+        defer handles.deinit(vm_context.getHeap());
+
         var context = PrimitiveContext{
             .vm = vm_context.getVM(),
             .actor = vm_context.getActor(),
@@ -194,6 +203,7 @@ const PrimitiveSpec = struct {
             .target_location = target_location,
             .source_range = source_range,
         };
+        handles.trackValue(&context.receiver);
 
         return self.function(&context) catch |err| switch (err) {
             error.GetArgumentFailure => context.get_argument_error.?,

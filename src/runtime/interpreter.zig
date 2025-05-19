@@ -473,22 +473,26 @@ fn performPrimitiveSend(
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !ExecutionResult {
+    const heap = vm_context.getHeap();
+
+    var handles: VirtualMachine.Heap.Handles = undefined;
+    handles.init(heap);
+    defer handles.deinit(heap);
+
     const primitive = primitives.getPrimitive(index);
+
     var receiver = receiver_;
+    handles.trackValue(&receiver);
     if (receiver.asObject()) |receiver_object| {
         if (receiver_object.asType(.Activation)) |activation| {
             receiver = activation.findActivationReceiver();
         }
     }
 
-    const heap = vm_context.getHeap();
-    var tracked_receiver = heap.track(receiver);
-    defer tracked_receiver.deinit(heap);
-
     const actor = vm_context.getActor();
     const argument_slice = vm_context.getActor().argument_stack.lastNItems(primitive.arity);
 
-    const primitive_result = try primitive.call(tracked_receiver, argument_slice, target_location, source_range);
+    const primitive_result = try primitive.call(receiver, argument_slice, target_location, source_range);
     if (!(primitive_result == .ActorYielded and actor.yield_reason == .Blocked)) {
         // NOTE: If the actor got blocked, it will retry the same primitive
         //       call when it gets unblocked, so we shouldn't pop values off
@@ -647,7 +651,7 @@ pub fn sendMessage(
             );
 
             actor.argument_stack.popNItems(argument_count);
-            return ExecutionResult.resolve(vm.nil());
+            return ExecutionResult.resolve(vm.global_nil);
         },
         .Nothing => ExecutionResult.runtimeError(try RuntimeError.initFormatted(source_range, "Unknown selector {}", .{selector})),
     };
@@ -659,27 +663,23 @@ fn executeBlock(
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
+    const heap = vm_context.getHeap();
+
+    var handles: VirtualMachine.Heap.Handles = undefined;
+    handles.init(heap);
+    defer handles.deinit(heap);
+
     const message_name = try vm_context.getVM().getOrCreateBlockMessageName(@intCast(arguments.len));
+
     var block = block_receiver;
+    handles.trackObject(@ptrCast(&block));
 
     const required_memory = ActivationObject.requiredSizeForAllocation(
         block.getArgumentSlotCount(),
         block.getAssignableSlotCount(),
     );
 
-    const heap = vm_context.getHeap();
-    var token = token: {
-        var tracked_block = heap.track(block.asValue());
-        defer tracked_block.deinit(heap);
-
-        // Ensure that we won't GC by creating an activation.
-        const token = try heap.allocate(required_memory);
-
-        // Refresh the pointer to the block.
-        block = tracked_block.get().asObject().?.asType(.Block).?;
-
-        break :token token;
-    };
+    var token = try heap.allocate(required_memory);
     defer token.deinit();
 
     const actor = vm_context.getActor();
@@ -703,30 +703,24 @@ fn executeMethod(
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
+    const heap = vm_context.getHeap();
+
+    var handles: VirtualMachine.Heap.Handles = undefined;
+    handles.init(heap);
+    defer handles.deinit(heap);
+
     var receiver_of_method = const_receiver;
+    handles.trackValue(&receiver_of_method);
+
     var method = const_method;
+    handles.trackObject(@ptrCast(&method));
 
     const required_memory = ActivationObject.requiredSizeForAllocation(
         method.getArgumentSlotCount(),
         method.getAssignableSlotCount(),
     );
 
-    const heap = vm_context.getHeap();
-    var token = token: {
-        var tracked_receiver = heap.track(receiver_of_method);
-        defer tracked_receiver.deinit(heap);
-        var tracked_method = heap.track(method.asValue());
-        defer tracked_method.deinit(heap);
-
-        // Get the allocation token for the method
-        const token = try heap.allocate(required_memory);
-
-        // Refresh the pointers to the method and its receiver.
-        receiver_of_method = tracked_receiver.get();
-        method = tracked_method.get().asObject().?.asType(.Method).?;
-
-        break :token token;
-    };
+    var token = try heap.allocate(required_memory);
     defer token.deinit();
 
     // NOTE: The receiver of a method activation must never be an activation

@@ -94,7 +94,7 @@ pub const Block = extern struct {
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Block.lookup: Looking at traits block\n", .{});
-        const block_traits = context.getVM().block_traits.get();
+        const block_traits = context.getVM().block_traits;
         if (selector.equals(Selector.well_known.parent))
             return LookupResult{ .Regular = block_traits };
 

@@ -21,7 +21,7 @@ pub fn Nil(context: *PrimitiveContext) !ExecutionResult {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    return ExecutionResult.resolve(context.vm.nil());
+    return ExecutionResult.resolve(context.vm.global_nil);
 }
 
 /// Return the given path relative to the current activation's definition
