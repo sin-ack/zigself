@@ -283,15 +283,12 @@ pub fn Heap(comptime Root: type) type {
                 heap: *Self,
 
                 pub fn visit(visitor: *const @This(), value: *Value, object: ?BaseObject.Ptr) !void {
-                    _ = object;
-
                     const reference = value.asReference() orelse return;
                     if (reference.getAddress() == visitor.from.getAddress()) {
-                        // FIXME: This is unsound!! If this value is in an object that's in
-                        //        OldGeneration, the *object* containing this value must be
-                        //        remembered. The visitor currently isn't given enough
-                        //        information to do this (the object itself must be passed).
                         value.* = visitor.to;
+                        if (object) |o| {
+                            _ = try visitor.heap.rememberObjectReference(o.asValue(), visitor.to);
+                        }
                     }
                 }
             };
