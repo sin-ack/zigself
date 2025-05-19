@@ -63,8 +63,8 @@ pub fn visitEdges(
     visitor: anytype,
 ) !void {
     for (&self.general_purpose) |*register| {
-        try visitor.visit(register);
+        try visitor.visit(register, null);
     }
 
-    try visitor.visit(&self.ret);
+    try visitor.visit(&self.ret, null);
 }

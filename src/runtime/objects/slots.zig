@@ -110,7 +110,7 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
         /// visitor.
         pub fn visitAssignableSlotValues(self: ObjectT.Ptr, visitor: anytype) !void {
             for (self.getAssignableSlots()) |*slot| {
-                try visitor.visit(slot);
+                try visitor.visit(slot, @ptrCast(self));
             }
         }
     };
@@ -320,7 +320,7 @@ pub const Slots = extern struct {
             // references to it.
             const new_object = map_builder.createObject();
             new_object.object.getMetadata().reachability = self.object.getMetadata().reachability;
-            heap.updateAllReferencesTo(self.asValue(), new_object.asValue());
+            try heap.updateAllReferencesTo(self.asValue(), new_object.asValue());
             return new_object;
         }
 
@@ -488,8 +488,8 @@ pub fn SlotsLikeMapBase(comptime MapT: type) type {
         /// from the `visitEdges` in the map implementation.
         pub fn visitSlots(self: MapT.Ptr, visitor: anytype) !void {
             for (self.getSlots()) |*slot| {
-                try visitor.visit(&slot.name.value);
-                try visitor.visit(&slot.value);
+                try visitor.visit(&slot.name.value, @ptrCast(self));
+                try visitor.visit(&slot.value, @ptrCast(self));
             }
         }
     };

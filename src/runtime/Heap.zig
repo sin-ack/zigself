@@ -45,6 +45,7 @@ const Allocator = std.mem.Allocator;
 const debug = @import("../debug.zig");
 const Value = value_import.Value;
 const Reference = value_import.Reference;
+const BaseObject = @import("base_object.zig").BaseObject;
 const value_import = @import("value.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
 
@@ -122,10 +123,11 @@ comptime {
 /// where `visitor` is a structure containing a method with the following
 /// signature:
 ///
-///     fn visit(self: *@TypeOf(visitor), value: *Value) !void
+///     fn visit(self: *@TypeOf(visitor), value: *Value, object: ?BaseObject.Ptr) !void
 ///
 /// The `visitEdges` method should iterate over all the heap references in the
-/// root and call the `visit` method on the `visitor` for each reference.
+/// root and call the `visit` method on the `visitor` for each reference (and, if applicable,
+/// the object containing the reference).
 pub fn Heap(comptime Root: type) type {
     return struct {
         allocator: Allocator,
@@ -271,15 +273,18 @@ pub fn Heap(comptime Root: type) type {
         // --- Wololo ---
 
         /// Update all occurrences for the given reference.
-        pub fn updateAllReferencesTo(self: *Self, from: Value, to: Value) void {
+        pub fn updateAllReferencesTo(self: *Self, from: Value, to: Value) !void {
             // Don't need to update non-references.
             const from_ref = from.asReference() orelse return;
 
             const Visitor = struct {
                 from: Reference,
                 to: Value,
+                heap: *Self,
 
-                pub fn visit(visitor: *const @This(), value: *Value) error{}!void {
+                pub fn visit(visitor: *const @This(), value: *Value, object: ?BaseObject.Ptr) !void {
+                    _ = object;
+
                     const reference = value.asReference() orelse return;
                     if (reference.getAddress() == visitor.from.getAddress()) {
                         // FIXME: This is unsound!! If this value is in an object that's in
@@ -293,11 +298,12 @@ pub fn Heap(comptime Root: type) type {
             const visitor: Visitor = .{
                 .from = from_ref,
                 .to = to,
+                .heap = self,
             };
 
-            self.root.visitEdges(visitor) catch unreachable;
-            self.new_generation.visitAllObjects(visitor) catch unreachable;
-            self.old_generation.visitAllObjects(visitor) catch unreachable;
+            try self.root.visitEdges(visitor);
+            try self.new_generation.visitAllObjects(visitor);
+            try self.old_generation.visitAllObjects(visitor);
         }
 
         // --- Remembering object references ---
@@ -616,7 +622,9 @@ pub fn Heap(comptime Root: type) type {
                         new_generation: *NewGeneration,
                         stats: *GarbageCollectionStats,
 
-                        pub fn visit(visitor: *const @This(), value: *Value) !void {
+                        pub fn visit(visitor: *const @This(), value: *Value, object: ?BaseObject.Ptr) !void {
+                            _ = object;
+
                             const reference = value.asReference() orelse return;
                             var past_survivor_copy_target = CopyTarget.OldGeneration;
                             const new_reference = try visitor.new_generation.copyReference(visitor.heap, &past_survivor_copy_target, visitor.stats, reference);
@@ -649,7 +657,7 @@ pub fn Heap(comptime Root: type) type {
                             // Since we're force-copying without using any roots, we don't care about the
                             // new value we get back.
                             var value = reference.asValue();
-                            try visitor.visit(&value);
+                            try visitor.visit(&value, object);
 
                             current_offset += object_size_bytes;
                         }
@@ -662,7 +670,9 @@ pub fn Heap(comptime Root: type) type {
                     copy_target: *CopyTarget,
                     stats: *GarbageCollectionStats,
 
-                    pub fn visit(visitor: *const @This(), value: *Value) !void {
+                    pub fn visit(visitor: *const @This(), value: *Value, object: ?BaseObject.Ptr) !void {
+                        _ = object;
+
                         const reference = value.asReference() orelse return;
                         const new_reference = try visitor.new_generation.copyReference(visitor.heap, visitor.copy_target, visitor.stats, reference);
                         value.* = new_reference.asValue();
@@ -682,7 +692,7 @@ pub fn Heap(comptime Root: type) type {
                 for (&heap.handles) |*handle| {
                     if (handle.*) |h| {
                         var value = Value.fromObjectAddress(h);
-                        try visitor.visit(&value);
+                        try visitor.visit(&value, null);
                         handle.* = value.asReference().?.getAddress();
                     }
                 }
@@ -1169,7 +1179,7 @@ pub fn Heap(comptime Root: type) type {
                 for (&heap.handles) |*handle| {
                     if (handle.*) |h| {
                         var value = Value.fromObjectAddress(h);
-                        try visitor.visit(&value);
+                        try visitor.visit(&value, null);
                     }
                 }
 
@@ -1232,7 +1242,9 @@ pub fn Heap(comptime Root: type) type {
                     gray_queue: *std.ArrayListUnmanaged([*]u64),
                     black_set: *std.AutoArrayHashMapUnmanaged([*]u64, void),
 
-                    pub fn visit(visitor: *const @This(), value: *Value) !void {
+                    pub fn visit(visitor: *const @This(), value: *Value, object: ?BaseObject.Ptr) !void {
+                        _ = object;
+
                         const reference = value.asReference() orelse return;
                         const address = reference.getAddress();
 
@@ -1379,7 +1391,9 @@ pub fn Heap(comptime Root: type) type {
                 const RemapVisitor = struct {
                     remap_table: *std.AutoArrayHashMapUnmanaged([*]u64, [*]u64),
 
-                    pub fn visit(visitor: *const @This(), value: *Value) !void {
+                    pub fn visit(visitor: *const @This(), value: *Value, object: ?BaseObject.Ptr) !void {
+                        _ = object;
+
                         const reference = value.asReference() orelse return;
                         const address = reference.getAddress();
 
@@ -1418,7 +1432,9 @@ pub fn Heap(comptime Root: type) type {
                     old_generation: *OldGeneration,
                     found: bool,
 
-                    pub fn visit(visitor: *@This(), value: *Value) !void {
+                    pub fn visit(visitor: *@This(), value: *Value, object: ?BaseObject.Ptr) !void {
+                        _ = object;
+
                         const reference = value.asReference() orelse return;
                         const address = reference.getAddress();
 

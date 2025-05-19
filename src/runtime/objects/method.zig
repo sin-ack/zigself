@@ -233,7 +233,7 @@ pub const MethodMap = extern struct {
 
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: MethodMap.Ptr, visitor: anytype) !void {
-        try visitor.visit(&self.method_name.value);
+        try visitor.visit(&self.method_name.value, @ptrCast(self));
         try self.visitSlots(visitor);
     }
 

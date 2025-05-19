@@ -200,9 +200,9 @@ pub const Activation = extern struct {
     /// Visit the edges on this object with the given visitor.
     pub fn visitEdges(self: Activation.Ptr, visitor: anytype) !void {
         try self.slots.object.visitEdges(visitor);
-        try visitor.visit(&self.receiver);
+        try visitor.visit(&self.receiver, @ptrCast(self));
         for (self.getAssignableSlots()) |*value| {
-            try visitor.visit(value);
+            try visitor.visit(value, @ptrCast(self));
         }
     }
 

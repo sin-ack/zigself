@@ -90,7 +90,7 @@ pub const Array = extern struct {
     pub fn visitEdges(self: Array.Ptr, visitor: anytype) !void {
         try self.object.visitEdges(visitor);
         for (self.getValues()) |*value| {
-            try visitor.visit(value);
+            try visitor.visit(value, @ptrCast(self));
         }
     }
 

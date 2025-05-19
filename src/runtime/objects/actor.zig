@@ -87,7 +87,7 @@ pub const Actor = extern struct {
 
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: Actor.Ptr, visitor: anytype) !void {
-        try visitor.visit(&self.context);
+        try visitor.visit(&self.context, @ptrCast(self));
     }
 
     pub fn lookup(self: Actor.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {

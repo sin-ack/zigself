@@ -405,24 +405,24 @@ pub fn visitEdges(
     // TODO: Write interfaces proposal for Zig
     visitor: anytype,
 ) !void {
-    try visitor.visit(&self.actor_object.value);
+    try visitor.visit(&self.actor_object.value, null);
 
     // Go through the register file.
     try self.register_file.visitEdges(visitor);
 
     if (self.entrypoint_selector) |*value|
-        try visitor.visit(&value.value);
+        try visitor.visit(&value.value, null);
 
     if (self.blocked_fd) |*value|
-        try visitor.visit(&value.value);
+        try visitor.visit(&value.value, null);
 
     if (self.message_sender) |*value|
-        try visitor.visit(&value.value);
+        try visitor.visit(&value.value, null);
 
     // Go through the activation stack.
     // TODO: Move this into an ActivationStack.visitEdges method.
     for (self.activation_stack.getStack()) |*activation| {
-        try visitor.visit(&activation.activation_object.value);
+        try visitor.visit(&activation.activation_object.value, null);
     }
 
     // Go through the slot, argument and saved register stacks.
@@ -430,29 +430,29 @@ pub fn visitEdges(
         if (std.meta.eql(SlotSentinel, slot.*))
             continue;
 
-        try visitor.visit(&slot.name.value);
-        try visitor.visit(&slot.value);
+        try visitor.visit(&slot.name.value, null);
+        try visitor.visit(&slot.value, null);
     }
 
     for (self.argument_stack.allItems()) |*argument| {
         if (std.meta.eql(ValueSentinel, argument.*))
             continue;
 
-        try visitor.visit(argument);
+        try visitor.visit(argument, null);
     }
 
     for (self.saved_register_stack.allItems()) |*saved_register| {
-        try visitor.visit(&saved_register.value);
+        try visitor.visit(&saved_register.value, null);
     }
 
     {
         var it = self.mailbox.first;
         while (it) |node| : (it = node.next) {
             const message: *Message = @fieldParentPtr("node", node);
-            try visitor.visit(&message.sender.value);
-            try visitor.visit(&message.method.value);
+            try visitor.visit(&message.sender.value, null);
+            try visitor.visit(&message.method.value, null);
             for (message.arguments) |*argument| {
-                try visitor.visit(argument);
+                try visitor.visit(argument, null);
             }
         }
     }

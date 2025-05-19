@@ -248,7 +248,7 @@ pub const MapObject = extern struct {
     /// Visit edges of this object using the given visitor. Users of `MapObject`
     /// must call this method in their own `visitEdges` implementation.
     pub fn visitEdges(self: MapObject.Ptr, visitor: anytype) !void {
-        try visitor.visit(&self.map);
+        try visitor.visit(&self.map, @ptrCast(self));
     }
 
     pub fn getMap(self: MapObject.Ptr) Map.Ptr {

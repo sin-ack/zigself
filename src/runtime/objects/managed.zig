@@ -120,7 +120,7 @@ pub const Managed = extern struct {
 
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: Managed.Ptr, visitor: anytype) !void {
-        try visitor.visit(&self.value);
+        try visitor.visit(&self.value, @ptrCast(self));
     }
 
     pub fn lookup(self: Managed.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {

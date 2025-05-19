@@ -102,7 +102,7 @@ pub fn IntrinsicMap(comptime MapT: type, comptime object_type: ObjectType) type 
         /// Visit edges of this object using the given visitor.
         pub fn visitEdges(self: Ptr, visitor: anytype) !void {
             inline for (struct_fields[1..]) |field| {
-                try visitor.visit(&@field(self, field.name));
+                try visitor.visit(&@field(self, field.name), @ptrCast(self));
             }
         }
 
