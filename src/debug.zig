@@ -35,3 +35,6 @@ pub const HEAP_HANDLE_MISS_DEBUG = false;
 /// work to find an empty handle slot, so you can use this to track down those
 /// cases.
 pub const CRASH_ON_OUT_OF_ORDER_HANDLE_FREES = false;
+/// When enabled, all unsafe Value/Reference type casts will assert that the
+/// cast is valid. Obviously it's a big performance hit.
+pub const STRICT_CAST_CHECKING = false;

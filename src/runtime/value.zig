@@ -21,6 +21,7 @@ const object_lookup = @import("object_lookup.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
+const STRICT_CAST_CHECKING = debug.STRICT_CAST_CHECKING;
 
 pub const Value = packed struct(u64) {
     type: Type,
@@ -59,22 +60,44 @@ pub const Value = packed struct(u64) {
     /// Try to cast this value to an integer. Returns null if this value is not
     /// an integer.
     pub inline fn asInteger(self: Value) ?Value.SignedData {
-        if (self.type == .Integer) return @bitCast(self.data);
-        return null;
+        if (self.type != .Integer) return null;
+        return self.unsafeAsInteger();
+    }
+
+    /// Cast this value to an integer without checking. Only call this if you
+    /// know this value is an integer; otherwise call `asInteger`.
+    pub inline fn unsafeAsInteger(self: Value) Value.SignedData {
+        if (STRICT_CAST_CHECKING) std.debug.assert(self.type == .Integer);
+        return @bitCast(self.data);
     }
 
     /// Try to cast this value to an unsigned integer. Returns null if this
     /// value is not an unsigned integer.
     pub inline fn asUnsignedInteger(self: Value) ?Value.Data {
-        if (self.type == .Integer) return self.data;
-        return null;
+        if (self.type != .Integer) return null;
+        return self.unsafeAsUnsignedInteger();
+    }
+
+    /// Cast this value to an unsigned integer without checking. Only call this
+    /// if you know this value is an unsigned integer; otherwise call
+    /// `asUnsignedInteger`.
+    pub inline fn unsafeAsUnsignedInteger(self: Value) Value.Data {
+        if (STRICT_CAST_CHECKING) std.debug.assert(self.type == .Integer);
+        return self.data;
     }
 
     /// Try to cast this value to an object-like. Returns null if this value is
     /// not an object-like.
-    pub inline fn asObjectLike(self: Value) ?ObjectLike {
-        if (self.type == .Object) return @bitCast(self);
-        return null;
+    inline fn asObjectLike(self: Value) ?ObjectLike {
+        if (self.type != .Object) return null;
+        return self.unsafeAsObjectLike();
+    }
+
+    /// Cast this value to an `ObjectLike` without checking. Only call this if
+    /// you know this value is an object-like; otherwise call `asObjectLike`.
+    inline fn unsafeAsObjectLike(self: Value) ObjectLike {
+        if (STRICT_CAST_CHECKING) std.debug.assert(self.type == .Object);
+        return @bitCast(self);
     }
 
     /// Try to cast this value to an object reference. Returns null if this
@@ -84,11 +107,23 @@ pub const Value = packed struct(u64) {
         return null;
     }
 
+    /// Cast this value to a reference without checking. Only call this if you
+    /// know this value is a reference; otherwise call `asReference`.
+    pub inline fn unsafeAsReference(self: Value) Reference {
+        return self.unsafeAsObjectLike().unsafeAsReference();
+    }
+
     /// Try to cast this value to a base object pointer. Returns null if this
     /// value is not an object reference.
     pub inline fn asBaseObject(self: Value) ?BaseObject.Ptr {
         if (self.asObjectLike()) |object_like| return object_like.asBaseObject();
         return null;
+    }
+
+    /// Cast this value to a `BaseObject` without checking. Only call this if
+    /// you know this value is a base object; otherwise call `asBaseObject`.
+    pub inline fn unsafeAsBaseObject(self: Value) BaseObject.Ptr {
+        return self.unsafeAsObjectLike().unsafeAsBaseObject();
     }
 
     /// Try to cast this value to an object pointer. Returns null if this value
@@ -98,6 +133,12 @@ pub const Value = packed struct(u64) {
         return null;
     }
 
+    /// Cast this value to an `Object` without checking. Only call this if you
+    /// know this value is an object; otherwise call `asObject`.
+    pub inline fn unsafeAsObject(self: Value) Object.Ptr {
+        return self.unsafeAsBaseObject().unsafeAsObject();
+    }
+
     /// Try to cast this value to a map pointer. Returns null if this value is
     /// not an object reference.
     pub inline fn asMap(self: Value) ?Map.Ptr {
@@ -105,11 +146,10 @@ pub const Value = packed struct(u64) {
         return null;
     }
 
-    /// Try to cast this value to a byte array pointer. Returns null if this
-    /// value is not an object reference.
-    pub inline fn asByteArray(self: Value) ?ByteArray {
-        if (self.asObjectLike()) |object_like| return object_like.asByteArray();
-        return null;
+    /// Cast this value to a `Map` without checking. Only call this if you
+    /// know this value is a map; otherwise call `asMap`.
+    pub inline fn unsafeAsMap(self: Value) Map.Ptr {
+        return self.unsafeAsBaseObject().unsafeAsMap();
     }
 
     /// Perform a lookup on this value by a selector.
@@ -124,7 +164,7 @@ pub const Value = packed struct(u64) {
 
         const vm = context.getVM();
         return switch (self.type) {
-            .Object => selector.lookupObject(self.asObject().?),
+            .Object => selector.lookupObject(self.unsafeAsObject()),
             .Integer => {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up on traits integer\n", .{});
                 const integer_traits = vm.integer_traits;
@@ -142,7 +182,7 @@ pub const Value = packed struct(u64) {
             .Integer => self,
             // NOTE: The only error condition that can happen here is during method and block map cloning.
             //       Since user code is unable to do this, there is no reason to propagate a try here.
-            .Object => (self.asObject().?.clone(allocator, heap, token, actor_id) catch unreachable).asValue(),
+            .Object => (self.unsafeAsObject().clone(allocator, heap, token, actor_id) catch unreachable).asValue(),
         };
     }
 };
@@ -160,19 +200,31 @@ pub const ObjectLike = packed struct(u64) {
         Object = 1,
     };
 
+    /// Try to cast this value to a `Reference`. Returns null if this value is
+    /// not a reference.
     pub inline fn asReference(self: ObjectLike) ?Reference {
-        if (self.type == .Reference) return @bitCast(self);
-        return null;
+        if (self.type != .Reference) return null;
+        return self.unsafeAsReference();
     }
 
+    /// Cast this value to a `Reference` without checking. Only call this if
+    /// you know this value is a reference; otherwise call `asReference`.
+    pub inline fn unsafeAsReference(self: ObjectLike) Reference {
+        if (STRICT_CAST_CHECKING) std.debug.assert(self.type == .Reference);
+        return @bitCast(self);
+    }
+
+    /// Try to cast this value to a `BaseObject`. Returns null if this value is
+    /// not a base object.
     pub inline fn asBaseObject(self: ObjectLike) ?BaseObject.Ptr {
         if (self.asReference()) |reference| return reference.asBaseObject();
         return null;
     }
 
-    pub inline fn asByteArray(self: ObjectLike) ?ByteArray {
-        if (self.asReference()) |reference| return ByteArray.fromAddress(reference.getAddress());
-        return null;
+    /// Cast this value to a `BaseObject` without checking. Only call this if
+    /// you know this value is a base object; otherwise call `asBaseObject`.
+    pub inline fn unsafeAsBaseObject(self: ObjectLike) BaseObject.Ptr {
+        return self.unsafeAsReference().asBaseObject();
     }
 
     // NOTE: Since we don't manipulate object headers here, we don't supply
@@ -255,17 +307,33 @@ pub const Reference = packed struct(u64) {
         return @ptrFromInt(raw_value & ~Mask);
     }
 
-    /// Return a pointer to the object this reference points to.
+    /// Return a pointer to the `BaseObject` this reference points to.
     pub inline fn asBaseObject(self: Reference) BaseObject.Ptr {
         return @ptrCast(self.getAddress());
     }
 
+    /// Try to cast this reference to an `Object`. Returns null if this
+    /// reference is not an object reference.
     pub inline fn asObject(self: Reference) ?Object.Ptr {
         return self.asBaseObject().asObject();
     }
 
+    /// Cast this reference to an `Object` without checking. Only call this
+    /// if you know this reference is an object; otherwise call `asObject`.
+    pub inline fn unsafeAsObject(self: Reference) Object.Ptr {
+        return self.asBaseObject().unsafeAsObject();
+    }
+
+    /// Try to cast this reference to a `Map`. Returns null if this reference
+    /// is not a map reference.
     pub inline fn asMap(self: Reference) ?Map.Ptr {
         return self.asBaseObject().asMap();
+    }
+
+    /// Cast this reference to a `Map` without checking. Only call this
+    /// if you know this reference is a map; otherwise call `asMap`.
+    pub inline fn unsafeAsMap(self: Reference) Map.Ptr {
+        return self.asBaseObject().unsafeAsMap();
     }
 };
 
@@ -287,7 +355,8 @@ pub fn PointerValueAlignment(comptime T: type, comptime alignment: ?u29) type {
         }
 
         pub fn get(self: Self) PointerT {
-            const self_int: usize = @intCast(self.value.asUnsignedInteger().?);
+            @setRuntimeSafety(false);
+            const self_int: usize = @intCast(self.value.unsafeAsUnsignedInteger());
             return @ptrFromInt(self_int);
         }
     };
@@ -336,8 +405,8 @@ pub fn IntegerValue(comptime signedness: IntegerValueSignedness) type {
         .Unsigned => Value.fromUnsignedInteger,
     };
     const conversion_function = switch (signedness) {
-        .Signed => Value.asInteger,
-        .Unsigned => Value.asUnsignedInteger,
+        .Signed => Value.unsafeAsInteger,
+        .Unsigned => Value.unsafeAsUnsignedInteger,
     };
 
     return extern struct {
@@ -350,13 +419,7 @@ pub fn IntegerValue(comptime signedness: IntegerValueSignedness) type {
         }
 
         pub fn get(self: Self) IntegerT {
-            if (builtin.mode == .Debug) {
-                if (self.value.type != .Integer) {
-                    @panic("!!! IntegerValue does not contain an integer!");
-                }
-            }
-
-            return conversion_function(self.value).?;
+            return conversion_function(self.value);
         }
     };
 }
@@ -375,7 +438,7 @@ pub fn ObjectValue(comptime ObjectT: type) type {
         }
 
         pub fn get(self: Self) ObjectT.Ptr {
-            return self.value.asObject().?.asType(ObjectT.Type).?;
+            return self.value.unsafeAsObject().unsafeAsType(ObjectT.Type);
         }
     };
 }

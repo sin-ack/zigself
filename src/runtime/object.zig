@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
 const Actor = @import("Actor.zig");
+const debug = @import("../debug.zig");
 const Value = @import("value.zig").Value;
 const pointer = @import("../utility/pointer.zig");
 const Selector = @import("Selector.zig");
@@ -17,6 +18,8 @@ const heap_import = @import("Heap.zig");
 const scoped_bits = @import("../utility/scoped_bits.zig");
 const object_lookup = @import("object_lookup.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
+
+const STRICT_CAST_CHECKING = debug.STRICT_CAST_CHECKING;
 
 // TODO: Unify ObjectType and ObjectRegistry once Zig stops treating it as a dependency loop.
 pub const ObjectType = enum(u5) {
@@ -137,8 +140,16 @@ pub const Object = extern struct {
 
     /// If the object is of the given type, return it as that type. Otherwise return null.
     pub fn asType(self: Object.Ptr, comptime object_type: ObjectType) ?ObjectT(object_type).Ptr {
-        if (self.getMetadata().type == object_type) return @ptrCast(self);
+        if (self.getMetadata().type == object_type) return self.unsafeAsType(object_type);
         return null;
+    }
+
+    /// Force-cast this object to the given type. This is unsafe and should only
+    /// be used when it is absolutely certain that the object is of the given
+    /// type. Most code should use `asType` instead.
+    pub fn unsafeAsType(self: Object.Ptr, comptime object_type: ObjectType) ObjectT(object_type).Ptr {
+        if (STRICT_CAST_CHECKING) std.debug.assert(self.getMetadata().type == object_type);
+        return @ptrCast(self);
     }
 
     /// Return the address of this object.
@@ -252,16 +263,16 @@ pub const MapObject = extern struct {
     }
 
     pub fn getMap(self: MapObject.Ptr) Map.Ptr {
-        const reference = self.map.asReference().?;
+        const reference = self.map.unsafeAsReference();
 
         // XXX: If we're currently in the middle of scavenging, then our map
         //      probably has already been scavenged into the target space and
         //      a forward reference has been placed in its location instead.
         //      We should get the forwarded object.
-        if (Reference.tryFromForwarding(reference.getAddress())) |forwarded_reference| {
-            return @ptrCast(forwarded_reference.getAddress());
+        if (Reference.tryFromForwarding2(reference)) |forwarded_reference| {
+            return forwarded_reference.unsafeAsMap();
         }
 
-        return reference.asMap().?;
+        return reference.unsafeAsMap();
     }
 };

@@ -305,13 +305,13 @@ pub fn PollFDs_Events_WaitingForMS_IfFail(context: *PrimitiveContext) !Execution
     const fd_values = fds.getValues();
     const event_values = events.getValues();
     for (fd_values, 0..) |fd, i| {
-        const managed_fd = fd.asObject().?.asType(.Managed).?;
+        const managed_fd = fd.unsafeAsObject().unsafeAsType(.Managed);
         const fd_value = FileDescriptor.fromValue(managed_fd.value);
         const event_flags = event_values[i];
 
         poll_fds[i] = .{
             .fd = fd_value.fd,
-            .events = @intCast(event_flags.asInteger().?),
+            .events = @intCast(event_flags.unsafeAsInteger()),
             .revents = 0,
         };
     }

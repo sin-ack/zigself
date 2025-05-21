@@ -63,7 +63,7 @@ pub const Method = extern struct {
     }
 
     pub fn getMap(self: Method.Ptr) MethodMap.Ptr {
-        return self.slots.object.getMap().asType(.Method).?;
+        return self.slots.object.getMap().unsafeAsType(.Method);
     }
 
     pub fn getSlots(self: Method.Ptr) Slot.Slice {

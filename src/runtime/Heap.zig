@@ -271,8 +271,8 @@ pub fn Heap(comptime Root: type) type {
             std.debug.assert(source.type == .Object);
             if (target.type != .Object) return false;
 
-            const source_ref = source.asReference().?;
-            const target_ref = target.asReference().?;
+            const source_ref = source.unsafeAsReference();
+            const target_ref = target.unsafeAsReference();
 
             if (REMEMBERED_SET_DEBUG) std.debug.print("Heap.rememberObjectReference: Trying to create a reference {*} -> {*}\n", .{ source_ref.getAddress(), target_ref.getAddress() });
 
@@ -1670,7 +1670,7 @@ test "basic heap allocation" {
 
     // Array object should have moved to future (now past) survivor space.
     try std.testing.expect(array != previous_array_address);
-    try std.testing.expectEqual(.PastSurvivor, heap.new_generation.referenceLocation(array.asValue().asReference().?));
+    try std.testing.expectEqual(.PastSurvivor, heap.new_generation.referenceLocation(array.asValue().unsafeAsReference()));
 }
 
 test "spill to old space" {
@@ -1930,7 +1930,7 @@ test "remembered set" {
     var array: ArrayObject.Ptr = @ptrCast(try heap.old_generation.allocate(heap.allocator, array_required_memory));
     array.init(.Global, used_map, &.{}, null);
     // Remember the address since it will point to the new generation.
-    const did_remember = heap.old_generation.rememberAddress(array.asValue().asReference().?.getAddress());
+    const did_remember = heap.old_generation.rememberAddress(array.asValue().unsafeAsReference().getAddress());
     try std.testing.expect(did_remember);
 
     // First perform a minor collection. At the end of this collection, the
@@ -1947,7 +1947,7 @@ test "remembered set" {
 
     // Check whether the map moved successfully to past survivor.
     const new_used_map = array.getMap();
-    const new_used_map_ref = new_used_map.asValue().asReference().?;
+    const new_used_map_ref = new_used_map.asValue().unsafeAsReference();
     try std.testing.expectEqual(.PastSurvivor, heap.new_generation.referenceLocation(new_used_map_ref));
 
     // Ensure that the card offset for the first card is *not* 0 (since we
@@ -2029,5 +2029,5 @@ test "handle set updates pointers correctly" {
     try std.testing.expect(array_map_value.data != array_map_value_original.data);
 
     // Both the value and the object pointer should point to the same location.
-    try std.testing.expect(array_map.asValue().asReference().?.getAddress() == array_map_value.asReference().?.getAddress());
+    try std.testing.expect(array_map.asValue().unsafeAsReference().getAddress() == array_map_value.unsafeAsReference().getAddress());
 }

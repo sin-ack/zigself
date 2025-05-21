@@ -27,8 +27,8 @@ fn inspectValueInternal(
     visited_object_link: ?*const VisitedObjectLink,
 ) !void {
     switch (value.type) {
-        .Integer => std.debug.print("<integer> {d}", .{value.asInteger().?}),
-        .Object => return inspectObject(display_type, vm, value.asObject().?, indent, visited_object_link),
+        .Integer => std.debug.print("<integer> {d}", .{value.unsafeAsInteger()}),
+        .Object => return inspectObject(display_type, vm, value.unsafeAsObject(), indent, visited_object_link),
     }
 }
 
@@ -87,21 +87,21 @@ fn inspectObject(
     // FIXME: Move this into object delegation.
     switch (object.getMetadata().type) {
         .Slots => {
-            const slots = object.asType(.Slots).?;
+            const slots = object.unsafeAsType(.Slots);
 
             std.debug.print("(|{s}", .{separator});
             try inspectSlots(display_type, vm, slots, indent + 2, separator, &my_link);
             printWithIndent(display_type, indent, "|)", .{});
         },
         .Activation => {
-            const activation = object.asType(.Activation).?;
+            const activation = object.unsafeAsType(.Activation);
 
             std.debug.print("<activation object> (|{s}", .{separator});
             try inspectSlots(display_type, vm, activation, indent + 2, separator, &my_link);
             printWithIndent(display_type, indent, "|)", .{});
         },
         .Method => {
-            const method = object.asType(.Method).?;
+            const method = object.unsafeAsType(.Method);
 
             std.debug.print("<method object \"{s}\"> ", .{method.getMap().method_name.get().getValues()});
 
@@ -114,7 +114,7 @@ fn inspectObject(
             }
         },
         .Block => {
-            const block = object.asType(.Block).?;
+            const block = object.unsafeAsType(.Block);
 
             std.debug.print("<block object> ", .{});
 
@@ -127,12 +127,12 @@ fn inspectObject(
             }
         },
         .ByteArray => {
-            const byte_array = object.asType(.ByteArray).?;
+            const byte_array = object.unsafeAsType(.ByteArray);
             const values = byte_array.getValues();
             std.debug.print("<byte array size: {d}> \"{s}\"", .{ values.len, values });
         },
         .Array => {
-            const array = object.asType(.Array).?;
+            const array = object.unsafeAsType(.Array);
             const values = array.getValues();
 
             std.debug.print("<array size: {d}> ", .{values.len});
@@ -153,7 +153,7 @@ fn inspectObject(
             }
         },
         .Managed => {
-            const managed = object.asType(.Managed).?;
+            const managed = object.unsafeAsType(.Managed);
             std.debug.print("<managed object: {}> ", .{managed.getManagedType()});
             try inspectValueInternal(display_type, vm, managed.value, indent, &my_link);
         },
@@ -166,10 +166,10 @@ fn inspectObject(
             std.debug.print("<actor proxy>", .{});
         },
         .Float => {
-            std.debug.print("<float> {}", .{object.asType(.Float).?.get()});
+            std.debug.print("<float> {}", .{object.unsafeAsType(.Float).get()});
         },
         .AddrInfo => {
-            const addrinfo_map = object.asType(.AddrInfo).?.getMap();
+            const addrinfo_map = object.unsafeAsType(.AddrInfo).getMap();
 
             std.debug.print("<addrinfo> (|{s}", .{separator});
 

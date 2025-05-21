@@ -64,7 +64,7 @@ pub const Block = extern struct {
     }
 
     pub fn getMap(self: Block.Ptr) BlockMap.Ptr {
-        return self.slots.object.getMap().asType(.Block).?;
+        return self.slots.object.getMap().unsafeAsType(.Block);
     }
 
     pub fn getSlots(self: Block.Ptr) Slot.Slice {

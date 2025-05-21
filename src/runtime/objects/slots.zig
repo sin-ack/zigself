@@ -96,7 +96,7 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
             std.debug.assert(slot.isAssignable());
             std.debug.assert(!slot.isArgument());
 
-            return &getAssignableSlots(self)[@intCast(slot.value.asUnsignedInteger().?)];
+            return &getAssignableSlots(self)[@intCast(slot.value.unsafeAsUnsignedInteger())];
         }
 
         /// Return a shallow copy of this object.
@@ -217,7 +217,7 @@ pub const Slots = extern struct {
     }
 
     pub fn getMap(self: Slots.Ptr) SlotsMap.Ptr {
-        return self.object.getMap().asType(.Slots).?;
+        return self.object.getMap().unsafeAsType(.Slots);
     }
 
     pub fn getSlots(self: Slots.Ptr) Slot.Slice {

@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Actor = @import("Actor.zig");
+const debug = @import("../debug.zig");
 const Value = @import("value.zig").Value;
 const pointer = @import("../utility/pointer.zig");
 const BaseObject = @import("base_object.zig").BaseObject;
@@ -13,6 +14,8 @@ const ObjectLike = @import("value.zig").ObjectLike;
 const heap_import = @import("Heap.zig");
 const scoped_bits = @import("../utility/scoped_bits.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
+
+const STRICT_CAST_CHECKING = debug.STRICT_CAST_CHECKING;
 
 // TODO: Unify MapType and MapRegistry once Zig stops raising false dependency loops.
 pub const MapType = enum(u5) {
@@ -96,8 +99,16 @@ pub const Map = extern struct {
 
     /// If the map is of the given type, return it as that type. Otherwise return null.
     pub fn asType(self: Ptr, comptime map_type: MapType) ?MapT(map_type).Ptr {
-        if (self.getMetadata().type == map_type) return @ptrCast(self);
+        if (self.getMetadata().type == map_type) return self.unsafeAsType(map_type);
         return null;
+    }
+
+    /// Force-cast this map to the given map type. This is unsafe and should
+    /// only be used when it is absolutely certain that the map is of the given
+    /// type. Most code should use `asType` instead.
+    pub fn unsafeAsType(self: Ptr, comptime map_type: MapType) MapT(map_type).Ptr {
+        if (STRICT_CAST_CHECKING) std.debug.assert(self.getMetadata().type == map_type);
+        return @ptrCast(self);
     }
 
     /// Return the map's address.

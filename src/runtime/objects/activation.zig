@@ -51,13 +51,13 @@ pub const Activation = extern struct {
         receiver: GenericValue,
     ) Activation.Ptr {
         const assignable_slot_count = switch (map_type) {
-            .Block => map.asType(.Block).?.getAssignableSlotCount(),
-            .Method => map.asType(.Method).?.getAssignableSlotCount(),
+            .Block => map.unsafeAsType(.Block).getAssignableSlotCount(),
+            .Method => map.unsafeAsType(.Method).getAssignableSlotCount(),
             else => unreachable,
         };
         const argument_slot_count = switch (map_type) {
-            .Block => map.asType(.Block).?.getArgumentSlotCount(),
-            .Method => map.asType(.Method).?.getArgumentSlotCount(),
+            .Block => map.unsafeAsType(.Block).getArgumentSlotCount(),
+            .Method => map.unsafeAsType(.Method).getArgumentSlotCount(),
             else => unreachable,
         };
 
@@ -176,7 +176,7 @@ pub const Activation = extern struct {
     pub fn getAssignableSlotValue(self: Activation.Ptr, slot: Slot) *GenericValue {
         std.debug.assert(slot.isAssignable());
 
-        const offset_int = slot.value.asUnsignedInteger().?;
+        const offset_int = slot.value.unsafeAsUnsignedInteger();
         std.debug.assert(!exceedsBoundsOf(offset_int, usize));
 
         const offset: usize = @intCast(offset_int);
@@ -220,11 +220,15 @@ pub const Activation = extern struct {
     /// receiver is also an activation object, then returns its receiver
     /// instead.
     pub fn findActivationReceiver(self: Activation.Ptr) GenericValue {
-        var object = self.asValue().asObject().?;
+        if (self.receiver.type != .Object) {
+            return self.receiver;
+        }
+
+        var object = self.receiver.unsafeAsObject();
         while (object.asType(.Activation)) |activation| {
             const receiver = activation.receiver;
             if (receiver.type == .Object) {
-                object = receiver.asObject().?;
+                object = receiver.unsafeAsObject();
             } else {
                 return receiver;
             }
@@ -255,7 +259,7 @@ pub const Activation = extern struct {
             std.debug.panic("Attempted to call getMethodMap on a block activation object", .{});
         }
 
-        return self.slots.object.getMap().asType(.Method).?;
+        return self.slots.object.getMap().unsafeAsType(.Method);
     }
 
     fn getBlockMap(self: Activation.Ptr) BlockMap.Ptr {
@@ -263,7 +267,7 @@ pub const Activation = extern struct {
             std.debug.panic("Attempted to call getBlockMap on a method activation object", .{});
         }
 
-        return self.slots.object.getMap().asType(.Block).?;
+        return self.slots.object.getMap().unsafeAsType(.Block);
     }
 
     fn DispatchReturn(comptime fn_name: []const u8) type {

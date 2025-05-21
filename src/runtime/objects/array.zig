@@ -68,7 +68,7 @@ pub const Array = extern struct {
     }
 
     pub fn getMap(self: Array.Ptr) ArrayMap.Ptr {
-        return self.object.getMap().asType(.Array).?;
+        return self.object.getMap().unsafeAsType(.Array);
     }
 
     pub fn getSize(self: Array.Ptr) usize {

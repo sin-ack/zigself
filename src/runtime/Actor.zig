@@ -507,8 +507,8 @@ pub fn canWriteTo(self: *Actor, value: Value) bool {
     return switch (value.type) {
         .Integer => true,
         .Object => writable: {
-            const object = value.asObject().?;
-            break :writable self.id == .Global or object.getMetadata().reachability != .Global;
+            const base_object = value.unsafeAsBaseObject();
+            break :writable self.id == .Global or base_object.metadata.reachability != .Global;
         },
     };
 }
@@ -520,7 +520,8 @@ pub fn ensureCanRead(self: *Actor, value: Value, source_range: SourceRange) void
     switch (value.type) {
         .Integer => {},
         .Object => {
-            const object = value.asObject().?;
+            // XXX: Assuming read accesses can't be made on maps right now.
+            const object = value.unsafeAsObject();
             if (object.getMetadata().reachability != .Global and object.getMetadata().actor_id != self.id)
                 std.debug.panic(
                     "!!! Attempted to read object that is not readable for this actor!\n" ++

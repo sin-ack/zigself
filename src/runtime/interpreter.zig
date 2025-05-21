@@ -254,7 +254,7 @@ fn opcodeSelfPrimSend(context: *InterpreterContext) InterpreterError!ExecutionRe
 fn opcodePushConstantSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
     const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushConstantSlot);
     const name_value = context.vm.readRegister(payload.name_location);
-    const name_byte_array_object = name_value.asObject().?.asType(.ByteArray).?;
+    const name_byte_array_object = name_value.unsafeAsObject().unsafeAsType(.ByteArray);
     const value = context.vm.readRegister(payload.value_location);
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initConstant(name_byte_array_object, if (payload.is_parent) .Parent else .NotParent, value));
@@ -264,7 +264,7 @@ fn opcodePushConstantSlot(context: *InterpreterContext) InterpreterError!Executi
 fn opcodePushAssignableSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
     const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushAssignableSlot);
     const name_value = context.vm.readRegister(payload.name_location);
-    const name_byte_array_object = name_value.asObject().?.asType(.ByteArray).?;
+    const name_byte_array_object = name_value.unsafeAsObject().unsafeAsType(.ByteArray);
     const value = context.vm.readRegister(payload.value_location);
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initAssignable(name_byte_array_object, if (payload.is_parent) .Parent else .NotParent, value));
@@ -274,7 +274,7 @@ fn opcodePushAssignableSlot(context: *InterpreterContext) InterpreterError!Execu
 fn opcodePushArgumentSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
     const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushArgumentSlot);
     const name_value = context.vm.readRegister(payload.name_location);
-    const name_byte_array_object = name_value.asObject().?.asType(.ByteArray).?;
+    const name_byte_array_object = name_value.unsafeAsObject().unsafeAsType(.ByteArray);
 
     try context.actor.slot_stack.push(context.vm.allocator, Slot.initArgument(name_byte_array_object));
     return ExecutionResult.normal();
@@ -330,7 +330,7 @@ fn opcodeCreateMethod(context: *InterpreterContext) InterpreterError!ExecutionRe
     const index = context.getInstructionIndex();
 
     const payload = block.getTypedPayload(index, .CreateMethod);
-    const method_name = context.vm.readRegister(payload.method_name_location).asObject().?.asType(.ByteArray).?;
+    const method_name = context.vm.readRegister(payload.method_name_location).unsafeAsObject().unsafeAsType(.ByteArray);
 
     try createMethod(
         context.getDefinitionExecutable(),

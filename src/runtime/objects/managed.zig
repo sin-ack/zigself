@@ -41,7 +41,7 @@ pub const FileDescriptor = packed struct(GenericValue.Data) {
     }
 
     pub fn fromValue(value: GenericValue) FileDescriptor {
-        const raw_value: GenericValue.Data = @intCast(value.asUnsignedInteger().?);
+        const raw_value: GenericValue.Data = @intCast(value.unsafeAsUnsignedInteger());
         return @bitCast(raw_value);
     }
 

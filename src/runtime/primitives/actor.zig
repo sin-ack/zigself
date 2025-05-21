@@ -97,7 +97,7 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
 
     // FIXME: We should perhaps allow any object to be the genesis actor
     //        context, so blocks can also work for example.
-    if (!(receiver.type == .Object and receiver.asObject().?.getMetadata().type == .Slots)) {
+    if (!(receiver.type == .Object and receiver.unsafeAsObject().getMetadata().type == .Slots)) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Expected receiver of _Genesis: to be a slots object",
@@ -163,7 +163,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
     // FIXME: We should perhaps allow any object to receive a message context,
     //        so blocks can also work for example.
-    if (!(receiver.type == .Object and receiver.asObject().?.getMetadata().type == .Slots)) {
+    if (!(receiver.type == .Object and receiver.unsafeAsObject().getMetadata().type == .Slots)) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
             "Expected receiver of _ActorSpawn: to be a slots object",

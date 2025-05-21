@@ -20,7 +20,7 @@ fn traverseObjectGraphInner(
     return switch (value.type) {
         .Integer => value,
         .Object => value: {
-            const old_reference = value.asReference().?;
+            const old_reference = value.unsafeAsReference();
             const old_base_object = old_reference.asBaseObject();
             const old_object_address = old_reference.getAddress();
 
@@ -58,7 +58,7 @@ fn traverseObjectGraphInner(
 
             switch (old_base_object.metadata.type) {
                 .Object => {
-                    const old_object = old_base_object.asObject().?;
+                    const old_object = old_base_object.unsafeAsObject();
                     const old_object_type = old_object.getMetadata().type;
 
                     // TODO: Have a more robust way of knowing which object
@@ -77,14 +77,14 @@ fn traverseObjectGraphInner(
                     switch (old_object_type) {
                         .Activation, .Actor => unreachable,
                         .Slots, .Method, .Block => {
-                            const new_base_object = (try visitor.visit(old_base_object)).asObject().?;
+                            const new_base_object = (try visitor.visit(old_base_object)).unsafeAsObject();
                             @as(MapObject.Ptr, @ptrCast(new_base_object)).map = new_map.?;
 
                             const assignable_slots = switch (old_object_type) {
                                 // FIXME: Move this to something like Object.getSlots().
-                                .Slots => new_base_object.asType(.Slots).?.getAssignableSlots(),
-                                .Method => new_base_object.asType(.Method).?.getAssignableSlots(),
-                                .Block => new_base_object.asType(.Block).?.getAssignableSlots(),
+                                .Slots => new_base_object.unsafeAsType(.Slots).getAssignableSlots(),
+                                .Method => new_base_object.unsafeAsType(.Method).getAssignableSlots(),
+                                .Block => new_base_object.unsafeAsType(.Block).getAssignableSlots(),
                                 else => unreachable,
                             };
 
@@ -95,7 +95,7 @@ fn traverseObjectGraphInner(
                             break :value new_base_object.asValue();
                         },
                         .Array => {
-                            const array = (try visitor.visit(old_base_object)).asObject().?.asType(.Array).?;
+                            const array = (try visitor.visit(old_base_object)).unsafeAsObject().unsafeAsType(.Array);
                             array.object.map = new_map.?;
 
                             for (array.getValues()) |*v| {
@@ -105,7 +105,7 @@ fn traverseObjectGraphInner(
                             break :value array.asValue();
                         },
                         .AddrInfo => {
-                            const new_object = (try visitor.visit(old_base_object)).asObject().?.asType(.AddrInfo).?;
+                            const new_object = (try visitor.visit(old_base_object)).unsafeAsObject().unsafeAsType(.AddrInfo);
                             new_object.object.map = new_map.?;
                             break :value new_object.asValue();
                         },
@@ -116,11 +116,11 @@ fn traverseObjectGraphInner(
                     }
                 },
                 .Map => {
-                    const old_map = old_base_object.asMap().?;
+                    const old_map = old_base_object.unsafeAsMap();
                     const map_type = old_map.getMetadata().type;
                     // Copy the map itself if necessary
                     const new_map = switch (map_type) {
-                        .Slots, .Method, .Block => (try visitor.visit(old_base_object)).asMap().?,
+                        .Slots, .Method, .Block => (try visitor.visit(old_base_object)).unsafeAsMap(),
                         // Array maps will always be immutable, because they
                         // don't point to anything that's not globally
                         // reachable.
@@ -139,7 +139,7 @@ fn traverseObjectGraphInner(
                                 //       type.
                                 .AddrInfo => unreachable,
                                 .Array => unreachable,
-                                inline else => |t| new_map.asType(t).?.getSlots(),
+                                inline else => |t| new_map.unsafeAsType(t).getSlots(),
                             };
 
                             for (slots) |*slot| {

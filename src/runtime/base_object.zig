@@ -8,12 +8,15 @@ const Allocator = std.mem.Allocator;
 
 const Map = @import("map.zig").Map;
 const Actor = @import("Actor.zig");
+const debug = @import("../debug.zig");
 const Value = @import("value.zig").Value;
 const Object = @import("object.zig").Object;
 const pointer = @import("../utility/pointer.zig");
 const ObjectLike = @import("value.zig").ObjectLike;
 const heap_import = @import("Heap.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
+
+const STRICT_CAST_CHECKING = debug.STRICT_CAST_CHECKING;
 
 fn BaseObjectT(comptime object_type: BaseObject.Type) type {
     return switch (object_type) {
@@ -65,13 +68,28 @@ pub const BaseObject = extern struct {
     }
 
     pub fn asObject(self: BaseObject.Ptr) ?Object.Ptr {
-        if (self.metadata.type == .Object) return @ptrCast(self);
+        if (self.metadata.type == .Object) return self.unsafeAsObject();
         return null;
     }
 
+    /// Cast to an `Object` without checking. Only call this if you are
+    /// absolutely sure that the object is an `Object`; otherwise call
+    /// `asObject`.
+    pub fn unsafeAsObject(self: BaseObject.Ptr) Object.Ptr {
+        if (STRICT_CAST_CHECKING) std.debug.assert(self.metadata.type == .Object);
+        return @ptrCast(self);
+    }
+
     pub fn asMap(self: BaseObject.Ptr) ?Map.Ptr {
-        if (self.metadata.type == .Map) return @ptrCast(self);
+        if (self.metadata.type == .Map) return self.unsafeAsMap();
         return null;
+    }
+
+    /// Cast to a `Map` without checking. Only call this if you are absolutely
+    /// sure that the object is a `Map`; otherwise call `asMap`.
+    pub fn unsafeAsMap(self: BaseObject.Ptr) Map.Ptr {
+        if (STRICT_CAST_CHECKING) std.debug.assert(self.metadata.type == .Map);
+        return @ptrCast(self);
     }
 
     pub fn getAddress(self: BaseObject.Ptr) [*]u64 {

@@ -63,31 +63,31 @@ const SlotProperties = extern struct {
     }
 
     pub fn isParent(self: SlotProperties) bool {
-        return self.properties.asUnsignedInteger().? & ParentBit > 0;
+        return self.properties.unsafeAsUnsignedInteger() & ParentBit > 0;
     }
 
     pub fn isAssignable(self: SlotProperties) bool {
-        return self.properties.asUnsignedInteger().? & AssignableBit > 0;
+        return self.properties.unsafeAsUnsignedInteger() & AssignableBit > 0;
     }
 
     pub fn isArgument(self: SlotProperties) bool {
-        return self.properties.asUnsignedInteger().? & ArgumentBit > 0;
+        return self.properties.unsafeAsUnsignedInteger() & ArgumentBit > 0;
     }
 
     fn isIndexAssigned(self: SlotProperties) bool {
-        return self.properties.asUnsignedInteger().? & IndexAssignedBit > 0;
+        return self.properties.unsafeAsUnsignedInteger() & IndexAssignedBit > 0;
     }
 
     fn setIndexAssigned(self: *SlotProperties) void {
         if (self.isIndexAssigned())
             @panic("Attempting to set the index assigned bit twice!");
         self.properties = Value.fromUnsignedInteger(
-            self.properties.asUnsignedInteger().? | IndexAssignedBit,
+            self.properties.unsafeAsUnsignedInteger() | IndexAssignedBit,
         );
     }
 
     pub fn getHash(self: SlotProperties) u32 {
-        return @intCast(self.properties.asUnsignedInteger().? >> 30);
+        return @intCast(self.properties.unsafeAsUnsignedInteger() >> 30);
     }
 };
 
@@ -180,7 +180,7 @@ pub const Slot = extern struct {
             std.debug.assert(self.properties.isIndexAssigned());
         }
 
-        return @intCast(self.value.asUnsignedInteger());
+        return @intCast(self.value.unsafeAsUnsignedInteger());
     }
 
     pub fn getName(self: Slot) []const u8 {
@@ -277,7 +277,7 @@ pub const Slot = extern struct {
                 @panic("TODO: Handle overriding of argument slots");
 
             if (previous_slot.isAssignable()) {
-                const overwritten_assignable_slot_index = previous_slot.value.asUnsignedInteger().?;
+                const overwritten_assignable_slot_index = previous_slot.value.unsafeAsUnsignedInteger();
                 _ = assignable_slot_values.orderedRemove(@intCast(overwritten_assignable_slot_index));
 
                 // Go through all the previous slots, and subtract 1 from all
@@ -285,7 +285,7 @@ pub const Slot = extern struct {
                 // current one (to sync with the slot value removal).
                 for (previous_slots) |*slot| {
                     if (!slot.isArgument() and slot.isAssignable()) {
-                        const other_assignable_slot_index = slot.value.asUnsignedInteger().?;
+                        const other_assignable_slot_index = slot.value.unsafeAsUnsignedInteger();
                         if (other_assignable_slot_index > overwritten_assignable_slot_index)
                             slot.value = Value.fromUnsignedInteger(@intCast(other_assignable_slot_index - 1));
                     }
