@@ -20,5 +20,5 @@ jobs:
         with:
           version: 0.15.0-dev.465+bb79c85cb
 
-      - name: Run zigSelf tests
-        run: zig build test
+      - name: Run tests
+        run: zig build test --summary all
