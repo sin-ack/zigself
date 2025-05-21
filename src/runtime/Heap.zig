@@ -146,7 +146,7 @@ pub fn Heap(comptime Root: type) type {
         first_handle_set: ?*Handles,
 
         const Self = @This();
-        const FinalizationSet = std.AutoArrayHashMapUnmanaged([*]u64, void);
+        const FinalizationSet = std.ArrayListUnmanaged([*]u64);
 
         /// Initialize a new heap.
         pub fn init(allocator: Allocator, root: *Root) !Self {
@@ -296,7 +296,7 @@ pub fn Heap(comptime Root: type) type {
                 }
             }
 
-            try self.new_generation.finalization_set.put(self.allocator, object, {});
+            try self.new_generation.finalization_set.append(self.allocator, object);
         }
 
         /// The new generation. This is split between eden and the survivor half-spaces.
@@ -367,7 +367,7 @@ pub fn Heap(comptime Root: type) type {
 
             pub fn destroy(self: *NewGeneration, allocator: Allocator) void {
                 // Finalize everything in the finalization set.
-                for (self.finalization_set.keys()) |address| {
+                for (self.finalization_set.items) |address| {
                     const reference = Reference.createRegular(address);
                     const object = reference.asBaseObject();
                     std.debug.assert(object.canFinalize());
@@ -537,18 +537,6 @@ pub fn Heap(comptime Root: type) type {
 
                 @memcpy(new_memory, old_memory);
 
-                // If the object was in our finalization set, update or move the entry.
-                if (self.finalization_set.swapRemove(old_memory)) {
-                    switch (target.*) {
-                        .FutureSurvivorSpace => {
-                            self.finalization_set.putAssumeCapacity(new_memory.ptr, {});
-                        },
-                        .OldGeneration => {
-                            try heap.old_generation.finalization_set.put(heap.allocator, new_memory.ptr, {});
-                        },
-                    }
-                }
-
                 old_memory[0] = @bitCast(Reference.createForwarding(new_memory.ptr));
                 return Reference.createRegular(new_memory.ptr);
             }
@@ -717,26 +705,30 @@ pub fn Heap(comptime Root: type) type {
                     }
                 }
 
-                // Finalize any objects still in the finalization set and is part of eden
-                // or the past survivor space.
-                var new_finalization_set: FinalizationSet = .empty;
-                for (self.finalization_set.keys()) |address| {
+                // Finalize any object that isn't alive anymore, and update the
+                // address for the ones that did. We're "compacting" the
+                // finalization set here so we can do a trick to avoid
+                // allocating a new finalization set.
+                const finalization_set_items = self.finalization_set.items;
+                self.finalization_set.items.len = 0;
+                for (finalization_set_items) |address| {
                     const reference = Reference.createRegular(address);
-                    switch (self.referenceLocation(reference)) {
-                        .Eden, .PastSurvivor => {
-                            const object = reference.asBaseObject();
-                            std.debug.assert(object.canFinalize());
-                            object.finalize(heap.allocator);
-                        },
-                        .FutureSurvivor => {
-                            try new_finalization_set.put(heap.allocator, address, {});
-                        },
-                        .Outside => @panic("!!! Finalization set contains object outside of new generation!"),
+                    if (reference.tryFromForwarding2()) |forwarded| {
+                        // The object survived, so we need to update the
+                        // finalization set to point to the new address.
+                        switch (self.referenceLocation(forwarded)) {
+                            .FutureSurvivor => self.finalization_set.appendAssumeCapacity(forwarded.getAddress()),
+                            .Outside => try heap.old_generation.finalization_set.append(heap.allocator, forwarded.getAddress()),
+                            .Eden, .PastSurvivor => @panic("!!! A forwarded pointer during minor collection must point to either the future survivor space or the old generation!"),
+                        }
+                    } else {
+                        // The object died, perform last rites.
+                        const object = reference.asBaseObject();
+                        std.debug.assert(object.canFinalize());
+                        if (GC_SPAMMY_DEBUG) std.debug.print("NewGeneration.collect: Finalizing object at {*}\n", .{reference.getAddress()});
+                        object.finalize(heap.allocator);
                     }
                 }
-
-                self.finalization_set.deinit(heap.allocator);
-                self.finalization_set = new_finalization_set;
 
                 // We have now copied all the objects we need to, and can assume that the
                 // eden and past survivor spaces are completely empty.
@@ -967,6 +959,14 @@ pub fn Heap(comptime Root: type) type {
 
             /// Deinitialize the old generation.
             pub fn destroy(self: *OldGeneration, allocator: Allocator) void {
+                // Finalize everything in the finalization set.
+                for (self.finalization_set.items) |address| {
+                    const reference = Reference.createRegular(address);
+                    const object = reference.asBaseObject();
+                    std.debug.assert(object.canFinalize());
+                    object.finalize(allocator);
+                }
+
                 var region = self.first_free_region;
                 while (region) |r| {
                     const next = r.next;
@@ -979,14 +979,6 @@ pub fn Heap(comptime Root: type) type {
                     const next = r.next;
                     r.destroy(allocator);
                     region = next;
-                }
-
-                // Finalize everything in the finalization set.
-                for (self.finalization_set.keys()) |address| {
-                    const reference = Reference.createRegular(address);
-                    const object = reference.asBaseObject();
-                    std.debug.assert(object.canFinalize());
-                    object.finalize(allocator);
                 }
 
                 self.finalization_set.deinit(allocator);
@@ -1232,6 +1224,28 @@ pub fn Heap(comptime Root: type) type {
                     try object.visitEdges(mark_visitor);
                 }
 
+                // Any objects that are not in black_set are about to die.
+                // Perform their last rites by "compacting" the finalization
+                // set (same idea as in the new generation).
+                // Anything left in self.finalization_set after this will be
+                // remapped below.
+                const finalization_set_items = self.finalization_set.items;
+                self.finalization_set.items.len = 0;
+                for (finalization_set_items) |address| {
+                    if (black_set.contains(address)) {
+                        // The object lives, keep the address for remapping
+                        // later.
+                        self.finalization_set.appendAssumeCapacity(address);
+                    } else {
+                        // The object died, perform last rites.
+                        const reference = Reference.createRegular(address);
+                        const object = reference.asBaseObject();
+                        if (GC_SPAMMY_DEBUG) std.debug.print("OldGeneration.collect: Finalizing object at {*}\n", .{reference.getAddress()});
+                        std.debug.assert(object.canFinalize());
+                        object.finalize(heap.allocator);
+                    }
+                }
+
                 // Now that we've marked all the live objects, we can compact the heap.
                 // Note that unlike with the new generation, which is a moving collector,
                 // we have to store the new addresses of the objects in an out-of-band table
@@ -1292,17 +1306,6 @@ pub fn Heap(comptime Root: type) type {
                                 try remap_table.put(allocator, address, new_memory.ptr);
                                 std.mem.copyForwards(u64, new_memory, old_memory);
                                 current_total_used += object_size_bytes;
-
-                                if (self.finalization_set.swapRemove(address)) {
-                                    // If this object was in the finalization set, we need to
-                                    // update the entry to point to the new address.
-                                    self.finalization_set.putAssumeCapacity(new_memory.ptr, {});
-                                }
-                            } else {
-                                if (self.finalization_set.swapRemove(address)) {
-                                    std.debug.assert(object.canFinalize());
-                                    object.finalize(heap.allocator);
-                                }
                             }
 
                             offset += object_size_bytes;
@@ -1370,6 +1373,15 @@ pub fn Heap(comptime Root: type) type {
 
                         current_remap_region = remap_region.next;
                     }
+                }
+
+                // Remap everything in the finalization set. Each value in the
+                // finalization set is guaranteed to be in the remap table
+                // (otherwise we have held a stale reference!).
+                for (self.finalization_set.items) |*old_address| {
+                    const new_address = remap_table.get(old_address.*) orelse
+                        @panic("!!! Finalization set contains an address that is not in the remap table?!");
+                    old_address.* = new_address;
                 }
 
                 const RememberedSetVisitor = struct {
