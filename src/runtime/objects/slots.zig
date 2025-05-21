@@ -16,7 +16,7 @@ const Selector = @import("../Selector.zig");
 const traversal = @import("../object_traversal.zig");
 const MapObject = @import("../object.zig").MapObject;
 const BaseObject = @import("../base_object.zig").BaseObject;
-const MapBuilder = @import("../map_builder.zig").MapBuilder;
+const mapbuilder = @import("../map_builder.zig");
 const heap_import = @import("../Heap.zig");
 const LookupResult = @import("../object_lookup.zig").LookupResult;
 const VirtualMachine = @import("../VirtualMachine.zig");
@@ -284,11 +284,12 @@ pub const Slots = extern struct {
         }
 
         // Let's allocate a new map with the target slot count.
-        var new_map = SlotsMap.create(token, @intCast(merge_info.slots));
-        var map_builder = new_map.getMapBuilder(token);
+        const new_map = SlotsMap.create(token, @intCast(merge_info.slots));
+        var map_builder: SlotsMap.MapBuilder = undefined;
+        map_builder.initInPlace(token, new_map);
 
         forSlotsInMergeOrder(self, source_object, struct {
-            map_builder: *@TypeOf(map_builder),
+            map_builder: *SlotsMap.MapBuilder,
             target_object_reachability: @TypeOf(self.object.getMetadata().reachability),
 
             pub fn visit(context: @This(), object: Slots.Ptr, slot: Slot) !void {
@@ -444,6 +445,8 @@ pub const Slots = extern struct {
 /// usingnamespace.
 pub fn SlotsLikeMapBase(comptime MapT: type) type {
     return struct {
+        pub const MapBuilder = mapbuilder.MapBuilder(MapT, MapT.ObjectType);
+
         fn getSlotMemory(self: MapT.Ptr) pointer.HeapSlice(u8, .Mutable) {
             const total_object_size = MapT.getSizeInMemory(self);
             const map_memory: [*]align(@alignOf(u64)) u8 = @ptrCast(self);
@@ -478,10 +481,6 @@ pub fn SlotsLikeMapBase(comptime MapT: type) type {
 
         fn asSlotsMap(self: MapT.Ptr) SlotsMap.Ptr {
             return @ptrCast(self);
-        }
-
-        pub fn getMapBuilder(self: MapT.Ptr, token: *heap_import.AllocationToken) MapBuilder(MapT, MapT.ObjectType) {
-            return MapBuilder(MapT, MapT.ObjectType).init(token, self);
         }
 
         /// Visit the slots in this map with the given visitor. Call this

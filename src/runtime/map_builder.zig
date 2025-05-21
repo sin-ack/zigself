@@ -26,7 +26,7 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
     return struct {
         token: *heap.AllocationToken,
         map: MapType.Ptr,
-        assignable_slot_values: AssignableSlotValues,
+        assignable_slot_values: AssignableSlotValues = undefined,
 
         slot_index: usize = 0,
         assignable_slot_index: usize = 0,
@@ -37,12 +37,22 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
         // Marker for typechecking.
         pub const is_map_builder = true;
 
-        pub fn init(token: *heap.AllocationToken, map: MapType.Ptr) Self {
-            return Self{
+        /// Initialize the map builder in-place. Usage:
+        ///
+        ///     var map_builder: MapBuilder(MapType, ObjectType) = undefined;
+        ///     map_builder.initInPlace(token, map);
+        ///
+        pub fn initInPlace(self: *Self, token: *heap.AllocationToken, map: MapType.Ptr) void {
+            self.* = .{
                 .token = token,
                 .map = map,
-                .assignable_slot_values = AssignableSlotValues.init(0) catch unreachable,
             };
+            // XXX: No matter what I do here, I cannot make the Zig compiler not
+            //      copy ~2KB of uninitialized memory if we call
+            //      BoundedArray.init or manually initialize the struct.
+            //      Instead we only set the field that matters. This is very
+            //      brittle; I hope RLS gets fixed.
+            self.assignable_slot_values.len = 0;
         }
 
         pub fn addSlot(self: *Self, slot: Slot) void {

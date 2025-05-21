@@ -758,8 +758,9 @@ fn createObject(
     );
     defer token.deinit();
 
-    var slots_map = SlotsMap.create(&token, total_slot_count);
-    var map_builder = slots_map.getMapBuilder(&token);
+    const slots_map = SlotsMap.create(&token, total_slot_count);
+    var map_builder: SlotsMap.MapBuilder = undefined;
+    map_builder.initInPlace(&token, slots_map);
 
     for (slots) |slot| {
         map_builder.addSlot(slot);
@@ -801,7 +802,7 @@ fn createMethod(
     defer token.deinit();
 
     const block = executable.value.getBlock(block_index);
-    var method_map = try MethodMap.create(
+    const method_map = try MethodMap.create(
         vm_context.getHeap(),
         &token,
         argument_slot_count,
@@ -812,7 +813,8 @@ fn createMethod(
         executable,
     );
 
-    var map_builder = method_map.getMapBuilder(&token);
+    var map_builder: MethodMap.MapBuilder = undefined;
+    map_builder.initInPlace(&token, method_map);
 
     for (slots) |slot| {
         map_builder.addSlot(slot);
@@ -867,7 +869,7 @@ fn createBlock(
     );
     defer token.deinit();
 
-    var block_map = try BlockMap.create(
+    const block_map = try BlockMap.create(
         vm_context.getHeap(),
         &token,
         argument_slot_count,
@@ -878,7 +880,8 @@ fn createBlock(
         executable,
     );
 
-    var map_builder = block_map.getMapBuilder(&token);
+    var map_builder: BlockMap.MapBuilder = undefined;
+    map_builder.initInPlace(&token, block_map);
 
     for (slots) |slot| {
         map_builder.addSlot(slot);
