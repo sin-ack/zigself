@@ -146,11 +146,12 @@ pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
                     .alloc = allocFn,
                     .resize = resizeFn,
                     .free = freeFn,
+                    .remap = remapFn,
                 },
             };
         }
 
-        fn allocFn(ptr: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
+        fn allocFn(ptr: *anyopaque, len: usize, ptr_align: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
             const self: *Self = @ptrCast(@alignCast(ptr));
             const result = self.parent_allocator.rawAlloc(len, ptr_align, ret_addr);
             if (result) |data| {
@@ -167,7 +168,7 @@ pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
             return result;
         }
 
-        fn resizeFn(ptr: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool {
+        fn resizeFn(ptr: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
             const self: *Self = @ptrCast(@alignCast(ptr));
             if (self.parent_allocator.rawResize(buf, buf_align, new_len, ret_addr)) {
                 if (name) |n| {
@@ -186,7 +187,7 @@ pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
             return false;
         }
 
-        fn freeFn(ptr: *anyopaque, buf: []u8, buf_align: u8, ret_addr: usize) void {
+        fn freeFn(ptr: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.parent_allocator.rawFree(buf, buf_align, ret_addr);
             // this condition is to handle free being called on an empty slice that was never even allocated
@@ -198,6 +199,23 @@ pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
                     free(buf.ptr);
                 }
             }
+        }
+
+        fn remapFn(ptr: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            if (self.parent_allocator.rawRemap(memory, alignment, new_len, ret_addr)) |new_memory| {
+                if (name) |n| {
+                    freeNamed(memory.ptr, n);
+                    allocNamed(new_memory, new_len, n);
+                } else {
+                    free(memory.ptr);
+                    alloc(new_memory, new_len);
+                }
+
+                return new_memory;
+            }
+
+            return null;
         }
     };
 }
