@@ -12,6 +12,7 @@ const debug = @import("../debug.zig");
 const Value = @import("value.zig").Value;
 const Object = @import("object.zig").Object;
 const pointer = @import("../utility/pointer.zig");
+const Reference = @import("value.zig").Reference;
 const ObjectLike = @import("value.zig").ObjectLike;
 const heap_import = @import("Heap.zig");
 const VirtualMachine = @import("VirtualMachine.zig");
@@ -98,6 +99,10 @@ pub const BaseObject = extern struct {
 
     pub fn asValue(self: BaseObject.Ptr) Value {
         return Value.fromObjectAddress(self.getAddress());
+    }
+
+    pub fn asReference(self: BaseObject.Ptr) Reference {
+        return @bitCast(self);
     }
 
     // --- Common methods ---
