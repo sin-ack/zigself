@@ -213,6 +213,16 @@ pub fn Heap(comptime Root: type) type {
                 try self.new_generation.collect(self, &stats);
             }
 
+            if (GC_DEBUG) {
+                std.debug.print("Heap.collect: {} bytes freed. Survived: {} bytes new, {} bytes existing. {} bytes tenured. {} bytes compacted in the old generation.\n", .{
+                    stats.freed_bytes,
+                    stats.new_survived_bytes,
+                    stats.existing_survived_bytes,
+                    stats.tenured_bytes,
+                    stats.old_compacted_bytes,
+                });
+            }
+
             return stats;
         }
 
@@ -346,6 +356,12 @@ pub fn Heap(comptime Root: type) type {
                 const eden = memory[0..eden_size];
                 const past_survivor = memory[eden_size..(eden_size + semispace_size)];
                 const future_survivor = memory[(eden_size + semispace_size)..];
+
+                if (GC_DEBUG) {
+                    std.debug.print("NewGeneration.create: Eden region:            {*}-{*}\n", .{ eden.ptr, eden.ptr + eden.len });
+                    std.debug.print("NewGeneration.create: Past survivor region:   {*}-{*}\n", .{ past_survivor.ptr, past_survivor.ptr + past_survivor.len });
+                    std.debug.print("NewGeneration.create: Future survivor region: {*}-{*}\n", .{ future_survivor.ptr, future_survivor.ptr + future_survivor.len });
+                }
 
                 self.* = .{
                     .memory = memory,
@@ -520,7 +536,7 @@ pub fn Heap(comptime Root: type) type {
                         error.OutOfMemory => blk: {
                             // Future survivor space has no more room. We unfortunately have to
                             // tenure this object to the old generation.
-                            if (GC_DEBUG) std.debug.print("NewGeneration.copyObject: Switching target to OldGeneration because future survivor space is full\n", .{});
+                            if (GC_DEBUG) std.debug.print("NewGeneration.copyReference: Switching target to OldGeneration because future survivor space is full\n", .{});
 
                             target.* = .OldGeneration;
                             stats.tenured_bytes += object_size_bytes;
@@ -536,6 +552,7 @@ pub fn Heap(comptime Root: type) type {
                 };
 
                 @memcpy(new_memory, old_memory);
+                if (GC_SPAMMY_DEBUG) std.debug.print("NewGeneration.copyReference: Copied {*} -> {*}\n", .{ old_memory, new_memory.ptr });
 
                 old_memory[0] = @bitCast(Reference.createForwarding(new_memory.ptr));
                 return Reference.createRegular(new_memory.ptr);
@@ -544,6 +561,7 @@ pub fn Heap(comptime Root: type) type {
             /// Collect garbage in the new generation, copying objects from eden and the
             /// past survivor space to the future survivor space.
             pub fn collect(self: *NewGeneration, heap: *Self, stats: *GarbageCollectionStats) Allocator.Error!void {
+                if (GC_DEBUG) std.debug.print("NewGeneration.collect: Starting minor collection\n", .{});
                 var copy_target = CopyTarget.FutureSurvivorSpace;
 
                 // Assume that all the memory in the past survivor space is garbage at the
@@ -738,6 +756,12 @@ pub fn Heap(comptime Root: type) type {
                 // Swap the past and future survivor spaces.
                 std.mem.swap([]align(@alignOf(u64)) u8, &self.past_survivor, &self.future_survivor);
                 std.mem.swap(usize, &self.past_survivor_used, &self.future_survivor_used);
+
+                if (GC_DEBUG) {
+                    std.debug.print("NewGeneration.collect: Swapped past and future survivor spaces\n", .{});
+                    std.debug.print("NewGeneration.collect: Past survivor space now:   {*}-{*}\n", .{ self.past_survivor.ptr, self.past_survivor.ptr + self.past_survivor.len });
+                    std.debug.print("NewGeneration.collect: Future survivor space now: {*}-{*}\n", .{ self.future_survivor.ptr, self.future_survivor.ptr + self.future_survivor.len });
+                }
             }
         };
 
@@ -843,6 +867,8 @@ pub fn Heap(comptime Root: type) type {
                 errdefer allocator.free(memory);
 
                 const remembered_set = try RememberedSet.createFromSize(allocator, OLD_GENERATION_REGION_SIZE);
+
+                if (GC_DEBUG) std.debug.print("Region.create: New region allocated: {*}-{*}\n", .{ memory.ptr, memory.ptr + memory.len });
 
                 self.* = .{
                     .memory = memory,
