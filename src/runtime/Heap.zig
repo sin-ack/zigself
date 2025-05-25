@@ -269,8 +269,8 @@ pub fn Heap(comptime Root: type) type {
             };
 
             try self.root.visitEdges(visitor);
-            try self.new_generation.visitAllObjects(visitor);
-            try self.old_generation.visitAllObjects(visitor);
+            try self.new_generation.visitAllObjectEdges(visitor);
+            try self.old_generation.visitAllObjectEdges(visitor);
         }
 
         // --- Remembering object references ---
@@ -397,9 +397,9 @@ pub fn Heap(comptime Root: type) type {
 
             // --- Heap Traversal ---
 
-            /// Visit all objects on the heap. Not all objects may be alive, but all
-            /// objects will be valid.
-            pub fn visitAllObjects(self: *const NewGeneration, visitor: anytype) !void {
+            /// Visit the edges of all objects (not the objects themselves) in
+            /// eden.
+            fn visitEdenEdges(self: *const NewGeneration, visitor: anytype) !void {
                 var current_offset: usize = 0;
                 while (current_offset < self.eden_used) {
                     const address: [*]u64 = @alignCast(@ptrCast(self.eden.ptr + current_offset));
@@ -412,8 +412,14 @@ pub fn Heap(comptime Root: type) type {
 
                     current_offset += object_size_bytes;
                 }
+            }
 
-                current_offset = 0;
+            /// Visit the edges of all objects (not the objects themselves) in
+            /// the new generation.
+            pub fn visitAllObjectEdges(self: *const NewGeneration, visitor: anytype) !void {
+                try self.visitEdenEdges(visitor);
+
+                var current_offset: usize = 0;
                 while (current_offset < self.past_survivor_used) {
                     const address: [*]u64 = @alignCast(@ptrCast(self.past_survivor.ptr + current_offset));
                     const reference = Reference.createRegular(address);
@@ -558,6 +564,123 @@ pub fn Heap(comptime Root: type) type {
                 return Reference.createRegular(new_memory.ptr);
             }
 
+            /// Tenure all objects in the past survivor space to the old generation.
+            fn tenurePastSurvivorSpace(self: *NewGeneration, heap: *Self, stats: *GarbageCollectionStats) !void {
+                if (GC_DEBUG) std.debug.print("NewGeneration.tenurePastSurvivorSpace: Tenuring past survivor space to old generation\n", .{});
+
+                // There are three possible sources of outside references to the
+                // past survivor space:
+                // - Heap roots and handle sets. We just scan them.
+                // - Eden. Same here.
+                // - Old generation. We don't want to scan all of the old
+                //   generation since it may be very large, so instead we scan
+                //   through the remembered set and only grab the ones that are
+                //   currently in the past survivor space.
+
+                const OutsideCopyVisitor = struct {
+                    heap: *Self,
+                    new_generation: *NewGeneration,
+                    stats: *GarbageCollectionStats,
+
+                    // ? -> PastSurvivor
+                    pub fn visit(visitor: *const @This(), value: *Value, object: ?BaseObject.Ptr) !void {
+                        _ = object;
+                        // Force the copy target to old generation.
+                        var past_survivor_copy_target = CopyTarget.OldGeneration;
+
+                        const reference = value.asReference() orelse return;
+                        if (visitor.new_generation.referenceLocation(reference) != .PastSurvivor) return;
+
+                        const new_reference = try visitor.new_generation.copyReference(visitor.heap, &past_survivor_copy_target, visitor.stats, reference);
+                        value.* = new_reference.asValue();
+                    }
+                };
+                const outside_copy_visitor: OutsideCopyVisitor = .{
+                    .heap = heap,
+                    .new_generation = self,
+                    .stats = stats,
+                };
+
+                const saved_old_generation_last_region = heap.old_generation.latest_region;
+                const saved_old_generation_last_region_used = if (saved_old_generation_last_region) |r| r.used else null;
+
+                // Visit everything that could point to the past survivor space.
+
+                try heap.root.visitEdges(outside_copy_visitor);
+                if (heap.first_handle_set) |handle_set| {
+                    try handle_set.visitEdges(outside_copy_visitor);
+                }
+                try self.visitEdenEdges(outside_copy_visitor);
+                // XXX: There might be a tiny edge case here where the objects
+                //      that are being newly copied in are also scanned because
+                //      the last card in the remembered set pointed to the end
+                //      of the old generation region. It shouldn't matter for
+                //      our purposes, however.
+                try heap.old_generation.visitRememberedObjectEdges(outside_copy_visitor);
+
+                const PastSurvivorObjectVisitor = struct {
+                    heap: *Self,
+                    new_generation: *NewGeneration,
+                    stats: *GarbageCollectionStats,
+
+                    // PastSurvivor -> ?
+                    pub fn visit(visitor: *const @This(), value: *Value, object: ?BaseObject.Ptr) !void {
+                        const reference = value.asReference() orelse return;
+                        switch (visitor.new_generation.referenceLocation(reference)) {
+                            // Don't copy the value since it's not being
+                            // tenured. Instead, note down the address in the
+                            // remembered set as it has now become an old->new
+                            // reference.
+                            .Eden => {
+                                const did_remember = visitor.heap.old_generation.rememberAddress(object.?.getAddress());
+                                std.debug.assert(did_remember);
+                            },
+                            // Proceed to copy the object.
+                            .PastSurvivor => {
+                                var past_survivor_copy_target = CopyTarget.OldGeneration;
+                                const new_reference = try visitor.new_generation.copyReference(visitor.heap, &past_survivor_copy_target, visitor.stats, reference);
+                                value.* = new_reference.asValue();
+                            },
+                            // Old->old reference, do nothing.
+                            .Outside => return,
+                            .FutureSurvivor => @panic("!!! Found reference to future survivor space while tenuring the past survivor space!"),
+                        }
+                    }
+                };
+                const past_survivor_object_visitor: PastSurvivorObjectVisitor = .{
+                    .heap = heap,
+                    .new_generation = self,
+                    .stats = stats,
+                };
+
+                // Now perform Cheney on the old generation starting from our
+                // saved point. This time, since we're visiting objects that
+                // were previously in PastSurvivor, we have to behave a little
+                // differently.
+
+                {
+                    // If what we saved was nothing (which is the case for the first
+                    // ever tenure) then we have to start from the first region.
+                    var current_region: ?*Region = saved_old_generation_last_region orelse heap.old_generation.first_region;
+                    var current_offset = saved_old_generation_last_region_used orelse 0;
+                    while (current_region) |region| {
+                        while (current_offset < region.used) {
+                            const address: [*]u64 = @alignCast(@ptrCast(region.memory.ptr + current_offset));
+                            const reference = Reference.createRegular(address);
+                            const object = reference.asBaseObject();
+                            const object_size_bytes = object.getSizeInMemory();
+
+                            try object.visitEdges(past_survivor_object_visitor);
+
+                            current_offset += object_size_bytes;
+                        }
+
+                        current_region = region.next;
+                        current_offset = 0;
+                    }
+                }
+            }
+
             /// Collect garbage in the new generation, copying objects from eden and the
             /// past survivor space to the future survivor space.
             pub fn collect(self: *NewGeneration, heap: *Self, stats: *GarbageCollectionStats) Allocator.Error!void {
@@ -569,62 +692,17 @@ pub fn Heap(comptime Root: type) type {
                 stats.freed_bytes += self.eden_used + self.past_survivor_used;
 
                 const future_survivor_space_initial_offset = self.future_survivor_used;
-                const old_generation_initial_latest_region = heap.old_generation.latest_region;
-                const old_generation_initial_latest_region_offset = if (old_generation_initial_latest_region) |region| region.used else 0;
 
                 // First, if necessary, tenure objects from the past survivor space to the
                 // old generation.
                 if (self.past_survivor_used >= (self.past_survivor.len * TENURE_THRESHOLD_PERCENT) / 100) {
-                    if (GC_DEBUG) std.debug.print("NewGeneration.collect: Tenuring past survivor space to old generation\n", .{});
-
-                    const Visitor = struct {
-                        heap: *Self,
-                        new_generation: *NewGeneration,
-                        stats: *GarbageCollectionStats,
-
-                        pub fn visit(visitor: *const @This(), value: *Value, object: ?BaseObject.Ptr) !void {
-                            _ = object;
-
-                            const reference = value.asReference() orelse return;
-                            var past_survivor_copy_target = CopyTarget.OldGeneration;
-                            const new_reference = try visitor.new_generation.copyReference(visitor.heap, &past_survivor_copy_target, visitor.stats, reference);
-                            value.* = new_reference.asValue();
-                        }
-                    };
-                    const visitor: Visitor = .{
-                        .heap = heap,
-                        .new_generation = self,
-                        .stats = stats,
-                    };
-
-                    var current_offset: usize = 0;
-                    while (current_offset < self.past_survivor_used) {
-                        const address: [*]u64 = @alignCast(@ptrCast(self.past_survivor.ptr + current_offset));
-                        const reference = Reference.createRegular(address);
-
-                        // If this is a forwarding reference, then the object being referenced has
-                        // already been copied, so the only thing we need to do is move forward.
-                        if (Reference.tryFromForwarding2(reference)) |forwarding_reference| {
-                            if (GC_SPAMMY_DEBUG) std.debug.print("NewGeneration.collect: Found forwarding reference {*} when tenuring to past survivor space\n", .{forwarding_reference.getAddress()});
-
-                            const new_object = forwarding_reference.asBaseObject();
-                            current_offset += new_object.getSizeInMemory();
-                        } else {
-                            const object = reference.asBaseObject();
-                            const object_size_bytes = object.getSizeInMemory();
-
-                            try object.visitEdges(visitor);
-                            // Since we're force-copying without using any roots, we don't care about the
-                            // new value we get back.
-                            var value = reference.asValue();
-                            try visitor.visit(&value, object);
-
-                            current_offset += object_size_bytes;
-                        }
-                    }
+                    try self.tenurePastSurvivorSpace(heap, stats);
                 }
 
-                const Visitor = struct {
+                const saved_old_generation_last_region = heap.old_generation.latest_region;
+                const saved_old_generation_last_region_used = if (saved_old_generation_last_region) |region| region.used else null;
+
+                const CopyVisitor = struct {
                     heap: *Self,
                     new_generation: *NewGeneration,
                     copy_target: *CopyTarget,
@@ -638,7 +716,7 @@ pub fn Heap(comptime Root: type) type {
                         value.* = new_reference.asValue();
                     }
                 };
-                const visitor: Visitor = .{
+                const copy_visitor: CopyVisitor = .{
                     .heap = heap,
                     .new_generation = self,
                     .copy_target = &copy_target,
@@ -646,42 +724,14 @@ pub fn Heap(comptime Root: type) type {
                 };
 
                 // Kick off the process by visiting roots.
-                try heap.root.visitEdges(visitor);
+                try heap.root.visitEdges(copy_visitor);
                 if (heap.first_handle_set) |handle_set| {
-                    try handle_set.visitEdges(visitor);
+                    try handle_set.visitEdges(copy_visitor);
                 }
 
-                // Iterate through the old generation's regions and check each
-                // card in the region's remembered set to see if there are any
-                // objects that are pointing to the new region.
-                var current_region = heap.old_generation.first_region;
-                while (current_region) |region| {
-                    current_region = region.next;
-
-                    for (region.remembered_set.cards, 0..) |card, index| {
-                        if (card == .Empty) continue;
-
-                        const card_start = index << RememberedSet.CARD_INDEX_SHIFT;
-                        const card_end = @min(region.used, (index + 1) << RememberedSet.CARD_INDEX_SHIFT);
-                        const first_offset = card.wordOffset() * Card.WORD_SIZE;
-
-                        // We hit the end of the region, so no point in going further.
-                        if (card_end < card_start) break;
-
-                        var offset = card_start + first_offset;
-                        while (offset < card_end) {
-                            const address: [*]u64 = @alignCast(@ptrCast(region.memory.ptr + offset));
-                            const reference = Reference.createRegular(address);
-
-                            const object = reference.asBaseObject();
-                            const object_size_bytes = object.getSizeInMemory();
-
-                            try object.visitEdges(visitor);
-
-                            offset += object_size_bytes;
-                        }
-                    }
-                }
+                // Visit the edges of each object recorded in the remembered set
+                // as well.
+                try heap.old_generation.visitRememberedObjectEdges(copy_visitor);
 
                 // Cheney on the MTA: Try to catch up to the end of the future survivor
                 // space by scanning every object and copying over references to eden
@@ -694,7 +744,7 @@ pub fn Heap(comptime Root: type) type {
                     const object = reference.asBaseObject();
                     const object_size_bytes = object.getSizeInMemory();
 
-                    try object.visitEdges(visitor);
+                    try object.visitEdges(copy_visitor);
 
                     target_current_offset += object_size_bytes;
                 }
@@ -703,8 +753,30 @@ pub fn Heap(comptime Root: type) type {
                 // also scan the objects in the old generation that have been added since
                 // the start of the garbage collection cycle.
                 if (copy_target == .OldGeneration) {
-                    target_current_offset = old_generation_initial_latest_region_offset;
-                    var current_scanned_region = old_generation_initial_latest_region;
+                    // Any new generation references in force-tenured objects
+                    // now form old->new references, which means we have to
+                    // remember them.
+                    const RememberForceTenuredObjectVisitor = struct {
+                        new_generation: *NewGeneration,
+                        old_generation: *OldGeneration,
+
+                        pub fn visit(visitor: *const @This(), value: *Value, object: ?BaseObject.Ptr) error{}!void {
+                            const reference = value.asReference() orelse return;
+                            // TODO: Should be able to short-circuit once at
+                            //       least one old->new reference is found.
+                            if (visitor.new_generation.contains(reference)) {
+                                const did_remember = visitor.old_generation.rememberAddress(object.?.getAddress());
+                                std.debug.assert(did_remember);
+                            }
+                        }
+                    };
+                    const remember_force_tenured_object_visitor: RememberForceTenuredObjectVisitor = .{
+                        .new_generation = self,
+                        .old_generation = heap.old_generation,
+                    };
+
+                    var current_scanned_region = saved_old_generation_last_region orelse heap.old_generation.first_region;
+                    target_current_offset = saved_old_generation_last_region_used orelse 0;
                     while (current_scanned_region) |region| {
                         while (target_current_offset < region.used) {
                             const address: [*]u64 = @alignCast(@ptrCast(region.memory.ptr + target_current_offset));
@@ -713,7 +785,8 @@ pub fn Heap(comptime Root: type) type {
                             const object = reference.asBaseObject();
                             const object_size_bytes = object.getSizeInMemory();
 
-                            try object.visitEdges(visitor);
+                            try object.visitEdges(copy_visitor);
+                            object.visitEdges(remember_force_tenured_object_visitor) catch unreachable;
 
                             target_current_offset += object_size_bytes;
                         }
@@ -1013,9 +1086,9 @@ pub fn Heap(comptime Root: type) type {
 
             // --- Heap Traversal ---
 
-            /// Visit all objects on the heap. Not all objects may be alive, but all
-            /// objects will be valid.
-            pub fn visitAllObjects(self: *const OldGeneration, visitor: anytype) !void {
+            /// Visit the edges of all the objects (not the objects themselves)
+            /// in the old generation.
+            pub fn visitAllObjectEdges(self: *const OldGeneration, visitor: anytype) !void {
                 var current_region = self.first_region;
                 while (current_region) |region| {
                     current_region = region.next;
@@ -1032,6 +1105,43 @@ pub fn Heap(comptime Root: type) type {
 
                         current_offset += object_size_bytes;
                     }
+                }
+            }
+
+            /// Visit the edges of all the objects (not the objects themselves)
+            /// that are recorded in each region's remembered sets. Note that
+            /// more objects than actually recorded may be visited, as each
+            /// card only records the start address for each region that the
+            /// card represents.
+            pub fn visitRememberedObjectEdges(self: *const OldGeneration, visitor: anytype) !void {
+                var current_region = self.first_region;
+                while (current_region) |region| {
+                    for (region.remembered_set.cards, 0..) |card, index| {
+                        if (card == .Empty) continue;
+
+                        const card_start = index << RememberedSet.CARD_INDEX_SHIFT;
+                        const card_end = @min(region.used, (index + 1) << RememberedSet.CARD_INDEX_SHIFT);
+                        const first_offset = @as(usize, card.wordOffset()) * Card.WORD_SIZE;
+
+                        // We hit the end of the region, so no point in going further.
+                        if (card_end < card_start) break;
+
+                        var offset = card_start + first_offset;
+                        while (offset < card_end) {
+                            const address: [*]u64 = @alignCast(@ptrCast(region.memory.ptr + offset));
+                            const reference = Reference.createRegular(address);
+
+                            const object = reference.asBaseObject();
+                            // XXX: Dynamic dispatch
+                            const object_size_bytes = object.getSizeInMemory();
+
+                            try object.visitEdges(visitor);
+
+                            offset += object_size_bytes;
+                        }
+                    }
+
+                    current_region = region.next;
                 }
             }
 
@@ -2068,4 +2178,206 @@ test "handle set updates pointers correctly" {
 
     // Both the value and the object pointer should point to the same location.
     try std.testing.expect(array_map.asValue().unsafeAsReference().getAddress() == array_map_value.unsafeAsReference().getAddress());
+}
+
+test "past survivor space tenuring transitively tenures any referenced objects in past survivor space" {
+    const ArrayMap = @import("objects/array.zig").ArrayMap;
+    const ArrayObject = @import("objects/array.zig").Array;
+    const allocator = std.testing.allocator;
+
+    var root: TestRoot = .{};
+
+    var heap = try Heap(TestRoot).init(allocator, &root);
+    defer heap.deinit();
+
+    var handles: Heap(TestRoot).Handles = undefined;
+    handles.init(&heap);
+    defer handles.deinit(&heap);
+
+    const map_required_memory = ArrayMap.requiredSizeForAllocation();
+    const array_required_memory = ArrayObject.requiredSizeForAllocation(0);
+
+    var token = try heap.allocate(map_required_memory + array_required_memory);
+    defer token.deinit();
+
+    const array_map = ArrayMap.create(&token, 0);
+    var array = ArrayObject.createWithValues(&token, .Global, array_map, &.{}, null);
+    handles.trackObject(@ptrCast(&array));
+
+    // Minor collection so that the objects are moved into past survivor.
+    _ = try heap.collect(.{ .minor = .Force, .major = .Disable });
+
+    // Ensure both objects are in past survivor space.
+    try std.testing.expectEqual(.PastSurvivor, heap.new_generation.referenceLocation(array.asValue().unsafeAsReference()));
+    try std.testing.expectEqual(.PastSurvivor, heap.new_generation.referenceLocation(array.getMap().asValue().unsafeAsReference()));
+
+    // Force a tenure of the past survivor space. For this test to pass,
+    // the map should be tenured alongside the array (since it is referenced
+    // by the array).
+    var dummy_stats: GarbageCollectionStats = undefined;
+    try heap.new_generation.tenurePastSurvivorSpace(&heap, &dummy_stats);
+
+    // Both the array and its map should now exist in the old generation.
+    try std.testing.expect(heap.old_generation.contains(&heap, array.asValue().unsafeAsReference()));
+    try std.testing.expect(heap.old_generation.contains(&heap, array.getMap().asValue().unsafeAsReference()));
+}
+
+test "past survivor space tenuring creates remembered set entries if new generation object is referenced" {
+    const ArrayMap = @import("objects/array.zig").ArrayMap;
+    const ArrayObject = @import("objects/array.zig").Array;
+    const allocator = std.testing.allocator;
+
+    var root: TestRoot = .{};
+
+    var heap = try Heap(TestRoot).init(allocator, &root);
+    defer heap.deinit();
+
+    var handles: Heap(TestRoot).Handles = undefined;
+    handles.init(&heap);
+    defer handles.deinit(&heap);
+
+    // Create an array and its map, and place them in the past survivor space.
+
+    const map1_required_memory = ArrayMap.requiredSizeForAllocation();
+    const array1_required_memory = ArrayObject.requiredSizeForAllocation(1);
+
+    var token1 = try heap.allocate(map1_required_memory + array1_required_memory);
+    defer token1.deinit();
+
+    const array_map1 = ArrayMap.create(&token1, 1);
+    var array1 = ArrayObject.createWithValues(&token1, .Global, array_map1, &.{}, Value.fromUnsignedInteger(0));
+    handles.trackObject(@ptrCast(&array1));
+
+    _ = try heap.collect(.{ .minor = .Force, .major = .Disable });
+
+    try std.testing.expectEqual(.PastSurvivor, heap.new_generation.referenceLocation(array1.asValue().unsafeAsReference()));
+
+    // Now, create another array, and reference it from the first one.
+    const map2_required_memory = ArrayMap.requiredSizeForAllocation();
+    const array2_required_memory = ArrayObject.requiredSizeForAllocation(0);
+
+    var token2 = try heap.allocate(map2_required_memory + array2_required_memory);
+    defer token2.deinit();
+
+    const array_map2 = ArrayMap.create(&token2, 0);
+    var array2 = ArrayObject.createWithValues(&token2, .Global, array_map2, &.{}, null);
+    array1.getValues()[0] = array2.asValue();
+
+    // Force past survivor space tenuring. After this, there should be exactly
+    // one card in the remembered set that points to the array map (the first
+    // entry).
+    var dummy_stats: GarbageCollectionStats = undefined;
+    try heap.new_generation.tenurePastSurvivorSpace(&heap, &dummy_stats);
+
+    // Ensure that objects are where we expect them to be.
+    try std.testing.expectEqual(.Eden, heap.new_generation.referenceLocation(array2.asValue().unsafeAsReference()));
+    try std.testing.expect(heap.old_generation.contains(&heap, array1.asValue().unsafeAsReference()));
+    try std.testing.expect(heap.old_generation.contains(&heap, array1.getMap().asValue().unsafeAsReference()));
+
+    // Ensure that a card was created for the referencing array, and that it
+    // is the first card (since we have rooted it).
+    const first_region = heap.old_generation.first_region.?;
+    const remembered_set = first_region.remembered_set;
+    try std.testing.expect(remembered_set.cards[0] != .Empty);
+    try std.testing.expect(remembered_set.cards[0].wordOffset() == 0);
+}
+
+test "eden reference pointing to past survivor object gets updated if past survivor is tenured" {
+    const ArrayMap = @import("objects/array.zig").ArrayMap;
+    const ArrayObject = @import("objects/array.zig").Array;
+    const allocator = std.testing.allocator;
+
+    var root: TestRoot = .{};
+
+    var heap = try Heap(TestRoot).init(allocator, &root);
+    defer heap.deinit();
+
+    var handles: Heap(TestRoot).Handles = undefined;
+    handles.init(&heap);
+    defer handles.deinit(&heap);
+
+    // Create an map and get it into past survivor space.
+    var array_map = array_map: {
+        const map_required_memory = ArrayMap.requiredSizeForAllocation();
+
+        var token = try heap.allocate(map_required_memory);
+        defer token.deinit();
+
+        var array_map = ArrayMap.create(&token, 0);
+        handles.trackObject(@ptrCast(&array_map));
+
+        _ = try heap.collect(.{ .minor = .Force, .major = .Disable });
+
+        break :array_map array_map;
+    };
+    handles.trackObject(@ptrCast(&array_map));
+
+    // Ensure that the map is in past survivor space.
+    try std.testing.expectEqual(.PastSurvivor, heap.new_generation.referenceLocation(array_map.asValue().unsafeAsReference()));
+
+    const array_required_memory = ArrayObject.requiredSizeForAllocation(0);
+
+    var token = try heap.allocate(array_required_memory);
+    defer token.deinit();
+
+    var array = ArrayObject.createWithValues(&token, .Global, array_map, &.{}, null);
+    handles.trackObject(@ptrCast(&array));
+
+    var dummy_stats: GarbageCollectionStats = undefined;
+    try heap.new_generation.tenurePastSurvivorSpace(&heap, &dummy_stats);
+
+    // Ensure that the array map reference was successfully updated to point
+    // to the new location of the array map in the old generation.
+    try std.testing.expectEqual(array.getMap().asValue().unsafeAsReference().getAddress(), array_map.asValue().unsafeAsReference().getAddress());
+}
+
+test "force-tenured objects pointing to new generation objects get remembered" {
+    const ArrayMap = @import("objects/array.zig").ArrayMap;
+    const ArrayObject = @import("objects/array.zig").Array;
+    const allocator = std.testing.allocator;
+
+    var root: TestRoot = .{};
+
+    var heap = try Heap(TestRoot).init(allocator, &root);
+    defer heap.deinit();
+
+    var handles: Heap(TestRoot).Handles = undefined;
+    handles.init(&heap);
+    defer handles.deinit(&heap);
+
+    // The idea is that we create enough objects in eden such that exactly one
+    // object gets force-tenured, and that object gets remembered.
+    const map_required_memory = ArrayMap.requiredSizeForAllocation();
+    const array_required_memory = ArrayObject.requiredSizeForAllocation(1);
+
+    const future_survivor_space_size = @divExact(NEW_GENERATION_SIZE, SURVIVOR_SPACE_RATIO + 2);
+    const required_arrays = @divFloor((future_survivor_space_size - map_required_memory), array_required_memory) + 1;
+
+    const required_memory = map_required_memory + (required_arrays * array_required_memory);
+    var token = try heap.allocate(required_memory);
+    defer token.deinit();
+
+    const array_map = ArrayMap.create(&token, 1);
+    var last_array_value = Value.fromUnsignedInteger(0);
+    for (0..required_arrays) |_| {
+        const array = ArrayObject.createWithValues(&token, .Global, array_map, &.{last_array_value}, null);
+        last_array_value = array.asValue();
+    }
+
+    handles.trackValue(&last_array_value);
+
+    // When we minor collect here, we should get exactly one object force-tenured.
+    const stats = try heap.collect(.{ .minor = .Force, .major = .Disable });
+    try std.testing.expectEqual(0, stats.freed_bytes);
+    try std.testing.expectEqual(required_memory, stats.new_survived_bytes);
+    try std.testing.expectEqual(0, stats.existing_survived_bytes);
+    try std.testing.expectEqual(0, stats.old_compacted_bytes);
+    try std.testing.expectEqual(array_required_memory, stats.tenured_bytes);
+
+    // A remembered set entry should be created for the first object in the
+    // old generation.
+    const first_region = heap.old_generation.first_region.?;
+    const remembered_set = first_region.remembered_set;
+    try std.testing.expect(remembered_set.cards[0] != .Empty);
+    try std.testing.expect(remembered_set.cards[0].wordOffset() == 0);
 }
