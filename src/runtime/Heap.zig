@@ -1620,7 +1620,7 @@ pub fn Heap(comptime Root: type) type {
         ///     // ...
         ///
         ///     var my_object = SomeObject.create(&token, ...);
-        ///     handles.trackObject(@ptrCast(&my_object));
+        ///     handles.trackObject(&my_object);
         ///
         /// The idea is taken from the legend:
         /// https://bernsteinbear.com/blog/scrapscript-baseline/#inside-the-runtime-handles
@@ -1660,12 +1660,45 @@ pub fn Heap(comptime Root: type) type {
                 self.len += 1;
             }
 
+            fn ensureObjectIsBaseObjectDescendant(comptime T: type) void {
+                const ptr1_typeinfo = @typeInfo(T);
+                if (ptr1_typeinfo != .pointer) {
+                    @compileError("trackObject must be given a *ObjectT.Ptr, got: " ++ @typeName(T));
+                }
+
+                const ptr2_typeinfo = @typeInfo(ptr1_typeinfo.pointer.child);
+                if (ptr2_typeinfo != .pointer) {
+                    @compileError("trackObject must be given a *ObjectT.Ptr, got: " ++ @typeName(T));
+                }
+
+                const child_type = ptr2_typeinfo.pointer.child;
+                // If this struct type is an object type, we should be able to
+                // expand the first field and eventually reach BaseObject.
+                comptime var current_type = child_type;
+                while (true) {
+                    const typeinfo = @typeInfo(current_type);
+                    if (typeinfo != .@"struct") {
+                        @compileError("trackObject argument must be an object that descends from BaseObject, got: " ++ @typeName(child_type));
+                    }
+
+                    const first_field = typeinfo.@"struct".fields[0];
+                    if (first_field.type == BaseObject) {
+                        break;
+                    }
+
+                    current_type = first_field.type;
+                } else {
+                    @compileError("trackObject argument must be an object that descends from BaseObject, got: " ++ @typeName(child_type));
+                }
+            }
+
             /// Store a reference to some object. The object must descend from
             /// (embed) BaseObject.
-            pub fn trackObject(self: *Handles, object: *BaseObject.Ptr) void {
+            pub fn trackObject(self: *Handles, object: anytype) void {
+                comptime ensureObjectIsBaseObjectDescendant(@TypeOf(object));
                 std.debug.assert(self.len < MAX_HANDLES);
 
-                self.handles[self.len] = .{ .Object = object };
+                self.handles[self.len] = .{ .Object = @ptrCast(object) };
                 self.len += 1;
             }
 
@@ -1801,7 +1834,7 @@ test "basic heap allocation" {
     var array = ArrayObject.createWithValues(&token, .Global, array_map, &.{}, null);
     const previous_array_address = array;
     // Root the object so it doesn't get collected.
-    handles.trackObject(@ptrCast(&array));
+    handles.trackObject(&array);
 
     const stats = try heap.collect(.{});
 
@@ -1860,7 +1893,7 @@ test "spill to old space" {
     }
 
     // Root the last object so the whole chain doesn't get collected.
-    handles.trackObject(@ptrCast(&array));
+    handles.trackObject(&array);
 
     const stats = try heap.collect(.{});
 
@@ -1908,7 +1941,7 @@ test "past survivor space tenuring" {
     }
 
     // Root the last object so the whole chain doesn't get collected.
-    handles.trackObject(@ptrCast(&array));
+    handles.trackObject(&array);
 
     const stats = try heap.collect(.{});
 
@@ -1959,7 +1992,7 @@ test "finalization" {
     var object = try ManagedObject.create(&heap, &token, .Global, .FileDescriptor, fd_object.toValue());
 
     // Root the object so it doesn't get collected.
-    handles.trackObject(@ptrCast(&object));
+    handles.trackObject(&object);
 
     // First, collect to make sure the object's finalizer isn't run while it's still
     // alive.
@@ -2016,7 +2049,7 @@ test "major garbage collection" {
     var array = ArrayObject.createWithValues(&token, .Global, map, &.{}, null);
 
     // Hold onto the array.
-    handles.trackObject(@ptrCast(&array));
+    handles.trackObject(&array);
 
     // Force a major+minor garbage collection. This should not clear anything.
     const stats1 = try heap.collect(.{ .major = .Force });
@@ -2105,7 +2138,7 @@ test "remembered set" {
     try std.testing.expect(card.wordOffset() != 0);
 
     // Hold onto the array so that it doesn't go away.
-    handles.trackObject(@ptrCast(&array));
+    handles.trackObject(&array);
 
     // Now perform a major GC. This will:
     // - Compact away unused_map.
@@ -2155,7 +2188,7 @@ test "handle set updates pointers correctly" {
     defer token.deinit();
 
     var array_map = ArrayMap.create(&token, 0);
-    handles.trackObject(@ptrCast(&array_map));
+    handles.trackObject(&array_map);
     var array_map_value = array_map.asValue();
     handles.trackValue(&array_map_value);
 
@@ -2202,7 +2235,7 @@ test "past survivor space tenuring transitively tenures any referenced objects i
 
     const array_map = ArrayMap.create(&token, 0);
     var array = ArrayObject.createWithValues(&token, .Global, array_map, &.{}, null);
-    handles.trackObject(@ptrCast(&array));
+    handles.trackObject(&array);
 
     // Minor collection so that the objects are moved into past survivor.
     _ = try heap.collect(.{ .minor = .Force, .major = .Disable });
@@ -2246,7 +2279,7 @@ test "past survivor space tenuring creates remembered set entries if new generat
 
     const array_map1 = ArrayMap.create(&token1, 1);
     var array1 = ArrayObject.createWithValues(&token1, .Global, array_map1, &.{}, Value.fromUnsignedInteger(0));
-    handles.trackObject(@ptrCast(&array1));
+    handles.trackObject(&array1);
 
     _ = try heap.collect(.{ .minor = .Force, .major = .Disable });
 
@@ -2304,13 +2337,13 @@ test "eden reference pointing to past survivor object gets updated if past survi
         defer token.deinit();
 
         var array_map = ArrayMap.create(&token, 0);
-        handles.trackObject(@ptrCast(&array_map));
+        handles.trackObject(&array_map);
 
         _ = try heap.collect(.{ .minor = .Force, .major = .Disable });
 
         break :array_map array_map;
     };
-    handles.trackObject(@ptrCast(&array_map));
+    handles.trackObject(&array_map);
 
     // Ensure that the map is in past survivor space.
     try std.testing.expectEqual(.PastSurvivor, heap.new_generation.referenceLocation(array_map.asValue().unsafeAsReference()));
@@ -2321,7 +2354,7 @@ test "eden reference pointing to past survivor object gets updated if past survi
     defer token.deinit();
 
     var array = ArrayObject.createWithValues(&token, .Global, array_map, &.{}, null);
-    handles.trackObject(@ptrCast(&array));
+    handles.trackObject(&array);
 
     var dummy_stats: GarbageCollectionStats = undefined;
     try heap.new_generation.tenurePastSurvivorSpace(&heap, &dummy_stats);

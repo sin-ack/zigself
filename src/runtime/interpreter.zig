@@ -672,7 +672,7 @@ fn executeBlock(
     const message_name = try vm_context.getVM().getOrCreateBlockMessageName(@intCast(arguments.len));
 
     var block = block_receiver;
-    handles.trackObject(@ptrCast(&block));
+    handles.trackObject(&block);
 
     const required_memory = ActivationObject.requiredSizeForAllocation(
         block.getArgumentSlotCount(),
@@ -713,7 +713,7 @@ fn executeMethod(
     handles.trackValue(&receiver_of_method);
 
     var method = const_method;
-    handles.trackObject(@ptrCast(&method));
+    handles.trackObject(&method);
 
     const required_memory = ActivationObject.requiredSizeForAllocation(
         method.getArgumentSlotCount(),

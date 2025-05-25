@@ -25,9 +25,9 @@ pub fn AddSlots(context: *PrimitiveContext) !ExecutionResult {
 
     const arguments = context.getArguments("_AddSlots:");
     var receiver = try arguments.getObject(PrimitiveContext.Receiver, .Slots);
-    handles.trackObject(@ptrCast(&receiver));
+    handles.trackObject(&receiver);
     var argument = try arguments.getObject(0, .Slots);
-    handles.trackObject(@ptrCast(&argument));
+    handles.trackObject(&argument);
 
     if (!context.actor.canWriteTo(context.receiver)) {
         return ExecutionResult.runtimeError(

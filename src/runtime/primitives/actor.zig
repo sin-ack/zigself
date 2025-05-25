@@ -110,7 +110,7 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
         .Value => |value| return ExecutionResult.resolve(value),
         .RuntimeError => |err| return ExecutionResult.runtimeError(err),
     }
-    handles.trackObject(@ptrCast(&method));
+    handles.trackObject(&method);
 
     var token = try context.vm.heap.allocate(
         method.requiredSizeForActivation() +
@@ -184,7 +184,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         },
         .RuntimeError => |err| return ExecutionResult.runtimeError(err),
     }
-    handles.trackObject(@ptrCast(&spawn_method));
+    handles.trackObject(&spawn_method);
 
     var token = try context.vm.heap.allocate(spawn_method.requiredSizeForActivation());
     defer token.deinit();
@@ -249,7 +249,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         .Value => |value| return ExecutionResult.resolve(value),
         .RuntimeError => |err| return ExecutionResult.runtimeError(err),
     }
-    handles.trackObject(@ptrCast(&entrypoint_method));
+    handles.trackObject(&entrypoint_method);
 
     context.actor.entrypoint_selector = null;
 
