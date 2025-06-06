@@ -75,11 +75,6 @@ pub const Array = extern struct {
         return self.getMap().getSize();
     }
 
-    pub fn canFinalize(self: Array.Ptr) bool {
-        _ = self;
-        return false;
-    }
-
     pub fn finalize(self: Array.Ptr, allocator: Allocator) void {
         _ = self;
         _ = allocator;
@@ -183,11 +178,6 @@ pub const ArrayMap = extern struct {
     pub fn clone(self: ArrayMap.Ptr, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken) ArrayMap.Ptr {
         _ = heap;
         return create(token, self.getSize());
-    }
-
-    pub fn canFinalize(self: ArrayMap.Ptr) bool {
-        _ = self;
-        return false;
     }
 
     pub fn finalize(self: ArrayMap.Ptr, allocator: Allocator) void {

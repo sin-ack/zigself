@@ -386,7 +386,6 @@ pub fn Heap(comptime Root: type) type {
                 for (self.finalization_set.items) |address| {
                     const reference = Reference.createRegular(address);
                     const object = reference.asBaseObject();
-                    std.debug.assert(object.canFinalize());
                     object.finalize(allocator);
                 }
 
@@ -815,7 +814,6 @@ pub fn Heap(comptime Root: type) type {
                     } else {
                         // The object died, perform last rites.
                         const object = reference.asBaseObject();
-                        std.debug.assert(object.canFinalize());
                         if (GC_SPAMMY_DEBUG) std.debug.print("NewGeneration.collect: Finalizing object at {*}\n", .{reference.getAddress()});
                         object.finalize(heap.allocator);
                     }
@@ -1062,7 +1060,6 @@ pub fn Heap(comptime Root: type) type {
                 for (self.finalization_set.items) |address| {
                     const reference = Reference.createRegular(address);
                     const object = reference.asBaseObject();
-                    std.debug.assert(object.canFinalize());
                     object.finalize(allocator);
                 }
 
@@ -1377,7 +1374,6 @@ pub fn Heap(comptime Root: type) type {
                         const reference = Reference.createRegular(address);
                         const object = reference.asBaseObject();
                         if (GC_SPAMMY_DEBUG) std.debug.print("OldGeneration.collect: Finalizing object at {*}\n", .{reference.getAddress()});
-                        std.debug.assert(object.canFinalize());
                         object.finalize(heap.allocator);
                     }
                 }

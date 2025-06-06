@@ -75,11 +75,6 @@ pub const ActorProxy = extern struct {
         return @sizeOf(ActorProxy);
     }
 
-    pub fn canFinalize(self: ActorProxy.Ptr) bool {
-        _ = self;
-        return false;
-    }
-
     pub fn finalize(self: ActorProxy.Ptr, allocator: Allocator) void {
         _ = self;
         _ = allocator;

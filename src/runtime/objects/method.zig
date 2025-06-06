@@ -70,11 +70,6 @@ pub const Method = extern struct {
         return self.getMap().getSlots();
     }
 
-    pub fn canFinalize(self: Method.Ptr) bool {
-        _ = self;
-        return false;
-    }
-
     pub fn finalize(self: Method.Ptr, allocator: Allocator) void {
         _ = self;
         _ = allocator;
@@ -220,11 +215,6 @@ pub const MethodMap = extern struct {
 
     pub fn expectsActivationObjectAsReceiver(self: MethodMap.Ptr) bool {
         return self.isInlineMethod();
-    }
-
-    pub fn canFinalize(self: MethodMap.Ptr) bool {
-        _ = self;
-        return true;
     }
 
     pub fn finalize(self: MethodMap.Ptr, allocator: Allocator) void {

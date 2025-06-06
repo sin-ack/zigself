@@ -103,11 +103,6 @@ pub const Managed = extern struct {
         return Managed.ExtraBits.read(self.object.getMetadata().*);
     }
 
-    pub fn canFinalize(self: Managed.Ptr) bool {
-        _ = self;
-        return true;
-    }
-
     pub fn finalize(self: Managed.Ptr, allocator: Allocator) void {
         _ = allocator;
         switch (self.getManagedType()) {

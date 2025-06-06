@@ -186,11 +186,6 @@ pub const Activation = extern struct {
             &self.getNonargumentSlots()[offset];
     }
 
-    pub fn canFinalize(self: Activation.Ptr) bool {
-        _ = self;
-        return false;
-    }
-
     pub fn finalize(self: Activation.Ptr, allocator: Allocator) void {
         _ = self;
         _ = allocator;

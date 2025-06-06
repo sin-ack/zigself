@@ -133,12 +133,7 @@ pub const Map = extern struct {
         };
     }
 
-    pub fn canFinalize(self: Map.Ptr) bool {
-        return self.dispatch(bool, "canFinalize", .{});
-    }
-
     pub fn finalize(self: Map.Ptr, allocator: Allocator) void {
-        std.debug.assert(self.canFinalize());
         self.dispatch(void, "finalize", .{allocator});
     }
 

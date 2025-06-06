@@ -185,11 +185,6 @@ pub const Object = extern struct {
         return self.dispatch(usize, "getSizeForCloning", .{});
     }
 
-    /// Return whether this object can be finalized.
-    pub fn canFinalize(self: Object.Ptr) bool {
-        return self.dispatch(bool, "canFinalize", .{});
-    }
-
     /// Finalize this object. Skip if the object does not support finalization.
     pub fn finalize(self: Object.Ptr, allocator: Allocator) void {
         // FIXME: This forces the finalize method to be defined on objects that

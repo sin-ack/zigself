@@ -90,12 +90,6 @@ pub const Float = extern struct {
         return create(token, actor_id, self.get());
     }
 
-    /// Return whether this object can finalize.
-    pub fn canFinalize(self: Float.Ptr) bool {
-        _ = self;
-        return false;
-    }
-
     /// Finalize this object.
     pub fn finalize(self: Float.Ptr, allocator: Allocator) void {
         _ = self;

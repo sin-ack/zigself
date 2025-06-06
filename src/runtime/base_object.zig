@@ -141,11 +141,6 @@ pub const BaseObject = extern struct {
         };
     }
 
-    /// Return whether this object can be finalized.
-    pub fn canFinalize(self: BaseObject.Ptr) bool {
-        return self.dispatch(bool, "canFinalize", .{});
-    }
-
     /// Finalize this object. Skip if the object does not support finalization.
     pub fn finalize(self: BaseObject.Ptr, allocator: Allocator) void {
         self.dispatch(void, "finalize", .{allocator});

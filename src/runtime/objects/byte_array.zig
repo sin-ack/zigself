@@ -92,11 +92,6 @@ pub const ByteArray = extern struct {
         return requiredSizeForAllocation();
     }
 
-    pub fn canFinalize(self: ByteArray.Ptr) bool {
-        _ = self;
-        return true;
-    }
-
     pub fn finalize(self: ByteArray.Ptr, allocator: Allocator) void {
         // FIXME: Stopgap solution while byte arrays are not interned. When a string pool
         //        is created for byte arrays, byte arrays will no longer need to finalize.

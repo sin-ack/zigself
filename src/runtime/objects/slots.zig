@@ -415,11 +415,6 @@ pub const Slots = extern struct {
         };
     }
 
-    pub fn canFinalize(self: Slots.Ptr) bool {
-        _ = self;
-        return false;
-    }
-
     pub fn finalize(self: Slots.Ptr, allocator: Allocator) void {
         _ = self;
         _ = allocator;
@@ -529,11 +524,6 @@ pub const SlotsMap = extern struct {
         @memcpy(new_map.getSlots(), self.getSlots());
 
         return new_map;
-    }
-
-    pub fn canFinalize(self: SlotsMap.Ptr) bool {
-        _ = self;
-        return false;
     }
 
     pub fn finalize(self: SlotsMap.Ptr, allocator: Allocator) void {

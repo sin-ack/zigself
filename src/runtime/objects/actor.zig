@@ -74,11 +74,6 @@ pub const Actor = extern struct {
         return @sizeOf(Actor);
     }
 
-    pub fn canFinalize(self: Actor.Ptr) bool {
-        _ = self;
-        return true;
-    }
-
     pub fn finalize(self: Actor.Ptr, allocator: Allocator) void {
         // FIXME: Ask the VM whether the actor has been quit by the time we
         //        reach here.

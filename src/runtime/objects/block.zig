@@ -71,11 +71,6 @@ pub const Block = extern struct {
         return self.getMap().getSlots();
     }
 
-    pub fn canFinalize(self: Block.Ptr) bool {
-        _ = self;
-        return false;
-    }
-
     pub fn finalize(self: Block.Ptr, allocator: Allocator) void {
         _ = self;
         _ = allocator;
@@ -215,11 +210,6 @@ pub const BlockMap = extern struct {
         self.base_map.init(.Block, argument_slot_count, total_slot_count, block, executable);
         self.parent_activation = parent_activation;
         self.nonlocal_return_target_activation = nonlocal_return_target_activation;
-    }
-
-    pub fn canFinalize(self: BlockMap.Ptr) bool {
-        _ = self;
-        return true;
     }
 
     pub fn finalize(self: BlockMap.Ptr, allocator: Allocator) void {
