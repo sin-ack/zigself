@@ -70,23 +70,10 @@ pub const Method = extern struct {
         return self.getMap().getSlots();
     }
 
-    pub fn finalize(self: Method.Ptr, allocator: Allocator) void {
-        _ = self;
-        _ = allocator;
-        @panic("Attempted to call Method.finalize");
-    }
-
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: Method.Ptr, visitor: anytype) !void {
         try self.slots.object.visitEdges(visitor);
         try self.visitAssignableSlotValues(visitor);
-    }
-
-    pub fn lookup(self: Method.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
-        _ = self;
-        _ = selector;
-        _ = previously_visited;
-        @panic("Attempted to call Method.lookup");
     }
 
     // --- Top level context creation ---

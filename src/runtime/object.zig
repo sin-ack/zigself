@@ -168,6 +168,10 @@ pub const Object = extern struct {
     fn dispatch(self: Object.Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
         return switch (self.getMetadata().type) {
             inline else => |t| {
+                if (!@hasDecl(ObjectT(t), name)) {
+                    @panic("!!! " ++ @tagName(t) ++ " does not implement `" ++ name ++ "`!");
+                }
+
                 const self_ptr: ObjectT(t).Ptr = @ptrCast(self);
                 return @call(.auto, @field(ObjectT(t), name), .{self_ptr} ++ args);
             },

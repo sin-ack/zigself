@@ -75,12 +75,6 @@ pub const Array = extern struct {
         return self.getMap().getSize();
     }
 
-    pub fn finalize(self: Array.Ptr, allocator: Allocator) void {
-        _ = self;
-        _ = allocator;
-        @panic("Attempted to call Array.finalize");
-    }
-
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: Array.Ptr, visitor: anytype) !void {
         try self.object.visitEdges(visitor);
@@ -178,12 +172,6 @@ pub const ArrayMap = extern struct {
     pub fn clone(self: ArrayMap.Ptr, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken) ArrayMap.Ptr {
         _ = heap;
         return create(token, self.getSize());
-    }
-
-    pub fn finalize(self: ArrayMap.Ptr, allocator: Allocator) void {
-        _ = self;
-        _ = allocator;
-        @panic("Attempted to call ArrayMap.finalize");
     }
 
     /// Visit edges of this object using the given visitor.

@@ -71,12 +71,6 @@ pub const Block = extern struct {
         return self.getMap().getSlots();
     }
 
-    pub fn finalize(self: Block.Ptr, allocator: Allocator) void {
-        _ = self;
-        _ = allocator;
-        @panic("Attempted to call Block.finalize");
-    }
-
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: Block.Ptr, visitor: anytype) !void {
         try self.slots.object.visitEdges(visitor);

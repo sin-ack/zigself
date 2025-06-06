@@ -186,12 +186,6 @@ pub const Activation = extern struct {
             &self.getNonargumentSlots()[offset];
     }
 
-    pub fn finalize(self: Activation.Ptr, allocator: Allocator) void {
-        _ = self;
-        _ = allocator;
-        @panic("Attempted to call Activation.finalize");
-    }
-
     /// Visit the edges on this object with the given visitor.
     pub fn visitEdges(self: Activation.Ptr, visitor: anytype) !void {
         try self.slots.object.visitEdges(visitor);
@@ -251,7 +245,7 @@ pub const Activation = extern struct {
 
     fn getMethodMap(self: Activation.Ptr) MethodMap.Ptr {
         if (self.getActivationType() == .Block) {
-            std.debug.panic("Attempted to call getMethodMap on a block activation object", .{});
+            @panic("Attempted to call getMethodMap on a block activation object");
         }
 
         return self.slots.object.getMap().unsafeAsType(.Method);
@@ -259,7 +253,7 @@ pub const Activation = extern struct {
 
     fn getBlockMap(self: Activation.Ptr) BlockMap.Ptr {
         if (self.getActivationType() == .Method) {
-            std.debug.panic("Attempted to call getBlockMap on a method activation object", .{});
+            @panic("Attempted to call getBlockMap on a method activation object");
         }
 
         return self.slots.object.getMap().unsafeAsType(.Block);

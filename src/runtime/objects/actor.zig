@@ -85,14 +85,6 @@ pub const Actor = extern struct {
         try visitor.visit(&self.context, @ptrCast(self));
     }
 
-    pub fn lookup(self: Actor.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
-        _ = self;
-        _ = selector;
-        _ = previously_visited;
-
-        @panic("TODO: What should lookups on actor objects do?");
-    }
-
     pub fn humanReadableName() []const u8 {
         return "an actor";
     }

@@ -415,12 +415,6 @@ pub const Slots = extern struct {
         };
     }
 
-    pub fn finalize(self: Slots.Ptr, allocator: Allocator) void {
-        _ = self;
-        _ = allocator;
-        @panic("Attempted to call Slots.finalize");
-    }
-
     /// Visit the edges on this object with the given visitor.
     pub fn visitEdges(self: Slots.Ptr, visitor: anytype) !void {
         try self.object.visitEdges(visitor);
@@ -524,12 +518,6 @@ pub const SlotsMap = extern struct {
         @memcpy(new_map.getSlots(), self.getSlots());
 
         return new_map;
-    }
-
-    pub fn finalize(self: SlotsMap.Ptr, allocator: Allocator) void {
-        _ = self;
-        _ = allocator;
-        @panic("Attempted to call SlotsMap.finalize");
     }
 
     /// Visit the edges on this map with the given visitor.

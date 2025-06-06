@@ -127,6 +127,10 @@ pub const Map = extern struct {
     fn dispatch(self: Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
         return switch (self.getMetadata().type) {
             inline else => |t| {
+                if (!@hasDecl(MapT(t), name)) {
+                    @panic("!!! " ++ @tagName(t) ++ " does not implement `" ++ name ++ "`!");
+                }
+
                 const self_ptr: MapT(t).Ptr = @ptrCast(self);
                 return @call(.auto, @field(MapT(t), name), .{self_ptr} ++ args);
             },

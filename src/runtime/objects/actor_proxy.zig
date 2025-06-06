@@ -75,12 +75,6 @@ pub const ActorProxy = extern struct {
         return @sizeOf(ActorProxy);
     }
 
-    pub fn finalize(self: ActorProxy.Ptr, allocator: Allocator) void {
-        _ = self;
-        _ = allocator;
-        @panic("Attempted to call ActorProxy.finalize");
-    }
-
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: ActorProxy.Ptr, visitor: anytype) !void {
         try visitor.visit(&self.actor_object.value, @ptrCast(self));

@@ -90,13 +90,6 @@ pub const Float = extern struct {
         return create(token, actor_id, self.get());
     }
 
-    /// Finalize this object.
-    pub fn finalize(self: Float.Ptr, allocator: Allocator) void {
-        _ = self;
-        _ = allocator;
-        @panic("Float.finalize() should never be called");
-    }
-
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: Float.Ptr, visitor: anytype) !void {
         _ = self;
