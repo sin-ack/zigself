@@ -165,7 +165,7 @@ pub const Object = extern struct {
     // --- Common operations ---
 
     /// Perform a dynamic dispatch based on the current object type.
-    fn dispatch(self: Object.Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
+    inline fn dispatch(self: Object.Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
         return switch (self.getMetadata().type) {
             inline else => |t| {
                 if (!@hasDecl(ObjectT(t), name)) {
@@ -173,7 +173,7 @@ pub const Object = extern struct {
                 }
 
                 const self_ptr: ObjectT(t).Ptr = @ptrCast(self);
-                return @call(.auto, @field(ObjectT(t), name), .{self_ptr} ++ args);
+                return @call(.always_inline, @field(ObjectT(t), name), .{self_ptr} ++ args);
             },
         };
     }

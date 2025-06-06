@@ -108,11 +108,11 @@ pub const BaseObject = extern struct {
     // --- Common methods ---
 
     /// Perform a dynamic dispatch based on the current object type.
-    fn dispatch(self: BaseObject.Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
+    inline fn dispatch(self: BaseObject.Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
         return switch (self.metadata.type) {
             inline else => |t| {
                 const self_ptr: BaseObjectT(t).Ptr = @ptrCast(self);
-                return @call(.auto, @field(BaseObjectT(t), name), .{self_ptr} ++ args);
+                return @call(.always_inline, @field(BaseObjectT(t), name), .{self_ptr} ++ args);
             },
         };
     }
