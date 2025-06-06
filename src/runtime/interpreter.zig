@@ -155,13 +155,17 @@ const specialized_executors = blk: {
     var executors: []const *const Executor = &[_]*const Executor{};
 
     for (std.enums.values(bytecode.Instruction.Opcode)) |opcode| {
-        executors = executors ++ [_]*const Executor{makeSpecializedExecutor(opcode)};
+        executors = executors ++ [_]*const Executor{makeSpecializedExecutor(opcode).execute};
     }
 
     break :blk executors;
 };
 
-pub fn makeSpecializedExecutor(comptime opcode: bytecode.Instruction.Opcode) Executor {
+// NOTE: We return the struct and not the function because this way Zig gives it
+//       a nice name in the symbol table, which is useful for debugging.
+//       "runtime.interpreter.makeSpecializedExecutor__struct_12345.execute"
+//       -> "runtime.interpreter.makeSpecializedExecutor(.Send).execute"
+pub fn makeSpecializedExecutor(comptime opcode: bytecode.Instruction.Opcode) type {
     return struct {
         fn execute(context: *InterpreterContext) InterpreterError!void {
             if (EXECUTION_DEBUG) {
@@ -210,7 +214,7 @@ pub fn makeSpecializedExecutor(comptime opcode: bytecode.Instruction.Opcode) Exe
 
             return @call(.always_tail, specialized_executors[@intFromEnum(context.getCurrentBytecodeBlock().getOpcode(new_instruction_index))], .{context});
         }
-    }.execute;
+    };
 }
 
 // --- Opcode handlers ---
