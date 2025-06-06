@@ -11,6 +11,7 @@ const debug = @import("../debug.zig");
 const Value = @import("value.zig").Value;
 const pointer = @import("../utility/pointer.zig");
 const Selector = @import("Selector.zig");
+const ValueSlot = @import("object_lookup.zig").ValueSlot;
 const Reference = @import("value.zig").Reference;
 const BaseObject = @import("base_object.zig").BaseObject;
 const ObjectLike = @import("value.zig").ObjectLike;
@@ -164,12 +165,24 @@ pub const Object = extern struct {
 
     // --- Common operations ---
 
+    /// How to handle missing methods during dynamic dispatch.
+    const MissingMethodHandling = enum {
+        /// Require the method to be present. If the method isn't defined on
+        /// the object, it is a compile-time error.
+        Required,
+        /// If the method is not defined on the object, panic.
+        Panic,
+    };
+
     /// Perform a dynamic dispatch based on the current object type.
-    inline fn dispatch(self: Object.Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
+    inline fn dispatch(self: Object.Ptr, comptime missing_method_handling: MissingMethodHandling, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
         return switch (self.getMetadata().type) {
             inline else => |t| {
                 if (!@hasDecl(ObjectT(t), name)) {
-                    @panic("!!! " ++ @tagName(t) ++ " does not implement `" ++ name ++ "`!");
+                    switch (missing_method_handling) {
+                        .Required => @compileError("!!! " ++ @tagName(t) ++ " does not implement `" ++ name ++ "`, and it is required."),
+                        .Panic => @panic("!!! " ++ @tagName(t) ++ " does not implement `" ++ name ++ "`!"),
+                    }
                 }
 
                 const self_ptr: ObjectT(t).Ptr = @ptrCast(self);
@@ -180,21 +193,18 @@ pub const Object = extern struct {
 
     /// Get the size of this object (NOT its dependencies) in memory.
     pub fn getSizeInMemory(self: Object.Ptr) usize {
-        return self.dispatch(usize, "getSizeInMemory", .{});
+        return self.dispatch(.Required, usize, "getSizeInMemory", .{});
     }
 
     /// Get the size required for cloning this object (including all private
     /// dependencies it has).
     pub fn getSizeForCloning(self: Object.Ptr) usize {
-        return self.dispatch(usize, "getSizeForCloning", .{});
+        return self.dispatch(.Required, usize, "getSizeForCloning", .{});
     }
 
     /// Finalize this object. Skip if the object does not support finalization.
     pub fn finalize(self: Object.Ptr, allocator: Allocator) void {
-        // FIXME: This forces the finalize method to be defined on objects that
-        //        don't support finalization. Find a way that can avoid forcing
-        //        the definition of the useless finalize method.
-        self.dispatch(void, "finalize", .{allocator});
+        self.dispatch(.Panic, void, "finalize", .{allocator});
     }
 
     /// Visit all the edges of this object.
@@ -209,7 +219,7 @@ pub const Object = extern struct {
             break :blk @typeInfo(visit_info.@"fn".return_type.?).error_union.error_set;
         };
 
-        return self.dispatch(Error!void, "visitEdges", .{visitor});
+        return self.dispatch(.Required, Error!void, "visitEdges", .{visitor});
     }
 
     /// Create a new shallow copy of this object. The map is not affected.
@@ -233,7 +243,7 @@ pub const Object = extern struct {
         selector: Selector,
         previously_visited: ?*const Selector.VisitedValueLink,
     ) object_lookup.LookupResult {
-        return self.dispatch(object_lookup.LookupResult, "lookup", .{ selector, previously_visited });
+        return self.dispatch(.Panic, object_lookup.LookupResult, "lookup", .{ selector, previously_visited });
     }
 };
 

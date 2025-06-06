@@ -123,12 +123,25 @@ pub const Map = extern struct {
 
     // --- Common methods ---
 
+    // TODO: Unify this with the object dispatch code.
+    /// How to handle missing methods during dynamic dispatch.
+    const MissingMethodHandling = enum {
+        /// Require the method to be present. If the method isn't defined on
+        /// the map, it is a compile-time error.
+        Required,
+        /// If the method is not defined on the map, panic.
+        Panic,
+    };
+
     /// Dynamically dispatch a method on the map.
-    inline fn dispatch(self: Ptr, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
+    inline fn dispatch(self: Ptr, comptime missing_method_handling: MissingMethodHandling, comptime ReturnType: type, comptime name: []const u8, args: anytype) ReturnType {
         return switch (self.getMetadata().type) {
             inline else => |t| {
                 if (!@hasDecl(MapT(t), name)) {
-                    @panic("!!! " ++ @tagName(t) ++ " does not implement `" ++ name ++ "`!");
+                    switch (missing_method_handling) {
+                        .Required => @compileError("!!! " ++ @tagName(t) ++ " does not implement `" ++ name ++ "`, and it is required."),
+                        .Panic => @panic("!!! " ++ @tagName(t) ++ " does not implement `" ++ name ++ "`!"),
+                    }
                 }
 
                 const self_ptr: MapT(t).Ptr = @ptrCast(self);
@@ -138,10 +151,10 @@ pub const Map = extern struct {
     }
 
     pub fn finalize(self: Map.Ptr, allocator: Allocator) void {
-        self.dispatch(void, "finalize", .{allocator});
+        self.dispatch(.Panic, void, "finalize", .{allocator});
     }
 
-    /// Visit all the edges of this object.
+    /// Visit all the edges of this map.
     pub fn visitEdges(self: Map.Ptr, visitor: anytype) !void {
         const Error = blk: {
             comptime var Visitor = @TypeOf(visitor);
@@ -153,15 +166,15 @@ pub const Map = extern struct {
             break :blk @typeInfo(visit_info.@"fn".return_type.?).error_union.error_set;
         };
 
-        return self.dispatch(Error!void, "visitEdges", .{visitor});
+        return self.dispatch(.Required, Error!void, "visitEdges", .{visitor});
     }
 
     pub fn getSizeInMemory(self: Map.Ptr) usize {
-        return self.dispatch(usize, "getSizeInMemory", .{});
+        return self.dispatch(.Required, usize, "getSizeInMemory", .{});
     }
 
     pub fn getSizeForCloning(self: Map.Ptr) usize {
-        return self.dispatch(usize, "getSizeForCloning", .{});
+        return self.dispatch(.Required, usize, "getSizeForCloning", .{});
     }
 
     pub fn clone(self: Map.Ptr, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID) Allocator.Error!Map.Ptr {

@@ -20,7 +20,6 @@ const ObjectValue = value_import.ObjectValue;
 const SourceRange = @import("../SourceRange.zig");
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
-const LookupResult = @import("../object_lookup.zig").LookupResult;
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
 const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationObject = @import("activation.zig").Activation;
