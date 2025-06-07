@@ -245,6 +245,11 @@ pub const Object = extern struct {
     ) object_lookup.LookupResult {
         return self.dispatch(.Panic, object_lookup.LookupResult, "lookup", .{ selector, previously_visited });
     }
+
+    /// Get the value slot at the given index.
+    pub fn getValueSlot(self: Object.Ptr, index: usize) ValueSlot {
+        return self.dispatch(.Panic, ValueSlot, "getValueSlot", .{index});
+    }
 };
 
 /// An object with an associated map reference. Some object types (notably Slots

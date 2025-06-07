@@ -37,38 +37,44 @@ fn findActorMethod(
     receiver: Value,
     selector: Selector,
 ) !FindActorMethodResult {
-    return switch (receiver.lookup(selector)) {
+    return lookup: switch (receiver.lookup(selector)) {
         .Nothing => FindActorMethodResult{ .RuntimeError = try RuntimeError.initFormatted(
             source_range,
             "Unknown selector '{s}'",
             .{selector},
         ) },
-        .Assignment => FindActorMethodResult{ .RuntimeError = try RuntimeError.initFormatted(
-            source_range,
-            "Spawning actor with non-unary method '{s}' not permitted",
-            .{selector},
-        ) },
-        .Regular => |lookup_result| blk: {
-            if (lookup_result.asObject()) |lookup_result_object| {
-                if (lookup_result_object.asType(.Method)) |lookup_result_as_method| {
-                    if (lookup_result_as_method.getArgumentSlotCount() != 0) {
-                        break :blk FindActorMethodResult{ .RuntimeError = try RuntimeError.initFormatted(
-                            source_range,
-                            "Spawning actor with non-unary method '{s}' not permitted",
-                            .{selector},
-                        ) };
-                    }
-
-                    break :blk FindActorMethodResult{ .Method = lookup_result_as_method };
-                }
-            }
-
-            break :blk FindActorMethodResult{ .Value = lookup_result };
-        },
         .ActorMessage => FindActorMethodResult{ .RuntimeError = RuntimeError.initLiteral(
             source_range,
             "Spawning actor by sending message to actor proxy not permitted",
         ) },
+        .FoundUncacheable => |value_slot| switch (value_slot) {
+            .Constant => |target| blk: {
+                if (target.asObject()) |target_object| {
+                    if (target_object.asType(.Method)) |target_as_method| {
+                        if (target_as_method.getArgumentSlotCount() != 0) {
+                            break :blk FindActorMethodResult{ .RuntimeError = try RuntimeError.initFormatted(
+                                source_range,
+                                "Spawning actor with non-unary method '{s}' not permitted",
+                                .{selector},
+                            ) };
+                        }
+
+                        break :blk FindActorMethodResult{ .Method = target_as_method };
+                    }
+                }
+
+                break :blk FindActorMethodResult{ .Value = target };
+            },
+            .Assignable => FindActorMethodResult{ .RuntimeError = try RuntimeError.initFormatted(
+                source_range,
+                "Spawning actor with non-unary method '{s}' not permitted",
+                .{selector},
+            ) },
+        },
+        .Found => |lookup_target| {
+            const value_slot = lookup_target.object.getValueSlot(lookup_target.value_slot_index);
+            continue :lookup .{ .FoundUncacheable = value_slot };
+        },
     };
 }
 

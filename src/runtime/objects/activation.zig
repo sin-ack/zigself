@@ -17,6 +17,7 @@ const Selector = @import("../Selector.zig");
 const bytecode = @import("../bytecode.zig");
 const BlockMap = @import("block.zig").BlockMap;
 const MethodMap = @import("method.zig").MethodMap;
+const ValueSlot = @import("../object_lookup.zig").ValueSlot;
 const map_import = @import("../map.zig");
 const SlotsObject = slots.Slots;
 const GenericValue = value_import.Value;
@@ -201,6 +202,11 @@ pub const Activation = extern struct {
 
         // Receiver lookup
         return self.receiver.lookup(selector);
+    }
+
+    /// Get the value slot at the given index.
+    pub fn getValueSlot(self: Activation.Ptr, index: usize) ValueSlot {
+        return slots.getValueSlotGeneric(Activation, self, index);
     }
 
     // --- Finding activation receiver ---

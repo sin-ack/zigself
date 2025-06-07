@@ -9,9 +9,11 @@ const Map = @import("map.zig").Map;
 const heap = @import("Heap.zig");
 const Actor = @import("Actor.zig");
 const value = @import("value.zig");
+const Object = @import("object.zig").Object;
 const pointer = @import("../utility/pointer.zig");
 const Selector = @import("Selector.zig");
 const MapObject = @import("object.zig").MapObject;
+const ValueSlot = @import("object_lookup.zig").ValueSlot;
 const ObjectType = @import("object.zig").ObjectType;
 const LookupResult = @import("object_lookup.zig").LookupResult;
 
@@ -180,15 +182,31 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
         ) LookupResult {
             _ = previously_visited;
 
-            const map = self.getMap();
-
-            inline for (field_selectors) |field_selector| {
+            inline for (field_selectors, 0..) |field_selector, index| {
                 if (selector.equals(field_selector)) {
-                    return LookupResult{ .Regular = @field(map, field_selector.name) };
+                    return LookupResult{
+                        .Found = .{
+                            .object = @ptrCast(self),
+                            .value_slot_index = index,
+                        },
+                    };
                 }
             }
 
             return LookupResult.nothing;
+        }
+
+        /// Get the value slot at the given index.
+        pub fn getValueSlot(self: Ptr, index: usize) ValueSlot {
+            const map = self.getMap();
+
+            inline for (field_selectors, 0..) |field_selector, i| {
+                if (index == i) {
+                    return .{ .Constant = @field(map, field_selector.name) };
+                }
+            }
+
+            unreachable;
         }
 
         pub fn requiredSizeForAllocation() usize {

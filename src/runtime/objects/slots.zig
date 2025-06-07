@@ -15,6 +15,7 @@ const pointer = @import("../../utility/pointer.zig");
 const Selector = @import("../Selector.zig");
 const traversal = @import("../object_traversal.zig");
 const MapObject = @import("../object.zig").MapObject;
+const ValueSlot = @import("../object_lookup.zig").ValueSlot;
 const BaseObject = @import("../base_object.zig").BaseObject;
 const mapbuilder = @import("../map_builder.zig");
 const heap_import = @import("../Heap.zig");
@@ -138,26 +139,18 @@ pub fn slotsLookup(
     const currently_visited = Selector.VisitedValueLink{ .previous = previously_visited, .value = object.asValue() };
 
     // Direct lookup
-    for (object.getSlots()) |slot| {
+    for (object.getSlots(), 0..) |slot, slot_index| {
         const slot_selector = Selector.fromSlot(slot);
         if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing selector {} vs. slot {}\n", .{ selector, slot_selector });
 
-        if (slot.isAssignable()) {
-            if (selector.canAssignTo(slot_selector)) {
-                return LookupResult{
-                    .Assignment = .{
-                        .object = Object.fromAddress(object.asObjectAddress()),
-                        .value_ptr = object.getAssignableSlotValue(slot),
-                    },
-                };
-            }
-
-            if (selector.equals(slot_selector))
-                return LookupResult{ .Regular = object.getAssignableSlotValue(slot).* };
+        if (selector.equals(slot_selector) or selector.canAssignTo(slot_selector)) {
+            return .{
+                .Found = .{
+                    .object = @ptrCast(object),
+                    .value_slot_index = slot_index,
+                },
+            };
         }
-
-        if (selector.equals(slot_selector))
-            return LookupResult{ .Regular = slot.value };
     }
 
     if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Could not find the slot on this object, looking at parents\n", .{});
@@ -172,7 +165,27 @@ pub fn slotsLookup(
 
             if (slot_value.asObject()) |slot_object| {
                 const parent_lookup_result = selector.chainedLookupObject(slot_object, &currently_visited);
-                if (parent_lookup_result != .Nothing) return parent_lookup_result;
+                if (slot.isAssignable()) {
+                    // FIXME: We currently cannot cache lookups if they went
+                    //        through an assignable slot as the cache could
+                    //        become stale if the parent slot is modified.
+                    //        This needs to be solved by introducing
+                    //        dependency links so that inline caches can be
+                    //        invalidated via external events.
+                    switch (parent_lookup_result) {
+                        // We didn't find anything so move on to the next parent.
+                        .Nothing => {},
+
+                        .ActorMessage, .FoundUncacheable => return parent_lookup_result,
+                        .Found => |lt| {
+                            // "Kill" the cache by getting the direct value.
+                            const lookup_result_value_slot = lt.object.getValueSlot(lt.value_slot_index);
+                            return .{ .FoundUncacheable = lookup_result_value_slot };
+                        },
+                    }
+                } else {
+                    if (parent_lookup_result != .Nothing) return parent_lookup_result;
+                }
             } else {
                 @panic("FIXME: Allow integers to be parent slot values (let me know of your usecase!)");
             }
@@ -181,6 +194,29 @@ pub fn slotsLookup(
 
     // Nope, not here
     return LookupResult.nothing;
+}
+
+/// Return the corresponding value slot for the given value slot index in the
+/// object.
+pub fn getValueSlotGeneric(comptime ObjectType: type, object: ObjectType.Ptr, value_slot_index: usize) ValueSlot {
+    const slots = object.getSlots();
+    if (value_slot_index >= slots.len) {
+        @branchHint(.cold);
+        std.debug.panic("Value slot index {} is out of bounds for object with {} slots", .{ value_slot_index, slots.len });
+    }
+
+    const slot = slots[value_slot_index];
+    if (slot.isAssignable()) {
+        return .{
+            .Assignable = .{
+                .object = @ptrCast(object),
+                .value_ptr = object.getAssignableSlotValue(slot),
+                .selector = Selector.fromSlot(slot),
+            },
+        };
+    } else {
+        return .{ .Constant = slot.value };
+    }
 }
 
 /// An object consisting of constant or mutable slots. The constant slot's value
@@ -423,6 +459,11 @@ pub const Slots = extern struct {
 
     pub fn lookup(self: Slots.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         return slotsLookup(Slots, self, selector, previously_visited);
+    }
+
+    /// Get the value slot at the given index.
+    pub fn getValueSlot(self: Slots.Ptr, index: usize) ValueSlot {
+        return getValueSlotGeneric(Slots, self, index);
     }
 
     pub fn humanReadableName() []const u8 {

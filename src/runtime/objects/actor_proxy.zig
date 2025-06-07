@@ -87,29 +87,39 @@ pub const ActorProxy = extern struct {
         if (LOOKUP_DEBUG) std.debug.print("ActorProxy.lookup: Looking at an actor proxy object\n", .{});
 
         const target_actor = self.actor_object.get();
-        return switch (target_actor.context.lookup(selector)) {
+        return lookup: switch (target_actor.context.lookup(selector)) {
             .Nothing => LookupResult.nothing,
-            // FIXME: This should probably cause a different kind of error.
-            .Assignment => LookupResult.nothing,
-            .Regular => |lookup_result| blk: {
-                if (lookup_result.asObject()) |object| {
-                    if (object.asType(.Method)) |method_object| {
-                        break :blk LookupResult{
-                            .ActorMessage = .{
-                                .target_actor = target_actor,
-                                .method = method_object,
-                            },
-                        };
-                    }
-                }
-
-                // NOTE: In zigSelf, all messages are async. Therefore sending a
-                //       message to a non-method slot will not return any
-                //       meaningful value to the user. However it should also
-                //       still be valid, so we cannot return nothing here.
-                break :blk LookupResult{ .Regular = context.getVM().global_nil };
-            },
             .ActorMessage => unreachable,
+            .FoundUncacheable => |value_slot| switch (value_slot) {
+                .Constant => |target| self.trySendActorMessage(target),
+                // FIXME: This should probably cause a different kind of error.
+                .Assignable => LookupResult.nothing,
+            },
+            .Found => |lookup_target| {
+                const value_slot = lookup_target.object.getValueSlot(lookup_target.value_slot_index);
+                continue :lookup .{ .FoundUncacheable = value_slot };
+            },
         };
+    }
+
+    fn trySendActorMessage(self: ActorProxy.Ptr, target: GenericValue) LookupResult {
+        const target_actor = self.actor_object.get();
+
+        if (target.asObject()) |object| {
+            if (object.asType(.Method)) |method_object| {
+                return LookupResult{
+                    .ActorMessage = .{
+                        .target_actor = target_actor,
+                        .method = method_object,
+                    },
+                };
+            }
+        }
+
+        // NOTE: In zigSelf, all messages are async. Therefore sending a
+        //       message to a non-method slot will not return any
+        //       meaningful value to the user. However it should also
+        //       still be valid, so we cannot return nothing here.
+        return LookupResult{ .FoundUncacheable = .{ .Constant = context.getVM().global_nil } };
     }
 };

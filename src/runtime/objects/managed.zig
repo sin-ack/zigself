@@ -10,6 +10,7 @@ const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
 const pointer = @import("../../utility/pointer.zig");
 const Selector = @import("../Selector.zig");
+const ValueSlot = @import("../object_lookup.zig").ValueSlot;
 const heap_import = @import("../Heap.zig");
 const value_import = @import("../value.zig");
 const GenericValue = value_import.Value;
@@ -118,15 +119,29 @@ pub const Managed = extern struct {
         try visitor.visit(&self.value, @ptrCast(self));
     }
 
+    // --- Well-known value slots ---
+    const VALUE_SLOT_VALUE = 0;
+
     pub fn lookup(self: Managed.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Managed.lookup: Looking at a managed object type: {}\n", .{self.getManagedType()});
         if (selector.equals(Selector.well_known.value)) {
-            return LookupResult{ .Regular = self.value };
+            return .{ .Found = .{
+                .object = @ptrCast(self),
+                .value_slot_index = VALUE_SLOT_VALUE,
+            } };
         }
 
         return LookupResult.nothing;
+    }
+
+    /// Get the value slot at the given index.
+    pub fn getValueSlot(self: Managed.Ptr, index: usize) ValueSlot {
+        switch (index) {
+            VALUE_SLOT_VALUE => return .{ .Constant = self.value },
+            else => unreachable,
+        }
     }
 
     pub fn asObjectAddress(self: Managed.Ptr) [*]u64 {

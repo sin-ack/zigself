@@ -158,8 +158,12 @@ pub const Value = packed struct(u64) {
         selector: Selector,
     ) LookupResult {
         if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up {} on {}\n", .{ selector, self });
+
+        // FIXME: We probably shouldn't even get here in the first place;
+        //        sending "self" to an object should be optimized out at the
+        //        bytecode level.
         if (selector.equals(Selector.well_known.self)) {
-            return .{ .Regular = self };
+            return .{ .FoundUncacheable = .{ .Constant = self } };
         }
 
         const vm = context.getVM();
@@ -169,7 +173,8 @@ pub const Value = packed struct(u64) {
                 if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up on traits integer\n", .{});
                 const integer_traits = vm.integer_traits;
                 if (selector.equals(Selector.well_known.parent))
-                    return LookupResult{ .Regular = integer_traits };
+                    // FIXME: Can we cache this?
+                    return .{ .FoundUncacheable = .{ .Constant = integer_traits } };
 
                 return integer_traits.lookup(selector);
             },

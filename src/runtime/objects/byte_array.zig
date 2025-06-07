@@ -11,6 +11,7 @@ const Object = @import("../object.zig").Object;
 const context = @import("../context.zig");
 const pointer = @import("../../utility/pointer.zig");
 const Selector = @import("../Selector.zig");
+const ValueSlot = @import("../object_lookup.zig").ValueSlot;
 const heap_import = @import("../Heap.zig");
 const VMByteArray = @import("../ByteArray.zig");
 const value_import = @import("../value.zig");
@@ -105,16 +106,31 @@ pub const ByteArray = extern struct {
         // FIXME: Byte array memory is now allocated outside the heap.
     }
 
+    // --- Well-known value slots ---
+    const VALUE_SLOT_PARENT = 0;
+
     pub fn lookup(self: ByteArray.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
-        _ = self;
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("ByteArray.lookup: Looking at traits string\n", .{});
-        const string_traits = context.getVM().string_traits;
         if (selector.equals(Selector.well_known.parent))
-            return LookupResult{ .Regular = string_traits };
+            return .{ .Found = .{
+                .object = @ptrCast(self),
+                .value_slot_index = VALUE_SLOT_PARENT,
+            } };
 
+        const string_traits = context.getVM().string_traits;
         return string_traits.lookup(selector);
+    }
+
+    /// Get the value slot at the given index.
+    pub fn getValueSlot(self: ByteArray.Ptr, index: usize) ValueSlot {
+        _ = self;
+
+        switch (index) {
+            VALUE_SLOT_PARENT => return .{ .Constant = context.getVM().string_traits },
+            else => unreachable,
+        }
     }
 
     /// Return the size for allocating this object on the heap.

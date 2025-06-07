@@ -12,6 +12,7 @@ const context = @import("../context.zig");
 const pointer = @import("../../utility/pointer.zig");
 const Selector = @import("../Selector.zig");
 const MapObject = @import("../object.zig").MapObject;
+const ValueSlot = @import("../object_lookup.zig").ValueSlot;
 const heap_import = @import("../Heap.zig");
 const IntegerValue = value_import.IntegerValue;
 const GenericValue = @import("../value.zig").Value;
@@ -83,16 +84,31 @@ pub const Array = extern struct {
         }
     }
 
+    // --- Well-known value slots ---
+    const VALUE_SLOT_PARENT = 0;
+
     pub fn lookup(self: Array.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
-        _ = self;
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Array.lookup: Looking at traits array\n", .{});
-        const array_traits = context.getVM().array_traits;
         if (selector.equals(Selector.well_known.parent))
-            return LookupResult{ .Regular = array_traits };
+            return .{ .Found = .{
+                .object = @ptrCast(self),
+                .value_slot_index = VALUE_SLOT_PARENT,
+            } };
 
+        const array_traits = context.getVM().array_traits;
         return array_traits.lookup(selector);
+    }
+
+    /// Get the value slot at the given index.
+    pub fn getValueSlot(self: Array.Ptr, index: usize) ValueSlot {
+        _ = self;
+
+        switch (index) {
+            VALUE_SLOT_PARENT => return .{ .Constant = context.getVM().array_traits },
+            else => unreachable,
+        }
     }
 
     pub fn getValues(self: Array.Ptr) []GenericValue {

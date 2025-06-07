@@ -562,10 +562,53 @@ pub fn sendMessage(
 
     actor.ensureCanRead(receiver, source_range);
 
-    return switch (receiver.lookup(selector)) {
-        .Regular => |lookup_result| {
-            if (lookup_result.asObject()) |lookup_result_object| {
-                if (lookup_result_object.asType(.Method)) |method| {
+    const lookup_result = receiver.lookup(selector);
+    const value_slot = switch (lookup_result) {
+        .Found => |lookup_target| lookup_target.object.getValueSlot(lookup_target.value_slot_index),
+        .FoundUncacheable => |value_slot| value_slot,
+
+        .Nothing => return ExecutionResult.runtimeError(
+            try RuntimeError.initFormatted(source_range, "Unknown selector {}", .{selector}),
+        ),
+        // FIXME: Factor this out into a separate function, it makes this bit
+        //        of code quite noisy.
+        .ActorMessage => |actor_message| {
+            const method = actor_message.method;
+            const argument_count = method.getArgumentSlotCount();
+            const argument_slice = actor.argument_stack.lastNItems(argument_count);
+
+            var target_actor = actor_message.target_actor.getActor();
+
+            // FIXME: Figure out a way to avoid creating an owned slice here.
+            //        This is required for the time being because we don't have
+            //        a better first-in-last-out (which is how messages are
+            //        processed) structure yet.
+            const vm = vm_context.getVM();
+            const new_arguments_slice = try vm.allocator.alloc(Value, argument_slice.len);
+            errdefer vm.allocator.free(new_arguments_slice);
+
+            // Blessing each argument is required so that actors don't share memory.
+            for (argument_slice, 0..) |argument, i| {
+                new_arguments_slice[i] = try bless.bless(target_actor.id, argument);
+            }
+
+            try target_actor.putMessageInMailbox(
+                vm.allocator,
+                actor.actor_object.get(),
+                method,
+                new_arguments_slice,
+                source_range,
+            );
+
+            actor.argument_stack.popNItems(argument_count);
+            return ExecutionResult.resolve(vm.global_nil);
+        },
+    };
+
+    return resolve: switch (value_slot) {
+        .Constant => |target| {
+            if (target.asObject()) |target_object| {
+                if (target_object.asType(.Method)) |method| {
                     const argument_count = method.getArgumentSlotCount();
                     const argument_slice = actor.argument_stack.lastNItems(argument_count);
 
@@ -583,9 +626,17 @@ pub fn sendMessage(
                 }
             }
 
-            return ExecutionResult.resolve(lookup_result);
+            return ExecutionResult.resolve(target);
         },
-        .Assignment => |assignment_context| {
+        .Assignable => |assignment_context| {
+            // Just because it's assignable doesn't mean we're actually
+            // assigning right now! Check if we are actually performing an
+            // assignment.
+            if (!selector.canAssignTo(assignment_context.selector)) {
+                // No, this was a simple lookup. Treat it like a constant.
+                continue :resolve .{ .Constant = assignment_context.value_ptr.* };
+            }
+
             const argument_slice = actor.argument_stack.lastNItems(1);
             var argument = argument_slice[0];
             // NOTE: This is required, for instance, when we are assigning `self` to
@@ -626,38 +677,6 @@ pub fn sendMessage(
             actor.argument_stack.popNItems(1);
             return ExecutionResult.resolve(receiver);
         },
-        .ActorMessage => |actor_message| {
-            const method = actor_message.method;
-            const argument_count = method.getArgumentSlotCount();
-            const argument_slice = actor.argument_stack.lastNItems(argument_count);
-
-            var target_actor = actor_message.target_actor.getActor();
-
-            // FIXME: Figure out a way to avoid creating an owned slice here.
-            //        This is required for the time being because we don't have
-            //        a better first-in-last-out (which is how messages are
-            //        processed) structure yet.
-            const vm = vm_context.getVM();
-            const new_arguments_slice = try vm.allocator.alloc(Value, argument_slice.len);
-            errdefer vm.allocator.free(new_arguments_slice);
-
-            // Blessing each argument is required so that actors don't share memory.
-            for (argument_slice, 0..) |argument, i| {
-                new_arguments_slice[i] = try bless.bless(target_actor.id, argument);
-            }
-
-            try target_actor.putMessageInMailbox(
-                vm.allocator,
-                actor.actor_object.get(),
-                method,
-                new_arguments_slice,
-                source_range,
-            );
-
-            actor.argument_stack.popNItems(argument_count);
-            return ExecutionResult.resolve(vm.global_nil);
-        },
-        .Nothing => ExecutionResult.runtimeError(try RuntimeError.initFormatted(source_range, "Unknown selector {}", .{selector})),
     };
 }
 

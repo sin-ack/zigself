@@ -11,11 +11,13 @@ const Actor = @import("../Actor.zig");
 const Value = value_import.Value;
 const debug = @import("../../debug.zig");
 const slots = @import("slots.zig");
+const Object = @import("../object.zig").Object;
 const pointer = @import("../../utility/pointer.zig");
 const context = @import("../context.zig");
 const Selector = @import("../Selector.zig");
 const bytecode = @import("../bytecode.zig");
 const ByteArray = @import("../ByteArray.zig");
+const ValueSlot = @import("../object_lookup.zig").ValueSlot;
 const Activation = @import("../Activation.zig");
 const SlotsObject = slots.Slots;
 const SourceRange = @import("../SourceRange.zig");
@@ -77,17 +79,32 @@ pub const Block = extern struct {
         try self.visitAssignableSlotValues(visitor);
     }
 
+    // --- Well-known value slots ---
+    const VALUE_SLOT_PARENT = 0;
+
     pub fn lookup(self: Block.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         // NOTE: executeMessage will handle the execution of the block itself.
-        _ = self;
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Block.lookup: Looking at traits block\n", .{});
-        const block_traits = context.getVM().block_traits;
         if (selector.equals(Selector.well_known.parent))
-            return LookupResult{ .Regular = block_traits };
+            return .{ .Found = .{
+                .object = @ptrCast(self),
+                .value_slot_index = VALUE_SLOT_PARENT,
+            } };
 
+        const block_traits = context.getVM().block_traits;
         return block_traits.lookup(selector);
+    }
+
+    /// Get the value slot at the given index.
+    pub fn getValueSlot(self: Block.Ptr, index: usize) ValueSlot {
+        _ = self;
+
+        switch (index) {
+            VALUE_SLOT_PARENT => return .{ .Constant = context.getVM().block_traits },
+            else => unreachable,
+        }
     }
 
     // --- Slot counts ---

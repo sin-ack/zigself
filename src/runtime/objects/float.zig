@@ -11,6 +11,7 @@ const Object = @import("../object.zig").Object;
 const context = @import("../context.zig");
 const pointer = @import("../../utility/pointer.zig");
 const Selector = @import("../Selector.zig");
+const ValueSlot = @import("../object_lookup.zig").ValueSlot;
 const heap_import = @import("../Heap.zig");
 const GenericValue = @import("../value.zig").Value;
 const IntegerValue = @import("../value.zig").IntegerValue;
@@ -96,17 +97,32 @@ pub const Float = extern struct {
         _ = visitor;
     }
 
+    // --- Well-known value slots ---
+    const VALUE_SLOT_PARENT = 0;
+
     /// Perform a lookup on this object.
     pub fn lookup(self: Float.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
-        _ = self;
         _ = previously_visited;
 
         if (LOOKUP_DEBUG) std.debug.print("Float.lookup: Looking at traits float\n", .{});
-        const float_traits = context.getVM().float_traits;
         if (selector.equals(Selector.well_known.parent))
-            return LookupResult{ .Regular = float_traits };
+            return .{ .Found = .{
+                .object = @ptrCast(self),
+                .value_slot_index = VALUE_SLOT_PARENT,
+            } };
 
+        const float_traits = context.getVM().float_traits;
         return float_traits.lookup(selector);
+    }
+
+    /// Get the value slot at the given index.
+    pub fn getValueSlot(self: Float.Ptr, index: usize) ValueSlot {
+        _ = self;
+
+        switch (index) {
+            VALUE_SLOT_PARENT => return .{ .Constant = context.getVM().float_traits },
+            else => unreachable,
+        }
     }
 
     pub fn requiredSizeForAllocation() usize {
