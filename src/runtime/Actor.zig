@@ -64,7 +64,7 @@ next_method_is_inline: bool = false,
 
 /// The currently active source range. This is updated by the source_range
 /// instruction.
-range: Range = .{ .start = 0, .end = 0 },
+range: Range = .{ .start = 0, .end = 1 },
 
 /// The ID of this actor, which determines the ownership of each object in the
 /// system.

@@ -788,7 +788,7 @@ fn parseMethod(self: *Parser, argument_names: []const []const u8, permissiveness
         const argument_slot = AST.SlotNode{
             .range = .{
                 .start = 0,
-                .end = 0,
+                .end = 1,
             },
             .name = argument_name,
             .value = null,
