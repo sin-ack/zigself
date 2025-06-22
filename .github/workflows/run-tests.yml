@@ -18,7 +18,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v1
         with:
-          version: 0.15.0-dev.465+bb79c85cb
+          version: 0.15.0-dev.864+75d0ec9c0
 
       - name: Run tests
         run: zig build test --summary all

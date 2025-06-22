@@ -44,6 +44,10 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("zigself", zigself);
     exe.root_module.addImport("zig-args", zig_args);
     exe.root_module.addImport("tracy", tracy);
+    // NOTE: Currently forced to use LLVM backend due to native backend lacking
+    //       tail call capabilities (which we use in the interpreter).
+    //       https://github.com/ziglang/zig/issues/24044
+    exe.use_llvm = true;
 
     b.installArtifact(exe);
 
@@ -63,6 +67,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     test_harness_exe.root_module.addImport("zigself", zigself);
+    // NOTE: Currently forced to use LLVM backend due to native backend lacking
+    //       tail call capabilities (which we use in the interpreter).
+    //       https://github.com/ziglang/zig/issues/24044
+    test_harness_exe.use_llvm = true;
 
     const test_harness_run_cmd = b.addRunArtifact(test_harness_exe);
     if (b.args) |args| {

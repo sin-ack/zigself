@@ -39,7 +39,7 @@ You need the Zig compiler, preferably one built with the known-good version
 commit. You can find the source code, instructions for building, and more on the
 [Zig repository](https://github.com/ziglang/zig).
 
-Latest Zig version known to work is [0.15.0-dev.465+bb79c85cb](https://github.com/ziglang/zig/commit/bb79c85cb).
+Latest Zig version known to work is [0.15.0-dev.864+75d0ec9c0](https://github.com/ziglang/zig/commit/75d0ec9c0).
 Earlier and later versions may work but there are no guarantees.
 
 ## Building zigSelf
