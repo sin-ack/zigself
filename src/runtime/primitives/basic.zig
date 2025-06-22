@@ -116,8 +116,10 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
     if (!did_parse_without_errors) {
         // TODO: Pass error information to the failure block.
         return try interpreter.sendMessage(
+            context.vm,
             failure_block,
             Selector.well_known.value,
+            null,
             context.target_location,
             context.source_range,
         );
@@ -128,8 +130,10 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
             // TODO: Pass error information to the failure block.
             std.debug.print("Code generation for the script passed to _EvaluateStringIfFail: failed", .{});
             return try interpreter.sendMessage(
+                context.vm,
                 failure_block,
                 Selector.well_known.value,
+                null,
                 context.target_location,
                 context.source_range,
             );
@@ -165,8 +169,10 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
             context.vm.restoreStackSnapshot(stack_snapshot);
 
             const block_result = try interpreter.sendMessage(
+                context.vm,
                 failure_block,
                 Selector.well_known.value,
+                null,
                 context.target_location,
                 context.source_range,
             );

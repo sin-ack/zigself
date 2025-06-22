@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Map = @import("../map.zig").Map;
 const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
@@ -15,6 +16,7 @@ const heap_import = @import("../Heap.zig");
 const value_import = @import("../value.zig");
 const GenericValue = value_import.Value;
 const LookupResult = @import("../object_lookup.zig").LookupResult;
+const VirtualMachine = @import("../VirtualMachine.zig");
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
@@ -119,6 +121,13 @@ pub const Managed = extern struct {
         try visitor.visit(&self.value, @ptrCast(self));
     }
 
+    pub fn getMapForCaching(self: Managed.Ptr, vm: *const VirtualMachine) ?Map.Ptr {
+        _ = self;
+        _ = vm;
+        // Should there be a managed map for caching only?
+        @panic("FIXME");
+    }
+
     // --- Well-known value slots ---
     const VALUE_SLOT_VALUE = 0;
 
@@ -129,6 +138,7 @@ pub const Managed = extern struct {
         if (selector.equals(Selector.well_known.value)) {
             return .{ .Found = .{
                 .object = @ptrCast(self),
+                .value_slot = self.getValueSlot(VALUE_SLOT_VALUE),
                 .value_slot_index = VALUE_SLOT_VALUE,
             } };
         }

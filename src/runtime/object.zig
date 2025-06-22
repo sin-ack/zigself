@@ -246,6 +246,12 @@ pub const Object = extern struct {
         return self.dispatch(.Panic, object_lookup.LookupResult, "lookup", .{ selector, previously_visited });
     }
 
+    /// Get the map for this object for caching purposes. This can be the
+    /// object's own map, or a "representative map" otherwise.
+    pub fn getMapForCaching(self: Object.Ptr, vm: *const VirtualMachine) ?Map.Ptr {
+        return self.dispatch(.Required, ?Map.Ptr, "getMapForCaching", .{vm});
+    }
+
     /// Get the value slot at the given index.
     pub fn getValueSlot(self: Object.Ptr, index: usize) ValueSlot {
         return self.dispatch(.Panic, ValueSlot, "getValueSlot", .{index});

@@ -143,10 +143,13 @@ pub fn slotsLookup(
         const slot_selector = Selector.fromSlot(slot);
         if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing selector {} vs. slot {}\n", .{ selector, slot_selector });
 
-        if (selector.equals(slot_selector) or selector.canAssignTo(slot_selector)) {
+        const matches_constant = selector.equals(slot_selector);
+        const matches_assignable = selector.canAssignTo(slot_selector);
+        if (matches_constant or matches_assignable) {
             return .{
                 .Found = .{
                     .object = @ptrCast(object),
+                    .value_slot = getValueSlotGeneric(ObjectType, object, slot_index),
                     .value_slot_index = slot_index,
                 },
             };
@@ -254,6 +257,11 @@ pub const Slots = extern struct {
 
     pub fn getMap(self: Slots.Ptr) SlotsMap.Ptr {
         return self.object.getMap().unsafeAsType(.Slots);
+    }
+
+    pub fn getMapForCaching(self: Slots.Ptr, vm: *const VirtualMachine) ?Map.Ptr {
+        _ = vm;
+        return @ptrCast(self.getMap());
     }
 
     pub fn getSlots(self: Slots.Ptr) Slot.Slice {

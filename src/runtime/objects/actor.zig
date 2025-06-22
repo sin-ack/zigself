@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Map = @import("../map.zig").Map;
 const heap = @import("../Heap.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
@@ -83,6 +84,12 @@ pub const Actor = extern struct {
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: Actor.Ptr, visitor: anytype) !void {
         try visitor.visit(&self.context, @ptrCast(self));
+    }
+
+    pub fn getMapForCaching(self: Actor.Ptr, vm: *const VirtualMachine) ?Map.Ptr {
+        _ = self;
+        _ = vm;
+        return null;
     }
 
     pub fn humanReadableName() []const u8 {

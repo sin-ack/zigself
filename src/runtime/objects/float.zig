@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Map = @import("../map.zig").Map;
 const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
@@ -97,6 +98,11 @@ pub const Float = extern struct {
         _ = visitor;
     }
 
+    pub fn getMapForCaching(self: Float.Ptr, vm: *const VirtualMachine) ?Map.Ptr {
+        _ = self;
+        return vm.float_traits.unsafeAsMap();
+    }
+
     // --- Well-known value slots ---
     const VALUE_SLOT_PARENT = 0;
 
@@ -108,6 +114,7 @@ pub const Float = extern struct {
         if (selector.equals(Selector.well_known.parent))
             return .{ .Found = .{
                 .object = @ptrCast(self),
+                .value_slot = self.getValueSlot(VALUE_SLOT_PARENT),
                 .value_slot_index = VALUE_SLOT_PARENT,
             } };
 

@@ -23,6 +23,8 @@ const SlotsObject = slots.Slots;
 const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
 const LookupResult = @import("../object_lookup.zig").LookupResult;
+const ExecutableMap = @import("executable_map.zig").ExecutableMap;
+const VirtualMachine = @import("../VirtualMachine.zig");
 const exceedsBoundsOf = @import("../../utility/bounds_check.zig").exceedsBoundsOf;
 const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;
 
@@ -198,10 +200,19 @@ pub const Activation = extern struct {
 
     pub fn lookup(self: Activation.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
         const slots_lookup_result = slots.slotsLookup(Activation, self, selector, previously_visited);
-        if (slots_lookup_result != .Nothing) return slots_lookup_result;
-
-        // Receiver lookup
-        return self.receiver.lookup(selector);
+        // NOTE: If the activation object is the one that contains the slot, we
+        //       must NOT cache the result. Activation objects should only live
+        //       for the duration of a method or block activation, so anything
+        //       we cache will be stale by the time the activation is done.
+        return switch (slots_lookup_result) {
+            // Not on us, so look it up on the receiver.
+            .Nothing => self.receiver.lookup(selector),
+            .Found => |lookup_target| if (@as(Activation.Ptr, @ptrCast(lookup_target.object)) == self)
+                .{ .FoundUncacheable = self.getValueSlot(lookup_target.value_slot_index) }
+            else
+                slots_lookup_result,
+            else => slots_lookup_result,
+        };
     }
 
     /// Get the value slot at the given index.
@@ -248,6 +259,18 @@ pub const Activation = extern struct {
     }
 
     // --- Map dispatch ---
+
+    /// Return the executable map from the map backing this activation.
+    pub fn getExecutableMap(self: Activation.Ptr) ExecutableMap.Ptr {
+        // NOTE: This looks like an unsafe cast, but both Block and Method maps
+        //       use ExecutableMap as their base type.
+        return @ptrCast(self.slots.object.getMap());
+    }
+
+    pub fn getMapForCaching(self: Activation.Ptr, vm: *const VirtualMachine) ?Map.Ptr {
+        _ = vm;
+        return @ptrCast(self.getExecutableMap());
+    }
 
     fn getMethodMap(self: Activation.Ptr) MethodMap.Ptr {
         if (self.getActivationType() == .Block) {

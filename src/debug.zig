@@ -27,6 +27,8 @@ pub const LOW_EXECUTABLE_DUMP_DEBUG = false;
 pub const EXECUTION_DEBUG = false;
 /// Print pushes and pops to VM stacks.
 pub const STACK_DEBUG = false;
+/// Print all inline cache operations.
+pub const INLINE_CACHE_DEBUG = false;
 /// Report when a an empty heap handle slot was found non-optimally.
 pub const HEAP_HANDLE_MISS_DEBUG = false;
 /// Crash the VM if an out-of-order heap handle untrack happens.

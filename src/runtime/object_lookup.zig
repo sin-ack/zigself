@@ -19,6 +19,7 @@ pub const ValueSlot = union(enum) {
     Constant: Value,
     /// An assignable value slot.
     Assignable: struct {
+        // FIXME: Deduplicate this with `LookupTarget.object`
         /// The object that contains the value.
         object: Object.Ptr,
         /// The pointer to the value. Can be safely written to. Note that if
@@ -37,7 +38,9 @@ pub const ValueSlot = union(enum) {
 pub const LookupTarget = struct {
     /// The object that contains the value.
     object: Object.Ptr,
-    /// The index of this value in the object's value slots.
+    /// The value slot that was found.
+    value_slot: ValueSlot,
+    /// The index of this value slot in the object.
     value_slot_index: usize,
 };
 

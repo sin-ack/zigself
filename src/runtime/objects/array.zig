@@ -72,6 +72,11 @@ pub const Array = extern struct {
         return self.object.getMap().unsafeAsType(.Array);
     }
 
+    pub fn getMapForCaching(self: Array.Ptr, vm: *const VirtualMachine) ?Map.Ptr {
+        _ = vm;
+        return @ptrCast(self.getMap());
+    }
+
     pub fn getSize(self: Array.Ptr) usize {
         return self.getMap().getSize();
     }
@@ -94,6 +99,7 @@ pub const Array = extern struct {
         if (selector.equals(Selector.well_known.parent))
             return .{ .Found = .{
                 .object = @ptrCast(self),
+                .value_slot = self.getValueSlot(VALUE_SLOT_PARENT),
                 .value_slot_index = VALUE_SLOT_PARENT,
             } };
 

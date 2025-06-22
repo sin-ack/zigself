@@ -181,6 +181,15 @@ pub const Value = packed struct(u64) {
         };
     }
 
+    /// Get the map for this object for caching purposes. This can be the
+    /// object's own map, or a "representative map" otherwise.
+    pub fn getMapForCaching(self: Value, vm: *const VirtualMachine) ?Map.Ptr {
+        return switch (self.type) {
+            .Integer => vm.integer_traits.unsafeAsMap(),
+            .Object => self.unsafeAsObject().getMapForCaching(vm),
+        };
+    }
+
     /// Clone this value on the heap and return a reference to the new copy.
     pub fn clone(self: Value, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID) Value {
         return switch (self.type) {

@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Map = @import("../map.zig").Map;
 const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
@@ -106,6 +107,11 @@ pub const ByteArray = extern struct {
         // FIXME: Byte array memory is now allocated outside the heap.
     }
 
+    pub fn getMapForCaching(self: ByteArray.Ptr, vm: *const VirtualMachine) ?Map.Ptr {
+        _ = self;
+        return vm.string_traits.unsafeAsMap();
+    }
+
     // --- Well-known value slots ---
     const VALUE_SLOT_PARENT = 0;
 
@@ -116,6 +122,7 @@ pub const ByteArray = extern struct {
         if (selector.equals(Selector.well_known.parent))
             return .{ .Found = .{
                 .object = @ptrCast(self),
+                .value_slot = self.getValueSlot(VALUE_SLOT_PARENT),
                 .value_slot_index = VALUE_SLOT_PARENT,
             } };
 

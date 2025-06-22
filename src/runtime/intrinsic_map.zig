@@ -16,6 +16,7 @@ const MapObject = @import("object.zig").MapObject;
 const ValueSlot = @import("object_lookup.zig").ValueSlot;
 const ObjectType = @import("object.zig").ObjectType;
 const LookupResult = @import("object_lookup.zig").LookupResult;
+const VirtualMachine = @import("VirtualMachine.zig");
 
 /// A shaped object makes it easy to define an object with well-known slots for
 /// use in primitives. The values can currently only be constants. This function
@@ -155,6 +156,11 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
             return @ptrCast(self.object.getMap());
         }
 
+        pub fn getMapForCaching(self: Ptr, vm: *const VirtualMachine) ?Map.Ptr {
+            _ = vm;
+            return @ptrCast(self.getMap());
+        }
+
         pub fn getSizeInMemory(self: Ptr) usize {
             _ = self;
             return requiredSizeForAllocation();
@@ -187,6 +193,7 @@ fn IntrinsicObject(comptime MapT: type, comptime field_names: []const []const u8
                     return LookupResult{
                         .Found = .{
                             .object = @ptrCast(self),
+                            .value_slot = self.getValueSlot(index),
                             .value_slot_index = index,
                         },
                     };

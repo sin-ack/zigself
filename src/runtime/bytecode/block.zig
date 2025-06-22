@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 
 const instruction = @import("./instruction.zig");
 const Range = @import("../../language/Range.zig");
+const InlineCacheEntry = @import("../inline_cache.zig").InlineCacheEntry;
 
 const SEAL = std.debug.runtime_safety;
 
@@ -168,6 +169,15 @@ fn Block(comptime InstructionT: type) type {
 
             try self.instructions.multi_array.append(allocator, undefined);
             return self.instructions.multi_array.len - 1;
+        }
+
+        /// Allocate an inline cache based on the current block.
+        pub fn allocateInlineCache(self: *Self, allocator: Allocator) ![]InlineCacheEntry {
+            const cache = try allocator.alloc(InlineCacheEntry, self.send_count);
+            for (cache) |*entry| {
+                entry.* = .init();
+            }
+            return cache;
         }
 
         /// Return the amount of instructions in this block.

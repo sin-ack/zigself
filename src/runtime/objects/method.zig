@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Map = @import("../map.zig").Map;
 const Slot = @import("../slot.zig").Slot;
 const Actor = @import("../Actor.zig");
 const slots = @import("slots.zig");
@@ -23,6 +24,7 @@ const value_import = @import("../value.zig");
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
 const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationObject = @import("activation.zig").Activation;
+const InlineCacheEntry = @import("../inline_cache.zig").InlineCacheEntry;
 const SlotsLikeMapBase = slots.SlotsLikeMapBase;
 const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;
 const AssignableSlotsMixin = slots.AssignableSlotsMixin;
@@ -65,6 +67,12 @@ pub const Method = extern struct {
         return self.slots.object.getMap().unsafeAsType(.Method);
     }
 
+    pub fn getMapForCaching(self: Method.Ptr, vm: *const VirtualMachine) ?Map.Ptr {
+        _ = self;
+        _ = vm;
+        @panic("!!! getMapForCaching should never be called on Method!");
+    }
+
     pub fn getSlots(self: Method.Ptr) Slot.Slice {
         return self.getMap().getSlots();
     }
@@ -87,7 +95,7 @@ pub const Method = extern struct {
     ) !Method.Ptr {
         const toplevel_context_method_map = blk: {
             const toplevel_context_name = try ByteArray.createWithValues(allocator, heap, token, .Global, toplevel_context_string);
-            break :blk try MethodMap.create(heap, token, 0, 0, false, toplevel_context_name, block, executable);
+            break :blk try MethodMap.create(allocator, heap, token, 0, 0, false, toplevel_context_name, block, executable);
         };
         return create(token, context.getActor().id, toplevel_context_method_map, &.{});
     }
@@ -158,6 +166,7 @@ pub const MethodMap = extern struct {
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
+        allocator: Allocator,
         heap: *VirtualMachine.Heap,
         token: *heap_import.AllocationToken,
         argument_slot_count: u8,
@@ -169,11 +178,14 @@ pub const MethodMap = extern struct {
     ) !MethodMap.Ptr {
         const size = MethodMap.requiredSizeForAllocation(total_slot_count);
 
-        const memory_area = token.allocate(size);
-        var self: MethodMap.Ptr = @ptrCast(memory_area);
-        self.init(argument_slot_count, total_slot_count, is_inline_method, method_name, block, executable);
+        const inline_cache = try block.allocateInlineCache(allocator);
+        errdefer allocator.free(inline_cache);
 
+        const memory_area = token.allocate(size);
         try heap.markAddressAsNeedingFinalization(memory_area);
+
+        var self: MethodMap.Ptr = @ptrCast(memory_area);
+        self.init(argument_slot_count, total_slot_count, is_inline_method, method_name, block, executable, inline_cache);
         return self;
     }
 
@@ -185,8 +197,9 @@ pub const MethodMap = extern struct {
         method_name: ByteArray.Ptr,
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
+        inline_cache: []InlineCacheEntry,
     ) void {
-        self.base_map.init(.Method, argument_slot_count, total_slot_count, block, executable);
+        self.base_map.init(.Method, argument_slot_count, total_slot_count, block, executable, inline_cache);
         self.setInlineMethod(is_inline_method);
         self.method_name = .init(method_name);
     }
@@ -209,6 +222,7 @@ pub const MethodMap = extern struct {
 
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: MethodMap.Ptr, visitor: anytype) !void {
+        try self.base_map.visitEdges(visitor);
         try visitor.visit(&self.method_name.value, @ptrCast(self));
         try self.visitSlots(visitor);
     }
@@ -219,6 +233,8 @@ pub const MethodMap = extern struct {
 
     pub fn clone(self: MethodMap.Ptr, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken) !MethodMap.Ptr {
         const new_map = try create(
+            // FIXME: Pass vm into clone!
+            context.getVM().allocator,
             heap,
             token,
             self.getArgumentSlotCount(),

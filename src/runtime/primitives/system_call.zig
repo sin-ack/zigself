@@ -31,7 +31,7 @@ fn callFailureBlock(
     const errno_value = Value.fromInteger(errno_int);
 
     try context.actor.argument_stack.push(context.vm.allocator, errno_value);
-    return try interpreter.sendMessage(block, Selector.well_known.@"value:", context.target_location, context.source_range);
+    return try interpreter.sendMessage(context.vm, block, Selector.well_known.@"value:", null, context.target_location, context.source_range);
 }
 
 /// Create a managed FD out of a native FD value.

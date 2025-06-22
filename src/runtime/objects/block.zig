@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Map = @import("../map.zig").Map;
 const Slot = @import("../slot.zig").Slot;
 const heap_import = @import("../Heap.zig");
 const Actor = @import("../Actor.zig");
@@ -26,6 +27,7 @@ const value_import = @import("../value.zig");
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
 const VirtualMachine = @import("../VirtualMachine.zig");
 const ActivationObject = @import("activation.zig").Activation;
+const InlineCacheEntry = @import("../inline_cache.zig").InlineCacheEntry;
 const SlotsLikeMapBase = slots.SlotsLikeMapBase;
 const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;
 const AssignableSlotsMixin = slots.AssignableSlotsMixin;
@@ -69,6 +71,11 @@ pub const Block = extern struct {
         return self.slots.object.getMap().unsafeAsType(.Block);
     }
 
+    pub fn getMapForCaching(self: Block.Ptr, vm: *const VirtualMachine) ?Map.Ptr {
+        _ = vm;
+        return @ptrCast(self.getMap());
+    }
+
     pub fn getSlots(self: Block.Ptr) Slot.Slice {
         return self.getMap().getSlots();
     }
@@ -90,6 +97,7 @@ pub const Block = extern struct {
         if (selector.equals(Selector.well_known.parent))
             return .{ .Found = .{
                 .object = @ptrCast(self),
+                .value_slot = self.getValueSlot(VALUE_SLOT_PARENT),
                 .value_slot_index = VALUE_SLOT_PARENT,
             } };
 
@@ -190,6 +198,7 @@ pub const BlockMap = extern struct {
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
     pub fn create(
+        allocator: Allocator,
         heap: *VirtualMachine.Heap,
         token: *heap_import.AllocationToken,
         argument_slot_count: u8,
@@ -201,11 +210,14 @@ pub const BlockMap = extern struct {
     ) !BlockMap.Ptr {
         const size = BlockMap.requiredSizeForAllocation(total_slot_count);
 
-        const memory_area = token.allocate(size);
-        var self: BlockMap.Ptr = @ptrCast(memory_area);
-        self.init(argument_slot_count, total_slot_count, parent_activation, nonlocal_return_target_activation, block, executable);
+        const inline_cache = try block.allocateInlineCache(allocator);
+        errdefer allocator.free(inline_cache);
 
+        const memory_area = token.allocate(size);
         try heap.markAddressAsNeedingFinalization(memory_area);
+
+        var self: BlockMap.Ptr = @ptrCast(memory_area);
+        self.init(argument_slot_count, total_slot_count, parent_activation, nonlocal_return_target_activation, block, executable, inline_cache);
         return self;
     }
 
@@ -217,8 +229,9 @@ pub const BlockMap = extern struct {
         nonlocal_return_target_activation: Activation.ActivationRef,
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
+        inline_cache: []InlineCacheEntry,
     ) void {
-        self.base_map.init(.Block, argument_slot_count, total_slot_count, block, executable);
+        self.base_map.init(.Block, argument_slot_count, total_slot_count, block, executable, inline_cache);
         self.parent_activation = parent_activation;
         self.nonlocal_return_target_activation = nonlocal_return_target_activation;
     }
@@ -229,6 +242,7 @@ pub const BlockMap = extern struct {
 
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: BlockMap.Ptr, visitor: anytype) !void {
+        try self.base_map.visitEdges(visitor);
         try self.visitSlots(visitor);
     }
 
@@ -238,6 +252,8 @@ pub const BlockMap = extern struct {
 
     pub fn clone(self: BlockMap.Ptr, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken) !BlockMap.Ptr {
         const new_map = try create(
+            // FIXME: Pass vm into clone!
+            context.getVM().allocator,
             heap,
             token,
             self.getArgumentSlotCount(),

@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Map = @import("../map.zig").Map;
 const Actor = @import("../Actor.zig");
 const debug = @import("../../debug.zig");
 const Object = @import("../object.zig").Object;
@@ -69,6 +70,12 @@ pub const ActorProxy = extern struct {
 
     pub fn getSizeForCloning(self: ActorProxy.Ptr) usize {
         return self.getSizeInMemory();
+    }
+
+    pub fn getMapForCaching(self: ActorProxy.Ptr, vm: *const VirtualMachine) ?Map.Ptr {
+        _ = self;
+        _ = vm;
+        return null;
     }
 
     pub fn requiredSizeForAllocation() usize {

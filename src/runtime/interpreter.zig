@@ -29,6 +29,7 @@ const FloatObject = @import("objects/float.zig").Float;
 const SlotsObject = objects_slots.Slots;
 const MethodObject = objects_method.Method;
 const RuntimeError = @import("RuntimeError.zig");
+const ExecutableMap = @import("objects/executable_map.zig").ExecutableMap;
 const objects_block = @import("objects/block.zig");
 const objects_slots = @import("objects/slots.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
@@ -225,7 +226,8 @@ fn opcodeSend(context: *InterpreterContext) InterpreterError!ExecutionResult {
 
     const payload = block.getTypedPayload(index, .Send);
     const receiver = context.vm.readRegister(payload.receiver_location);
-    return try performSend(receiver, payload.selector, block.getTargetLocation(index), context.getSourceRange());
+    const executable_map = context.getCurrentActivationObject().getExecutableMap();
+    return try performSend(context.vm, receiver, payload.selector, executable_map, payload.send_index, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodeSelfSend(context: *InterpreterContext) InterpreterError!ExecutionResult {
@@ -234,7 +236,8 @@ fn opcodeSelfSend(context: *InterpreterContext) InterpreterError!ExecutionResult
 
     const payload = block.getTypedPayload(index, .SelfSend);
     const receiver = context.actor.activation_stack.getCurrent().activation_object.value;
-    return try performSend(receiver, payload.selector, block.getTargetLocation(index), context.getSourceRange());
+    const executable_map = context.getCurrentActivationObject().getExecutableMap();
+    return try performSend(context.vm, receiver, payload.selector, executable_map, payload.send_index, block.getTargetLocation(index), context.getSourceRange());
 }
 
 fn opcodePrimSend(context: *InterpreterContext) InterpreterError!ExecutionResult {
@@ -449,12 +452,15 @@ fn opcodeVerifySlotSentinel(context: *InterpreterContext) InterpreterError!Execu
 // --- Utility functions ---
 
 fn performSend(
+    vm: *const VirtualMachine,
     receiver: Value,
     selector: Selector,
+    executable_map: ExecutableMap.Ptr,
+    send_index: u32,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !ExecutionResult {
-    const result = try sendMessage(receiver, selector, target_location, source_range);
+    const result = try sendMessage(vm, receiver, selector, .{ .executable_map = executable_map, .send_index = send_index }, target_location, source_range);
     switch (result) {
         .Resolved => |v| {
             var value = v;
@@ -513,31 +519,44 @@ fn performPrimitiveSend(
     }
 }
 
+/// The location to use for getting and putting the inline cache.
+pub const InlineCacheLocation = struct {
+    /// The executable map the inline cache is stored in.
+    executable_map: ExecutableMap.Ptr,
+    /// The index of the send instruction in the executable map.
+    send_index: u32,
+};
+
 /// Sends a message to the given receiver, returning the result if it can be
 /// immediately resolved. If the message send must create a new activation,
 /// pushes the activation onto the stack and signals that the activation has
 /// changed. If the message send fails, returns the runtime error.
 pub fn sendMessage(
+    vm: *const VirtualMachine,
     receiver: Value,
     selector: Selector,
+    inline_cache_location: ?InlineCacheLocation,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !ExecutionResult {
     const actor = vm_context.getActor();
+
+    var real_receiver = real_receiver: {
+        if (receiver.asObject()) |receiver_object| {
+            if (receiver_object.asType(.Activation)) |activation| {
+                break :real_receiver activation.findActivationReceiver();
+            }
+        }
+
+        break :real_receiver receiver;
+    };
 
     // Check for block activation. Note that this isn't the same as calling a
     // method on traits block, this is actually executing the block itself via
     // the virtual method.
     // FIXME: Only activate this when the message looks like a block execution.
     {
-        var block_receiver = receiver;
-        if (block_receiver.asObject()) |block_object| {
-            if (block_object.asType(.Activation)) |activation| {
-                block_receiver = activation.findActivationReceiver();
-            }
-        }
-
-        if (block_receiver.asObject()) |block_object| {
+        if (real_receiver.asObject()) |block_object| {
             if (block_object.asType(.Block)) |receiver_as_block| {
                 // FIXME: Check hash here instead of name.
                 if (receiver_as_block.isCorrectMessageForBlockExecution(selector.name)) {
@@ -562,47 +581,67 @@ pub fn sendMessage(
 
     actor.ensureCanRead(receiver, source_range);
 
-    const lookup_result = receiver.lookup(selector);
-    const value_slot = switch (lookup_result) {
-        .Found => |lookup_target| lookup_target.object.getValueSlot(lookup_target.value_slot_index),
-        .FoundUncacheable => |value_slot| value_slot,
-
-        .Nothing => return ExecutionResult.runtimeError(
-            try RuntimeError.initFormatted(source_range, "Unknown selector {}", .{selector}),
-        ),
-        // FIXME: Factor this out into a separate function, it makes this bit
-        //        of code quite noisy.
-        .ActorMessage => |actor_message| {
-            const method = actor_message.method;
-            const argument_count = method.getArgumentSlotCount();
-            const argument_slice = actor.argument_stack.lastNItems(argument_count);
-
-            var target_actor = actor_message.target_actor.getActor();
-
-            // FIXME: Figure out a way to avoid creating an owned slice here.
-            //        This is required for the time being because we don't have
-            //        a better first-in-last-out (which is how messages are
-            //        processed) structure yet.
-            const vm = vm_context.getVM();
-            const new_arguments_slice = try vm.allocator.alloc(Value, argument_slice.len);
-            errdefer vm.allocator.free(new_arguments_slice);
-
-            // Blessing each argument is required so that actors don't share memory.
-            for (argument_slice, 0..) |argument, i| {
-                new_arguments_slice[i] = try bless.bless(target_actor.id, argument);
+    const value_slot = value_slot: {
+        if (inline_cache_location) |location| {
+            const maybe_cached_value_slot = location.executable_map.getCachedValueSlot(vm, location.send_index, real_receiver);
+            if (maybe_cached_value_slot) |cached_value_slot| {
+                // If the inline cache is hit, we can use the cached value slot directly.
+                break :value_slot cached_value_slot;
             }
+        }
 
-            try target_actor.putMessageInMailbox(
-                vm.allocator,
-                actor.actor_object.get(),
-                method,
-                new_arguments_slice,
-                source_range,
-            );
+        // Cache miss: Perform a lookup. :(
+        const lookup_result = receiver.lookup(selector);
+        break :value_slot switch (lookup_result) {
+            .Found => |lookup_target| found_value_slot: {
+                @branchHint(.likely);
+                if (inline_cache_location) |location| {
+                    // Cache this so our future lookups can use it. :)
+                    location.executable_map.cacheLookupTarget(vm, location.send_index, real_receiver, lookup_target);
+                }
+                break :found_value_slot lookup_target.value_slot;
+            },
+            .FoundUncacheable => |value_slot| value_slot,
 
-            actor.argument_stack.popNItems(argument_count);
-            return ExecutionResult.resolve(vm.global_nil);
-        },
+            .Nothing => {
+                @branchHint(.cold);
+                return ExecutionResult.runtimeError(
+                    try RuntimeError.initFormatted(source_range, "Unknown selector {}", .{selector}),
+                );
+            },
+            // FIXME: Factor this out into a separate function, it makes this bit
+            //        of code quite noisy.
+            .ActorMessage => |actor_message| {
+                const method = actor_message.method;
+                const argument_count = method.getArgumentSlotCount();
+                const argument_slice = actor.argument_stack.lastNItems(argument_count);
+
+                var target_actor = actor_message.target_actor.getActor();
+
+                // FIXME: Figure out a way to avoid creating an owned slice here.
+                //        This is required for the time being because we don't have
+                //        a better first-in-last-out (which is how messages are
+                //        processed) structure yet.
+                const new_arguments_slice = try vm.allocator.alloc(Value, argument_slice.len);
+                errdefer vm.allocator.free(new_arguments_slice);
+
+                // Blessing each argument is required so that actors don't share memory.
+                for (argument_slice, 0..) |argument, i| {
+                    new_arguments_slice[i] = try bless.bless(target_actor.id, argument);
+                }
+
+                try target_actor.putMessageInMailbox(
+                    vm.allocator,
+                    actor.actor_object.get(),
+                    method,
+                    new_arguments_slice,
+                    source_range,
+                );
+
+                actor.argument_stack.popNItems(argument_count);
+                return ExecutionResult.resolve(vm.global_nil);
+            },
+        };
     };
 
     return resolve: switch (value_slot) {
@@ -826,6 +865,7 @@ fn createMethod(
 
     const block = executable.value.getBlock(block_index);
     const method_map = try MethodMap.create(
+        vm_context.getVM().allocator,
         vm_context.getHeap(),
         &token,
         argument_slot_count,
@@ -893,6 +933,7 @@ fn createBlock(
     defer token.deinit();
 
     const block_map = try BlockMap.create(
+        vm_context.getVM().allocator,
         vm_context.getHeap(),
         &token,
         argument_slot_count,
