@@ -34,7 +34,10 @@ fn lowerBlock(allocator: Allocator, executable: *bytecode.lowcode.Executable, as
     defer register_pool.deinit(allocator);
 
     const low_block_index = try executable.makeBlock();
+
     const low_block = executable.getBlock(low_block_index);
+    // FIXME: Is there a way we can avoid setting this manually?
+    low_block.send_count = ast_block.send_count;
 
     const push_registers_inst_offset = try low_block.reserveInstruction(allocator);
 
