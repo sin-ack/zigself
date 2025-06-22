@@ -172,16 +172,19 @@ pub fn makeSpecializedExecutor(comptime opcode: bytecode.Instruction.Opcode) typ
             if (EXECUTION_DEBUG) {
                 const block = context.getCurrentBytecodeBlock();
                 const index = context.getInstructionIndex();
+                const range = block.getSourceRange(index);
+
+                const source_range = SourceRange.initNoRef(context.getDefinitionExecutable(), range);
 
                 const inst = bytecode.Instruction{
                     .target = block.getTargetLocation(index),
                     .opcode = block.getOpcode(index),
                     .payload = block.getPayload(index),
-                    .source_range = block.getSourceRange(index),
+                    .source_range = range,
                 };
-                std.debug.print("[#{} {s} {s}] Executing: {} = {}\n", .{
-                    context.actor.id,
-                    context.getDefinitionExecutable().value.definition_script.value.file_path,
+                std.debug.print("[#{} {} {s}] Executing: {} = {}\n", .{
+                    @intFromEnum(context.actor.id),
+                    source_range,
                     context.getCurrentActivation().creator_message.getValues(),
                     inst.target,
                     inst,
