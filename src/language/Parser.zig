@@ -29,6 +29,47 @@ pub const ParseError = Allocator.Error;
 const Parser = @This();
 const TokenIndex = enum(usize) { _ };
 
+/// A list of slots that are currently being built. Ensures that all slots have
+/// unique names (which significantly simplifies the implementation of the later
+/// stages of the VM).
+const SlotList = struct {
+    slots: std.ArrayListUnmanaged(AST.SlotNode) = .empty,
+
+    pub const empty: SlotList = .{};
+    pub const Error = error{SlotExistsWithSameName};
+
+    pub fn deinit(self: *SlotList, allocator: Allocator) void {
+        for (self.slots.items) |*slot| {
+            slot.deinit(allocator);
+        }
+        self.slots.deinit(allocator);
+    }
+
+    /// Append a new slot to the list. Returns an error if the slot name
+    /// collides with an existing slot name.
+    pub fn append(
+        self: *SlotList,
+        allocator: Allocator,
+        slot: AST.SlotNode,
+    ) !void {
+        // Ensure that the slot name is unique.
+        for (self.slots.items) |existing_slot| {
+            if (std.mem.eql(u8, existing_slot.name, slot.name)) {
+                return Error.SlotExistsWithSameName;
+            }
+        }
+
+        // Append the slot.
+        try self.slots.append(allocator, slot);
+    }
+
+    /// Extract the slots into a slice. From this point on, the slots should
+    /// be treated as immutable. Caller will take ownership of the slice.
+    pub fn toOwnedSlice(self: *SlotList, allocator: Allocator) ![]AST.SlotNode {
+        return try self.slots.toOwnedSlice(allocator);
+    }
+};
+
 pub fn createFromFile(allocator: Allocator, file_path: []const u8) !*Parser {
     const cwd = std.fs.cwd();
     const file = try cwd.openFile(file_path, .{});
@@ -286,22 +327,19 @@ pub fn parseScript(self: *Parser) ParseError!?AST.ScriptNode {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    const slots = try self.parseSlotList(.Method);
-    errdefer {
-        for (slots) |*slot| {
-            slot.deinit(self.allocator);
-        }
-        self.allocator.free(slots);
-    }
+    var slots = try self.parseSlotList(.Method);
+    defer slots.deinit(self.allocator);
 
     const statements = try self.parseStatementList(.DisallowNonlocalReturns, .EOF);
+    errdefer statements.unrefWithAllocator(self.allocator);
 
+    const slots_slice = try slots.toOwnedSlice(self.allocator);
     return AST.ScriptNode{
         .range = .{
             .start = 0,
             .end = self.buffer.len,
         },
-        .slots = slots,
+        .slots = slots_slice,
         .statements = statements,
     };
 }
@@ -394,27 +432,33 @@ fn parseStatementList(self: *Parser, nonlocal_returns: StatementListNonlocalRetu
 // <MethodSlotList> ::= "|" "|" | "|" <MethodSlot> ("." <MethodSlot>)* "."? "|"
 // <BlockSlotList> ::= "|" "|" | "|" <BlockSlot> ("." <BlockSlot>)* (".")? "|"
 const SlotType = enum { Slots, Method, Block };
-fn parseSlotList(self: *Parser, slot_type: SlotType) ParseError![]AST.SlotNode {
+fn parseSlotList(self: *Parser, slot_type: SlotType) ParseError!SlotList {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    _ = self.tryConsume(.Pipe) orelse return &.{};
+    _ = self.tryConsume(.Pipe) orelse return .empty;
     // Empty slot list.
-    if (self.tryConsume(.Pipe)) |_| return &.{};
+    if (self.tryConsume(.Pipe)) |_| return .empty;
 
-    var slots = std.ArrayList(AST.SlotNode).init(self.allocator);
-    defer {
-        for (slots.items) |*slot| {
-            slot.deinit(self.allocator);
-        }
-        slots.deinit();
-    }
+    var slots: SlotList = .empty;
+    errdefer slots.deinit(self.allocator);
 
     {
-        var slot = (try self.parseSlot(slot_type)) orelse return slots.toOwnedSlice();
+        var slot = (try self.parseSlot(slot_type)) orelse return slots;
         errdefer slot.deinit(self.allocator);
 
-        try slots.append(slot);
+        slots.append(self.allocator, slot) catch |err| switch (err) {
+            SlotList.Error.SlotExistsWithSameName => {
+                try self.diagnostics.reportDiagnosticFormatted(
+                    .Error,
+                    self.offsetToLocation(slot.range.start),
+                    "Slot with name '{s}' already defined",
+                    .{slot.name},
+                );
+                return slots;
+            },
+            else => |e| return e,
+        };
     }
 
     while (self.tryConsume(.Period)) |_| {
@@ -422,14 +466,25 @@ fn parseSlotList(self: *Parser, slot_type: SlotType) ParseError![]AST.SlotNode {
             break;
         }
 
-        var slot = (try self.parseSlot(slot_type)) orelse return slots.toOwnedSlice();
+        var slot = (try self.parseSlot(slot_type)) orelse return slots;
         errdefer slot.deinit(self.allocator);
 
-        try slots.append(slot);
+        slots.append(self.allocator, slot) catch |err| switch (err) {
+            SlotList.Error.SlotExistsWithSameName => {
+                try self.diagnostics.reportDiagnosticFormatted(
+                    .Error,
+                    self.offsetToLocation(slot.range.start),
+                    "Slot with name '{s}' already defined",
+                    .{slot.name},
+                );
+                return slots;
+            },
+            else => |e| return e,
+        };
     }
 
     _ = try self.expectTokenContext(.Pipe, "after slot list");
-    return slots.toOwnedSlice();
+    return slots;
 }
 
 // <SlotsSlot> ::= <CommonSlot> | <NonPrimitiveIdentifier> "*" ("=" | "<-") <Expression>
@@ -774,18 +829,14 @@ fn parseMethod(self: *Parser, argument_names: []const []const u8, permissiveness
 
     const start = self.tokenStartAt(self.consume());
 
-    var slots = try std.ArrayList(AST.SlotNode).initCapacity(self.allocator, argument_names.len);
-    defer {
-        for (slots.items) |*slot| {
-            slot.deinit(self.allocator);
-        }
-        slots.deinit();
-    }
+    var slots = try self.parseSlotList(if (permissiveness == .AllowParentSlots) .Slots else .Method);
+    defer slots.deinit(self.allocator);
 
-    // TODO: Check if the argument names are unique.
-    // TODO: Check for clobbering of argument slots by non-argument slots.
     for (argument_names) |argument_name| {
         const argument_slot = AST.SlotNode{
+            // FIXME: This should point to the AST node that caused the argument
+            //        slot to be defined (:foo in blocks or `keyword: [foo]` in
+            //        methods).
             .range = .{
                 .start = 0,
                 .end = 1,
@@ -797,29 +848,29 @@ fn parseMethod(self: *Parser, argument_names: []const []const u8, permissiveness
             .is_mutable = true,
             .is_argument = true,
         };
-        try slots.append(argument_slot);
+
+        slots.append(self.allocator, argument_slot) catch |err| switch (err) {
+            SlotList.Error.SlotExistsWithSameName => {
+                try self.diagnostics.reportDiagnosticFormatted(
+                    .Error,
+                    self.offsetToLocation(start),
+                    "Slot with name '{s}' already defined",
+                    .{argument_name},
+                );
+                return null;
+            },
+            else => return @errorCast(err),
+        };
     }
-
-    {
-        const nonargument_slots = try self.parseSlotList(if (permissiveness == .AllowParentSlots) .Slots else .Method);
-        defer self.allocator.free(nonargument_slots);
-        errdefer {
-            for (nonargument_slots) |*slot| {
-                slot.deinit(self.allocator);
-            }
-        }
-
-        try slots.appendSlice(nonargument_slots);
-    }
-
-    const slots_slice = try slots.toOwnedSlice();
-    errdefer self.allocator.free(slots_slice);
 
     const statements = try self.parseStatementList(.DisallowNonlocalReturns, .ParenClose);
     errdefer statements.unrefWithAllocator(self.allocator);
 
     const end = self.tokenStartAt(self.token_index);
     const method_node = try self.allocator.create(AST.ObjectNode);
+    errdefer method_node.destroy(self.allocator);
+
+    const slots_slice = try slots.toOwnedSlice(self.allocator);
     method_node.* = .{
         .range = .{
             .start = start,
@@ -1405,8 +1456,8 @@ fn parseSlotsObject(self: *Parser) ParseError!?*AST.ObjectNode {
     self.assertToken(.ParenOpen);
     const start = self.tokenStartAt(self.consume());
 
-    const slots = try self.parseSlotList(.Slots);
-    errdefer self.allocator.free(slots);
+    var slots = try self.parseSlotList(.Slots);
+    defer slots.deinit(self.allocator);
 
     _ = try self.expectTokenContext(.ParenClose, "after slots object");
     const end = self.tokenStartAt(self.token_index);
@@ -1415,12 +1466,15 @@ fn parseSlotsObject(self: *Parser) ParseError!?*AST.ObjectNode {
     errdefer statements.unrefWithAllocator(self.allocator);
 
     const object_node = try self.allocator.create(AST.ObjectNode);
+    errdefer object_node.destroy(self.allocator);
+
+    const slots_slice = try slots.toOwnedSlice(self.allocator);
     object_node.* = .{
         .range = .{
             .start = start,
             .end = end,
         },
-        .slots = slots,
+        .slots = slots_slice,
         .statements = statements,
     };
 
@@ -1435,20 +1489,23 @@ fn parseBlock(self: *Parser) ParseError!?*AST.BlockNode {
     self.assertToken(.BracketOpen);
     const start = self.tokenStartAt(self.consume());
 
-    const slots = try self.parseSlotList(.Block);
-    errdefer self.allocator.free(slots);
+    var slots = try self.parseSlotList(.Block);
+    errdefer slots.deinit(self.allocator);
 
     const statements = try self.parseStatementList(.AllowNonlocalReturns, .BracketClose);
     errdefer statements.unrefWithAllocator(self.allocator);
 
     const end = self.tokenStartAt(self.token_index);
     const block_node = try self.allocator.create(AST.BlockNode);
+    errdefer block_node.destroy(self.allocator);
+
+    const slots_slice = try slots.toOwnedSlice(self.allocator);
     block_node.* = .{
         .range = .{
             .start = start,
             .end = end,
         },
-        .slots = slots,
+        .slots = slots_slice,
         .statements = statements,
     };
 
