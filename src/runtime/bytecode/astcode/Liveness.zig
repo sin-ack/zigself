@@ -56,18 +56,6 @@ fn instructionReferencesRegister(block: *astcode.Block, index: usize, location: 
             const payload = block.getTypedPayload(index, .PrimSend);
             break :blk payload.receiver_location == location;
         },
-        .PushConstantSlot => blk: {
-            const payload = block.getTypedPayload(index, .PushConstantSlot);
-            break :blk payload.name_location == location or payload.value_location == location;
-        },
-        .PushAssignableSlot => blk: {
-            const payload = block.getTypedPayload(index, .PushAssignableSlot);
-            break :blk payload.name_location == location or payload.value_location == location;
-        },
-        .PushArgumentSlot => blk: {
-            const payload = block.getTypedPayload(index, .PushArgumentSlot);
-            break :blk payload.name_location == location or payload.value_location == location;
-        },
         .CreateMethod => blk: {
             const payload = block.getTypedPayload(index, .CreateMethod);
             break :blk payload.method_name_location == location;
@@ -90,9 +78,7 @@ fn instructionReferencesRegister(block: *astcode.Block, index: usize, location: 
         .CreateByteArray,
         .SetMethodInline,
         .PushArgumentSentinel,
-        .PushSlotSentinel,
         .VerifyArgumentSentinel,
-        .VerifySlotSentinel,
         => false,
 
         .PushRegisters => unreachable,

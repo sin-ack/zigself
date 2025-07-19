@@ -56,7 +56,6 @@ mailbox: Mailbox = .{},
 /// execution uses these registers to perform its operations.
 register_file: bytecode.lowcode.RegisterFile = .{},
 argument_stack: Stack(Value, "Argument stack", ValueSentinel) = .{},
-slot_stack: Stack(Slot, "Slot stack", SlotSentinel) = .{},
 saved_register_stack: Stack(SavedRegister, "Saved register stack", null) = .{},
 
 /// Whether the next created method is going to be an inline method.
@@ -75,7 +74,6 @@ const Mailbox = std.DoublyLinkedList;
 
 // Sentinel values for the stacks
 pub const ValueSentinel: Value = @bitCast(@as(u64, 0xCCCCCCCCCCCCCCCC));
-pub const SlotSentinel = Slot{ .name = @bitCast(ValueSentinel), .properties = .{ .properties = ValueSentinel }, .value = ValueSentinel };
 
 pub const MaximumStackDepth = 2048;
 
@@ -83,7 +81,6 @@ pub const MaximumStackDepth = 2048;
 /// restored after a non-local return.
 pub const StackSnapshot = struct {
     argument_height: usize,
-    slot_height: usize,
     saved_register_height: usize,
 
     /// Bump just the argument stack height. This is necessary because the stack
@@ -214,7 +211,6 @@ fn deinit(self: *Actor, allocator: Allocator) void {
     self.clearMailbox(allocator);
 
     self.argument_stack.deinit(allocator);
-    self.slot_stack.deinit(allocator);
     self.saved_register_stack.deinit(allocator);
 
     for (self.activation_stack.getStack()) |*activation| {
@@ -381,14 +377,12 @@ pub fn exitActivation(
 pub fn takeStackSnapshot(self: Actor) StackSnapshot {
     return .{
         .argument_height = self.argument_stack.height(),
-        .slot_height = self.slot_stack.height(),
         .saved_register_height = self.saved_register_stack.height(),
     };
 }
 
 pub fn restoreStackSnapshot(self: *Actor, snapshot: StackSnapshot) void {
     self.argument_stack.restoreTo(snapshot.argument_height);
-    self.slot_stack.restoreTo(snapshot.slot_height);
     self.saved_register_stack.restoreTo(snapshot.saved_register_height);
 }
 
@@ -425,15 +419,6 @@ pub fn visitEdges(
         try visitor.visit(&activation.activation_object.value, null);
     }
 
-    // Go through the slot, argument and saved register stacks.
-    for (self.slot_stack.allItems()) |*slot| {
-        if (std.meta.eql(SlotSentinel, slot.*))
-            continue;
-
-        try visitor.visit(&slot.name.value, null);
-        try visitor.visit(&slot.value, null);
-    }
-
     for (self.argument_stack.allItems()) |*argument| {
         if (std.meta.eql(ValueSentinel, argument.*))
             continue;
@@ -467,7 +452,6 @@ pub fn unwindStacks(self: *Actor) void {
     self.activation_stack.clear();
 
     self.argument_stack.restoreTo(0);
-    self.slot_stack.restoreTo(0);
     self.saved_register_stack.restoreTo(0);
 }
 

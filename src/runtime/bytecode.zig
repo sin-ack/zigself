@@ -1,10 +1,11 @@
-// Copyright (c) 2022, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
 pub const instruction = @import("./bytecode/instruction.zig");
 pub const block = @import("./bytecode/block.zig");
 pub const executable = @import("./bytecode/executable.zig");
+pub const ObjectDescriptor = @import("./bytecode/ObjectDescriptor.zig");
 
 pub const astcode = @import("./bytecode/astcode.zig");
 pub const lowcode = @import("./bytecode/lowcode.zig");

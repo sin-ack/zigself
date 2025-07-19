@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -12,6 +12,7 @@ const Script = @import("../../language/Script.zig");
 const astcode = @import("./astcode.zig");
 const Selector = @import("../Selector.zig");
 const primitives = @import("../primitives.zig");
+const ObjectDescriptor = @import("ObjectDescriptor.zig");
 
 const Block = astcode.Block;
 const Executable = astcode.Executable;
@@ -128,14 +129,12 @@ fn generateObject(self: *AstGen, executable: *Executable, block: *Block, object:
         return error.AstGenFailure;
     }
 
-    try self.generateSlotList(executable, block, object.slots, object.range);
+    const object_descriptor = try self.generateSlotList(executable, block, object.slots, object.range);
+    errdefer object_descriptor.deinit(executable.allocator);
 
+    const object_descriptor_index = try executable.addObjectDescriptor(object_descriptor);
     const object_location = self.allocateRegister();
-    const slot_count: u16 = @intCast(object.slots.len);
-    try block.addInstruction(executable.allocator, .CreateObject, object_location, .{ .slot_count = slot_count }, object.range);
-
-    if (std.debug.runtime_safety)
-        try block.addInstruction(executable.allocator, .VerifySlotSentinel, .Nil, {}, object.range);
+    try block.addInstruction(executable.allocator, .CreateObject, object_location, .{ .descriptor_index = object_descriptor_index }, object.range);
 
     return object_location;
 }
@@ -145,40 +144,40 @@ fn generateBlock(self: *AstGen, executable: *Executable, block: *Block, block_no
     self.method_execution_depth = 0;
     defer self.method_execution_depth = saved_method_execution_depth;
 
-    const block_index = try self.generateSlotsAndCodeCommon(executable, block, block_node.slots, block_node.statements.value.statements, block_node.range);
-    const block_location = self.allocateRegister();
-    const slot_count: u16 = @intCast(block_node.slots.len);
-    try block.addInstruction(executable.allocator, .CreateBlock, block_location, .{
-        .slot_count = slot_count,
-        .block_index = block_index,
-    }, block_node.range);
+    const result = try self.generateSlotsAndCodeCommon(executable, block, block_node.slots, block_node.statements.value.statements, block_node.range);
+    errdefer result.object_descriptor.deinit(executable.allocator);
 
-    if (std.debug.runtime_safety)
-        try block.addInstruction(executable.allocator, .VerifySlotSentinel, .Nil, {}, block_node.range);
+    const object_descriptor_index = try executable.addObjectDescriptor(result.object_descriptor);
+    const block_location = self.allocateRegister();
+    try block.addInstruction(executable.allocator, .CreateBlock, block_location, .{
+        .descriptor_index = object_descriptor_index,
+        .block_index = result.block_index,
+    }, block_node.range);
 
     return block_location;
 }
 
-fn generateMethod(self: *AstGen, executable: *Executable, block: *Block, method_name_location: RegisterLocation, method: *ast.ObjectNode) AstGenError!RegisterLocation {
+fn generateMethod(self: *AstGen, executable: *Executable, block: *Block, method_name: []const u8, method: *ast.ObjectNode) AstGenError!RegisterLocation {
     self.method_execution_depth += 1;
     defer self.method_execution_depth -= 1;
 
-    const block_index = try self.generateSlotsAndCodeCommon(executable, block, method.slots, method.statements.value.statements, method.range);
+    const result = try self.generateSlotsAndCodeCommon(executable, block, method.slots, method.statements.value.statements, method.range);
+    errdefer result.object_descriptor.deinit(executable.allocator);
 
     if (self.method_execution_depth > 1) {
         try block.addInstruction(executable.allocator, .SetMethodInline, .Nil, {}, method.range);
     }
 
+    const method_name_location = self.allocateRegister();
+    try block.addInstruction(executable.allocator, .CreateByteArray, method_name_location, method_name, method.range);
+
+    const object_descriptor_index = try executable.addObjectDescriptor(result.object_descriptor);
     const method_location = self.allocateRegister();
-    const slot_count: u16 = @intCast(method.slots.len);
     try block.addInstruction(executable.allocator, .CreateMethod, method_location, .{
         .method_name_location = method_name_location,
-        .slot_count = slot_count,
-        .block_index = block_index,
+        .descriptor_index = object_descriptor_index,
+        .block_index = result.block_index,
     }, method.range);
-
-    if (std.debug.runtime_safety)
-        try block.addInstruction(executable.allocator, .VerifySlotSentinel, .Nil, {}, method.range);
 
     return method_location;
 }
@@ -299,6 +298,11 @@ fn generateNumber(self: *AstGen, executable: *Executable, block: *Block, number:
     return number_location;
 }
 
+const SlotsAndCodeResult = struct {
+    block_index: u32,
+    object_descriptor: ObjectDescriptor,
+};
+
 fn generateSlotsAndCodeCommon(
     self: *AstGen,
     executable: *Executable,
@@ -306,7 +310,7 @@ fn generateSlotsAndCodeCommon(
     slots: []ast.SlotNode,
     statements: []ast.ExpressionNode,
     source_range: Range,
-) AstGenError!u32 {
+) AstGenError!SlotsAndCodeResult {
     var assignable_slot_count: usize = 0;
     var argument_slot_count: usize = 0;
     for (slots) |slot| {
@@ -326,7 +330,8 @@ fn generateSlotsAndCodeCommon(
         return error.AstGenFailure;
     }
 
-    try self.generateSlotList(executable, parent_block, slots, source_range);
+    const object_descriptor = try self.generateSlotList(executable, parent_block, slots, source_range);
+    errdefer object_descriptor.deinit(executable.allocator);
 
     const child_block_index = try executable.makeBlock();
     const child_block = executable.getBlock(child_block_index);
@@ -338,17 +343,22 @@ fn generateSlotsAndCodeCommon(
     try child_block.addInstruction(executable.allocator, .Return, .Nil, .{ .value_location = last_expression_location }, source_range);
 
     child_block.seal();
-    return child_block_index;
+    return .{
+        .block_index = child_block_index,
+        .object_descriptor = object_descriptor,
+    };
 }
 
-fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots: []ast.SlotNode, source_range: Range) AstGenError!void {
-    if (std.debug.runtime_safety)
-        try block.addInstruction(executable.allocator, .PushSlotSentinel, .Nil, {}, source_range);
+fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots: []ast.SlotNode, source_range: Range) AstGenError!ObjectDescriptor {
+    var slot_descriptors: std.ArrayListUnmanaged(ObjectDescriptor.SlotDescriptor) = .empty;
+    defer {
+        for (slot_descriptors.items) |*slot_descriptor| {
+            slot_descriptor.deinit(executable.allocator);
+        }
+        slot_descriptors.deinit(executable.allocator);
+    }
 
     for (slots) |slot| {
-        const slot_name_location = self.allocateRegister();
-        try block.addInstruction(executable.allocator, .CreateByteArray, slot_name_location, slot.name, slot.range);
-
         const slot_value_location = blk: {
             if (slot.value) |value| {
                 if (value == .Object) {
@@ -361,7 +371,7 @@ fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots
                     }
 
                     if (value.Object.statements.value.statements.len > 0 or has_argument)
-                        break :blk try self.generateMethod(executable, block, slot_name_location, value.Object);
+                        break :blk try self.generateMethod(executable, block, slot.name, value.Object);
                 }
 
                 break :blk try self.generateExpression(executable, block, value);
@@ -374,22 +384,28 @@ fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots
             std.debug.assert(slot.is_mutable);
             std.debug.assert(!slot.is_parent);
 
-            try block.addInstruction(executable.allocator, .PushArgumentSlot, .Nil, .{
-                .name_location = slot_name_location,
-                .value_location = slot_value_location,
-            }, slot.range);
-        } else if (slot.is_mutable) {
-            try block.addInstruction(executable.allocator, .PushAssignableSlot, .Nil, .{
-                .name_location = slot_name_location,
-                .value_location = slot_value_location,
-                .is_parent = slot.is_parent,
-            }, slot.range);
+            const descriptor: ObjectDescriptor.SlotDescriptor = try .initArgument(executable.allocator, slot.name);
+            errdefer descriptor.deinit(executable.allocator);
+            try slot_descriptors.append(executable.allocator, descriptor);
+        } else if (slot.is_parent) {
+            const descriptor: ObjectDescriptor.SlotDescriptor = try .initParent(executable.allocator, slot.name, slot.is_mutable);
+            errdefer descriptor.deinit(executable.allocator);
+            try slot_descriptors.append(executable.allocator, descriptor);
+
+            try block.addInstruction(executable.allocator, .PushArg, .Nil, .{
+                .argument_location = slot_value_location,
+            }, source_range);
         } else {
-            try block.addInstruction(executable.allocator, .PushConstantSlot, .Nil, .{
-                .name_location = slot_name_location,
-                .value_location = slot_value_location,
-                .is_parent = slot.is_parent,
-            }, slot.range);
+            const descriptor: ObjectDescriptor.SlotDescriptor = try .initRegular(executable.allocator, slot.name, slot.is_mutable);
+            errdefer descriptor.deinit(executable.allocator);
+            try slot_descriptors.append(executable.allocator, descriptor);
+
+            try block.addInstruction(executable.allocator, .PushArg, .Nil, .{
+                .argument_location = slot_value_location,
+            }, source_range);
         }
     }
+
+    const descriptors_slice = try slot_descriptors.toOwnedSlice(executable.allocator);
+    return .init(descriptors_slice);
 }

@@ -114,12 +114,12 @@ pub const Slot = extern struct {
     pub const ConstPtr = pointer.HeapPtr(Slot, .Const);
     pub const Ptr = pointer.HeapPtr(Slot, .Mutable);
 
-    pub fn initConstant(name: ByteArray.Ptr, parent: SlotProperties.ParentFlag, value: Value) Slot {
-        return init(name, parent, .Constant, .NotArgument, value);
+    pub fn initRegular(name: ByteArray.Ptr, assignable: SlotProperties.AssignableFlag, value: Value) Slot {
+        return init(name, .NotParent, assignable, .NotArgument, value);
     }
 
-    pub fn initAssignable(name: ByteArray.Ptr, parent: SlotProperties.ParentFlag, value: Value) Slot {
-        return init(name, parent, .Assignable, .NotArgument, value);
+    pub fn initParent(name: ByteArray.Ptr, assignable: SlotProperties.AssignableFlag, value: Value) Slot {
+        return init(name, .Parent, assignable, .NotArgument, value);
     }
 
     pub fn initArgument(name: ByteArray.Ptr) Slot {
@@ -198,12 +198,16 @@ pub const Slot = extern struct {
             return initArgument(self.name.get());
         }
 
-        if (self.isAssignable()) {
-            const slot_value = holder.getAssignableSlotValue(self);
-            return initAssignable(self.name.get(), if (self.isParent()) .Parent else .NotParent, slot_value.*);
+        const slot_value = if (self.isAssignable())
+            holder.getAssignableSlotValue(self).*
+        else
+            self.value;
+
+        if (self.isParent()) {
+            return initParent(self.name.get(), if (self.isAssignable()) .Assignable else .Constant, slot_value);
         }
 
-        return initConstant(self.name.get(), if (self.isParent()) .Parent else .NotParent, self.value);
+        return initRegular(self.name.get(), if (self.isAssignable()) .Assignable else .Constant, slot_value);
     }
 
     fn GetSlotWithMyNameResult(comptime previous_slots_type: type) type {

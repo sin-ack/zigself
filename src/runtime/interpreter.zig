@@ -131,9 +131,6 @@ fn opcodeHandler(comptime opcode: bytecode.Instruction.Opcode) OpcodeHandler {
         .SelfSend => opcodeSelfSend,
         .PrimSend => opcodePrimSend,
         .SelfPrimSend => opcodeSelfPrimSend,
-        .PushConstantSlot => opcodePushConstantSlot,
-        .PushAssignableSlot => opcodePushAssignableSlot,
-        .PushArgumentSlot => opcodePushArgumentSlot,
         .CreateInteger => opcodeCreateInteger,
         .CreateFloatingPoint => opcodeCreateFloatingPoint,
         .CreateByteArray => opcodeCreateByteArray,
@@ -146,9 +143,7 @@ fn opcodeHandler(comptime opcode: bytecode.Instruction.Opcode) OpcodeHandler {
         .PushRegisters => opcodePushRegisters,
         .SetMethodInline => opcodeSetMethodInline,
         .PushArgumentSentinel => opcodePushArgumentSentinel,
-        .PushSlotSentinel => opcodePushSlotSentinel,
         .VerifyArgumentSentinel => opcodeVerifyArgumentSentinel,
-        .VerifySlotSentinel => opcodeVerifySlotSentinel,
     };
 }
 
@@ -261,35 +256,6 @@ fn opcodeSelfPrimSend(context: *InterpreterContext) InterpreterError!ExecutionRe
     return try performPrimitiveSend(receiver, payload.index, block.getTargetLocation(index), context.getSourceRange());
 }
 
-fn opcodePushConstantSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
-    const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushConstantSlot);
-    const name_value = context.vm.readRegister(payload.name_location);
-    const name_byte_array_object = name_value.unsafeAsObject().unsafeAsType(.ByteArray);
-    const value = context.vm.readRegister(payload.value_location);
-
-    try context.actor.slot_stack.push(context.vm.allocator, Slot.initConstant(name_byte_array_object, if (payload.is_parent) .Parent else .NotParent, value));
-    return ExecutionResult.normal();
-}
-
-fn opcodePushAssignableSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
-    const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushAssignableSlot);
-    const name_value = context.vm.readRegister(payload.name_location);
-    const name_byte_array_object = name_value.unsafeAsObject().unsafeAsType(.ByteArray);
-    const value = context.vm.readRegister(payload.value_location);
-
-    try context.actor.slot_stack.push(context.vm.allocator, Slot.initAssignable(name_byte_array_object, if (payload.is_parent) .Parent else .NotParent, value));
-    return ExecutionResult.normal();
-}
-
-fn opcodePushArgumentSlot(context: *InterpreterContext) InterpreterError!ExecutionResult {
-    const payload = context.getCurrentBytecodeBlock().getTypedPayload(context.getInstructionIndex(), .PushArgumentSlot);
-    const name_value = context.vm.readRegister(payload.name_location);
-    const name_byte_array_object = name_value.unsafeAsObject().unsafeAsType(.ByteArray);
-
-    try context.actor.slot_stack.push(context.vm.allocator, Slot.initArgument(name_byte_array_object));
-    return ExecutionResult.normal();
-}
-
 fn opcodeCreateInteger(context: *InterpreterContext) InterpreterError!ExecutionResult {
     const block = context.getCurrentBytecodeBlock();
     const index = context.getInstructionIndex();
@@ -325,17 +291,20 @@ fn opcodeCreateByteArray(context: *InterpreterContext) InterpreterError!Executio
 }
 
 fn opcodeCreateObject(context: *InterpreterContext) InterpreterError!ExecutionResult {
+    const executable = context.getDefinitionExecutable();
     const block = context.getCurrentBytecodeBlock();
     const index = context.getInstructionIndex();
 
+    const object_descriptor_index = block.getTypedPayload(index, .CreateObject).descriptor_index;
     try createObject(
-        block.getTypedPayload(index, .CreateObject).slot_count,
+        executable.value.getObjectDescriptor(object_descriptor_index),
         block.getTargetLocation(index),
     );
     return ExecutionResult.normal();
 }
 
 fn opcodeCreateMethod(context: *InterpreterContext) InterpreterError!ExecutionResult {
+    const executable = context.getDefinitionExecutable();
     const block = context.getCurrentBytecodeBlock();
     const index = context.getInstructionIndex();
 
@@ -343,9 +312,9 @@ fn opcodeCreateMethod(context: *InterpreterContext) InterpreterError!ExecutionRe
     const method_name = context.vm.readRegister(payload.method_name_location).unsafeAsObject().unsafeAsType(.ByteArray);
 
     try createMethod(
-        context.getDefinitionExecutable(),
+        executable,
         method_name,
-        payload.slot_count,
+        executable.value.getObjectDescriptor(payload.descriptor_index),
         payload.block_index,
         block.getTargetLocation(index),
     );
@@ -353,13 +322,14 @@ fn opcodeCreateMethod(context: *InterpreterContext) InterpreterError!ExecutionRe
 }
 
 fn opcodeCreateBlock(context: *InterpreterContext) InterpreterError!ExecutionResult {
+    const executable = context.getDefinitionExecutable();
     const block = context.getCurrentBytecodeBlock();
     const index = context.getInstructionIndex();
 
     const payload = block.getTypedPayload(index, .CreateBlock);
     try createBlock(
-        context.getDefinitionExecutable(),
-        payload.slot_count,
+        executable,
+        executable.value.getObjectDescriptor(payload.descriptor_index),
         payload.block_index,
         block.getTargetLocation(index),
     );
@@ -804,17 +774,56 @@ fn executeMethod(
 }
 
 fn createObject(
-    slot_count: u16,
+    object_descriptor: bytecode.ObjectDescriptor,
     target_location: bytecode.RegisterLocation,
 ) !void {
     const actor = vm_context.getActor();
-    const slots = actor.slot_stack.lastNItems(slot_count);
+
+    // FIXME: We currently have to do this object descriptor -> slot conversion
+    //        because of what the `Slot` code expects. That code can be
+    //        significantly simplified (most of the complexity is a leftover
+    //        from when I had experimented with inherited slots) and this
+    //        conversion can be removed.
+    var slots: std.ArrayListUnmanaged(Slot) = try .initCapacity(
+        // FIXME: Take the VM directly.
+        vm_context.getVM().allocator,
+        object_descriptor.slots.len,
+    );
+    slots.items.len = object_descriptor.slots.len;
+    defer slots.deinit(vm_context.getVM().allocator);
+
+    // NOTE: We have to go backwards when creating the slots because the initial
+    //       values of slots are pushed to the argument stack at this point,
+    //       with the last slot's initial value being at the top of the stack.
+    var slot_descriptor_i = object_descriptor.slots.len;
+    while (slot_descriptor_i > 0) : (slot_descriptor_i -= 1) {
+        const index = slot_descriptor_i - 1;
+        const slot_descriptor = object_descriptor.slots[index];
+
+        var token = try vm_context.getHeap().allocate(ByteArray.requiredSizeForAllocation());
+        defer token.deinit();
+
+        // NOTE: Per ObjectDescriptor documentation, an initial value only
+        //       exists for non-argument slots.
+        const slot_value = if (slot_descriptor.type != .Argument)
+            actor.argument_stack.pop()
+        else
+            null;
+        const slot_name = try ByteArray.createWithValues(vm_context.getVM().allocator, vm_context.getHeap(), &token, actor.id, slot_descriptor.name);
+
+        const slot = switch (slot_descriptor.type) {
+            .Regular => Slot.initRegular(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
+            .Parent => Slot.initParent(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
+            .Argument => Slot.initArgument(slot_name),
+        };
+        slots.items[index] = slot;
+    }
 
     var total_slot_count: u16 = 0;
     var total_assignable_slot_count: u8 = 0;
-    for (slots, 0..) |slot, i| {
-        total_slot_count += slot.requiredSlotSpace(slots[0..i]);
-        total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots[0..i]));
+    for (slots.items, 0..) |slot, i| {
+        total_slot_count += slot.requiredSlotSpace(slots.items[0..i]);
+        total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots.items[0..i]));
     }
 
     var token = try vm_context.getHeap().allocate(
@@ -827,32 +836,70 @@ fn createObject(
     var map_builder: SlotsMap.MapBuilder = undefined;
     map_builder.initInPlace(&token, slots_map);
 
-    for (slots) |slot| {
+    for (slots.items) |slot| {
         map_builder.addSlot(slot);
     }
 
     const the_slots_object = map_builder.createObject();
     vm_context.getVM().writeRegister(target_location, the_slots_object.asValue());
-    actor.slot_stack.popNItems(slot_count);
 }
 
 fn createMethod(
     executable: bytecode.Executable.Ref,
     method_name: ByteArray.Ptr,
-    slot_count: u16,
+    object_descriptor: bytecode.ObjectDescriptor,
     block_index: u32,
     target_location: bytecode.RegisterLocation,
 ) !void {
     const actor = vm_context.getActor();
     defer actor.next_method_is_inline = false;
 
-    const slots = actor.slot_stack.lastNItems(slot_count);
+    // FIXME: We currently have to do this object descriptor -> slot conversion
+    //        because of what the `Slot` code expects. That code can be
+    //        significantly simplified (most of the complexity is a leftover
+    //        from when I had experimented with inherited slots) and this
+    //        conversion can be removed.
+    var slots: std.ArrayListUnmanaged(Slot) = try .initCapacity(
+        // FIXME: Take the VM directly.
+        vm_context.getVM().allocator,
+        object_descriptor.slots.len,
+    );
+    slots.items.len = object_descriptor.slots.len;
+    defer slots.deinit(vm_context.getVM().allocator);
+
+    // NOTE: We have to go backwards when creating the slots because the initial
+    //       values of slots are pushed to the argument stack at this point,
+    //       with the last slot's initial value being at the top of the stack.
+    var slot_descriptor_i = object_descriptor.slots.len;
+    while (slot_descriptor_i > 0) : (slot_descriptor_i -= 1) {
+        const index = slot_descriptor_i - 1;
+        const slot_descriptor = object_descriptor.slots[index];
+
+        var token = try vm_context.getHeap().allocate(ByteArray.requiredSizeForAllocation());
+        defer token.deinit();
+
+        // NOTE: Per ObjectDescriptor documentation, an initial value only
+        //       exists for non-argument slots.
+        const slot_value = if (slot_descriptor.type != .Argument)
+            actor.argument_stack.pop()
+        else
+            null;
+        const slot_name = try ByteArray.createWithValues(vm_context.getVM().allocator, vm_context.getHeap(), &token, actor.id, slot_descriptor.name);
+
+        const slot = switch (slot_descriptor.type) {
+            .Regular => Slot.initRegular(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
+            .Parent => Slot.initParent(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
+            .Argument => Slot.initArgument(slot_name),
+        };
+        slots.items[index] = slot;
+    }
+
     var total_slot_count: u16 = 0;
     var total_assignable_slot_count: u8 = 0;
     var argument_slot_count: u8 = 0;
-    for (slots, 0..) |slot, i| {
-        total_slot_count += slot.requiredSlotSpace(slots[0..i]);
-        total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots[0..i]));
+    for (slots.items, 0..) |slot, i| {
+        total_slot_count += slot.requiredSlotSpace(slots.items[0..i]);
+        total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots.items[0..i]));
 
         // FIXME: This makes the assumption that argument slots are
         //        never overwritten.
@@ -882,29 +929,68 @@ fn createMethod(
     var map_builder: MethodMap.MapBuilder = undefined;
     map_builder.initInPlace(&token, method_map);
 
-    for (slots) |slot| {
+    for (slots.items) |slot| {
         map_builder.addSlot(slot);
     }
 
     const method = map_builder.createObject();
     vm_context.getVM().writeRegister(target_location, method.asValue());
-    actor.slot_stack.popNItems(slot_count);
 }
 
 fn createBlock(
     executable: bytecode.Executable.Ref,
-    slot_count: u16,
+    object_descriptor: bytecode.ObjectDescriptor,
     block_index: u32,
     target_location: bytecode.RegisterLocation,
 ) !void {
     const actor = vm_context.getActor();
-    const slots = actor.slot_stack.lastNItems(slot_count);
+
+    // FIXME: We currently have to do this object descriptor -> slot conversion
+    //        because of what the `Slot` code expects. That code can be
+    //        significantly simplified (most of the complexity is a leftover
+    //        from when I had experimented with inherited slots) and this
+    //        conversion can be removed.
+    var slots: std.ArrayListUnmanaged(Slot) = try .initCapacity(
+        // FIXME: Take the VM directly.
+        vm_context.getVM().allocator,
+        object_descriptor.slots.len,
+    );
+    slots.items.len = object_descriptor.slots.len;
+    defer slots.deinit(vm_context.getVM().allocator);
+
+    // NOTE: We have to go backwards when creating the slots because the initial
+    //       values of slots are pushed to the argument stack at this point,
+    //       with the last slot's initial value being at the top of the stack.
+    var slot_descriptor_i = object_descriptor.slots.len;
+    while (slot_descriptor_i > 0) : (slot_descriptor_i -= 1) {
+        const index = slot_descriptor_i - 1;
+        const slot_descriptor = object_descriptor.slots[index];
+
+        var token = try vm_context.getHeap().allocate(ByteArray.requiredSizeForAllocation());
+        defer token.deinit();
+
+        // NOTE: Per ObjectDescriptor documentation, an initial value only
+        //       exists for non-argument slots.
+        const slot_value = if (slot_descriptor.type != .Argument)
+            actor.argument_stack.pop()
+        else
+            null;
+        const slot_name = try ByteArray.createWithValues(vm_context.getVM().allocator, vm_context.getHeap(), &token, actor.id, slot_descriptor.name);
+
+        const slot = switch (slot_descriptor.type) {
+            .Regular => Slot.initRegular(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
+            .Parent => Slot.initParent(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
+            .Argument => Slot.initArgument(slot_name),
+        };
+        slots.items[index] = slot;
+    }
+
     var total_slot_count: u16 = 0;
     var total_assignable_slot_count: u15 = 0;
     var argument_slot_count: u8 = 0;
-    for (slots, 0..) |slot, i| {
-        total_slot_count += slot.requiredSlotSpace(slots[0..i]);
-        total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots[0..i]));
+    for (slots.items, 0..) |slot, i| {
+        total_slot_count += slot.requiredSlotSpace(slots.items[0..i]);
+        total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots.items[0..i]));
 
         // FIXME: This makes the assumption that argument slots are
         //        never overwritten.
@@ -950,11 +1036,10 @@ fn createBlock(
     var map_builder: BlockMap.MapBuilder = undefined;
     map_builder.initInPlace(&token, block_map);
 
-    for (slots) |slot| {
+    for (slots.items) |slot| {
         map_builder.addSlot(slot);
     }
 
     const the_block_object = map_builder.createObject();
     vm_context.getVM().writeRegister(target_location, the_block_object.asValue());
-    actor.slot_stack.popNItems(slot_count);
 }

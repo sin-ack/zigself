@@ -15,6 +15,14 @@ const LOW_EXECUTABLE_DUMP_DEBUG = debug.LOW_EXECUTABLE_DUMP_DEBUG;
 pub fn lowerExecutable(allocator: Allocator, ast_executable: *bytecode.astcode.Executable) !bytecode.lowcode.Executable.Ref {
     var low_executable = try bytecode.lowcode.Executable.create(allocator, ast_executable.definition_script);
     errdefer low_executable.unref();
+    // FIXME: Is there a way we can avoid copying this manually?
+    for (ast_executable.object_descriptors.items, 0..) |descriptor, i| {
+        const descriptor_copy = try descriptor.copy(allocator);
+        errdefer descriptor_copy.deinit(allocator);
+
+        const new_index = try low_executable.value.addObjectDescriptor(descriptor_copy);
+        std.debug.assert(new_index == i);
+    }
 
     for (ast_executable.blocks.items) |block| {
         try lowerBlock(allocator, low_executable.value, block);
@@ -94,38 +102,6 @@ fn lowerInstruction(
 
             try low_block.addInstruction(allocator, .SelfPrimSend, target, .{ .index = payload.index }, ast_block.getSourceRange(index));
         },
-        .PushConstantSlot => {
-            const payload = ast_block.getTypedPayload(index, .PushConstantSlot);
-            const name_location = register_pool.getAllocatedRegisterFor(payload.name_location);
-            const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
-
-            try low_block.addInstruction(allocator, .PushConstantSlot, .zero, .{
-                .name_location = name_location,
-                .value_location = value_location,
-                .is_parent = payload.is_parent,
-            }, ast_block.getSourceRange(index));
-        },
-        .PushAssignableSlot => {
-            const payload = ast_block.getTypedPayload(index, .PushAssignableSlot);
-            const name_location = register_pool.getAllocatedRegisterFor(payload.name_location);
-            const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
-
-            try low_block.addInstruction(allocator, .PushAssignableSlot, .zero, .{
-                .name_location = name_location,
-                .value_location = value_location,
-                .is_parent = payload.is_parent,
-            }, ast_block.getSourceRange(index));
-        },
-        .PushArgumentSlot => {
-            const payload = ast_block.getTypedPayload(index, .PushArgumentSlot);
-            const name_location = register_pool.getAllocatedRegisterFor(payload.name_location);
-            const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
-
-            try low_block.addInstruction(allocator, .PushArgumentSlot, .zero, .{
-                .name_location = name_location,
-                .value_location = value_location,
-            }, ast_block.getSourceRange(index));
-        },
         .CreateInteger => {
             const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
             try low_block.addInstruction(allocator, .CreateInteger, target, ast_block.getTypedPayload(index, .CreateInteger), ast_block.getSourceRange(index));
@@ -139,9 +115,10 @@ fn lowerInstruction(
             try low_block.addInstruction(allocator, .CreateByteArray, target, ast_block.getTypedPayload(index, .CreateByteArray), ast_block.getSourceRange(index));
         },
         .CreateObject => {
+            const payload = ast_block.getTypedPayload(index, .CreateObject);
             const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
             try low_block.addInstruction(allocator, .CreateObject, target, .{
-                .slot_count = ast_block.getTypedPayload(index, .CreateObject).slot_count,
+                .descriptor_index = payload.descriptor_index,
             }, ast_block.getSourceRange(index));
         },
         .CreateMethod => {
@@ -151,7 +128,7 @@ fn lowerInstruction(
 
             try low_block.addInstruction(allocator, .CreateMethod, target, .{
                 .method_name_location = method_name_location,
-                .slot_count = payload.slot_count,
+                .descriptor_index = payload.descriptor_index,
                 .block_index = payload.block_index,
             }, ast_block.getSourceRange(index));
         },
@@ -160,7 +137,7 @@ fn lowerInstruction(
             const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
 
             try low_block.addInstruction(allocator, .CreateBlock, target, .{
-                .slot_count = payload.slot_count,
+                .descriptor_index = payload.descriptor_index,
                 .block_index = payload.block_index,
             }, ast_block.getSourceRange(index));
         },
@@ -182,14 +159,8 @@ fn lowerInstruction(
         .PushArgumentSentinel => {
             try low_block.addInstruction(allocator, .PushArgumentSentinel, .zero, {}, ast_block.getSourceRange(index));
         },
-        .PushSlotSentinel => {
-            try low_block.addInstruction(allocator, .PushSlotSentinel, .zero, {}, ast_block.getSourceRange(index));
-        },
         .VerifyArgumentSentinel => {
             try low_block.addInstruction(allocator, .VerifyArgumentSentinel, .zero, {}, ast_block.getSourceRange(index));
-        },
-        .VerifySlotSentinel => {
-            try low_block.addInstruction(allocator, .VerifySlotSentinel, .zero, {}, ast_block.getSourceRange(index));
         },
         .PushRegisters => unreachable,
     }

@@ -28,11 +28,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
             SelfSend,
             SelfPrimSend,
 
-            // Pushing to the slot stack
-            PushConstantSlot,
-            PushAssignableSlot,
-            PushArgumentSlot,
-
             // Pushing to the argument stack
             PushArg,
 
@@ -55,9 +50,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
 
             // Sentinels (debugging)
             PushArgumentSentinel,
-            PushSlotSentinel,
             VerifyArgumentSentinel,
-            VerifySlotSentinel,
 
             // --- Lowcode only instructions ---
 
@@ -70,9 +63,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .PrimSend => "prim_send",
                     .SelfSend => "self_send",
                     .SelfPrimSend => "self_prim_send",
-                    .PushConstantSlot => "push_constant_slot",
-                    .PushAssignableSlot => "push_assignable_slot",
-                    .PushArgumentSlot => "push_argument_slot",
                     .PushRegisters => "push_registers",
                     .CreateInteger => "create_integer",
                     .CreateFloatingPoint => "create_floating_point",
@@ -85,9 +75,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .NonlocalReturn => "nonlocal_return",
                     .PushArg => "push_arg",
                     .PushArgumentSentinel => "push_argument_sentinel",
-                    .PushSlotSentinel => "push_slot_sentinel",
                     .VerifyArgumentSentinel => "verify_argument_sentinel",
-                    .VerifySlotSentinel => "verify_slot_sentinel",
                 };
             }
 
@@ -97,8 +85,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .SelfSend => "SelfSend",
                     .PrimSend => "PrimSend",
                     .SelfPrimSend => "SelfPrimSend",
-                    .PushConstantSlot, .PushAssignableSlot => "PushParentableSlot",
-                    .PushArgumentSlot => "PushNonParentSlot",
                     .Return, .NonlocalReturn => "Return",
 
                     .PushRegisters => "PushRegisters",
@@ -110,7 +96,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .CreateByteArray => "CreateByteArray",
                     .PushArg => "PushArg",
 
-                    .PushArgumentSentinel, .PushSlotSentinel, .VerifyArgumentSentinel, .VerifySlotSentinel, .SetMethodInline => "None",
+                    .PushArgumentSentinel, .VerifyArgumentSentinel, .SetMethodInline => "None",
                 };
             }
 
@@ -147,29 +133,20 @@ fn Instruction(comptime RegisterLocationT: type) type {
             SelfPrimSend: struct {
                 index: PrimitiveIndex,
             },
-            PushParentableSlot: struct {
-                name_location: RegisterLocation,
-                value_location: RegisterLocation,
-                is_parent: bool,
-            },
-            PushNonParentSlot: struct {
-                name_location: RegisterLocation,
-                value_location: RegisterLocation,
-            },
             PushArg: struct {
                 argument_location: RegisterLocation,
             },
             CreateInteger: i62,
             CreateFloatingPoint: f64,
             CreateByteArray: []const u8,
-            CreateObject: struct { slot_count: u16 },
+            CreateObject: struct { descriptor_index: u32 },
             CreateMethod: struct {
                 method_name_location: RegisterLocation,
-                slot_count: u16,
+                descriptor_index: u32,
                 block_index: u32,
             },
             CreateBlock: struct {
-                slot_count: u16,
+                descriptor_index: u32,
                 block_index: u32,
             },
             Return: struct {
@@ -212,15 +189,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     const payload = inst.payload.SelfPrimSend;
                     try std.fmt.format(writer, "({})", .{payload.index});
                 },
-                .PushConstantSlot, .PushAssignableSlot => {
-                    const payload = inst.payload.PushParentableSlot;
-                    try std.fmt.format(writer, "({}, {}, {})", .{ payload.name_location, payload.value_location, payload.is_parent });
-                },
-
-                .PushArgumentSlot => {
-                    const payload = inst.payload.PushNonParentSlot;
-                    try std.fmt.format(writer, "({}, {})", .{ payload.name_location, payload.value_location });
-                },
 
                 .CreateInteger => {
                     try std.fmt.format(writer, "({})", .{inst.payload.CreateInteger});
@@ -231,17 +199,17 @@ fn Instruction(comptime RegisterLocationT: type) type {
                 },
 
                 .CreateObject => {
-                    try std.fmt.format(writer, "({})", .{inst.payload.CreateObject.slot_count});
+                    try std.fmt.format(writer, "(OD#{})", .{inst.payload.CreateObject.descriptor_index});
                 },
 
                 .CreateMethod => {
                     const payload = inst.payload.CreateMethod;
-                    try std.fmt.format(writer, "({}, {}, #{})", .{ payload.method_name_location, payload.slot_count, payload.block_index });
+                    try std.fmt.format(writer, "({}, OD#{}, #{})", .{ payload.method_name_location, payload.descriptor_index, payload.block_index });
                 },
 
                 .CreateBlock => {
                     const payload = inst.payload.CreateBlock;
-                    try std.fmt.format(writer, "({}, #{})", .{ payload.slot_count, payload.block_index });
+                    try std.fmt.format(writer, "(OD#{}, #{})", .{ payload.descriptor_index, payload.block_index });
                 },
 
                 .CreateByteArray => {
@@ -264,9 +232,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
                 },
 
                 .PushArgumentSentinel,
-                .PushSlotSentinel,
                 .VerifyArgumentSentinel,
-                .VerifySlotSentinel,
                 .SetMethodInline,
                 => {
                     try std.fmt.format(writer, "()", .{});
