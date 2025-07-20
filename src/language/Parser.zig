@@ -66,6 +66,15 @@ const SlotList = struct {
     /// Extract the slots into a slice. From this point on, the slots should
     /// be treated as immutable. Caller will take ownership of the slice.
     pub fn toOwnedSlice(self: *SlotList, allocator: Allocator) ![]AST.SlotNode {
+        // Sort argument slots last. This ensures a consistent ordering, and is
+        // relied upon in object layout.
+        std.mem.sort(AST.SlotNode, self.slots.items, {}, struct {
+            pub fn lessThan(context: void, lhs: AST.SlotNode, rhs: AST.SlotNode) bool {
+                _ = context;
+                return !lhs.is_argument and rhs.is_argument;
+            }
+        }.lessThan);
+
         return try self.slots.toOwnedSlice(allocator);
     }
 };
