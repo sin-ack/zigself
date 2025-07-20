@@ -1,4 +1,4 @@
-// Copyright (c) 2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2024-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0
 
@@ -14,7 +14,7 @@ pub const Heap = @import("runtime/Heap.zig");
 pub const SourceRange = @import("runtime/SourceRange.zig");
 pub const VirtualMachine = @import("runtime/VirtualMachine.zig");
 pub const bytecode = @import("runtime/bytecode.zig");
-pub const interpreter = @import("runtime/interpreter.zig");
+pub const Interpreter = @import("runtime/Interpreter.zig");
 pub const map = @import("runtime/map.zig");
 pub const object = @import("runtime/object.zig");
 pub const value = @import("runtime/value.zig");

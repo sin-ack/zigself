@@ -18,7 +18,7 @@ const ExecutionResult = @import("../execution_result.zig").ExecutionResult;
 const addrinfo_object = @import("../objects/intrinsic/addrinfo.zig");
 const exceedsBoundsOf = @import("../../utility/bounds_check.zig").exceedsBoundsOf;
 
-const interpreter = @import("../interpreter.zig");
+const Interpreter = @import("../Interpreter.zig");
 
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
 
@@ -31,7 +31,7 @@ fn callFailureBlock(
     const errno_value = Value.fromInteger(errno_int);
 
     try context.actor.argument_stack.push(context.vm.allocator, errno_value);
-    return try interpreter.sendMessage(context.vm, block, Selector.well_known.@"value:", null, context.target_location, context.source_range);
+    return try context.interpreter.sendMessage(block, Selector.well_known.@"value:", null, context.target_location, context.source_range);
 }
 
 /// Create a managed FD out of a native FD value.

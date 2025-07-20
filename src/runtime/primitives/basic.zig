@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2021-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -9,7 +9,7 @@ const Script = @import("../../language/Script.zig");
 const AstGen = @import("../bytecode/AstGen.zig");
 const CodeGen = @import("../bytecode/CodeGen.zig");
 const Selector = @import("../Selector.zig");
-const interpreter = @import("../interpreter.zig");
+const Interpreter = @import("../Interpreter.zig");
 const RuntimeError = @import("../RuntimeError.zig");
 const ExecutionResult = @import("../execution_result.zig").ExecutionResult;
 const PrimitiveContext = @import("../primitives.zig").PrimitiveContext;
@@ -115,8 +115,7 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
     script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
     if (!did_parse_without_errors) {
         // TODO: Pass error information to the failure block.
-        return try interpreter.sendMessage(
-            context.vm,
+        return try context.interpreter.sendMessage(
             failure_block,
             Selector.well_known.value,
             null,
@@ -129,8 +128,7 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
         error.AstGenFailure => {
             // TODO: Pass error information to the failure block.
             std.debug.print("Code generation for the script passed to _EvaluateStringIfFail: failed", .{});
-            return try interpreter.sendMessage(
-                context.vm,
+            return try context.interpreter.sendMessage(
                 failure_block,
                 Selector.well_known.value,
                 null,
@@ -168,8 +166,7 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
             context.actor.activation_stack.restoreTo(activation_before_script);
             context.vm.restoreStackSnapshot(stack_snapshot);
 
-            const block_result = try interpreter.sendMessage(
-                context.vm,
+            const block_result = try context.interpreter.sendMessage(
                 failure_block,
                 Selector.well_known.value,
                 null,

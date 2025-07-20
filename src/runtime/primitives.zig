@@ -12,7 +12,7 @@ const Value = value_import.Value;
 const Actor = @import("./Actor.zig");
 const object = @import("./object.zig");
 const bytecode = @import("./bytecode.zig");
-const vm_context = @import("context.zig");
+const Interpreter = @import("Interpreter.zig");
 const SourceRange = @import("./SourceRange.zig");
 const RuntimeError = @import("./RuntimeError.zig");
 const value_import = @import("./value.zig");
@@ -32,6 +32,8 @@ const PrimitiveError = Allocator.Error || error{GetArgumentFailure};
 
 /// The context passed to a primitive.
 pub const PrimitiveContext = struct {
+    /// The interpreter that's executing this primitive.
+    interpreter: *const Interpreter,
     /// The virtual machine of the interpreter.
     vm: *VirtualMachine,
     /// The actor that this primitive is executing within.
@@ -182,6 +184,7 @@ const PrimitiveSpec = struct {
     /// Receiver must be manually tracked. Arguments are automatically tracked.
     pub fn call(
         self: PrimitiveSpec,
+        interpreter: *const Interpreter,
         receiver: Value,
         arguments: []const Value,
         target_location: bytecode.RegisterLocation,
@@ -192,12 +195,13 @@ const PrimitiveSpec = struct {
         //        protection; remove once all primitives are audited for correct
         //        use of heap references.
         var handles: VirtualMachine.Heap.Handles = undefined;
-        handles.init(vm_context.getHeap());
-        defer handles.deinit(vm_context.getHeap());
+        handles.init(&interpreter.vm.heap);
+        defer handles.deinit(&interpreter.vm.heap);
 
         var context = PrimitiveContext{
-            .vm = vm_context.getVM(),
-            .actor = vm_context.getActor(),
+            .interpreter = interpreter,
+            .vm = interpreter.vm,
+            .actor = interpreter.actor,
             .receiver = receiver,
             .arguments = arguments,
             .target_location = target_location,

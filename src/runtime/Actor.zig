@@ -15,7 +15,7 @@ const context = @import("context.zig");
 const bytecode = @import("./bytecode.zig");
 const Activation = @import("./Activation.zig");
 const ActorObject = @import("objects/actor.zig").Actor;
-const interpreter = @import("./interpreter.zig");
+const Interpreter = @import("./Interpreter.zig");
 const SourceRange = @import("./SourceRange.zig");
 const MethodObject = @import("objects/method.zig").Method;
 const RuntimeError = @import("RuntimeError.zig");
@@ -304,8 +304,8 @@ pub fn execute(self: *Actor) !ActorResult {
 pub fn executeUntil(self: *Actor, until: ?Activation.ActivationRef) !ActorResult {
     _ = self;
 
-    var interpreter_context = interpreter.InterpreterContext.init(until);
-    return try interpreter.execute(&interpreter_context);
+    var interpreter = Interpreter.init(until);
+    return try interpreter.execute();
 }
 
 pub const ActivationExitState = enum { LastActivation, NotLastActivation };
