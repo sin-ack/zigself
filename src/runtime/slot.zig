@@ -89,6 +89,26 @@ const SlotProperties = extern struct {
     pub fn getHash(self: SlotProperties) u32 {
         return @intCast(self.properties.unsafeAsUnsignedInteger() >> 30);
     }
+
+    pub fn format(
+        self: SlotProperties,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+
+        try writer.print(
+            "SlotProperties{{ .hash = {x}, .parent = {s}, .assignable = {s}, .argument = {s} }}",
+            .{
+                self.getHash(),
+                if (self.isParent()) "true" else "false",
+                if (self.isAssignable()) "true" else "false",
+                if (self.isArgument()) "true" else "false",
+            },
+        );
+    }
 };
 
 /// A slot as it exists on the heap. The slot caries various properties, as well
