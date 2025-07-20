@@ -43,66 +43,53 @@ const MergeInfo = struct {
     }
 };
 
-/// A mixin struct which can be added to a slots-like object through `pub
-/// usingnamespace`. Adds common functions expected from slots-like objects.
-pub fn SlotsLikeObjectBase(comptime ObjectT: type) type {
+/// A mixin that provides helpful methods for objects that have assignable
+/// slots. Usage:
+///
+/// ```zig
+/// pub const MyObject = struct {
+///     // ... other fields ...
+///     assignable_slots: AssignableSlots(MyObject) align(@alignOf(u64)),
+/// };
+/// ```
+///
+/// NOTE: You must always place the `assignable_slots` field at the end of the
+///       struct! This is how the mixin calculates the start of the assignable
+///       slots area.
+pub fn AssignableSlots(comptime ObjectT: type) type {
     return struct {
-        /// Return the address of the current object.
-        pub fn asObjectAddress(self: ObjectT.Ptr) [*]u64 {
-            return @ptrCast(@alignCast(self));
-        }
+        const Self = @This();
+        const Ptr = *align(@alignOf(u64)) Self;
 
-        /// Return this object as a value.
-        pub fn asValue(self: ObjectT.Ptr) Value {
-            return Value.fromObjectAddress(asObjectAddress(self));
-        }
-    };
-}
-
-/// A mixin that provides the common implementation of assignable slots in
-/// and assignable slots-dependent methods for slots-like objects.
-pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
-    return struct {
-        /// Return the amount of bytes that this object takes up in the
-        /// heap.
-        pub fn getSizeInMemory(self: ObjectT.Ptr) usize {
-            return requiredSizeForAllocation(self.getMap().getAssignableSlotCount());
-        }
-
-        pub fn getSizeForCloning(self: ObjectT.Ptr) usize {
-            return self.getSizeInMemory();
-        }
-
-        /// Return the amount of bytes required to create this object.
-        pub fn requiredSizeForAllocation(assignable_slot_count: u15) usize {
-            return @sizeOf(ObjectT) + assignable_slot_count * @sizeOf(Value);
+        /// Return the amount of bytes required for the assignable slots at
+        /// the end of the object.
+        pub fn requiredMemorySize(assignable_slot_count: u15) usize {
+            return assignable_slot_count * @sizeOf(Value);
         }
 
         /// Return a slice of `Value`s for the assignable slots that are
-        /// after the Slots object header. Should not be called from
-        /// outside; use getAssignableSlotValue instead.
-        pub fn getAssignableSlots(self: ObjectT.Ptr) pointer.HeapSlice(Value, .Mutable) {
-            const object_size = @sizeOf(ObjectT);
-            const object_memory: [*]u8 = @ptrCast(self);
-            const assignable_slot_count = ObjectT.getMap(self).getAssignableSlotCount();
+        /// after the object header.
+        pub fn getAssignableSlots(self: Ptr) pointer.HeapSlice(Value, .Mutable) {
+            const assignable_slot_memory: [*]align(@alignOf(u64)) u8 = @ptrCast(self);
+            const object: ObjectT.Ptr = @fieldParentPtr("assignable_slots", self);
+            const assignable_slot_count = object.getMap().getAssignableSlotCount();
 
-            return @alignCast(std.mem.bytesAsSlice(
+            return std.mem.bytesAsSlice(
                 Value,
-                object_memory[object_size .. object_size + assignable_slot_count * @sizeOf(Value)],
-            ));
+                assignable_slot_memory[0 .. assignable_slot_count * @sizeOf(Value)],
+            );
         }
 
         /// Return the assignable slot value for this slot.
-        pub fn getAssignableSlotValue(self: ObjectT.Ptr, slot: Slot) pointer.HeapPtr(Value, .Mutable) {
+        pub fn getAssignableSlotValue(self: Ptr, slot: Slot) pointer.HeapPtr(Value, .Mutable) {
             std.debug.assert(slot.isAssignable());
             std.debug.assert(!slot.isArgument());
 
             return &getAssignableSlots(self)[@intCast(slot.value.unsafeAsUnsignedInteger())];
         }
 
-        /// Visit the assignable slot values in this object with the given
-        /// visitor.
-        pub fn visitAssignableSlotValues(self: ObjectT.Ptr, visitor: anytype) !void {
+        /// Visit the assignable slot values with the given visitor.
+        pub fn visitEdges(self: Ptr, visitor: anytype) !void {
             for (self.getAssignableSlots()) |*slot| {
                 try visitor.visit(slot, @ptrCast(self));
             }
@@ -220,11 +207,9 @@ pub fn getValueSlotGeneric(comptime ObjectType: type, object: ObjectType.Ptr, va
 /// itself.
 pub const Slots = extern struct {
     object: MapObject align(@alignOf(u64)),
+    assignable_slots: AssignableSlots(Slots) align(@alignOf(u64)),
 
     pub const Ptr = pointer.HeapPtr(Slots, .Mutable);
-
-    pub usingnamespace SlotsLikeObjectBase(Slots);
-    pub usingnamespace AssignableSlotsMixin(Slots);
 
     pub fn create(token: *heap_import.AllocationToken, actor_id: Actor.ActorID, map: SlotsMap.Ptr, assignable_slots: []const Value) Slots.Ptr {
         if (assignable_slots.len != map.getAssignableSlotCount()) {
@@ -280,6 +265,41 @@ pub const Slots = extern struct {
         _ = allocator;
         _ = heap;
         return Slots.create(token, actor_id, self.getMap(), self.getAssignableSlots());
+    }
+
+    /// Return the address of the current object.
+    fn asObjectAddress(self: Slots.Ptr) [*]u64 {
+        return @ptrCast(@alignCast(self));
+    }
+
+    /// Return this object as a value.
+    pub fn asValue(self: Slots.Ptr) Value {
+        return Value.fromObjectAddress(self.asObjectAddress());
+    }
+
+    /// Return the amount of bytes the object occupies in memory.
+    pub fn getSizeInMemory(self: Slots.Ptr) usize {
+        return requiredSizeForAllocation(self.getMap().getAssignableSlotCount());
+    }
+
+    /// Return the amount of bytes required to clone the object.
+    pub fn getSizeForCloning(self: Slots.Ptr) usize {
+        return self.getSizeInMemory();
+    }
+
+    /// Return the required size for allocation of this object.
+    pub fn requiredSizeForAllocation(assignable_slot_count: u15) usize {
+        return @sizeOf(Slots) + AssignableSlots(Slots).requiredMemorySize(assignable_slot_count);
+    }
+
+    /// Return the assignable slots on this object.
+    pub fn getAssignableSlots(self: Slots.Ptr) pointer.HeapSlice(Value, .Mutable) {
+        return self.assignable_slots.getAssignableSlots();
+    }
+
+    /// Return the assignable slot value for the given slot.
+    pub fn getAssignableSlotValue(self: Slots.Ptr, slot: Slot) pointer.HeapPtr(Value, .Mutable) {
+        return self.assignable_slots.getAssignableSlotValue(slot);
     }
 
     // --- Adding slots ---
@@ -476,7 +496,7 @@ pub const Slots = extern struct {
     /// Visit the edges on this object with the given visitor.
     pub fn visitEdges(self: Slots.Ptr, visitor: anytype) !void {
         try self.object.visitEdges(visitor);
-        try self.visitAssignableSlotValues(visitor);
+        try self.assignable_slots.visitEdges(visitor);
     }
 
     pub fn lookup(self: Slots.Ptr, selector: Selector, previously_visited: ?*const Selector.VisitedValueLink) LookupResult {
@@ -493,53 +513,60 @@ pub const Slots = extern struct {
     }
 };
 
-/// Return a mixin struct which can be added to slots-like maps with pub
-/// usingnamespace.
-pub fn SlotsLikeMapBase(comptime MapT: type) type {
+/// Return a mixin struct which can be added to slots-like maps to manage the
+/// slots at the end of the map.
+///
+/// Usage:
+/// ```zig
+/// pub const MySlotsMap = struct {
+///    // ... other fields ...
+///    slots: MapSlots(MySlotsMap) align(@alignOf(u64)),
+/// };
+/// ```
+///
+/// NOTE: You must always place the `slots` field at the end of the struct! This
+///       is how the mixin calculates the start of the slots area.
+pub fn MapSlots(comptime MapT: type) type {
     return struct {
-        fn getSlotMemory(self: MapT.Ptr) pointer.HeapSlice(u8, .Mutable) {
-            const total_object_size = MapT.getSizeInMemory(self);
-            const map_memory: [*]align(@alignOf(u64)) u8 = @ptrCast(self);
-            return map_memory[@sizeOf(MapT)..total_object_size];
+        const Self = @This();
+        const Ptr = *align(@alignOf(u64)) Self;
+
+        /// Return a slice of `Slot`s for the slots area of the map.
+        pub fn getSlots(self: Ptr) Slot.Slice {
+            const slots_memory_area: [*]align(@alignOf(u64)) u8 = @ptrCast(self);
+            const slot_count = self.asSlotsMap().getSlotCount();
+
+            return std.mem.bytesAsSlice(Slot, slots_memory_area[0 .. slot_count * @sizeOf(Slot)]);
         }
 
-        pub fn getSlots(self: MapT.Ptr) Slot.Slice {
-            return std.mem.bytesAsSlice(Slot, getSlotMemory(self));
+        fn asSlotsMap(self: Ptr) SlotsMap.Ptr {
+            const map: MapT.Ptr = @fieldParentPtr("slots", self);
+            return @ptrCast(map);
         }
 
-        pub fn asObjectAddress(self: MapT.Ptr) [*]u64 {
-            return @ptrCast(self);
-        }
-
-        pub fn asValue(self: MapT.Ptr) Value {
-            return Value.fromObjectAddress(asObjectAddress(self));
-        }
-
-        pub fn getSlotCount(self: MapT.Ptr) u16 {
-            return asSlotsMap(self).map.getMetadata().slots;
-        }
-
-        /// Return the amount of assignable slots that this slot map
-        /// contains.
-        pub fn getAssignableSlotCount(self: MapT.Ptr) u15 {
+        /// Return the amount of assignable slots that this slot map contains.
+        pub fn getAssignableSlotCount(self: Ptr) u15 {
             return asSlotsMap(self).map.getMetadata().assignable_slots;
         }
 
-        pub fn setAssignableSlotCount(self: MapT.Ptr, count: u15) void {
+        /// Set the amount of assignable slots that this slot map contains.
+        pub fn setAssignableSlotCount(self: Ptr, count: u15) void {
             asSlotsMap(self).map.getMetadata().assignable_slots = count;
-        }
-
-        fn asSlotsMap(self: MapT.Ptr) SlotsMap.Ptr {
-            return @ptrCast(self);
         }
 
         /// Visit the slots in this map with the given visitor. Call this
         /// from the `visitEdges` in the map implementation.
-        pub fn visitSlots(self: MapT.Ptr, visitor: anytype) !void {
+        pub fn visitEdges(self: Ptr, visitor: anytype) !void {
             for (self.getSlots()) |*slot| {
                 try visitor.visit(&slot.name.value, @ptrCast(self));
                 try visitor.visit(&slot.value, @ptrCast(self));
             }
+        }
+
+        /// Return the amount of memory in bytes required for the slots
+        /// area of the map with the given slot count.
+        pub fn requiredMemorySize(slot_count: u16) usize {
+            return slot_count * @sizeOf(Slot);
         }
     };
 }
@@ -547,12 +574,11 @@ pub fn SlotsLikeMapBase(comptime MapT: type) type {
 /// The map of a slots object, consisting of a series of Slots.
 pub const SlotsMap = extern struct {
     map: Map align(@alignOf(u64)),
+    slots: MapSlots(SlotsMap) align(@alignOf(u64)),
 
     pub const Ptr = pointer.HeapPtr(SlotsMap, .Mutable);
     pub const ObjectType = Slots;
     pub const MapBuilder = mapbuilder.MapBuilder(SlotsMap, Slots);
-
-    pub usingnamespace SlotsLikeMapBase(SlotsMap);
 
     /// Create a new slots map. Takes the amount of slots this object will have.
     ///
@@ -590,7 +616,15 @@ pub const SlotsMap = extern struct {
 
     /// Visit the edges on this map with the given visitor.
     pub fn visitEdges(self: SlotsMap.Ptr, visitor: anytype) !void {
-        try self.visitSlots(visitor);
+        try self.slots.visitEdges(visitor);
+    }
+
+    fn asObjectAddress(self: SlotsMap.Ptr) [*]u64 {
+        return @ptrCast(self);
+    }
+
+    pub fn asValue(self: SlotsMap.Ptr) Value {
+        return Value.fromObjectAddress(asObjectAddress(self));
     }
 
     pub fn getSizeInMemory(self: SlotsMap.Ptr) usize {
@@ -601,8 +635,28 @@ pub const SlotsMap = extern struct {
         return self.getSizeInMemory();
     }
 
+    /// Return the amount of slots that this slot map contains.
+    pub fn getSlotCount(self: SlotsMap.Ptr) u16 {
+        return self.map.getMetadata().slots;
+    }
+
+    /// Get the assignable slot count for this map.
+    pub fn getAssignableSlotCount(self: SlotsMap.Ptr) u15 {
+        return self.slots.getAssignableSlotCount();
+    }
+
+    /// Set the assignable slot count for this map.
+    pub fn setAssignableSlotCount(self: SlotsMap.Ptr, count: u15) void {
+        self.slots.setAssignableSlotCount(count);
+    }
+
+    /// Return the slots contained in this map.
+    pub fn getSlots(self: SlotsMap.Ptr) Slot.Slice {
+        return self.slots.getSlots();
+    }
+
     /// Return the size required for the whole map with the given slot count.
     pub fn requiredSizeForAllocation(slot_count: u16) usize {
-        return @sizeOf(SlotsMap) + slot_count * @sizeOf(Slot);
+        return @sizeOf(SlotsMap) + MapSlots(SlotsMap).requiredMemorySize(slot_count);
     }
 };

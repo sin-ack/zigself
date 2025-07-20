@@ -60,7 +60,7 @@ pub const ByteArray = extern struct {
         self.byte_array = .init(byte_array.header);
     }
 
-    pub fn asObjectAddress(self: ByteArray.Ptr) [*]u64 {
+    fn asObjectAddress(self: ByteArray.Ptr) [*]u64 {
         return @ptrCast(@alignCast(self));
     }
 

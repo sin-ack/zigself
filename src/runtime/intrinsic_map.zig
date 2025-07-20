@@ -39,8 +39,23 @@ const VirtualMachine = @import("VirtualMachine.zig");
 ///             return create(map_map, token, ...);
 ///         }
 ///
-///         pub usingnamespace IntrinsicMap(MyObjectMap);
+///         const intrinsic_map = IntrinsicMap(MyObjectMap, .MyObject);
+///         pub const Ptr = intrinsic_map.Ptr;
+///         pub const ObjectType = intrinsic_map.ObjectType;
+///         pub const asAddress = intrinsic_map.asAddress;
+///         pub const asValue = intrinsic_map.asValue;
+///         pub const getSizeInMemory = intrinsic_map.getSizeInMemory;
+///         pub const getSizeForCloning = intrinsic_map.getSizeForCloning;
+///         pub const finalize = intrinsic_map.finalize;
+///         pub const visitEdges = intrinsic_map.visitEdges;
+///         pub const requiredSizeForAllocation = intrinsic_map.requiredSizeForAllocation;
+///         pub const createObject = intrinsic_map.createObject;
 ///     }
+///
+/// Yes, the usage is ugly. You can thank the Zig Software Foundation for
+/// that. Thanks for removing `usingnamespace`!
+// TODO: Add some utility to verify that the user has unpacked all decls
+//       from IntrinsicMap correctly.
 pub fn IntrinsicMap(comptime MapT: type, comptime object_type: ObjectType) type {
     const type_info = @typeInfo(MapT);
     if (type_info != .@"struct") {

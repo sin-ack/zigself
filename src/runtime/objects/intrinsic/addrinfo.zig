@@ -24,7 +24,18 @@ pub const AddrInfoMap = extern struct {
     flags: Value align(@alignOf(u64)),
     sockaddrBytes: Value align(@alignOf(u64)),
 
-    pub usingnamespace IntrinsicMap(AddrInfoMap, .AddrInfo);
+    // TODO: Verify that we actually unpacked all fields from IntrinsicMap.
+    const intrinsic_map = IntrinsicMap(AddrInfoMap, .AddrInfo);
+    pub const Ptr = intrinsic_map.Ptr;
+    pub const ObjectType = intrinsic_map.ObjectType;
+    pub const asAddress = intrinsic_map.asAddress;
+    pub const asValue = intrinsic_map.asValue;
+    pub const getSizeInMemory = intrinsic_map.getSizeInMemory;
+    pub const getSizeForCloning = intrinsic_map.getSizeForCloning;
+    pub const finalize = intrinsic_map.finalize;
+    pub const visitEdges = intrinsic_map.visitEdges;
+    pub const requiredSizeForAllocation = intrinsic_map.requiredSizeForAllocation;
+    pub const createObject = intrinsic_map.createObject;
 
     pub fn createFromAddrinfo(allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID, addrinfo: *std.posix.addrinfo) !AddrInfoMap.Ptr {
         const sockaddr_memory: [*]u8 = @ptrCast(addrinfo.addr.?);

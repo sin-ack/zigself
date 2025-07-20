@@ -17,6 +17,7 @@ const pointer = @import("../../utility/pointer.zig");
 const context = @import("../context.zig");
 const Selector = @import("../Selector.zig");
 const bytecode = @import("../bytecode.zig");
+const MapSlots = slots.MapSlots;
 const ByteArray = @import("../ByteArray.zig");
 const ValueSlot = @import("../object_lookup.zig").ValueSlot;
 const Activation = @import("../Activation.zig");
@@ -26,11 +27,9 @@ const LookupResult = @import("../object_lookup.zig").LookupResult;
 const value_import = @import("../value.zig");
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
 const VirtualMachine = @import("../VirtualMachine.zig");
+const AssignableSlots = slots.AssignableSlots;
 const ActivationObject = @import("activation.zig").Activation;
 const InlineCacheEntry = @import("../inline_cache.zig").InlineCacheEntry;
-const SlotsLikeMapBase = slots.SlotsLikeMapBase;
-const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;
-const AssignableSlotsMixin = slots.AssignableSlotsMixin;
 
 const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 
@@ -39,11 +38,9 @@ const LOOKUP_DEBUG = debug.LOOKUP_DEBUG;
 /// is created is still on the activation stack.
 pub const Block = extern struct {
     slots: SlotsObject align(@alignOf(u64)),
+    assignable_slots: AssignableSlots(Block) align(@alignOf(u64)),
 
     pub const Ptr = pointer.HeapPtr(Block, .Mutable);
-
-    pub usingnamespace SlotsLikeObjectBase(Block);
-    pub usingnamespace AssignableSlotsMixin(Block);
 
     /// Create a block object with the given block map. Allocates enough space
     /// for assignable slots.
@@ -79,7 +76,7 @@ pub const Block = extern struct {
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: Block.Ptr, visitor: anytype) !void {
         try self.slots.object.visitEdges(visitor);
-        try self.visitAssignableSlotValues(visitor);
+        try self.assignable_slots.visitEdges(visitor);
     }
 
     /// Return a shallow copy of this object.
@@ -91,6 +88,41 @@ pub const Block = extern struct {
         @memcpy(new_block.getAssignableSlots(), self.getAssignableSlots());
 
         return new_block;
+    }
+
+    /// Return the address of the current object.
+    fn asObjectAddress(self: Block.Ptr) [*]u64 {
+        return @ptrCast(@alignCast(self));
+    }
+
+    /// Return this object as a value.
+    pub fn asValue(self: Block.Ptr) Value {
+        return Value.fromObjectAddress(self.asObjectAddress());
+    }
+
+    /// Return the amount of bytes the object occupies in memory.
+    pub fn getSizeInMemory(self: Block.Ptr) usize {
+        return requiredSizeForAllocation(self.getMap().getAssignableSlotCount());
+    }
+
+    /// Return the amount of bytes required to clone the object.
+    pub fn getSizeForCloning(self: Block.Ptr) usize {
+        return self.getSizeInMemory();
+    }
+
+    /// Return the required size for allocation of this object.
+    pub fn requiredSizeForAllocation(assignable_slot_count: u15) usize {
+        return @sizeOf(Block) + AssignableSlots(Block).requiredMemorySize(assignable_slot_count);
+    }
+
+    /// Return the assignable slots on this object.
+    pub fn getAssignableSlots(self: Block.Ptr) pointer.HeapSlice(Value, .Mutable) {
+        return self.assignable_slots.getAssignableSlots();
+    }
+
+    /// Return the assignable slot value for the given slot.
+    pub fn getAssignableSlotValue(self: Block.Ptr, slot: Slot) pointer.HeapPtr(Value, .Mutable) {
+        return self.assignable_slots.getAssignableSlotValue(slot);
     }
 
     // --- Well-known value slots ---
@@ -196,11 +228,10 @@ pub const BlockMap = extern struct {
     /// block. If a non-local return happens inside this block, then it will
     /// target this activation.
     nonlocal_return_target_activation: Activation.ActivationRef align(@alignOf(u64)),
+    slots: MapSlots(BlockMap) align(@alignOf(u64)),
 
     pub const ObjectType = Block;
     pub const Ptr = pointer.HeapPtr(BlockMap, .Mutable);
-
-    pub usingnamespace SlotsLikeMapBase(BlockMap);
 
     /// Create a new block map.
     /// Borrows a ref for `script` from the caller. Takes ownership of
@@ -255,11 +286,39 @@ pub const BlockMap = extern struct {
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: BlockMap.Ptr, visitor: anytype) !void {
         try self.base_map.visitEdges(visitor);
-        try self.visitSlots(visitor);
+        try self.slots.visitEdges(visitor);
+    }
+
+    fn asObjectAddress(self: BlockMap.Ptr) [*]u64 {
+        return @ptrCast(self);
+    }
+
+    pub fn asValue(self: BlockMap.Ptr) Value {
+        return Value.fromObjectAddress(asObjectAddress(self));
+    }
+
+    /// Return the amount of slots that this slot map contains.
+    pub fn getSlotCount(self: BlockMap.Ptr) u16 {
+        return self.base_map.slots.getSlotCount();
+    }
+
+    /// Get the assignable slot count for this map.
+    pub fn getAssignableSlotCount(self: BlockMap.Ptr) u15 {
+        return self.slots.getAssignableSlotCount();
+    }
+
+    /// Set the assignable slot count for this map.
+    pub fn setAssignableSlotCount(self: BlockMap.Ptr, count: u15) void {
+        self.slots.setAssignableSlotCount(count);
     }
 
     pub fn getArgumentSlotCount(self: BlockMap.Ptr) u8 {
         return self.base_map.getArgumentSlotCount();
+    }
+
+    /// Return the slots contained in this map.
+    pub fn getSlots(self: BlockMap.Ptr) Slot.Slice {
+        return self.slots.getSlots();
     }
 
     pub fn clone(self: BlockMap.Ptr, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken) !BlockMap.Ptr {
@@ -292,6 +351,6 @@ pub const BlockMap = extern struct {
     }
 
     pub fn requiredSizeForAllocation(slot_count: u16) usize {
-        return @sizeOf(BlockMap) + slot_count * @sizeOf(Slot);
+        return @sizeOf(BlockMap) + MapSlots(BlockMap).requiredMemorySize(slot_count);
     }
 };

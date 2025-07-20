@@ -154,7 +154,7 @@ pub const Managed = extern struct {
         }
     }
 
-    pub fn asObjectAddress(self: Managed.Ptr) [*]u64 {
+    fn asObjectAddress(self: Managed.Ptr) [*]u64 {
         return @ptrCast(self);
     }
 

@@ -38,7 +38,7 @@ pub fn Stack(comptime T: type, comptime debug_name: []const u8, comptime sentine
             return value;
         }
 
-        pub usingnamespace if (sentinel) |st| struct {
+        const sentinel_methods = if (sentinel) |st| struct {
             /// Pushes a sentinel value on the stack which can later be checked with
             /// `verifySentinel`.
             pub fn pushSentinel(self: *Self, allocator: Allocator) !void {
@@ -52,7 +52,13 @@ pub fn Stack(comptime T: type, comptime debug_name: []const u8, comptime sentine
                     std.debug.panic("!!! Failed to verify sentinel! Expected {}, got {}", .{ popped_value, st });
                 if (STACK_DEBUG) std.debug.print(debug_name ++ ": Popped (sentinel), now have {} items\n", .{self.height()});
             }
-        } else struct {};
+        } else struct {
+            pub const pushSentinel = @compileError("Stack does not support sentinel values");
+            pub const verifySentinel = @compileError("Stack does not support sentinel values");
+        };
+
+        pub const pushSentinel = sentinel_methods.pushSentinel;
+        pub const verifySentinel = sentinel_methods.verifySentinel;
 
         /// Return a slice of the last N items on the stack.
         pub fn lastNItems(self: Self, n: u32) []const T {

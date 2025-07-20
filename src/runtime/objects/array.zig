@@ -60,7 +60,7 @@ pub const Array = extern struct {
         }
     }
 
-    pub fn asObjectAddress(self: Array.Ptr) [*]u64 {
+    fn asObjectAddress(self: Array.Ptr) [*]u64 {
         return @ptrCast(@alignCast(self));
     }
 

@@ -47,7 +47,7 @@ pub const Actor = extern struct {
         self.context = context;
     }
 
-    pub fn asObjectAddress(self: Actor.Ptr) [*]u64 {
+    fn asObjectAddress(self: Actor.Ptr) [*]u64 {
         return @ptrCast(@alignCast(self));
     }
 

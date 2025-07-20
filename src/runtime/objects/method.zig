@@ -13,6 +13,7 @@ const context = @import("../context.zig");
 const pointer = @import("../../utility/pointer.zig");
 const Selector = @import("../Selector.zig");
 const bytecode = @import("../bytecode.zig");
+const MapSlots = slots.MapSlots;
 const ByteArray = @import("byte_array.zig").ByteArray;
 const Activation = @import("../Activation.zig");
 const SlotsObject = slots.Slots;
@@ -23,23 +24,19 @@ const GenericValue = value_import.Value;
 const value_import = @import("../value.zig");
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
 const VirtualMachine = @import("../VirtualMachine.zig");
+const AssignableSlots = slots.AssignableSlots;
 const ActivationObject = @import("activation.zig").Activation;
 const InlineCacheEntry = @import("../inline_cache.zig").InlineCacheEntry;
-const SlotsLikeMapBase = slots.SlotsLikeMapBase;
-const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;
-const AssignableSlotsMixin = slots.AssignableSlotsMixin;
 
 /// A method object. A method object is a slots object with a method map as its
 /// parent.
 pub const Method = extern struct {
     slots: SlotsObject align(@alignOf(u64)),
+    assignable_slots: AssignableSlots(Method) align(@alignOf(u64)),
 
     pub const Ptr = pointer.HeapPtr(Method, .Mutable);
     pub const Type = .Method;
     pub const Value = value_import.ObjectValue(Method);
-
-    pub usingnamespace SlotsLikeObjectBase(Method);
-    pub usingnamespace AssignableSlotsMixin(Method);
 
     /// Create a method object with the given method map. Allocates enough
     /// space for assignable slots.
@@ -76,7 +73,7 @@ pub const Method = extern struct {
     /// Visit edges of this object using the given visitor.
     pub fn visitEdges(self: Method.Ptr, visitor: anytype) !void {
         try self.slots.object.visitEdges(visitor);
-        try self.visitAssignableSlotValues(visitor);
+        try self.assignable_slots.visitEdges(visitor);
     }
 
     /// Return a shallow copy of this object.
@@ -88,6 +85,41 @@ pub const Method = extern struct {
         @memcpy(new_method.getAssignableSlots(), self.getAssignableSlots());
 
         return new_method;
+    }
+
+    /// Return the address of the current object.
+    fn asObjectAddress(self: Method.Ptr) [*]u64 {
+        return @ptrCast(@alignCast(self));
+    }
+
+    /// Return this object as a value.
+    pub fn asValue(self: Method.Ptr) GenericValue {
+        return GenericValue.fromObjectAddress(self.asObjectAddress());
+    }
+
+    /// Return the amount of bytes the object occupies in memory.
+    pub fn getSizeInMemory(self: Method.Ptr) usize {
+        return requiredSizeForAllocation(self.getMap().getAssignableSlotCount());
+    }
+
+    /// Return the amount of bytes required to clone the object.
+    pub fn getSizeForCloning(self: Method.Ptr) usize {
+        return self.getSizeInMemory();
+    }
+
+    /// Return the required size for allocation of this object.
+    pub fn requiredSizeForAllocation(assignable_slot_count: u15) usize {
+        return @sizeOf(Method) + AssignableSlots(Method).requiredMemorySize(assignable_slot_count);
+    }
+
+    /// Return the assignable slots on this object.
+    pub fn getAssignableSlots(self: Method.Ptr) pointer.HeapSlice(GenericValue, .Mutable) {
+        return self.assignable_slots.getAssignableSlots();
+    }
+
+    /// Return the assignable slot value for the given slot.
+    pub fn getAssignableSlotValue(self: Method.Ptr, slot: Slot) pointer.HeapPtr(GenericValue, .Mutable) {
+        return self.assignable_slots.getAssignableSlotValue(slot);
     }
 
     // --- Top level context creation ---
@@ -161,14 +193,13 @@ pub const MethodMap = extern struct {
     base_map: ExecutableMap align(@alignOf(u64)),
     /// What the method is called.
     method_name: ObjectValue(ByteArray) align(@alignOf(u64)),
+    slots: MapSlots(MethodMap) align(@alignOf(u64)),
 
     pub const Ptr = pointer.HeapPtr(MethodMap, .Mutable);
     pub const ObjectType = Method;
 
     const MethodInformation = packed struct(u1) { is_inline: bool };
     pub const ExtraBits = ExecutableMap.ExtraBits.reserve(MethodInformation);
-
-    pub usingnamespace SlotsLikeMapBase(MethodMap);
 
     /// Create a new method map.
     /// Borrows a ref for `script` from the caller. Takes ownership of
@@ -237,11 +268,39 @@ pub const MethodMap = extern struct {
     pub fn visitEdges(self: MethodMap.Ptr, visitor: anytype) !void {
         try self.base_map.visitEdges(visitor);
         try visitor.visit(&self.method_name.value, @ptrCast(self));
-        try self.visitSlots(visitor);
+        try self.slots.visitEdges(visitor);
+    }
+
+    fn asObjectAddress(self: MethodMap.Ptr) [*]u64 {
+        return @ptrCast(self);
+    }
+
+    pub fn asValue(self: MethodMap.Ptr) GenericValue {
+        return GenericValue.fromObjectAddress(asObjectAddress(self));
+    }
+
+    /// Return the amount of slots that this slot map contains.
+    pub fn getSlotCount(self: MethodMap.Ptr) u16 {
+        return self.base_map.slots.getSlotCount();
+    }
+
+    /// Get the assignable slot count for this map.
+    pub fn getAssignableSlotCount(self: MethodMap.Ptr) u15 {
+        return self.slots.getAssignableSlotCount();
+    }
+
+    /// Set the assignable slot count for this map.
+    pub fn setAssignableSlotCount(self: MethodMap.Ptr, count: u15) void {
+        self.slots.setAssignableSlotCount(count);
     }
 
     pub fn getArgumentSlotCount(self: MethodMap.Ptr) u8 {
         return self.base_map.getArgumentSlotCount();
+    }
+
+    /// Return the slots contained in this map.
+    pub fn getSlots(self: MethodMap.Ptr) Slot.Slice {
+        return self.slots.getSlots();
     }
 
     pub fn clone(self: MethodMap.Ptr, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken) !MethodMap.Ptr {
@@ -274,6 +333,6 @@ pub const MethodMap = extern struct {
     }
 
     pub fn requiredSizeForAllocation(slot_count: u16) usize {
-        return @sizeOf(MethodMap) + slot_count * @sizeOf(Slot);
+        return @sizeOf(MethodMap) + MapSlots(MethodMap).requiredMemorySize(slot_count);
     }
 };

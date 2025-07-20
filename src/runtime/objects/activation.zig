@@ -26,7 +26,6 @@ const LookupResult = @import("../object_lookup.zig").LookupResult;
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
 const VirtualMachine = @import("../VirtualMachine.zig");
 const exceedsBoundsOf = @import("../../utility/bounds_check.zig").exceedsBoundsOf;
-const SlotsLikeObjectBase = slots.SlotsLikeObjectBase;
 
 /// An activation object, which is just a slots object but with an extra
 /// "receiver" value that is the actual value on which a message was activated.
@@ -37,8 +36,6 @@ pub const Activation = extern struct {
     pub const Ptr = pointer.HeapPtr(Activation, .Mutable);
     pub const Type = .Activation;
     pub const Value = value_import.ObjectValue(Activation);
-
-    pub usingnamespace SlotsLikeObjectBase(Activation);
 
     pub const ActivationType = enum(u1) { Method, Block };
     pub const ExtraBits = Object.ExtraBits.reserve(ActivationType);
@@ -112,6 +109,16 @@ pub const Activation = extern struct {
         self.slots.object.init(.Activation, actor_id, map.asValue());
         self.setActivationType(if (map_type == .Block) ActivationType.Block else ActivationType.Method);
         self.receiver = receiver;
+    }
+
+    /// Return the address of the current object.
+    fn asObjectAddress(self: Activation.Ptr) [*]u64 {
+        return @ptrCast(@alignCast(self));
+    }
+
+    /// Return this object as a value.
+    pub fn asValue(self: Activation.Ptr) GenericValue {
+        return GenericValue.fromObjectAddress(self.asObjectAddress());
     }
 
     // --- Activation type ---

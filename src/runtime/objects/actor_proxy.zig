@@ -44,7 +44,7 @@ pub const ActorProxy = extern struct {
         self.actor_object = ActorObject.Value.init(actor_object);
     }
 
-    pub fn asObjectAddress(self: ActorProxy.Ptr) [*]u64 {
+    fn asObjectAddress(self: ActorProxy.Ptr) [*]u64 {
         return @ptrCast(@alignCast(self));
     }
 
