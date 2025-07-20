@@ -11,21 +11,24 @@ fn writeTraceForFrame(message_name: []const u8, source_range: SourceRange) void 
     const range = source_range.getLocationRange();
     const source_line = source_range.getStartLine() catch unreachable;
 
-    std.debug.print("  at {s} ({})\n", .{ message_name, source_range });
+    // FIXME: Take a writer here instead printing to stderr directly.
+    // FIXME: Propagate errors
+    var writer_buffer: [4096]u8 = undefined;
+    var file_writer = std.fs.File.stderr().writer(&writer_buffer);
+    const writer = &file_writer.interface;
+
+    writer.print("  at {s} ({f})\n", .{ message_name, source_range }) catch unreachable;
     // NOTE: The spaces are to get the arrow aligned with the source code
-    std.debug.print("  \x1b[37m{d:<3} |\x1b[0m {s}\n\x1b[92m        ", .{ range.start.line, source_line });
+    writer.print("  \x1b[37m{d:<3} |\x1b[0m {s}\n\x1b[92m        ", .{ range.start.line, source_line }) catch unreachable;
 
-    // FIXME: Make this nicer
-    const writer = std.io.getStdErr().writer();
-
-    writer.writeByteNTimes(' ', range.start.column - 1) catch unreachable;
+    writer.splatByteAll(' ', range.start.column - 1) catch unreachable;
     if (range.start.line == range.end.line) {
-        writer.writeByteNTimes('^', @max(1, range.end.column - range.start.column)) catch unreachable;
+        writer.splatByteAll('^', @max(1, range.end.column - range.start.column)) catch unreachable;
     } else {
-        writer.writeByteNTimes('^', source_line.len - range.start.column + 1) catch unreachable;
-        writer.writeByteNTimes('.', 3) catch unreachable;
+        writer.splatByteAll('^', source_line.len - range.start.column + 1) catch unreachable;
+        writer.splatByteAll('.', 3) catch unreachable;
     }
-    std.debug.print("\x1b[0m\n", .{});
+    writer.print("\x1b[0m\n", .{}) catch unreachable;
 }
 
 /// Using the given activation object stack, print a stack trace to stderr until

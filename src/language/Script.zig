@@ -97,13 +97,13 @@ pub fn diagnostics(self: Script) Diagnostics {
     return self.parser.diagnostics;
 }
 
-pub fn reportDiagnostics(self: Script, writer: anytype) !void {
+pub fn reportDiagnostics(self: Script, writer: *std.io.Writer) !void {
     for (self.diagnostics().diagnostics.items) |diagnostic| {
         const line = self.parser.buffer[diagnostic.location.line_start..diagnostic.location.line_end];
 
-        try writer.print("{s}:{}: {s}: {s}\n", .{ self.file_path, diagnostic.location, @tagName(diagnostic.level), diagnostic.message });
+        try writer.print("{s}:{f}: {s}: {s}\n", .{ self.file_path, diagnostic.location, @tagName(diagnostic.level), diagnostic.message });
         try writer.print("{s}\n", .{line});
-        try writer.writeByteNTimes(' ', diagnostic.location.column - 1);
+        try writer.splatByteAll(' ', diagnostic.location.column - 1);
         try writer.writeAll("^\n");
     }
 }

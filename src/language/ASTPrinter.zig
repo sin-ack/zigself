@@ -54,7 +54,9 @@ fn dedent(self: *ASTPrinter) void {
 }
 
 fn print(self: *ASTPrinter, comptime fmt: []const u8, args: anytype) void {
-    const writer = std.io.getStdErr().writer();
+    var writer_buffer: [4096]u8 = undefined;
+    var file_writer = std.fs.File.stderr().writer(&writer_buffer);
+    const writer = &file_writer.interface;
     writer.writeAll(DARKGRAY) catch return;
 
     var last_indent: usize = 0;
@@ -73,7 +75,7 @@ fn print(self: *ASTPrinter, comptime fmt: []const u8, args: anytype) void {
             writer.writeAll("╴") catch return;
         } else {
             writer.writeAll(if (!branch.concluded) "│" else " ") catch return;
-            writer.writeByteNTimes(' ', self.indent_width - 1) catch return;
+            writer.splatByteAll(' ', self.indent_width - 1) catch return;
         }
 
         last_indent = branch.indent;

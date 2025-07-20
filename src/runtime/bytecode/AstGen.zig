@@ -42,7 +42,7 @@ pub fn generateExecutableFromScript(allocator: Allocator, script: Script.Ref) As
     try g.generateScript(executable.value, script.value.ast_root.?);
 
     if (AST_EXECUTABLE_DUMP_DEBUG)
-        std.debug.print("Executable dump: {}\n", .{executable.value});
+        std.debug.print("Executable dump: {f}\n", .{executable.value});
 
     return executable;
 }

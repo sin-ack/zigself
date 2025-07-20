@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2023, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2022-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -52,13 +52,8 @@ pub fn getStartLine(self: SourceRange) ![]const u8 {
     return self.executable.value.definition_script.value.getSourceLine(self.getLocationRange().start);
 }
 
-pub fn format(
-    source_range: SourceRange,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    try std.fmt.formatText(source_range.executable.value.definition_script.value.file_path, "s", options, writer);
+pub fn format(source_range: SourceRange, writer: *std.io.Writer) !void {
+    try writer.writeAll(source_range.executable.value.definition_script.value.file_path);
     try writer.writeByte(':');
-    try source_range.getLocationRange().format(fmt, options, writer);
+    try source_range.getLocationRange().format(writer);
 }

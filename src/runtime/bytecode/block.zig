@@ -185,20 +185,15 @@ fn Block(comptime InstructionT: type) type {
             return self.instructions.multi_array.len;
         }
 
-        pub fn format(
-            block: Self,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
+        pub fn format(block: Self, writer: *std.io.Writer) !void {
             var it = block.iterator();
             while (it.next()) |inst| {
                 if (!inst.target.isNothing())
-                    try std.fmt.format(writer, "{} = ", .{inst.target})
+                    try writer.print("{f} = ", .{inst.target})
                 else
                     try writer.writeAll(Instruction.RegisterLocation.ZeroLabel ++ "   ");
 
-                try inst.format(fmt, options, writer);
+                try inst.format(writer);
                 try writer.writeByte('\n');
             }
         }

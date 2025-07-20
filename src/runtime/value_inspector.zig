@@ -227,11 +227,16 @@ fn inspectSlots(
 }
 
 fn printWithIndent(comptime display_type: InspectDisplayType, indent: usize, comptime fmt: []const u8, args: anytype) void {
-    const writer = std.io.getStdErr().writer();
+    // FIXME: Take a writer instead of hardcoding stderr
+    // FIXME: Propagate errors
+    var writer_buffer: [4096]u8 = undefined;
+    var file_writer = std.fs.File.stderr().writer(&writer_buffer);
+    const writer = &file_writer.interface;
+
     switch (display_type) {
-        .Multiline => writer.writeByteNTimes(' ', indent) catch return,
+        .Multiline => writer.splatByteAll(' ', indent) catch return,
         .Inline => {},
     }
 
-    std.debug.print(fmt, args);
+    writer.print(fmt, args) catch return;
 }

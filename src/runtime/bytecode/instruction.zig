@@ -161,81 +161,73 @@ fn Instruction(comptime RegisterLocationT: type) type {
                 void,
         };
 
-        pub fn format(
-            inst: Self,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = fmt;
-            _ = options;
-
-            try std.fmt.format(writer, "{s}", .{inst.opcode.toString()});
+        pub fn format(inst: Self, writer: *std.io.Writer) !void {
+            try writer.print("{s}", .{inst.opcode.toString()});
 
             switch (inst.opcode) {
                 .Send => {
                     const payload = inst.payload.Send;
-                    try std.fmt.format(writer, "({}, {}) (send #{})", .{ payload.receiver_location, payload.selector, payload.send_index });
+                    try writer.print("({f}, {f}) (send #{})", .{ payload.receiver_location, payload.selector, payload.send_index });
                 },
                 .SelfSend => {
                     const payload = inst.payload.SelfSend;
-                    try std.fmt.format(writer, "({}) (send #{})", .{ payload.selector, payload.send_index });
+                    try writer.print("({f}) (send #{})", .{ payload.selector, payload.send_index });
                 },
                 .PrimSend => {
                     const payload = inst.payload.PrimSend;
-                    try std.fmt.format(writer, "({}, {})", .{ payload.receiver_location, payload.index });
+                    try writer.print("({f}, {f})", .{ payload.receiver_location, payload.index });
                 },
                 .SelfPrimSend => {
                     const payload = inst.payload.SelfPrimSend;
-                    try std.fmt.format(writer, "({})", .{payload.index});
+                    try writer.print("({f})", .{payload.index});
                 },
 
                 .CreateInteger => {
-                    try std.fmt.format(writer, "({})", .{inst.payload.CreateInteger});
+                    try writer.print("({})", .{inst.payload.CreateInteger});
                 },
 
                 .CreateFloatingPoint => {
-                    try std.fmt.format(writer, "({})", .{inst.payload.CreateFloatingPoint});
+                    try writer.print("({})", .{inst.payload.CreateFloatingPoint});
                 },
 
                 .CreateObject => {
-                    try std.fmt.format(writer, "(OD#{})", .{inst.payload.CreateObject.descriptor_index});
+                    try writer.print("(OD#{})", .{inst.payload.CreateObject.descriptor_index});
                 },
 
                 .CreateMethod => {
                     const payload = inst.payload.CreateMethod;
-                    try std.fmt.format(writer, "({}, OD#{}, #{})", .{ payload.method_name_location, payload.descriptor_index, payload.block_index });
+                    try writer.print("({f}, OD#{}, #{})", .{ payload.method_name_location, payload.descriptor_index, payload.block_index });
                 },
 
                 .CreateBlock => {
                     const payload = inst.payload.CreateBlock;
-                    try std.fmt.format(writer, "(OD#{}, #{})", .{ payload.descriptor_index, payload.block_index });
+                    try writer.print("(OD#{}, #{})", .{ payload.descriptor_index, payload.block_index });
                 },
 
                 .CreateByteArray => {
-                    try std.fmt.format(writer, "(\"{s}\")", .{inst.payload.CreateByteArray});
+                    try writer.print("(\"{s}\")", .{inst.payload.CreateByteArray});
                 },
 
                 .PushRegisters => {
                     if (comptime RegisterLocation.isFinite()) {
                         // NOTE: Update width whenever MaskInt changes in bit width
-                        try std.fmt.format(writer, "({b:0>8})", .{inst.payload.PushRegisters.mask});
+                        try writer.print("({b:0>8})", .{inst.payload.PushRegisters.mask});
                     }
                 },
 
                 .Return, .NonlocalReturn => {
-                    try std.fmt.format(writer, "({})", .{inst.payload.Return.value_location});
+                    try writer.print("({f})", .{inst.payload.Return.value_location});
                 },
 
                 .PushArg => {
-                    try std.fmt.format(writer, "({})", .{inst.payload.PushArg.argument_location});
+                    try writer.print("({f})", .{inst.payload.PushArg.argument_location});
                 },
 
                 .PushArgumentSentinel,
                 .VerifyArgumentSentinel,
                 .SetMethodInline,
                 => {
-                    try std.fmt.format(writer, "()", .{});
+                    try writer.writeAll("()");
                 },
             }
         }

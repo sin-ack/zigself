@@ -35,7 +35,7 @@ const usage_text =
 ;
 
 fn printUsage() !void {
-    const stderr = std.io.getStdErr();
+    const stderr = std.fs.File.stderr();
     _ = try stderr.write(usage_text);
 }
 
@@ -60,7 +60,7 @@ pub fn main() !u8 {
     }
 
     if (arguments.positionals.len != 1) {
-        const stderr = std.io.getStdErr();
+        const stderr = std.fs.File.stderr();
         _ = try stderr.write("Error: Must provide exactly one argument\n");
         try printUsage();
         return 1;
@@ -73,7 +73,10 @@ pub fn main() !u8 {
     defer entrypoint_script.unref();
 
     const did_parse_without_errors = try entrypoint_script.value.parseScript();
-    try entrypoint_script.value.reportDiagnostics(std.io.getStdErr().writer());
+
+    var writer_buffer: [4096]u8 = undefined;
+    var writer = std.fs.File.stderr().writer(&writer_buffer);
+    try entrypoint_script.value.reportDiagnostics(&writer.interface);
 
     if (arguments.options.@"dump-ast") {
         var printer = ASTPrinter.init(2, allocator);

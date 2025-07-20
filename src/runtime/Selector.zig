@@ -1,4 +1,4 @@
-// Copyright (c) 2024, sin-ack <sin-ack@protonmail.com>
+// Copyright (c) 2024-2025, sin-ack <sin-ack@protonmail.com>
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -74,16 +74,8 @@ pub fn chainedLookupObject(self: Selector, object: Object.Ptr, previously_visite
     return object.lookup(self, previously_visited);
 }
 
-pub fn format(
-    self: Selector,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    _ = fmt;
-    _ = options;
-
-    try std.fmt.format(writer, "\"{s}\"", .{self.name});
+pub fn format(self: Selector, writer: *std.io.Writer) !void {
+    try writer.print("\"{s}\"", .{self.name});
     // TODO: Add a debug flag that displays the hash.
 }
 

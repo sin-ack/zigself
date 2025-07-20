@@ -121,7 +121,7 @@ pub fn slotsLookup(
     // Direct lookup
     for (object.getSlots(), 0..) |slot, slot_index| {
         const slot_selector = Selector.fromSlot(slot);
-        if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing selector {} vs. slot {}\n", .{ selector, slot_selector });
+        if (SLOTS_LOOKUP_DEBUG) std.debug.print("Object.slotsLookup: Comparing selector {f} vs. slot {f}\n", .{ selector, slot_selector });
 
         const matches_constant = selector.equals(slot_selector);
         const matches_assignable = selector.canAssignTo(slot_selector);

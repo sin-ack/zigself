@@ -378,7 +378,7 @@ pub fn GetAddrInfoForHost_Port_Family_SocketType_Protocol_Flags_IfFail(context: 
     };
     defer if (node_c) |str| context.vm.allocator.free(str);
 
-    const service_c = try std.fmt.allocPrintZ(context.vm.allocator, "{}", .{port});
+    const service_c = try std.fmt.allocPrintSentinel(context.vm.allocator, "{}", .{port}, 0);
     defer context.vm.allocator.free(service_c);
 
     var result_ptr: ?*std.posix.addrinfo = undefined;

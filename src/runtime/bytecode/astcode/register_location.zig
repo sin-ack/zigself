@@ -34,14 +34,8 @@ pub const RegisterLocation = enum(u32) {
         return offset - 1;
     }
 
-    pub fn format(
-        loc: RegisterLocation,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
+    pub fn format(loc: RegisterLocation, writer: *std.io.Writer) !void {
         try writer.writeByte('%');
-        try std.fmt.formatInt(@intFromEnum(loc), 10, .lower, options, writer);
+        try writer.printInt(@intFromEnum(loc), 10, .lower, .{});
     }
 };

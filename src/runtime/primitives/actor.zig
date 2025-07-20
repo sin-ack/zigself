@@ -40,7 +40,7 @@ fn findActorMethod(
     return lookup: switch (receiver.lookup(selector)) {
         .Nothing => FindActorMethodResult{ .RuntimeError = try RuntimeError.initFormatted(
             source_range,
-            "Unknown selector '{s}'",
+            "Unknown selector '{f}'",
             .{selector},
         ) },
         .ActorMessage => FindActorMethodResult{ .RuntimeError = RuntimeError.initLiteral(
@@ -54,7 +54,7 @@ fn findActorMethod(
                         if (target_as_method.getArgumentSlotCount() != 0) {
                             break :blk FindActorMethodResult{ .RuntimeError = try RuntimeError.initFormatted(
                                 source_range,
-                                "Spawning actor with non-unary method '{s}' not permitted",
+                                "Spawning actor with non-unary method '{f}' not permitted",
                                 .{selector},
                             ) };
                         }
@@ -67,7 +67,7 @@ fn findActorMethod(
             },
             .Assignable => FindActorMethodResult{ .RuntimeError = try RuntimeError.initFormatted(
                 source_range,
-                "Spawning actor with non-unary method '{s}' not permitted",
+                "Spawning actor with non-unary method '{f}' not permitted",
                 .{selector},
             ) },
         },

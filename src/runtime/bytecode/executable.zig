@@ -89,18 +89,10 @@ fn Executable(comptime BlockT: type) type {
             return self.object_descriptors.items[index];
         }
 
-        pub fn format(
-            executable: Self,
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = fmt;
-            _ = options;
-
-            try std.fmt.format(writer, "ASTcode executable @ {s} ({} blocks):\n", .{ executable.definition_script.value.file_path, executable.blocks.items.len });
+        pub fn format(executable: Self, writer: *std.io.Writer) !void {
+            try writer.print("ASTcode executable @ {s} ({} blocks):\n", .{ executable.definition_script.value.file_path, executable.blocks.items.len });
             for (executable.blocks.items, 0..) |block, i| {
-                try std.fmt.format(writer, "Block {}:\n{}\n", .{ i, block });
+                try writer.print("Block {}:\n{f}\n", .{ i, block });
             }
         }
     };

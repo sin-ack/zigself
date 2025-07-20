@@ -63,7 +63,10 @@ pub fn RunScript(context: *PrimitiveContext) !ExecutionResult {
         error.OutOfMemory => return err,
     };
 
-    script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
+    var writer_buffer: [4096]u8 = undefined;
+    var writer = std.fs.File.stderr().writer(&writer_buffer);
+    script.value.reportDiagnostics(&writer.interface) catch unreachable;
+
     if (!did_parse_without_errors) {
         return ExecutionResult.runtimeError(RuntimeError.initLiteral(
             context.source_range,
@@ -112,7 +115,10 @@ pub fn EvaluateStringIfFail(context: *PrimitiveContext) !ExecutionResult {
         error.OutOfMemory => return error.OutOfMemory,
     };
 
-    script.value.reportDiagnostics(std.io.getStdErr().writer()) catch unreachable;
+    var writer_buffer: [4096]u8 = undefined;
+    var writer = std.fs.File.stderr().writer(&writer_buffer);
+    script.value.reportDiagnostics(&writer.interface) catch unreachable;
+
     if (!did_parse_without_errors) {
         // TODO: Pass error information to the failure block.
         return try context.interpreter.sendMessage(

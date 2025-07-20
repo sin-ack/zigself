@@ -14,15 +14,8 @@ line_start: usize,
 /// Points to the newline.
 line_end: usize,
 
-pub fn format(
-    location: Location,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    _ = fmt;
-
-    try std.fmt.formatInt(location.line, 10, .lower, options, writer);
+pub fn format(self: Location, writer: *std.io.Writer) !void {
+    try writer.printInt(self.line, 10, .lower, .{});
     try writer.writeByte(':');
-    try std.fmt.formatInt(location.column, 10, .lower, options, writer);
+    try writer.printInt(self.column, 10, .lower, .{});
 }

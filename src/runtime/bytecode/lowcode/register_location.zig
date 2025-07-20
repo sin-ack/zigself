@@ -82,14 +82,8 @@ pub const RegisterLocation = enum {
         };
     }
 
-    pub fn format(
-        loc: RegisterLocation,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
+    pub fn format(loc: RegisterLocation, writer: *std.io.Writer) !void {
         try writer.writeByte('%');
-        try std.fmt.formatText(@tagName(loc), "s", options, writer);
+        try writer.writeAll(@tagName(loc));
     }
 };

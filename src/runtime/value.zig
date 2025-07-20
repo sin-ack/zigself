@@ -157,7 +157,7 @@ pub const Value = packed struct(u64) {
         self: Value,
         selector: Selector,
     ) LookupResult {
-        if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up {} on {}\n", .{ selector, self });
+        if (LOOKUP_DEBUG) std.debug.print("Value.lookup: Looking up {f} on {}\n", .{ selector, self });
 
         // FIXME: We probably shouldn't even get here in the first place;
         //        sending "self" to an object should be optimized out at the

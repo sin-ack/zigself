@@ -90,15 +90,7 @@ const SlotProperties = extern struct {
         return @intCast(self.properties.unsafeAsUnsignedInteger() >> 30);
     }
 
-    pub fn format(
-        self: SlotProperties,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = fmt;
-        _ = options;
-
+    pub fn format(self: SlotProperties, writer: *std.io.Writer) !void {
         try writer.print(
             "SlotProperties{{ .hash = {x}, .parent = {s}, .assignable = {s}, .argument = {s} }}",
             .{

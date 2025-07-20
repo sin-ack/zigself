@@ -109,15 +109,8 @@ pub fn restart(self: *Activation) u32 {
     return 0;
 }
 
-pub fn format(
-    activation: Activation,
-    comptime fmt: []const u8,
-    options: std.fmt.FormatOptions,
-    writer: anytype,
-) !void {
-    _ = fmt;
-    _ = options;
-    try std.fmt.format(writer, "Activation{{ '{s}' created from {}, instruction_index = {}, target_location = {} }}", .{
+pub fn format(activation: Activation, writer: *std.io.Writer) !void {
+    try writer.print("Activation{{ '{s}' created from {f}, instruction_index = {}, target_location = {f} }}", .{
         activation.creator_message.getValues(),
         activation.created_from,
         activation.instruction_index,

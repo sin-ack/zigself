@@ -124,7 +124,7 @@ fn printCurrentInstruction(self: *Interpreter) void {
         .payload = block.getPayload(index),
         .source_range = range,
     };
-    std.debug.print("[#{} {} {s}] Executing: {} = {}\n", .{
+    std.debug.print("[#{} {f} {s}] Executing: {f} = {f}\n", .{
         @intFromEnum(self.actor.id),
         source_range,
         self.getCurrentActivation().creator_message.getValues(),
@@ -565,7 +565,7 @@ pub fn sendMessage(
             .Nothing => {
                 @branchHint(.cold);
                 return ExecutionResult.runtimeError(
-                    try RuntimeError.initFormatted(source_range, "Unknown selector {}", .{selector}),
+                    try RuntimeError.initFormatted(source_range, "Unknown selector {f}", .{selector}),
                 );
             },
             // FIXME: Factor this out into a separate function, it makes this bit

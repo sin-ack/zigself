@@ -93,6 +93,9 @@ fn collectTests(allocator: Allocator, directory: std.fs.Dir) !std.ArrayList(Test
 }
 
 fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
+    var writer_buffer: [4096]u8 = undefined;
+    var writer = std.fs.File.stderr().writer(&writer_buffer);
+
     var progress = std.Progress.start(.{
         .root_name = "Run zigSelf tests",
         .estimated_total_items = tests.items.len,
@@ -102,7 +105,7 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
     defer stdlib_script.unref();
 
     var did_parse_without_errors = try stdlib_script.value.parseScript();
-    try stdlib_script.value.reportDiagnostics(std.io.getStdErr().writer());
+    try stdlib_script.value.reportDiagnostics(&writer.interface);
     if (!did_parse_without_errors) {
         std.debug.panic("!!! Encountered errors while parsing the standard library entrypoint!", .{});
     }
@@ -139,7 +142,7 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
         defer script.unref();
 
         did_parse_without_errors = try script.value.parseScript();
-        try script.value.reportDiagnostics(std.io.getStdErr().writer());
+        try script.value.reportDiagnostics(&writer.interface);
         if (!did_parse_without_errors) {
             try parse_failed_tests.append(the_test.basename);
             continue :next_test;

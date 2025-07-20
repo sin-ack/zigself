@@ -335,7 +335,7 @@ pub fn exitActivation(
                 @as(u8, '-')
             else
                 @as(u8, ' ');
-            std.debug.print(" {c} #{} {}\n", .{ pointer, i, a });
+            std.debug.print(" {c} #{} {f}\n", .{ pointer, i, a });
         }
     }
 
@@ -510,7 +510,7 @@ pub fn ensureCanRead(self: *Actor, value: Value, source_range: SourceRange) void
                 std.debug.panic(
                     "!!! Attempted to read object that is not readable for this actor!\n" ++
                         "  Object {*} owned by actor #{}\n" ++
-                        "  Actor #{} is attempting to reach it at {}",
+                        "  Actor #{} is attempting to reach it at {f}",
                     .{ object, object.getMetadata().actor_id, self.id, source_range },
                 );
         },

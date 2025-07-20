@@ -29,7 +29,7 @@ pub fn lowerExecutable(allocator: Allocator, ast_executable: *bytecode.astcode.E
     }
 
     if (LOW_EXECUTABLE_DUMP_DEBUG)
-        std.debug.print("Executable dump: {}\n", .{low_executable.value});
+        std.debug.print("Executable dump: {f}\n", .{low_executable.value});
 
     return low_executable;
 }

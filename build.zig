@@ -37,17 +37,18 @@ pub fn build(b: *std.Build) void {
     // Steps
     const exe = b.addExecutable(.{
         .name = "self",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .optimize = optimize,
+            .target = target,
+        }),
+        // XXX: Native backend currently crashing due to Zig bug.
+        // https://github.com/ziglang/zig/issues/24364
+        .use_llvm = true,
     });
     exe.root_module.addImport("zigself", zigself);
     exe.root_module.addImport("zig-args", zig_args);
     exe.root_module.addImport("tracy", tracy);
-    // NOTE: Currently forced to use LLVM backend because the native backend
-    //       segfaults (and we can't upgrade yet due to our usingnamespace
-    //       use).
-    exe.use_llvm = true;
 
     b.installArtifact(exe);
 
@@ -62,9 +63,11 @@ pub fn build(b: *std.Build) void {
 
     var test_harness_exe = b.addExecutable(.{
         .name = "self-test",
-        .root_source_file = b.path("tests/harness.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/harness.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     test_harness_exe.root_module.addImport("zigself", zigself);
 
