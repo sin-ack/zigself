@@ -145,7 +145,7 @@ pub fn slotsLookup(
 
         const matches_constant = selector.equals(slot_selector);
         const matches_assignable = selector.canAssignTo(slot_selector);
-        if (matches_constant or matches_assignable) {
+        if (matches_constant or (matches_assignable and slot.isAssignable())) {
             return .{
                 .Found = .{
                     .object = @ptrCast(object),
