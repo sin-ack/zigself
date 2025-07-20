@@ -93,8 +93,11 @@ pub const Activation = extern struct {
             aligned_memory_area[activation_header_size..size],
         );
 
-        @memcpy(assignable_slots[0..argument_slot_count], arguments);
-        @memcpy(assignable_slots[argument_slot_count..], assignable_slot_values);
+        // FIXME: This is very ill-defined. We sort argument slots to the end
+        //        in parser code at the moment but there's nothing enforcing
+        //        this in later layers.
+        @memcpy(assignable_slots[0..assignable_slot_count], assignable_slot_values);
+        @memcpy(assignable_slots[assignable_slot_count..], arguments);
 
         return self;
     }
@@ -165,17 +168,6 @@ pub const Activation = extern struct {
         ));
     }
 
-    fn getArgumentSlots(self: Activation.Ptr) []GenericValue {
-        return self.getAssignableSlots()[0..self.getArgumentSlotCount()];
-    }
-
-    fn getNonargumentSlots(self: Activation.Ptr) []GenericValue {
-        const slot_values = self.getAssignableSlots();
-        std.debug.assert(slot_values.len - self.getArgumentSlotCount() == self.getAssignableSlotCount());
-
-        return slot_values[self.getArgumentSlotCount()..];
-    }
-
     pub fn getAssignableSlotValue(self: Activation.Ptr, slot: Slot) *GenericValue {
         std.debug.assert(slot.isAssignable());
 
@@ -183,10 +175,7 @@ pub const Activation = extern struct {
         std.debug.assert(!exceedsBoundsOf(offset_int, usize));
 
         const offset: usize = @intCast(offset_int);
-        return if (slot.isArgument())
-            &self.getArgumentSlots()[offset]
-        else
-            &self.getNonargumentSlots()[offset];
+        return &self.getAssignableSlots()[offset];
     }
 
     /// Visit the edges on this object with the given visitor.

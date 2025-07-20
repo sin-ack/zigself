@@ -41,20 +41,16 @@ pub const Method = extern struct {
     pub usingnamespace SlotsLikeObjectBase(Method);
     pub usingnamespace AssignableSlotsMixin(Method);
 
-    pub fn create(token: *heap_import.AllocationToken, actor_id: Actor.ActorID, map: MethodMap.Ptr, assignable_slot_values: []const GenericValue) Method.Ptr {
-        if (assignable_slot_values.len != map.getAssignableSlotCount()) {
-            std.debug.panic(
-                "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
-                .{ map.getAssignableSlotCount(), assignable_slot_values.len },
-            );
-        }
-
-        const size = Method.requiredSizeForAllocation(@intCast(assignable_slot_values.len));
+    /// Create a method object with the given method map. Allocates enough
+    /// space for assignable slots.
+    ///
+    /// All assignable slots *must* be initialized right after creation.
+    pub fn create(token: *heap_import.AllocationToken, actor_id: Actor.ActorID, map: MethodMap.Ptr) Method.Ptr {
+        const size = Method.requiredSizeForAllocation(map.getAssignableSlotCount());
 
         const memory_area = token.allocate(size);
         var self: Method.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map);
-        @memcpy(self.getAssignableSlots(), assignable_slot_values);
 
         return self;
     }
@@ -83,6 +79,17 @@ pub const Method = extern struct {
         try self.visitAssignableSlotValues(visitor);
     }
 
+    /// Return a shallow copy of this object.
+    pub fn clone(self: Method.Ptr, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID) Method.Ptr {
+        _ = allocator;
+        _ = heap;
+
+        const new_method = create(token, actor_id, self.getMap());
+        @memcpy(new_method.getAssignableSlots(), self.getAssignableSlots());
+
+        return new_method;
+    }
+
     // --- Top level context creation ---
 
     const toplevel_context_string = "<top level>";
@@ -95,9 +102,9 @@ pub const Method = extern struct {
     ) !Method.Ptr {
         const toplevel_context_method_map = blk: {
             const toplevel_context_name = try ByteArray.createWithValues(allocator, heap, token, .Global, toplevel_context_string);
-            break :blk try MethodMap.create(allocator, heap, token, 0, 0, false, toplevel_context_name, block, executable);
+            break :blk try MethodMap.create(allocator, heap, token, 0, 0, 0, false, toplevel_context_name, block, executable);
         };
-        return create(token, context.getActor().id, toplevel_context_method_map, &.{});
+        return create(token, context.getActor().id, toplevel_context_method_map);
     }
 
     pub fn requiredSizeForCreatingTopLevelContext() usize {
@@ -163,20 +170,23 @@ pub const MethodMap = extern struct {
 
     pub usingnamespace SlotsLikeMapBase(MethodMap);
 
+    /// Create a new method map.
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
+    /// All slots *must* be initialized right after creation.
     pub fn create(
         allocator: Allocator,
         heap: *VirtualMachine.Heap,
         token: *heap_import.AllocationToken,
+        slot_count: u16,
+        assignable_slot_count: u15,
         argument_slot_count: u8,
-        total_slot_count: u16,
         is_inline_method: bool,
         method_name: ByteArray.Ptr,
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
     ) !MethodMap.Ptr {
-        const size = MethodMap.requiredSizeForAllocation(total_slot_count);
+        const size = MethodMap.requiredSizeForAllocation(slot_count);
 
         const inline_cache = try block.allocateInlineCache(allocator);
         errdefer allocator.free(inline_cache);
@@ -185,21 +195,24 @@ pub const MethodMap = extern struct {
         try heap.markAddressAsNeedingFinalization(memory_area);
 
         var self: MethodMap.Ptr = @ptrCast(memory_area);
-        self.init(argument_slot_count, total_slot_count, is_inline_method, method_name, block, executable, inline_cache);
+        self.init(slot_count, assignable_slot_count, argument_slot_count, is_inline_method, method_name, block, executable, inline_cache);
+
         return self;
     }
 
     fn init(
         self: MethodMap.Ptr,
+        slot_count: u16,
+        assignable_slot_count: u15,
         argument_slot_count: u8,
-        total_slot_count: u16,
         is_inline_method: bool,
         method_name: ByteArray.Ptr,
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
         inline_cache: []InlineCacheEntry,
     ) void {
-        self.base_map.init(.Method, argument_slot_count, total_slot_count, block, executable, inline_cache);
+        self.base_map.init(.Method, argument_slot_count, slot_count, block, executable, inline_cache);
+        self.setAssignableSlotCount(assignable_slot_count);
         self.setInlineMethod(is_inline_method);
         self.method_name = .init(method_name);
     }
@@ -237,8 +250,9 @@ pub const MethodMap = extern struct {
             context.getVM().allocator,
             heap,
             token,
-            self.getArgumentSlotCount(),
             self.getSlotCount(),
+            self.getAssignableSlotCount(),
+            self.getArgumentSlotCount(),
             self.isInlineMethod(),
             self.method_name.get(),
             self.base_map.block.get(),

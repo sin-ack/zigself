@@ -15,7 +15,14 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+/// The slots of the object to be created.
 slots: []const SlotDescriptor,
+/// The number of slots requiring an assignable slot value.
+slots_requiring_assignable_slot_value: u15 = 0,
+/// The number of argument slots.
+argument_slots: u8 = 0,
+/// The number of slots with an initial value present on the argument stack.
+slots_with_initial_value: u32 = 0,
 
 const ObjectDescriptor = @This();
 pub const SlotDescriptor = struct {
@@ -54,6 +61,22 @@ pub const SlotDescriptor = struct {
         const name_copy = try allocator.dupe(u8, self.name);
         return .{ .name = name_copy, .type = self.type, .assignable = self.assignable };
     }
+
+    /// Return whether this slot requires an accompanying assignable slot value
+    /// on the object in addition to the slot on the map itself.
+    pub fn requiresAssignableSlotValue(self: SlotDescriptor) bool {
+        // NOTE: While argument slots are assignable, they are not counted as
+        //       requiring an assignable slot value. Since they would only
+        //       ever contain nil, we skip them when creating method and block
+        //       objects and only include them in activation objects.
+        return self.assignable and self.hasInitialValue();
+    }
+
+    /// Return whether this slot has an initial value on the argument stack
+    /// while initializing the object.
+    pub fn hasInitialValue(self: SlotDescriptor) bool {
+        return self.type != .Argument;
+    }
 };
 const SlotType = enum {
     /// A regular slot. Can be constant or assignable.
@@ -68,7 +91,14 @@ const SlotType = enum {
 };
 
 pub fn init(slots: []const SlotDescriptor) ObjectDescriptor {
-    return .{ .slots = slots };
+    var descriptor: ObjectDescriptor = .{ .slots = slots };
+    for (slots) |slot| {
+        if (slot.requiresAssignableSlotValue()) descriptor.slots_requiring_assignable_slot_value += 1;
+        if (slot.type == .Argument) descriptor.argument_slots += 1;
+        if (slot.hasInitialValue()) descriptor.slots_with_initial_value += 1;
+    }
+
+    return descriptor;
 }
 
 pub fn deinit(self: ObjectDescriptor, allocator: Allocator) void {

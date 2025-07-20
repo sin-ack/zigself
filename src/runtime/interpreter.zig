@@ -34,6 +34,7 @@ const objects_block = @import("objects/block.zig");
 const objects_slots = @import("objects/slots.zig");
 const VirtualMachine = @import("./VirtualMachine.zig");
 const objects_method = @import("objects/method.zig");
+const AllocationToken = @import("Heap.zig").AllocationToken;
 const ExecutionResult = @import("execution_result.zig").ExecutionResult;
 const ActivationObject = @import("objects/activation.zig").Activation;
 
@@ -777,71 +778,25 @@ fn createObject(
     object_descriptor: bytecode.ObjectDescriptor,
     target_location: bytecode.RegisterLocation,
 ) !void {
+    const allocator = vm_context.getVM().allocator;
     const actor = vm_context.getActor();
+    const heap = vm_context.getHeap();
 
-    // FIXME: We currently have to do this object descriptor -> slot conversion
-    //        because of what the `Slot` code expects. That code can be
-    //        significantly simplified (most of the complexity is a leftover
-    //        from when I had experimented with inherited slots) and this
-    //        conversion can be removed.
-    var slots: std.ArrayListUnmanaged(Slot) = try .initCapacity(
-        // FIXME: Take the VM directly.
-        vm_context.getVM().allocator,
-        object_descriptor.slots.len,
-    );
-    slots.items.len = object_descriptor.slots.len;
-    defer slots.deinit(vm_context.getVM().allocator);
-
-    // NOTE: We have to go backwards when creating the slots because the initial
-    //       values of slots are pushed to the argument stack at this point,
-    //       with the last slot's initial value being at the top of the stack.
-    var slot_descriptor_i = object_descriptor.slots.len;
-    while (slot_descriptor_i > 0) : (slot_descriptor_i -= 1) {
-        const index = slot_descriptor_i - 1;
-        const slot_descriptor = object_descriptor.slots[index];
-
-        var token = try vm_context.getHeap().allocate(ByteArray.requiredSizeForAllocation());
-        defer token.deinit();
-
-        // NOTE: Per ObjectDescriptor documentation, an initial value only
-        //       exists for non-argument slots.
-        const slot_value = if (slot_descriptor.type != .Argument)
-            actor.argument_stack.pop()
-        else
-            null;
-        const slot_name = try ByteArray.createWithValues(vm_context.getVM().allocator, vm_context.getHeap(), &token, actor.id, slot_descriptor.name);
-
-        const slot = switch (slot_descriptor.type) {
-            .Regular => Slot.initRegular(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
-            .Parent => Slot.initParent(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
-            .Argument => Slot.initArgument(slot_name),
-        };
-        slots.items[index] = slot;
-    }
-
-    var total_slot_count: u16 = 0;
-    var total_assignable_slot_count: u8 = 0;
-    for (slots.items, 0..) |slot, i| {
-        total_slot_count += slot.requiredSlotSpace(slots.items[0..i]);
-        total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots.items[0..i]));
-    }
-
-    var token = try vm_context.getHeap().allocate(
-        SlotsMap.requiredSizeForAllocation(total_slot_count) +
-            SlotsObject.requiredSizeForAllocation(total_assignable_slot_count),
+    const slot_count: u16 = @intCast(object_descriptor.slots.len);
+    const byte_array_required_memory = slot_count * ByteArray.requiredSizeForAllocation();
+    var token = try heap.allocate(
+        SlotsMap.requiredSizeForAllocation(slot_count) +
+            SlotsObject.requiredSizeForAllocation(object_descriptor.slots_requiring_assignable_slot_value) +
+            byte_array_required_memory,
     );
     defer token.deinit();
 
-    const slots_map = SlotsMap.create(&token, total_slot_count);
-    var map_builder: SlotsMap.MapBuilder = undefined;
-    map_builder.initInPlace(&token, slots_map);
+    const slots_map = SlotsMap.create2(&token, slot_count, object_descriptor.slots_requiring_assignable_slot_value);
+    const slots_object = SlotsObject.create2(&token, actor.id, slots_map);
 
-    for (slots.items) |slot| {
-        map_builder.addSlot(slot);
-    }
+    try writeObjectSlots(SlotsMap, allocator, heap, actor, &token, object_descriptor, slots_map, slots_object);
 
-    const the_slots_object = map_builder.createObject();
-    vm_context.getVM().writeRegister(target_location, the_slots_object.asValue());
+    vm_context.getVM().writeRegister(target_location, slots_object.asValue());
 }
 
 fn createMethod(
@@ -851,90 +806,38 @@ fn createMethod(
     block_index: u32,
     target_location: bytecode.RegisterLocation,
 ) !void {
+    const allocator = vm_context.getVM().allocator;
     const actor = vm_context.getActor();
+    const heap = vm_context.getHeap();
     defer actor.next_method_is_inline = false;
 
-    // FIXME: We currently have to do this object descriptor -> slot conversion
-    //        because of what the `Slot` code expects. That code can be
-    //        significantly simplified (most of the complexity is a leftover
-    //        from when I had experimented with inherited slots) and this
-    //        conversion can be removed.
-    var slots: std.ArrayListUnmanaged(Slot) = try .initCapacity(
-        // FIXME: Take the VM directly.
-        vm_context.getVM().allocator,
-        object_descriptor.slots.len,
-    );
-    slots.items.len = object_descriptor.slots.len;
-    defer slots.deinit(vm_context.getVM().allocator);
-
-    // NOTE: We have to go backwards when creating the slots because the initial
-    //       values of slots are pushed to the argument stack at this point,
-    //       with the last slot's initial value being at the top of the stack.
-    var slot_descriptor_i = object_descriptor.slots.len;
-    while (slot_descriptor_i > 0) : (slot_descriptor_i -= 1) {
-        const index = slot_descriptor_i - 1;
-        const slot_descriptor = object_descriptor.slots[index];
-
-        var token = try vm_context.getHeap().allocate(ByteArray.requiredSizeForAllocation());
-        defer token.deinit();
-
-        // NOTE: Per ObjectDescriptor documentation, an initial value only
-        //       exists for non-argument slots.
-        const slot_value = if (slot_descriptor.type != .Argument)
-            actor.argument_stack.pop()
-        else
-            null;
-        const slot_name = try ByteArray.createWithValues(vm_context.getVM().allocator, vm_context.getHeap(), &token, actor.id, slot_descriptor.name);
-
-        const slot = switch (slot_descriptor.type) {
-            .Regular => Slot.initRegular(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
-            .Parent => Slot.initParent(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
-            .Argument => Slot.initArgument(slot_name),
-        };
-        slots.items[index] = slot;
-    }
-
-    var total_slot_count: u16 = 0;
-    var total_assignable_slot_count: u8 = 0;
-    var argument_slot_count: u8 = 0;
-    for (slots.items, 0..) |slot, i| {
-        total_slot_count += slot.requiredSlotSpace(slots.items[0..i]);
-        total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots.items[0..i]));
-
-        // FIXME: This makes the assumption that argument slots are
-        //        never overwritten.
-        if (slot.isArgument())
-            argument_slot_count += 1;
-    }
-
-    var token = try vm_context.getHeap().allocate(
-        MethodMap.requiredSizeForAllocation(total_slot_count) +
-            MethodObject.requiredSizeForAllocation(total_assignable_slot_count),
+    const slot_count: u16 = @intCast(object_descriptor.slots.len);
+    const byte_array_required_memory = slot_count * ByteArray.requiredSizeForAllocation();
+    var token = try heap.allocate(
+        MethodMap.requiredSizeForAllocation(slot_count) +
+            MethodObject.requiredSizeForAllocation(object_descriptor.slots_requiring_assignable_slot_value) +
+            byte_array_required_memory,
     );
     defer token.deinit();
 
     const block = executable.value.getBlock(block_index);
     const method_map = try MethodMap.create(
-        vm_context.getVM().allocator,
-        vm_context.getHeap(),
+        allocator,
+        heap,
         &token,
-        argument_slot_count,
-        total_slot_count,
+        slot_count,
+        object_descriptor.slots_requiring_assignable_slot_value,
+        object_descriptor.argument_slots,
         actor.next_method_is_inline,
         method_name,
         block,
         executable,
     );
+    const method_object = MethodObject.create(&token, actor.id, method_map);
 
-    var map_builder: MethodMap.MapBuilder = undefined;
-    map_builder.initInPlace(&token, method_map);
+    try writeObjectSlots(MethodMap, allocator, heap, actor, &token, object_descriptor, method_map, method_object);
 
-    for (slots.items) |slot| {
-        map_builder.addSlot(slot);
-    }
-
-    const method = map_builder.createObject();
-    vm_context.getVM().writeRegister(target_location, method.asValue());
+    vm_context.getVM().writeRegister(target_location, method_object.asValue());
 }
 
 fn createBlock(
@@ -943,60 +846,9 @@ fn createBlock(
     block_index: u32,
     target_location: bytecode.RegisterLocation,
 ) !void {
+    const allocator = vm_context.getVM().allocator;
     const actor = vm_context.getActor();
-
-    // FIXME: We currently have to do this object descriptor -> slot conversion
-    //        because of what the `Slot` code expects. That code can be
-    //        significantly simplified (most of the complexity is a leftover
-    //        from when I had experimented with inherited slots) and this
-    //        conversion can be removed.
-    var slots: std.ArrayListUnmanaged(Slot) = try .initCapacity(
-        // FIXME: Take the VM directly.
-        vm_context.getVM().allocator,
-        object_descriptor.slots.len,
-    );
-    slots.items.len = object_descriptor.slots.len;
-    defer slots.deinit(vm_context.getVM().allocator);
-
-    // NOTE: We have to go backwards when creating the slots because the initial
-    //       values of slots are pushed to the argument stack at this point,
-    //       with the last slot's initial value being at the top of the stack.
-    var slot_descriptor_i = object_descriptor.slots.len;
-    while (slot_descriptor_i > 0) : (slot_descriptor_i -= 1) {
-        const index = slot_descriptor_i - 1;
-        const slot_descriptor = object_descriptor.slots[index];
-
-        var token = try vm_context.getHeap().allocate(ByteArray.requiredSizeForAllocation());
-        defer token.deinit();
-
-        // NOTE: Per ObjectDescriptor documentation, an initial value only
-        //       exists for non-argument slots.
-        const slot_value = if (slot_descriptor.type != .Argument)
-            actor.argument_stack.pop()
-        else
-            null;
-        const slot_name = try ByteArray.createWithValues(vm_context.getVM().allocator, vm_context.getHeap(), &token, actor.id, slot_descriptor.name);
-
-        const slot = switch (slot_descriptor.type) {
-            .Regular => Slot.initRegular(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
-            .Parent => Slot.initParent(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
-            .Argument => Slot.initArgument(slot_name),
-        };
-        slots.items[index] = slot;
-    }
-
-    var total_slot_count: u16 = 0;
-    var total_assignable_slot_count: u15 = 0;
-    var argument_slot_count: u8 = 0;
-    for (slots.items, 0..) |slot, i| {
-        total_slot_count += slot.requiredSlotSpace(slots.items[0..i]);
-        total_assignable_slot_count += @intCast(slot.requiredAssignableSlotValueSpace(slots.items[0..i]));
-
-        // FIXME: This makes the assumption that argument slots are
-        //        never overwritten.
-        if (slot.isArgument())
-            argument_slot_count += 1;
-    }
+    const heap = vm_context.getHeap();
 
     const block = executable.value.getBlock(block_index);
     // The latest activation is where the block was created, so it will always
@@ -1015,9 +867,12 @@ fn createBlock(
         parent_activation.takeRef(actor.activation_stack);
     std.debug.assert(nonlocal_return_target_activation.get(actor.activation_stack).?.nonlocal_return_target_activation == null);
 
+    const slot_count: u16 = @intCast(object_descriptor.slots.len);
+    const byte_array_required_memory = slot_count * ByteArray.requiredSizeForAllocation();
     var token = try vm_context.getHeap().allocate(
-        BlockMap.requiredSizeForAllocation(total_slot_count) +
-            BlockObject.requiredSizeForAllocation(total_assignable_slot_count),
+        BlockMap.requiredSizeForAllocation(slot_count) +
+            BlockObject.requiredSizeForAllocation(object_descriptor.slots_requiring_assignable_slot_value) +
+            byte_array_required_memory,
     );
     defer token.deinit();
 
@@ -1025,21 +880,71 @@ fn createBlock(
         vm_context.getVM().allocator,
         vm_context.getHeap(),
         &token,
-        argument_slot_count,
-        total_slot_count,
+        slot_count,
+        object_descriptor.slots_requiring_assignable_slot_value,
+        object_descriptor.argument_slots,
         parent_activation.takeRef(actor.activation_stack),
         nonlocal_return_target_activation,
         block,
         executable,
     );
+    const block_object = BlockObject.create(&token, actor.id, block_map);
 
-    var map_builder: BlockMap.MapBuilder = undefined;
-    map_builder.initInPlace(&token, block_map);
+    try writeObjectSlots(BlockMap, allocator, heap, actor, &token, object_descriptor, block_map, block_object);
 
-    for (slots.items) |slot| {
-        map_builder.addSlot(slot);
+    vm_context.getVM().writeRegister(target_location, block_object.asValue());
+}
+
+fn writeObjectSlots(
+    comptime MapType: type,
+    allocator: Allocator,
+    heap: *VirtualMachine.Heap,
+    actor: *Actor,
+    token: *AllocationToken,
+    object_descriptor: bytecode.ObjectDescriptor,
+    map: MapType.Ptr,
+    object: MapType.ObjectType.Ptr,
+) !void {
+    const output_slots = map.getSlots();
+    const output_assignable_slot_values = object.getAssignableSlots();
+
+    const initial_values = actor.argument_stack.lastNItems(object_descriptor.slots_with_initial_value);
+    defer actor.argument_stack.popNItems(object_descriptor.slots_with_initial_value);
+
+    var initial_values_index: usize = 0;
+    var assignable_slot_index: usize = 0;
+    // NOTE: This is different from assignable_slot_index which also tracks
+    //       assignable slots with no initial value.
+    var assignable_slot_value_index: usize = 0;
+    for (object_descriptor.slots, 0..) |slot_descriptor, i| {
+        const slot_name = try ByteArray.createWithValues(allocator, heap, token, actor.id, slot_descriptor.name);
+
+        // NOTE: Per ObjectDescriptor documentation, an initial value only
+        //       exists for non-argument slots.
+        const slot_value = if (slot_descriptor.hasInitialValue()) slot_value: {
+            const value = initial_values[initial_values_index];
+            initial_values_index += 1;
+            break :slot_value value;
+        } else null;
+
+        const slot = switch (slot_descriptor.type) {
+            .Regular => Slot.initRegular(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
+            .Parent => Slot.initParent(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
+            .Argument => Slot.initArgument(slot_name),
+        };
+
+        output_slots[i] = slot;
+        if (slot_descriptor.assignable) {
+            output_slots[i].value = Value.fromUnsignedInteger(@intCast(assignable_slot_index));
+
+            if (slot_descriptor.requiresAssignableSlotValue()) {
+                std.debug.assert(assignable_slot_value_index == assignable_slot_index);
+
+                output_assignable_slot_values[assignable_slot_value_index] = slot_value.?;
+                assignable_slot_value_index += 1;
+            }
+
+            assignable_slot_index += 1;
+        }
     }
-
-    const the_block_object = map_builder.createObject();
-    vm_context.getVM().writeRegister(target_location, the_block_object.asValue());
 }

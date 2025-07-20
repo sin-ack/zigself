@@ -45,20 +45,16 @@ pub const Block = extern struct {
     pub usingnamespace SlotsLikeObjectBase(Block);
     pub usingnamespace AssignableSlotsMixin(Block);
 
-    pub fn create(token: *heap_import.AllocationToken, actor_id: Actor.ActorID, map: BlockMap.Ptr, assignable_slot_values: []const Value) Block.Ptr {
-        if (assignable_slot_values.len != map.getAssignableSlotCount()) {
-            std.debug.panic(
-                "Passed assignable slot slice does not match slot count in map (expected {}, got {})",
-                .{ map.getAssignableSlotCount(), assignable_slot_values.len },
-            );
-        }
-
-        const size = Block.requiredSizeForAllocation(@intCast(assignable_slot_values.len));
+    /// Create a block object with the given block map. Allocates enough space
+    /// for assignable slots.
+    ///
+    /// All assignable slots *must* be initialized right after creation.
+    pub fn create(token: *heap_import.AllocationToken, actor_id: Actor.ActorID, map: BlockMap.Ptr) Block.Ptr {
+        const size = Block.requiredSizeForAllocation(map.getAssignableSlotCount());
 
         const memory_area = token.allocate(size);
         var self: Block.Ptr = @ptrCast(memory_area);
         self.init(actor_id, map);
-        @memcpy(self.getAssignableSlots(), assignable_slot_values);
 
         return self;
     }
@@ -84,6 +80,17 @@ pub const Block = extern struct {
     pub fn visitEdges(self: Block.Ptr, visitor: anytype) !void {
         try self.slots.object.visitEdges(visitor);
         try self.visitAssignableSlotValues(visitor);
+    }
+
+    /// Return a shallow copy of this object.
+    pub fn clone(self: Block.Ptr, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID) Block.Ptr {
+        _ = allocator;
+        _ = heap;
+
+        const new_block = create(token, actor_id, self.getMap());
+        @memcpy(new_block.getAssignableSlots(), self.getAssignableSlots());
+
+        return new_block;
     }
 
     // --- Well-known value slots ---
@@ -195,20 +202,23 @@ pub const BlockMap = extern struct {
 
     pub usingnamespace SlotsLikeMapBase(BlockMap);
 
+    /// Create a new block map.
     /// Borrows a ref for `script` from the caller. Takes ownership of
     /// `statements`.
+    /// All slots *must* be initialized right after creation.
     pub fn create(
         allocator: Allocator,
         heap: *VirtualMachine.Heap,
         token: *heap_import.AllocationToken,
+        slot_count: u16,
+        assignable_slot_count: u15,
         argument_slot_count: u8,
-        total_slot_count: u16,
         parent_activation: Activation.ActivationRef,
         nonlocal_return_target_activation: Activation.ActivationRef,
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
     ) !BlockMap.Ptr {
-        const size = BlockMap.requiredSizeForAllocation(total_slot_count);
+        const size = BlockMap.requiredSizeForAllocation(slot_count);
 
         const inline_cache = try block.allocateInlineCache(allocator);
         errdefer allocator.free(inline_cache);
@@ -217,23 +227,25 @@ pub const BlockMap = extern struct {
         try heap.markAddressAsNeedingFinalization(memory_area);
 
         var self: BlockMap.Ptr = @ptrCast(memory_area);
-        self.init(argument_slot_count, total_slot_count, parent_activation, nonlocal_return_target_activation, block, executable, inline_cache);
+        self.init(slot_count, assignable_slot_count, argument_slot_count, parent_activation, nonlocal_return_target_activation, block, executable, inline_cache);
         return self;
     }
 
     fn init(
         self: BlockMap.Ptr,
+        slot_count: u16,
+        assignable_slot_count: u15,
         argument_slot_count: u8,
-        total_slot_count: u16,
         parent_activation: Activation.ActivationRef,
         nonlocal_return_target_activation: Activation.ActivationRef,
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
         inline_cache: []InlineCacheEntry,
     ) void {
-        self.base_map.init(.Block, argument_slot_count, total_slot_count, block, executable, inline_cache);
+        self.base_map.init(.Block, argument_slot_count, slot_count, block, executable, inline_cache);
         self.parent_activation = parent_activation;
         self.nonlocal_return_target_activation = nonlocal_return_target_activation;
+        self.setAssignableSlotCount(assignable_slot_count);
     }
 
     pub fn finalize(self: BlockMap.Ptr, allocator: Allocator) void {
@@ -256,8 +268,9 @@ pub const BlockMap = extern struct {
             context.getVM().allocator,
             heap,
             token,
-            self.getArgumentSlotCount(),
             self.getSlotCount(),
+            self.getAssignableSlotCount(),
+            self.getArgumentSlotCount(),
             self.parent_activation,
             self.nonlocal_return_target_activation,
             self.base_map.block.get(),

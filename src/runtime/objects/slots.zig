@@ -100,13 +100,6 @@ pub fn AssignableSlotsMixin(comptime ObjectT: type) type {
             return &getAssignableSlots(self)[@intCast(slot.value.unsafeAsUnsignedInteger())];
         }
 
-        /// Return a shallow copy of this object.
-        pub fn clone(self: ObjectT.Ptr, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID) ObjectT.Ptr {
-            _ = allocator;
-            _ = heap;
-            return ObjectT.create(token, actor_id, self.getMap(), getAssignableSlots(self));
-        }
-
         /// Visit the assignable slot values in this object with the given
         /// visitor.
         pub fn visitAssignableSlotValues(self: ObjectT.Ptr, visitor: anytype) !void {
@@ -251,6 +244,20 @@ pub const Slots = extern struct {
         return self;
     }
 
+    /// Create a new slots object with the given map. The map must have
+    /// the correct amount of assignable slots set in its metadata.
+    ///
+    /// All assignable slots *must* be initialized right after creation.
+    pub fn create2(token: *heap_import.AllocationToken, actor_id: Actor.ActorID, map: SlotsMap.Ptr) Slots.Ptr {
+        const size = Slots.requiredSizeForAllocation(map.getAssignableSlotCount());
+
+        const memory_area = token.allocate(size);
+        var self: Slots.Ptr = @ptrCast(memory_area);
+        self.init(actor_id, map);
+
+        return self;
+    }
+
     fn init(self: Slots.Ptr, actor_id: Actor.ActorID, map: SlotsMap.Ptr) void {
         self.object.init(.Slots, actor_id, map.asValue());
     }
@@ -266,6 +273,13 @@ pub const Slots = extern struct {
 
     pub fn getSlots(self: Slots.Ptr) Slot.Slice {
         return self.getMap().getSlots();
+    }
+
+    /// Return a shallow copy of this object.
+    pub fn clone(self: Slots.Ptr, allocator: Allocator, heap: *VirtualMachine.Heap, token: *heap_import.AllocationToken, actor_id: Actor.ActorID) Slots.Ptr {
+        _ = allocator;
+        _ = heap;
+        return Slots.create(token, actor_id, self.getMap(), self.getAssignableSlots());
     }
 
     // --- Adding slots ---
@@ -483,8 +497,6 @@ pub const Slots = extern struct {
 /// usingnamespace.
 pub fn SlotsLikeMapBase(comptime MapT: type) type {
     return struct {
-        pub const MapBuilder = mapbuilder.MapBuilder(MapT, MapT.ObjectType);
-
         fn getSlotMemory(self: MapT.Ptr) pointer.HeapSlice(u8, .Mutable) {
             const total_object_size = MapT.getSizeInMemory(self);
             const map_memory: [*]align(@alignOf(u64)) u8 = @ptrCast(self);
@@ -538,6 +550,7 @@ pub const SlotsMap = extern struct {
 
     pub const Ptr = pointer.HeapPtr(SlotsMap, .Mutable);
     pub const ObjectType = Slots;
+    pub const MapBuilder = mapbuilder.MapBuilder(SlotsMap, Slots);
 
     pub usingnamespace SlotsLikeMapBase(SlotsMap);
 
@@ -551,6 +564,12 @@ pub const SlotsMap = extern struct {
         var self: SlotsMap.Ptr = @ptrCast(memory_area);
         self.init(slot_count);
 
+        return self;
+    }
+
+    pub fn create2(token: *heap_import.AllocationToken, slot_count: u16, assignable_slot_count: u15) SlotsMap.Ptr {
+        const self = create(token, slot_count);
+        self.setAssignableSlotCount(assignable_slot_count);
         return self;
     }
 
