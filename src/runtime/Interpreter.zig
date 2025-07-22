@@ -875,7 +875,6 @@ fn writeObjectSlots(
     defer self.actor.argument_stack.popNItems(object_descriptor.slots_with_initial_value);
 
     var initial_values_index: usize = 0;
-    var assignable_slot_index: usize = 0;
     // NOTE: This is different from assignable_slot_index which also tracks
     //       assignable slots with no initial value.
     var assignable_slot_value_index: usize = 0;
@@ -891,23 +890,21 @@ fn writeObjectSlots(
         } else null;
 
         const slot = switch (slot_descriptor.type) {
-            .Regular => Slot.initRegular(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
-            .Parent => Slot.initParent(slot_name, if (slot_descriptor.assignable) .Assignable else .Constant, slot_value.?),
+            .Regular => Slot.initRegular(slot_name, if (slot_descriptor.assignable_index != null) .Assignable else .Constant, slot_value.?),
+            .Parent => Slot.initParent(slot_name, if (slot_descriptor.assignable_index != null) .Assignable else .Constant, slot_value.?),
             .Argument => Slot.initArgument(slot_name),
         };
 
         output_slots[i] = slot;
-        if (slot_descriptor.assignable) {
-            output_slots[i].value = Value.fromUnsignedInteger(@intCast(assignable_slot_index));
+        if (slot_descriptor.assignable_index) |assignable_index| {
+            output_slots[i].value = Value.fromUnsignedInteger(@intCast(assignable_index));
 
             if (slot_descriptor.requiresAssignableSlotValue()) {
-                std.debug.assert(assignable_slot_value_index == assignable_slot_index);
+                std.debug.assert(assignable_slot_value_index == assignable_index);
 
                 output_assignable_slot_values[assignable_slot_value_index] = slot_value.?;
                 assignable_slot_value_index += 1;
             }
-
-            assignable_slot_index += 1;
         }
     }
 }

@@ -358,6 +358,7 @@ fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots
         slot_descriptors.deinit(executable.allocator);
     }
 
+    var assignable_index: usize = 0;
     for (slots) |slot| {
         const slot_value_location = blk: {
             if (slot.value) |value| {
@@ -384,21 +385,27 @@ fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots
             std.debug.assert(slot.is_mutable);
             std.debug.assert(!slot.is_parent);
 
-            const descriptor: ObjectDescriptor.SlotDescriptor = try .initArgument(executable.allocator, slot.name);
+            const descriptor: ObjectDescriptor.SlotDescriptor = try .initArgument(executable.allocator, slot.name, assignable_index);
             errdefer descriptor.deinit(executable.allocator);
             try slot_descriptors.append(executable.allocator, descriptor);
+
+            assignable_index += 1;
         } else if (slot.is_parent) {
-            const descriptor: ObjectDescriptor.SlotDescriptor = try .initParent(executable.allocator, slot.name, slot.is_mutable);
+            const descriptor: ObjectDescriptor.SlotDescriptor = try .initParent(executable.allocator, slot.name, if (slot.is_mutable) assignable_index else null);
             errdefer descriptor.deinit(executable.allocator);
             try slot_descriptors.append(executable.allocator, descriptor);
+
+            if (slot.is_mutable) assignable_index += 1;
 
             try block.addInstruction(executable.allocator, .PushArg, .Nil, .{
                 .argument_location = slot_value_location,
             }, source_range);
         } else {
-            const descriptor: ObjectDescriptor.SlotDescriptor = try .initRegular(executable.allocator, slot.name, slot.is_mutable);
+            const descriptor: ObjectDescriptor.SlotDescriptor = try .initRegular(executable.allocator, slot.name, if (slot.is_mutable) assignable_index else null);
             errdefer descriptor.deinit(executable.allocator);
             try slot_descriptors.append(executable.allocator, descriptor);
+
+            if (slot.is_mutable) assignable_index += 1;
 
             try block.addInstruction(executable.allocator, .PushArg, .Nil, .{
                 .argument_location = slot_value_location,

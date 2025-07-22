@@ -30,25 +30,31 @@ pub const SlotDescriptor = struct {
     name: []const u8,
     /// The type of the slot.
     type: SlotType,
-    /// Whether the slot can be assigned to.
-    assignable: bool,
+    /// The index of the assignable slot value in the object, if this
+    /// slot is assignable. If this is null, the slot is not assignable.
+    assignable_index: ?usize = null,
 
-    /// Create a new regular slot.
-    pub fn initRegular(allocator: Allocator, name: []const u8, assignable: bool) !SlotDescriptor {
+    /// Create a new regular slot. If assignable_index is not null, the slot
+    /// is assignable and the index of the assignable slot value is set in
+    /// the resulting object.
+    pub fn initRegular(allocator: Allocator, name: []const u8, assignable_index: ?usize) !SlotDescriptor {
         const name_copy = try allocator.dupe(u8, name);
-        return .{ .name = name_copy, .type = .Regular, .assignable = assignable };
+        return .{ .name = name_copy, .type = .Regular, .assignable_index = assignable_index };
     }
 
-    /// Create a new parent slot.
-    pub fn initParent(allocator: Allocator, name: []const u8, assignable: bool) !SlotDescriptor {
+    /// Create a new parent slot. If assignable_index is not null, the slot
+    /// is assignable and the index of the assignable slot value is set in
+    /// the resulting object.
+    pub fn initParent(allocator: Allocator, name: []const u8, assignable_index: ?usize) !SlotDescriptor {
         const name_copy = try allocator.dupe(u8, name);
-        return .{ .name = name_copy, .type = .Parent, .assignable = assignable };
+        return .{ .name = name_copy, .type = .Parent, .assignable_index = assignable_index };
     }
 
-    /// Create a new argument slot.
-    pub fn initArgument(allocator: Allocator, name: []const u8) !SlotDescriptor {
+    /// Create a new argument slot. This slot is always assignable and
+    /// the assignable index is set to the given value.
+    pub fn initArgument(allocator: Allocator, name: []const u8, assignable_index: usize) !SlotDescriptor {
         const name_copy = try allocator.dupe(u8, name);
-        return .{ .name = name_copy, .type = .Argument, .assignable = true };
+        return .{ .name = name_copy, .type = .Argument, .assignable_index = assignable_index };
     }
 
     /// Deinitialize the slot, freeing resources.
@@ -59,7 +65,7 @@ pub const SlotDescriptor = struct {
     /// Create a copy of the slot.
     pub fn copy(self: SlotDescriptor, allocator: Allocator) !SlotDescriptor {
         const name_copy = try allocator.dupe(u8, self.name);
-        return .{ .name = name_copy, .type = self.type, .assignable = self.assignable };
+        return .{ .name = name_copy, .type = self.type, .assignable_index = self.assignable_index };
     }
 
     /// Return whether this slot requires an accompanying assignable slot value
@@ -69,7 +75,7 @@ pub const SlotDescriptor = struct {
         //       requiring an assignable slot value. Since they would only
         //       ever contain nil, we skip them when creating method and block
         //       objects and only include them in activation objects.
-        return self.assignable and self.hasInitialValue();
+        return self.assignable_index != null and self.hasInitialValue();
     }
 
     /// Return whether this slot has an initial value on the argument stack
