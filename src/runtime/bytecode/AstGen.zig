@@ -79,27 +79,30 @@ fn generateScript(self: *AstGen, executable: *Executable, script_node: ast.Scrip
     try self.pushRegisterID();
     defer self.popRegisterID();
 
-    const last_expression_location = try self.generateStatementList(executable, script_block, script_node.statements.value.statements);
+    // TODO: Top-level scripts should be able to have slots.
+    const object_descriptor = ObjectDescriptor.init(&.{});
+
+    const last_expression_location = try self.generateStatementList(executable, script_block, &object_descriptor, script_node.statements.value.statements);
     try script_block.addInstruction(executable.allocator, .Return, self.allocateRegister(), .{ .value_location = last_expression_location }, script_node.range);
 
     script_block.seal();
 }
 
-fn generateStatementList(self: *AstGen, executable: *Executable, block: *Block, statements: []ast.ExpressionNode) AstGenError!RegisterLocation {
+fn generateStatementList(self: *AstGen, executable: *Executable, block: *Block, object_descriptor: *const ObjectDescriptor, statements: []ast.ExpressionNode) AstGenError!RegisterLocation {
     var last_expression_location = RegisterLocation.Nil;
     for (statements) |expression| {
-        last_expression_location = try self.generateExpression(executable, block, expression);
+        last_expression_location = try self.generateExpression(executable, block, object_descriptor, expression);
     }
 
     return last_expression_location;
 }
 
-fn generateExpression(self: *AstGen, executable: *Executable, block: *Block, expression: ast.ExpressionNode) AstGenError!RegisterLocation {
+fn generateExpression(self: *AstGen, executable: *Executable, block: *Block, object_descriptor: *const ObjectDescriptor, expression: ast.ExpressionNode) AstGenError!RegisterLocation {
     return switch (expression) {
-        .Object => |object| self.generateObject(executable, block, object),
-        .Block => |block_node| self.generateBlock(executable, block, block_node),
-        .Message => |message| self.generateMessage(executable, block, message),
-        .Return => |return_node| self.generateReturn(executable, block, return_node),
+        .Object => |object| self.generateObject(executable, block, object_descriptor, object),
+        .Block => |block_node| self.generateBlock(executable, block, object_descriptor, block_node),
+        .Message => |message| self.generateMessage(executable, block, object_descriptor, message),
+        .Return => |return_node| self.generateReturn(executable, block, object_descriptor, return_node),
 
         .Identifier => |identifier| self.generateIdentifier(executable, block, identifier),
         .String => |string| self.generateString(executable, block, string),
@@ -107,7 +110,7 @@ fn generateExpression(self: *AstGen, executable: *Executable, block: *Block, exp
     };
 }
 
-fn generateObject(self: *AstGen, executable: *Executable, block: *Block, object: *ast.ObjectNode) AstGenError!RegisterLocation {
+fn generateObject(self: *AstGen, executable: *Executable, block: *Block, parent_object_descriptor: *const ObjectDescriptor, object: *ast.ObjectNode) AstGenError!RegisterLocation {
     // Verify that we are generating bytecode for a slots object and not a
     // method; methods are generated through generateMethod.
     if (object.statements.value.statements.len > 0) {
@@ -129,7 +132,7 @@ fn generateObject(self: *AstGen, executable: *Executable, block: *Block, object:
         return error.AstGenFailure;
     }
 
-    const object_descriptor = try self.generateSlotList(executable, block, object.slots, object.range);
+    const object_descriptor = try self.generateSlotList(executable, block, parent_object_descriptor, object.slots, object.range);
     errdefer object_descriptor.deinit(executable.allocator);
 
     const object_descriptor_index = try executable.addObjectDescriptor(object_descriptor);
@@ -139,12 +142,12 @@ fn generateObject(self: *AstGen, executable: *Executable, block: *Block, object:
     return object_location;
 }
 
-fn generateBlock(self: *AstGen, executable: *Executable, block: *Block, block_node: *ast.BlockNode) AstGenError!RegisterLocation {
+fn generateBlock(self: *AstGen, executable: *Executable, block: *Block, parent_object_descriptor: *const ObjectDescriptor, block_node: *ast.BlockNode) AstGenError!RegisterLocation {
     const saved_method_execution_depth = self.method_execution_depth;
     self.method_execution_depth = 0;
     defer self.method_execution_depth = saved_method_execution_depth;
 
-    const result = try self.generateSlotsAndCodeCommon(executable, block, block_node.slots, block_node.statements.value.statements, block_node.range);
+    const result = try self.generateSlotsAndCodeCommon(executable, block, parent_object_descriptor, block_node.slots, block_node.statements.value.statements, block_node.range);
     errdefer result.object_descriptor.deinit(executable.allocator);
 
     const object_descriptor_index = try executable.addObjectDescriptor(result.object_descriptor);
@@ -157,23 +160,23 @@ fn generateBlock(self: *AstGen, executable: *Executable, block: *Block, block_no
     return block_location;
 }
 
-fn generateMethod(self: *AstGen, executable: *Executable, block: *Block, method_name: []const u8, method: *ast.ObjectNode) AstGenError!RegisterLocation {
+fn generateMethod(self: *AstGen, executable: *Executable, parent_block: *Block, parent_object_descriptor: *const ObjectDescriptor, method_name: []const u8, method: *ast.ObjectNode) AstGenError!RegisterLocation {
     self.method_execution_depth += 1;
     defer self.method_execution_depth -= 1;
 
-    const result = try self.generateSlotsAndCodeCommon(executable, block, method.slots, method.statements.value.statements, method.range);
+    const result = try self.generateSlotsAndCodeCommon(executable, parent_block, parent_object_descriptor, method.slots, method.statements.value.statements, method.range);
     errdefer result.object_descriptor.deinit(executable.allocator);
 
     if (self.method_execution_depth > 1) {
-        try block.addInstruction(executable.allocator, .SetMethodInline, .Nil, {}, method.range);
+        try parent_block.addInstruction(executable.allocator, .SetMethodInline, .Nil, {}, method.range);
     }
 
     const method_name_location = self.allocateRegister();
-    try block.addInstruction(executable.allocator, .CreateByteArray, method_name_location, method_name, method.range);
+    try parent_block.addInstruction(executable.allocator, .CreateByteArray, method_name_location, method_name, method.range);
 
     const object_descriptor_index = try executable.addObjectDescriptor(result.object_descriptor);
     const method_location = self.allocateRegister();
-    try block.addInstruction(executable.allocator, .CreateMethod, method_location, .{
+    try parent_block.addInstruction(executable.allocator, .CreateMethod, method_location, .{
         .method_name_location = method_name_location,
         .descriptor_index = object_descriptor_index,
         .block_index = result.block_index,
@@ -182,21 +185,21 @@ fn generateMethod(self: *AstGen, executable: *Executable, block: *Block, method_
     return method_location;
 }
 
-fn generateArgumentList(self: *AstGen, executable: *Executable, block: *Block, arguments: []ast.ExpressionNode, source_range: Range) !void {
+fn generateArgumentList(self: *AstGen, executable: *Executable, block: *Block, object_descriptor: *const ObjectDescriptor, arguments: []ast.ExpressionNode, source_range: Range) !void {
     if (std.debug.runtime_safety)
         try block.addInstruction(executable.allocator, .PushArgumentSentinel, .Nil, {}, source_range);
 
     for (arguments) |argument| {
-        const argument_location = try self.generateExpression(executable, block, argument);
+        const argument_location = try self.generateExpression(executable, block, object_descriptor, argument);
         try block.addInstruction(executable.allocator, .PushArg, .Nil, .{ .argument_location = argument_location }, source_range);
     }
 }
 
-fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, message: *ast.MessageNode) AstGenError!RegisterLocation {
+fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, object_descriptor: *const ObjectDescriptor, message: *ast.MessageNode) AstGenError!RegisterLocation {
     const message_location = message_location: {
         if (message.receiver) |receiver| {
-            const receiver_location = try self.generateExpression(executable, block, receiver);
-            try self.generateArgumentList(executable, block, message.arguments, message.range);
+            const receiver_location = try self.generateExpression(executable, block, object_descriptor, receiver);
+            try self.generateArgumentList(executable, block, object_descriptor, message.arguments, message.range);
 
             const message_location = self.allocateRegister();
             if (message.message_name[0] == '_') {
@@ -221,7 +224,7 @@ fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, messag
             break :message_location message_location;
         }
 
-        try self.generateArgumentList(executable, block, message.arguments, message.range);
+        try self.generateArgumentList(executable, block, object_descriptor, message.arguments, message.range);
 
         const message_location = self.allocateRegister();
         if (message.message_name[0] == '_') {
@@ -247,8 +250,8 @@ fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, messag
     return message_location;
 }
 
-fn generateReturn(self: *AstGen, executable: *Executable, block: *Block, return_node: *ast.ReturnNode) AstGenError!RegisterLocation {
-    const expr_location = try self.generateExpression(executable, block, return_node.expression);
+fn generateReturn(self: *AstGen, executable: *Executable, block: *Block, object_descriptor: *const ObjectDescriptor, return_node: *ast.ReturnNode) AstGenError!RegisterLocation {
+    const expr_location = try self.generateExpression(executable, block, object_descriptor, return_node.expression);
     try block.addInstruction(executable.allocator, .NonlocalReturn, .Nil, .{ .value_location = expr_location }, return_node.range);
     return RegisterLocation.Nil;
 }
@@ -307,6 +310,7 @@ fn generateSlotsAndCodeCommon(
     self: *AstGen,
     executable: *Executable,
     parent_block: *Block,
+    parent_object_descriptor: *const ObjectDescriptor,
     slots: []ast.SlotNode,
     statements: []ast.ExpressionNode,
     source_range: Range,
@@ -330,7 +334,7 @@ fn generateSlotsAndCodeCommon(
         return error.AstGenFailure;
     }
 
-    const object_descriptor = try self.generateSlotList(executable, parent_block, slots, source_range);
+    const object_descriptor = try self.generateSlotList(executable, parent_block, parent_object_descriptor, slots, source_range);
     errdefer object_descriptor.deinit(executable.allocator);
 
     const child_block_index = try executable.makeBlock();
@@ -339,7 +343,7 @@ fn generateSlotsAndCodeCommon(
     try self.pushRegisterID();
     defer self.popRegisterID();
 
-    const last_expression_location = try self.generateStatementList(executable, child_block, statements);
+    const last_expression_location = try self.generateStatementList(executable, child_block, &object_descriptor, statements);
     try child_block.addInstruction(executable.allocator, .Return, .Nil, .{ .value_location = last_expression_location }, source_range);
 
     child_block.seal();
@@ -349,7 +353,7 @@ fn generateSlotsAndCodeCommon(
     };
 }
 
-fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots: []ast.SlotNode, source_range: Range) AstGenError!ObjectDescriptor {
+fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, object_descriptor: *const ObjectDescriptor, slots: []ast.SlotNode, source_range: Range) AstGenError!ObjectDescriptor {
     var slot_descriptors: std.ArrayListUnmanaged(ObjectDescriptor.SlotDescriptor) = .empty;
     defer {
         for (slot_descriptors.items) |*slot_descriptor| {
@@ -372,10 +376,10 @@ fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, slots
                     }
 
                     if (value.Object.statements.value.statements.len > 0 or has_argument)
-                        break :blk try self.generateMethod(executable, block, slot.name, value.Object);
+                        break :blk try self.generateMethod(executable, block, object_descriptor, slot.name, value.Object);
                 }
 
-                break :blk try self.generateExpression(executable, block, value);
+                break :blk try self.generateExpression(executable, block, object_descriptor, value);
             }
 
             break :blk RegisterLocation.Nil;
