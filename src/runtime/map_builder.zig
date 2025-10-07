@@ -10,8 +10,6 @@ const Value = @import("value.zig").Value;
 const AstGen = @import("bytecode/AstGen.zig");
 const context = @import("context.zig");
 
-pub const AssignableSlotValues = std.BoundedArray(Value, AstGen.MaximumAssignableSlots);
-
 /// This struct allows one to build out a map's slots and eventually construct
 /// an object using it. It holds the assignable slot values and assigns an index
 /// to them. It additionally tracks argument slot offsets.
@@ -26,7 +24,8 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
     return struct {
         token: *heap.AllocationToken,
         map: MapType.Ptr,
-        assignable_slot_values: AssignableSlotValues = undefined,
+        assignable_slot_values_buffer: [AstGen.MaximumAssignableSlots]Value = undefined,
+        assignable_slot_values: std.ArrayList(Value),
 
         slot_index: usize = 0,
         assignable_slot_index: usize = 0,
@@ -46,13 +45,8 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
             self.* = .{
                 .token = token,
                 .map = map,
+                .assignable_slot_values = .initBuffer(&self.assignable_slot_values_buffer),
             };
-            // XXX: No matter what I do here, I cannot make the Zig compiler not
-            //      copy ~2KB of uninitialized memory if we call
-            //      BoundedArray.init or manually initialize the struct.
-            //      Instead we only set the field that matters. This is very
-            //      brittle; I hope RLS gets fixed.
-            self.assignable_slot_values.len = 0;
         }
 
         pub fn addSlot(self: *Self, slot: Slot) void {
@@ -87,7 +81,7 @@ pub fn MapBuilder(comptime MapType: type, comptime ObjectType: type) type {
         /// Assumes that a garbage collection will not happen before the values'
         /// use.
         pub fn writeAssignableSlotValuesTo(self: *Self, slot_values: []Value) void {
-            @memcpy(slot_values, self.assignable_slot_values.constSlice());
+            @memcpy(slot_values, self.assignable_slot_values.items);
         }
     };
 }

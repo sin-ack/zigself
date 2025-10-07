@@ -185,7 +185,7 @@ fn Block(comptime InstructionT: type) type {
             return self.instructions.multi_array.len;
         }
 
-        pub fn format(block: Self, writer: *std.io.Writer) !void {
+        pub fn format(block: Self, writer: *std.Io.Writer) !void {
             var it = block.iterator();
             while (it.next()) |inst| {
                 if (!inst.target.isNothing())

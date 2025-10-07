@@ -116,7 +116,7 @@ pub fn deinit(self: ObjectDescriptor, allocator: Allocator) void {
 
 /// Create a new copy of the object descriptor with the same slots.
 pub fn copy(self: ObjectDescriptor, allocator: Allocator) !ObjectDescriptor {
-    var new_slots: std.ArrayListUnmanaged(SlotDescriptor) = try .initCapacity(allocator, self.slots.len);
+    var new_slots: std.ArrayList(SlotDescriptor) = try .initCapacity(allocator, self.slots.len);
     defer {
         for (new_slots.items) |*slot| {
             slot.deinit(allocator);

@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 const AST = @import("./ast.zig");
 
 indent_width: usize,
+allocator: Allocator,
 branches: std.ArrayList(Branch),
 current_indent: usize = 0,
 is_stem: bool = false,
@@ -27,12 +28,13 @@ const Branch = struct { indent: usize, concluded: bool };
 pub fn init(indent_width: usize, allocator: Allocator) ASTPrinter {
     return .{
         .indent_width = indent_width,
-        .branches = std.ArrayList(Branch).init(allocator),
+        .allocator = allocator,
+        .branches = .empty,
     };
 }
 
 pub fn deinit(self: *ASTPrinter) void {
-    self.branches.deinit();
+    self.branches.deinit(self.allocator);
 }
 
 const StemIsLast = enum { Last, NotLast };
@@ -44,7 +46,7 @@ fn setStem(self: *ASTPrinter, is_last: StemIsLast) void {
 }
 
 fn indent(self: *ASTPrinter) void {
-    self.branches.append(.{ .indent = self.current_indent, .concluded = false }) catch unreachable;
+    self.branches.append(self.allocator, .{ .indent = self.current_indent, .concluded = false }) catch unreachable;
     self.current_indent += self.indent_width;
 }
 

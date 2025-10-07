@@ -12,7 +12,7 @@ const STACK_DEBUG = debug.STACK_DEBUG;
 /// A typed stack object.
 pub fn Stack(comptime T: type, comptime debug_name: []const u8, comptime sentinel: ?T) type {
     return struct {
-        stack: std.ArrayListUnmanaged(T) = .{},
+        stack: std.ArrayList(T) = .empty,
 
         const Self = @This();
 

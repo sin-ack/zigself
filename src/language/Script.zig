@@ -97,7 +97,7 @@ pub fn diagnostics(self: Script) Diagnostics {
     return self.parser.diagnostics;
 }
 
-pub fn reportDiagnostics(self: Script, writer: *std.io.Writer) !void {
+pub fn reportDiagnostics(self: Script, writer: *std.Io.Writer) !void {
     for (self.diagnostics().diagnostics.items) |diagnostic| {
         const line = self.parser.buffer[diagnostic.location.line_start..diagnostic.location.line_end];
 

@@ -74,7 +74,7 @@ pub fn chainedLookupObject(self: Selector, object: Object.Ptr, previously_visite
     return object.lookup(self, previously_visited);
 }
 
-pub fn format(self: Selector, writer: *std.io.Writer) !void {
+pub fn format(self: Selector, writer: *std.Io.Writer) !void {
     try writer.print("\"{s}\"", .{self.name});
     // TODO: Add a debug flag that displays the hash.
 }

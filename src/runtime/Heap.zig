@@ -146,7 +146,7 @@ pub fn Heap(comptime Root: type) type {
         first_handle_set: ?*Handles,
 
         const Self = @This();
-        const FinalizationSet = std.ArrayListUnmanaged([*]u64);
+        const FinalizationSet = std.ArrayList([*]u64);
 
         /// Initialize a new heap.
         pub fn init(allocator: Allocator, root: *Root) !Self {
@@ -1303,13 +1303,13 @@ pub fn Heap(comptime Root: type) type {
                 // NOTE: All allocations in the code below are done with the arena above,
                 //       so deinitialization steps are intentionally omitted.
 
-                var gray_queue: std.ArrayListUnmanaged([*]u64) = .empty;
+                var gray_queue: std.ArrayList([*]u64) = .empty;
                 var black_set: std.AutoArrayHashMapUnmanaged([*]u64, void) = .empty;
 
                 const MarkVisitor = struct {
                     allocator: Allocator,
                     new_generation: *NewGeneration,
-                    gray_queue: *std.ArrayListUnmanaged([*]u64),
+                    gray_queue: *std.ArrayList([*]u64),
                     black_set: *std.AutoArrayHashMapUnmanaged([*]u64, void),
 
                     pub fn visit(visitor: *const @This(), value: *Value, object: ?BaseObject.Ptr) !void {

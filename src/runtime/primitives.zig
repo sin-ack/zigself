@@ -340,7 +340,7 @@ const PrimitiveRegistry = &[_]PrimitiveSpec{
 pub const PrimitiveIndex = enum(u32) {
     _,
 
-    pub fn format(self: PrimitiveIndex, writer: *std.io.Writer) !void {
+    pub fn format(self: PrimitiveIndex, writer: *std.Io.Writer) !void {
         try writer.print("\"{s}\"", .{getPrimitive(self).name});
     }
 };

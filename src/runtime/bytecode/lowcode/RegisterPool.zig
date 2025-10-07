@@ -13,11 +13,11 @@ const LowcodeRegisterLocation = bytecode.lowcode.RegisterLocation;
 
 allocated_registers: AllocatedRegisterMap = .{},
 free_registers: LowcodeRegisterLocation.BitSet = LowcodeRegisterLocation.BitSet.initFull(),
-active_intervals: ActiveIntervalArray = .{},
+active_intervals: ActiveIntervalArray = .empty,
 clobbered_registers: LowcodeRegisterLocation.BitSet = LowcodeRegisterLocation.BitSet.initEmpty(),
 
 const RegisterPool = @This();
-const ActiveIntervalArray = std.ArrayListUnmanaged(ActiveInterval);
+const ActiveIntervalArray = std.ArrayList(ActiveInterval);
 const AllocatedRegisterMap = std.AutoArrayHashMapUnmanaged(AstcodeRegisterLocation, LowcodeRegisterLocation);
 pub const ActiveInterval = struct {
     bound_register: LowcodeRegisterLocation,

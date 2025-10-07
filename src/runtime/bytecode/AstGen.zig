@@ -25,6 +25,7 @@ pub const MaximumArguments = 128; // Reasonable limit
 pub const MaximumAssignableSlots = 255;
 
 method_execution_depth: usize = 0,
+allocator: Allocator,
 register_id_stack: std.ArrayList(u32),
 
 const AstGen = @This();
@@ -49,16 +50,17 @@ pub fn generateExecutableFromScript(allocator: Allocator, script: Script.Ref) As
 
 fn init(allocator: Allocator) !AstGen {
     return AstGen{
-        .register_id_stack = std.ArrayList(u32).init(allocator),
+        .allocator = allocator,
+        .register_id_stack = .empty,
     };
 }
 
 fn deinit(self: *AstGen) void {
-    self.register_id_stack.deinit();
+    self.register_id_stack.deinit(self.allocator);
 }
 
 fn pushRegisterID(self: *AstGen) !void {
-    try self.register_id_stack.append(1);
+    try self.register_id_stack.append(self.allocator, 1);
 }
 
 fn allocateRegister(self: *AstGen) RegisterLocation {
@@ -354,7 +356,7 @@ fn generateSlotsAndCodeCommon(
 }
 
 fn generateSlotList(self: *AstGen, executable: *Executable, block: *Block, object_descriptor: *const ObjectDescriptor, slots: []ast.SlotNode, source_range: Range) AstGenError!ObjectDescriptor {
-    var slot_descriptors: std.ArrayListUnmanaged(ObjectDescriptor.SlotDescriptor) = .empty;
+    var slot_descriptors: std.ArrayList(ObjectDescriptor.SlotDescriptor) = .empty;
     defer {
         for (slot_descriptors.items) |*slot_descriptor| {
             slot_descriptor.deinit(executable.allocator);

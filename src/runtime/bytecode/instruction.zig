@@ -161,7 +161,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
                 void,
         };
 
-        pub fn format(inst: Self, writer: *std.io.Writer) !void {
+        pub fn format(inst: Self, writer: *std.Io.Writer) !void {
             try writer.print("{s}", .{inst.opcode.toString()});
 
             switch (inst.opcode) {

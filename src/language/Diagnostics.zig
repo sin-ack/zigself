@@ -37,7 +37,7 @@ const DiagnosticList = std.ArrayList(Diagnostic);
 pub fn init(allocator: Allocator) !Diagnostics {
     return Diagnostics{
         .allocator = allocator,
-        .diagnostics = DiagnosticList.init(allocator),
+        .diagnostics = .empty,
     };
 }
 
@@ -45,14 +45,14 @@ pub fn deinit(self: *Diagnostics) void {
     for (self.diagnostics.items) |*diagnostic| {
         diagnostic.deinit(self.allocator);
     }
-    self.diagnostics.deinit();
+    self.diagnostics.deinit(self.allocator);
 }
 
 pub fn reportDiagnostic(self: *Diagnostics, comptime level: DiagnosticLevel, location: Location, comptime message: []const u8) !void {
-    try self.diagnostics.append(Diagnostic{ .level = level, .location = location, .message = message, .message_is_allocated = false });
+    try self.diagnostics.append(self.allocator, .{ .level = level, .location = location, .message = message, .message_is_allocated = false });
 }
 
 pub fn reportDiagnosticFormatted(self: *Diagnostics, comptime level: DiagnosticLevel, location: Location, comptime message: []const u8, args: anytype) !void {
     const formatted_message = try std.fmt.allocPrint(self.allocator, message, args);
-    try self.diagnostics.append(Diagnostic{ .level = level, .location = location, .message = formatted_message, .message_is_allocated = true });
+    try self.diagnostics.append(self.allocator, .{ .level = level, .location = location, .message = formatted_message, .message_is_allocated = true });
 }

@@ -82,7 +82,7 @@ pub const RegisterLocation = enum {
         };
     }
 
-    pub fn format(loc: RegisterLocation, writer: *std.io.Writer) !void {
+    pub fn format(loc: RegisterLocation, writer: *std.Io.Writer) !void {
         try writer.writeByte('%');
         try writer.writeAll(@tagName(loc));
     }

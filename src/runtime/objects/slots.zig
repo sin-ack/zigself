@@ -454,10 +454,11 @@ pub const Slots = extern struct {
         // This incurs a small performance cost but hopefully shouldn't hurt
         // too much as merging slots into existing objects should not be a
         // frequent occurrence.
-        var merged_slots = std.ArrayList(Slot).init(allocator);
-        defer merged_slots.deinit();
+        var merged_slots: std.ArrayList(Slot) = .empty;
+        defer merged_slots.deinit(allocator);
 
         const MergeCalculator = struct {
+            allocator: Allocator,
             merged_slots: *std.ArrayList(Slot),
             slots: *usize,
             assignable_slots: *usize,
@@ -469,7 +470,7 @@ pub const Slots = extern struct {
                 const context_assignable_slots: isize = @intCast(context.assignable_slots.*);
                 context.assignable_slots.* = @intCast(context_assignable_slots +
                     slot.requiredAssignableSlotValueSpace(context.merged_slots.items));
-                try context.merged_slots.append(slot);
+                try context.merged_slots.append(context.allocator, slot);
 
                 if (object == context.source_object)
                     context.has_updated_slots.* = true;
@@ -477,6 +478,7 @@ pub const Slots = extern struct {
         };
 
         try forSlotsInMergeOrder(target_object, source_object, MergeCalculator{
+            .allocator = allocator,
             .merged_slots = &merged_slots,
             .slots = &slots,
             .assignable_slots = &assignable_slots,

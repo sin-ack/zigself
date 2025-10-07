@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 
 const astcode = @import("../astcode.zig");
 
-intervals: std.ArrayListUnmanaged(Interval) = .{},
+intervals: std.ArrayList(Interval) = .empty,
 
 const Liveness = @This();
 pub const Interval = struct {

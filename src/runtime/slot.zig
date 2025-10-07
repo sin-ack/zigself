@@ -276,7 +276,7 @@ pub const Slot = extern struct {
     pub fn writeContentsTo(
         self: Slot,
         target_slots: Slot.Slice,
-        assignable_slot_values: *map_builder.AssignableSlotValues,
+        assignable_slot_values: *std.ArrayList(Value),
         slot_index: *usize,
         assignable_slot_index: *usize,
         argument_slot_index: *usize,

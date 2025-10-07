@@ -14,7 +14,7 @@ line_start: usize,
 /// Points to the newline.
 line_end: usize,
 
-pub fn format(self: Location, writer: *std.io.Writer) !void {
+pub fn format(self: Location, writer: *std.Io.Writer) !void {
     try writer.printInt(self.line, 10, .lower, .{});
     try writer.writeByte(':');
     try writer.printInt(self.column, 10, .lower, .{});

@@ -6,7 +6,7 @@ const std = @import("std");
 
 const Token = @import("./Token.zig");
 
-buffer: [:0]const u8,
+buffer: []const u8,
 offset: usize = 0,
 
 const Tokenizer = @This();
@@ -31,7 +31,7 @@ const State = enum {
     Pipe,
 };
 
-pub fn init(buffer: [:0]const u8) Tokenizer {
+pub fn init(buffer: []const u8) Tokenizer {
     return .{ .buffer = buffer };
 }
 
@@ -59,11 +59,10 @@ pub fn next(self: *Tokenizer) Token {
         },
     };
 
-    while (true) : (self.offset += 1) {
+    while (self.offset < self.buffer.len) : (self.offset += 1) {
         const c = self.buffer[self.offset];
         switch (state) {
             .Start => switch (c) {
-                0 => break,
                 '\n', '\r', '\t', ' ' => {
                     token.location.start = self.offset + 1;
                 },

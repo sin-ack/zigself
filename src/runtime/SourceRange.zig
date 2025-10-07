@@ -52,7 +52,7 @@ pub fn getStartLine(self: SourceRange) ![]const u8 {
     return self.executable.value.definition_script.value.getSourceLine(self.getLocationRange().start);
 }
 
-pub fn format(source_range: SourceRange, writer: *std.io.Writer) !void {
+pub fn format(source_range: SourceRange, writer: *std.Io.Writer) !void {
     try writer.writeAll(source_range.executable.value.definition_script.value.file_path);
     try writer.writeByte(':');
     try source_range.getLocationRange().format(writer);

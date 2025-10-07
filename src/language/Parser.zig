@@ -13,7 +13,7 @@ const Token = @import("./Token.zig");
 const Location = @import("./Location.zig");
 
 allocator: Allocator,
-buffer: [:0]const u8,
+buffer: []const u8,
 diagnostics: Diagnostics,
 
 tokens: std.MultiArrayList(struct {
@@ -23,7 +23,7 @@ tokens: std.MultiArrayList(struct {
 token_tags: []Token.Tag = undefined,
 token_starts: []usize = undefined,
 token_index: TokenIndex,
-line_offsets: std.ArrayListUnmanaged(usize),
+line_offsets: std.ArrayList(usize),
 
 pub const ParseError = Allocator.Error;
 const Parser = @This();
@@ -33,7 +33,7 @@ const TokenIndex = enum(usize) { _ };
 /// unique names (which significantly simplifies the implementation of the later
 /// stages of the VM).
 const SlotList = struct {
-    slots: std.ArrayListUnmanaged(AST.SlotNode) = .empty,
+    slots: std.ArrayList(AST.SlotNode) = .empty,
 
     pub const empty: SlotList = .{};
     pub const Error = error{SlotExistsWithSameName};
@@ -81,10 +81,7 @@ const SlotList = struct {
 
 pub fn createFromFile(allocator: Allocator, file_path: []const u8) !*Parser {
     const cwd = std.fs.cwd();
-    const file = try cwd.openFile(file_path, .{});
-    defer file.close();
-
-    const file_contents = try file.readToEndAllocOptions(allocator, std.math.maxInt(usize), null, .of(u8), 0);
+    const file_contents = try cwd.readFileAlloc(file_path, allocator, .unlimited);
     errdefer allocator.free(file_contents);
 
     var self = try allocator.create(Parser);
@@ -103,13 +100,13 @@ pub fn createFromString(allocator: Allocator, contents: []const u8) !*Parser {
     return self;
 }
 
-fn init(self: *Parser, allocator: Allocator, buffer: [:0]const u8, from_file: bool) !void {
+fn init(self: *Parser, allocator: Allocator, buffer: []const u8, from_file: bool) !void {
     self.* = .{
         .allocator = allocator,
         .buffer = buffer,
         .token_index = @enumFromInt(0),
-        .tokens = .{},
-        .line_offsets = .{},
+        .tokens = .empty,
+        .line_offsets = .empty,
         .diagnostics = try Diagnostics.init(allocator),
     };
     errdefer self.diagnostics.deinit();
@@ -365,12 +362,12 @@ fn parseStatementList(self: *Parser, nonlocal_returns: StatementListNonlocalRetu
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var statements = std.ArrayList(AST.ExpressionNode).init(self.allocator);
+    var statements: std.ArrayList(AST.ExpressionNode) = .empty;
     defer {
         for (statements.items) |*expression| {
             expression.deinit(self.allocator);
         }
-        statements.deinit();
+        statements.deinit(self.allocator);
     }
 
     var nonlocal_return_start: ?usize = null;
@@ -383,7 +380,7 @@ fn parseStatementList(self: *Parser, nonlocal_returns: StatementListNonlocalRetu
             var expression = (try self.parseExpression(.WithParenExpr)) orelse break :parse_first_statement;
             errdefer expression.deinit(self.allocator);
 
-            try statements.append(expression);
+            try statements.append(self.allocator, expression);
         }
 
         while (self.tryConsume(.Period)) |_| {
@@ -406,7 +403,7 @@ fn parseStatementList(self: *Parser, nonlocal_returns: StatementListNonlocalRetu
             var expression = (try self.parseExpression(.WithParenExpr)) orelse break;
             errdefer expression.deinit(self.allocator);
 
-            try statements.append(expression);
+            try statements.append(self.allocator, expression);
         }
 
         _ = try self.expectTokenContext(closing_token, "after statement list");
@@ -426,7 +423,7 @@ fn parseStatementList(self: *Parser, nonlocal_returns: StatementListNonlocalRetu
         statements.items[statements.items.len - 1] = AST.ExpressionNode{ .Return = return_node };
     }
 
-    const owned_statements = try statements.toOwnedSlice();
+    const owned_statements = try statements.toOwnedSlice(self.allocator);
     errdefer {
         for (statements.items) |*expression| {
             expression.deinit(self.allocator);
@@ -622,7 +619,7 @@ fn parseSlotCommon(self: *Parser) ParseError!?AST.SlotNode {
         return null;
     }
 
-    var argument_names = std.ArrayList([]const u8).init(self.allocator);
+    var argument_names: std.ArrayList([]const u8) = .empty;
     var did_transfer_argument_names = false;
     defer {
         if (!did_transfer_argument_names) {
@@ -630,7 +627,7 @@ fn parseSlotCommon(self: *Parser) ParseError!?AST.SlotNode {
                 self.allocator.free(argument_name);
             }
         }
-        argument_names.deinit();
+        argument_names.deinit(self.allocator);
     }
 
     const slot_name = (try self.parseMethodSlotName(&argument_names)) orelse return null;
@@ -661,42 +658,42 @@ fn parseMethodSlotName(self: *Parser, argument_names: *std.ArrayList([]const u8)
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
-    var slot_name = std.ArrayList(u8).init(self.allocator);
-    defer slot_name.deinit();
+    var slot_name: std.ArrayList(u8) = .empty;
+    defer slot_name.deinit(self.allocator);
 
     if (self.peek() == .FirstKeyword) {
-        try slot_name.appendSlice(self.getKeywordSlice(self.consume()));
+        try slot_name.appendSlice(self.allocator, self.getKeywordSlice(self.consume()));
 
         var identifier_index = (try self.expectToken(.Identifier)) orelse return null;
         var identifier = try self.getIdentifierCopy(identifier_index);
         errdefer self.allocator.free(identifier);
-        try argument_names.append(identifier);
+        try argument_names.append(self.allocator, identifier);
 
         while (self.peek() == .RestKeyword) {
-            try slot_name.appendSlice(self.getKeywordSlice(self.consume()));
+            try slot_name.appendSlice(self.allocator, self.getKeywordSlice(self.consume()));
 
             identifier_index = (try self.expectToken(.Identifier)) orelse return null;
             identifier = try self.getIdentifierCopy(identifier_index);
             errdefer self.allocator.free(identifier);
-            try argument_names.append(identifier);
+            try argument_names.append(self.allocator, identifier);
         }
 
-        return try slot_name.toOwnedSlice();
+        return try slot_name.toOwnedSlice(self.allocator);
     }
 
     std.debug.assert(self.peek().isOperator());
 
     while (self.peek().isOperator()) {
-        try slot_name.appendSlice(self.peek().symbol());
+        try slot_name.appendSlice(self.allocator, self.peek().symbol());
         _ = self.consume();
     }
 
     const identifier_index = (try self.expectToken(.Identifier)) orelse return null;
     const identifier = try self.getIdentifierCopy(identifier_index);
     errdefer self.allocator.free(identifier);
-    try argument_names.append(identifier);
+    try argument_names.append(self.allocator, identifier);
 
-    return try slot_name.toOwnedSlice();
+    return try slot_name.toOwnedSlice(self.allocator);
 }
 
 fn parseSlotCommonIdentifier(self: *Parser, identifier_index: TokenIndex) ParseError!?AST.SlotNode {
@@ -999,37 +996,37 @@ fn parseKeywordSend(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AS
     const first_keyword = self.consume();
     const start = self.tokenStartAt(first_keyword);
 
-    var message = std.ArrayList(u8).init(self.allocator);
-    defer message.deinit();
+    var message: std.ArrayList(u8) = .empty;
+    defer message.deinit(self.allocator);
 
-    var arguments = std.ArrayList(AST.ExpressionNode).init(self.allocator);
+    var arguments: std.ArrayList(AST.ExpressionNode) = .empty;
     defer {
         for (arguments.items) |*argument| {
             argument.deinit(self.allocator);
         }
-        arguments.deinit();
+        arguments.deinit(self.allocator);
     }
 
-    try message.appendSlice(self.getKeywordSlice(first_keyword));
+    try message.appendSlice(self.allocator, self.getKeywordSlice(first_keyword));
     {
         var argument = (try self.parseKeywordExpression(.WithParenExpr)) orelse return null;
         errdefer argument.deinit(self.allocator);
 
-        try arguments.append(argument);
+        try arguments.append(self.allocator, argument);
     }
 
     while (self.tryConsume(.RestKeyword)) |rest_keyword| {
-        try message.appendSlice(self.getKeywordSlice(rest_keyword));
+        try message.appendSlice(self.allocator, self.getKeywordSlice(rest_keyword));
 
         var argument = (try self.parseKeywordExpression(.WithParenExpr)) orelse return null;
         errdefer argument.deinit(self.allocator);
 
-        try arguments.append(argument);
+        try arguments.append(self.allocator, argument);
     }
 
-    const message_slice = try message.toOwnedSlice();
+    const message_slice = try message.toOwnedSlice(self.allocator);
     errdefer self.allocator.free(message_slice);
-    const arguments_slice = try arguments.toOwnedSlice();
+    const arguments_slice = try arguments.toOwnedSlice(self.allocator);
     errdefer self.allocator.free(arguments_slice);
 
     const end = self.tokenStartAt(self.token_index);
@@ -1057,12 +1054,12 @@ fn parseBinarySend(self: *Parser, receiver: ?AST.ExpressionNode, previous_operat
     const start = self.tokenStartAt(self.token_index);
     std.debug.assert(self.peek().isOperator());
 
-    var operator = std.ArrayList(u8).init(self.allocator);
-    defer operator.deinit();
+    var operator: std.ArrayList(u8) = .empty;
+    defer operator.deinit(self.allocator);
 
     // FIXME: Disallow whitespace between characters in binary operators
     while (self.peek().isOperator()) {
-        try operator.appendSlice(self.peek().symbol());
+        try operator.appendSlice(self.allocator, self.peek().symbol());
         _ = self.consume();
     }
 
@@ -1079,7 +1076,7 @@ fn parseBinarySend(self: *Parser, receiver: ?AST.ExpressionNode, previous_operat
         }
     }
 
-    const operator_slice = try operator.toOwnedSlice();
+    const operator_slice = try operator.toOwnedSlice(self.allocator);
     errdefer self.allocator.free(operator_slice);
 
     var argument = (try self.parseBinaryExpression(operator_slice)) orelse return null;
@@ -1550,8 +1547,8 @@ fn parseString(self: *Parser) ParseError!?AST.StringNode {
 
     var offset = start_of_string;
     var state = StringParseState.Start;
-    var string_buffer = std.ArrayList(u8).init(self.allocator);
-    defer string_buffer.deinit();
+    var string_buffer: std.ArrayList(u8) = .empty;
+    defer string_buffer.deinit(self.allocator);
 
     while (offset < self.buffer.len) : (offset += 1) {
         var c = self.buffer[offset];
@@ -1565,7 +1562,7 @@ fn parseString(self: *Parser) ParseError!?AST.StringNode {
             .Literal => switch (c) {
                 '\'' => {
                     return AST.StringNode{
-                        .value = try string_buffer.toOwnedSlice(),
+                        .value = try string_buffer.toOwnedSlice(self.allocator),
                         .range = .{ .start = start_of_string, .end = offset + 1 },
                     };
                 },
@@ -1581,28 +1578,28 @@ fn parseString(self: *Parser) ParseError!?AST.StringNode {
                     state = .Backslash;
                 },
                 else => {
-                    try string_buffer.append(c);
+                    try string_buffer.append(self.allocator, c);
                 },
             },
             .Backslash => switch (c) {
                 'n' => {
-                    try string_buffer.append('\n');
+                    try string_buffer.append(self.allocator, '\n');
                     state = .Literal;
                 },
                 'r' => {
-                    try string_buffer.append('\r');
+                    try string_buffer.append(self.allocator, '\r');
                     state = .Literal;
                 },
                 't' => {
-                    try string_buffer.append('\t');
+                    try string_buffer.append(self.allocator, '\t');
                     state = .Literal;
                 },
                 '\\' => {
-                    try string_buffer.append('\\');
+                    try string_buffer.append(self.allocator, '\\');
                     state = .Literal;
                 },
                 '\'' => {
-                    try string_buffer.append('\'');
+                    try string_buffer.append(self.allocator, '\'');
                     state = .Literal;
                 },
                 'x' => {
@@ -1624,7 +1621,7 @@ fn parseString(self: *Parser) ParseError!?AST.StringNode {
                     else
                         char |= 10 + (if (c >= 'a') c - 'a' else c - 'A');
 
-                    try string_buffer.append(char);
+                    try string_buffer.append(self.allocator, char);
                     state = .Literal;
                 },
                 else => unreachable,

@@ -39,12 +39,12 @@ const Test = struct {
 };
 
 fn collectTests(allocator: Allocator, directory: std.fs.Dir) !std.ArrayList(Test) {
-    var tests = std.ArrayList(Test).init(allocator);
+    var tests: std.ArrayList(Test) = .empty;
     errdefer {
         for (tests.items) |*the_test| {
             the_test.deinit(allocator);
         }
-        tests.deinit();
+        tests.deinit(allocator);
     }
 
     var args = try std.process.argsWithAllocator(allocator);
@@ -61,7 +61,7 @@ fn collectTests(allocator: Allocator, directory: std.fs.Dir) !std.ArrayList(Test
 
         {
             errdefer first_test.deinit(allocator);
-            try tests.append(first_test);
+            try tests.append(allocator, first_test);
         }
 
         while (args.next()) |path| {
@@ -69,7 +69,7 @@ fn collectTests(allocator: Allocator, directory: std.fs.Dir) !std.ArrayList(Test
             var the_test = try Test.init(allocator, basename, path);
             errdefer the_test.deinit(allocator);
 
-            try tests.append(the_test);
+            try tests.append(allocator, the_test);
         }
     } else {
         // No args were passed, let's walk the given directory.
@@ -85,7 +85,7 @@ fn collectTests(allocator: Allocator, directory: std.fs.Dir) !std.ArrayList(Test
             var the_test = try Test.init(allocator, entry.basename, entry.path);
             errdefer the_test.deinit(allocator);
 
-            try tests.append(the_test);
+            try tests.append(allocator, the_test);
         }
     }
 
@@ -118,17 +118,17 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
     }
 
     // Passes
-    var passed_tests = std.ArrayList([]const u8).init(allocator);
-    defer passed_tests.deinit();
+    var passed_tests: std.ArrayList([]const u8) = .empty;
+    defer passed_tests.deinit(allocator);
     // Failures
-    var failed_tests = std.ArrayList([]const u8).init(allocator);
-    defer failed_tests.deinit();
-    var parse_failed_tests = std.ArrayList([]const u8).init(allocator);
-    defer parse_failed_tests.deinit();
-    var passing_expect_error_tests = std.ArrayList([]const u8).init(allocator);
-    defer passing_expect_error_tests.deinit();
-    var crashed_tests = std.ArrayList([]const u8).init(allocator);
-    defer crashed_tests.deinit();
+    var failed_tests: std.ArrayList([]const u8) = .empty;
+    defer failed_tests.deinit(allocator);
+    var parse_failed_tests: std.ArrayList([]const u8) = .empty;
+    defer parse_failed_tests.deinit(allocator);
+    var passing_expect_error_tests: std.ArrayList([]const u8) = .empty;
+    defer passing_expect_error_tests.deinit(allocator);
+    var crashed_tests: std.ArrayList([]const u8) = .empty;
+    defer crashed_tests.deinit(allocator);
 
     next_test: for (tests.items) |the_test| {
         var script_progress_node = progress.start(the_test.basename, 0);
@@ -144,7 +144,7 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
         did_parse_without_errors = try script.value.parseScript();
         try script.value.reportDiagnostics(&writer.interface);
         if (!did_parse_without_errors) {
-            try parse_failed_tests.append(the_test.basename);
+            try parse_failed_tests.append(allocator, the_test.basename);
             continue :next_test;
         }
 
@@ -152,29 +152,29 @@ fn runTests(allocator: Allocator, tests: std.ArrayList(Test)) !bool {
             // AstGen failures are things that we test for, so expected-error
             // tests should be assumed "passing".
             if (err == error.AstGenFailure and the_test.expects_error) {
-                try passed_tests.append(the_test.basename);
+                try passed_tests.append(allocator, the_test.basename);
                 continue :next_test;
             }
 
             const test_name_without_extension = the_test.basename[0 .. the_test.basename.len - 5];
             std.debug.print("Caught error when executing test {s}: {}\n", .{ test_name_without_extension, err });
             if (@errorReturnTrace()) |trace| {
-                std.debug.dumpStackTrace(trace.*);
+                std.debug.dumpStackTrace(trace);
             }
 
-            try crashed_tests.append(the_test.basename);
+            try crashed_tests.append(allocator, the_test.basename);
             continue :next_test;
         };
 
         if (result == null and !the_test.expects_error) {
-            try failed_tests.append(the_test.basename);
+            try failed_tests.append(allocator, the_test.basename);
             continue :next_test;
         } else if (result != null and the_test.expects_error) {
-            try passing_expect_error_tests.append(the_test.basename);
+            try passing_expect_error_tests.append(allocator, the_test.basename);
             continue :next_test;
         }
 
-        try passed_tests.append(the_test.basename);
+        try passed_tests.append(allocator, the_test.basename);
     }
 
     progress.end();
@@ -229,7 +229,7 @@ pub fn main() !u8 {
         for (tests.items) |*the_test| {
             the_test.deinit(allocator);
         }
-        tests.deinit();
+        tests.deinit(allocator);
     }
 
     return if (try runTests(allocator, tests)) 1 else 0;

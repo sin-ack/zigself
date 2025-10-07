@@ -11,8 +11,8 @@
     },
     .dependencies = .{
         .@"zig-args" = .{
-            .url = "https://github.com/ikskuh/zig-args/archive/4c305bcb45fd3c4b74b7bf7f907cf3fc12f415a2.tar.gz",
-            .hash = "args-0.0.0-CiLiquDRAADuU_ueSmGquhHAuhDxxlfBokGj01ZdVYHt",
+            .url = "https://github.com/ikskuh/zig-args/archive/8ae26b44a884ff20dca98ee84c098e8f8e94902f.tar.gz",
+            .hash = "args-0.0.0-CiLiqojRAACGzDRO7A9dw7kWSchNk29caJZkXuMCb0Cn",
         },
         .tracy = .{
             .url = "https://github.com/wolfpld/tracy/archive/refs/tags/v0.11.1.tar.gz",

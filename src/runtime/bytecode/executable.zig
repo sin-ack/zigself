@@ -13,8 +13,8 @@ const ObjectDescriptor = @import("ObjectDescriptor.zig");
 fn Executable(comptime BlockT: type) type {
     return struct {
         allocator: Allocator,
-        blocks: std.ArrayListUnmanaged(*Block) = .{},
-        object_descriptors: std.ArrayListUnmanaged(ObjectDescriptor) = .empty,
+        blocks: std.ArrayList(*Block) = .empty,
+        object_descriptors: std.ArrayList(ObjectDescriptor) = .empty,
         definition_script: Script.Ref,
         ref: ref_counted.RefCount = .{},
 
@@ -89,7 +89,7 @@ fn Executable(comptime BlockT: type) type {
             return self.object_descriptors.items[index];
         }
 
-        pub fn format(executable: Self, writer: *std.io.Writer) !void {
+        pub fn format(executable: Self, writer: *std.Io.Writer) !void {
             try writer.print("ASTcode executable @ {s} ({} blocks):\n", .{ executable.definition_script.value.file_path, executable.blocks.items.len });
             for (executable.blocks.items, 0..) |block, i| {
                 try writer.print("Block {}:\n{f}\n", .{ i, block });

@@ -34,7 +34,7 @@ pub const RegisterLocation = enum(u32) {
         return offset - 1;
     }
 
-    pub fn format(loc: RegisterLocation, writer: *std.io.Writer) !void {
+    pub fn format(loc: RegisterLocation, writer: *std.Io.Writer) !void {
         try writer.writeByte('%');
         try writer.printInt(@intFromEnum(loc), 10, .lower, .{});
     }

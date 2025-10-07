@@ -109,7 +109,7 @@ pub fn restart(self: *Activation) u32 {
     return 0;
 }
 
-pub fn format(activation: Activation, writer: *std.io.Writer) !void {
+pub fn format(activation: Activation, writer: *std.Io.Writer) !void {
     try writer.print("Activation{{ '{s}' created from {f}, instruction_index = {}, target_location = {f} }}", .{
         activation.creator_message.getValues(),
         activation.created_from,
@@ -119,7 +119,7 @@ pub fn format(activation: Activation, writer: *std.io.Writer) !void {
 }
 
 pub const ActivationStack = struct {
-    stack: std.ArrayListUnmanaged(Activation) = .{},
+    stack: std.ArrayList(Activation) = .empty,
 
     pub fn deinit(self: *ActivationStack, allocator: Allocator) void {
         self.stack.deinit(allocator);

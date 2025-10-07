@@ -13,7 +13,7 @@ const LocationRange = @This();
 start: Location,
 end: Location,
 
-pub fn format(range: LocationRange, writer: *std.io.Writer) !void {
+pub fn format(range: LocationRange, writer: *std.Io.Writer) !void {
     try range.start.format(writer);
     try writer.writeByte('-');
 
