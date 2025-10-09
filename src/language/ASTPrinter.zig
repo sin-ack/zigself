@@ -84,7 +84,8 @@ fn print(self: *ASTPrinter, comptime fmt: []const u8, args: anytype) void {
     }
 
     writer.writeAll(CLEAR) catch return;
-    std.debug.print(fmt, args);
+    writer.print(fmt, args) catch return;
+    writer.flush() catch return;
 }
 
 pub fn dumpScript(self: *ASTPrinter, script: AST.ScriptNode) void {
