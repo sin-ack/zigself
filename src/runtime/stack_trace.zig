@@ -29,6 +29,7 @@ fn writeTraceForFrame(message_name: []const u8, source_range: SourceRange) void 
         writer.splatByteAll('.', 3) catch unreachable;
     }
     writer.print("\x1b[0m\n", .{}) catch unreachable;
+    writer.flush() catch unreachable;
 }
 
 /// Using the given activation object stack, print a stack trace to stderr until
