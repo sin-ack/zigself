@@ -55,8 +55,8 @@ mailbox: Mailbox = .{},
 /// The register file stores the register values for this actor. Lowcode
 /// execution uses these registers to perform its operations.
 register_file: bytecode.lowcode.RegisterFile = .{},
-argument_stack: Stack(Value, "Argument stack", ValueSentinel) = .{},
-saved_register_stack: Stack(SavedRegister, "Saved register stack", null) = .{},
+argument_stack: ArgumentStack = .{},
+saved_register_stack: Stack(SavedRegister, "Saved register stack", false) = .{},
 
 /// Whether the next created method is going to be an inline method.
 next_method_is_inline: bool = false,
@@ -72,8 +72,8 @@ id: ActorID,
 const Actor = @This();
 const Mailbox = std.DoublyLinkedList;
 
-// Sentinel values for the stacks
-pub const ValueSentinel: Value = @bitCast(@as(u64, 0xCCCCCCCCCCCCCCCC));
+const ArgumentStack = Stack(Value, "Argument stack", ArgumentStackHasSentinel);
+const ArgumentStackHasSentinel = std.debug.runtime_safety;
 
 pub const MaximumStackDepth = 2048;
 
@@ -81,6 +81,7 @@ pub const MaximumStackDepth = 2048;
 /// restored after a non-local return.
 pub const StackSnapshot = struct {
     argument_height: usize,
+    argument_sentinel_height: ArgumentStack.SentinelIndex,
     saved_register_height: usize,
 
     /// Bump just the argument stack height. This is necessary because the stack
@@ -89,6 +90,7 @@ pub const StackSnapshot = struct {
     /// actually is when the activation is entered.
     pub fn bumpArgumentHeight(self: *StackSnapshot, actor: *Actor) void {
         self.argument_height = actor.argument_stack.height();
+        self.argument_sentinel_height = actor.argument_stack.sentinelHeight();
     }
 };
 
@@ -377,13 +379,14 @@ pub fn exitActivation(
 pub fn takeStackSnapshot(self: Actor) StackSnapshot {
     return .{
         .argument_height = self.argument_stack.height(),
+        .argument_sentinel_height = self.argument_stack.sentinelHeight(),
         .saved_register_height = self.saved_register_stack.height(),
     };
 }
 
 pub fn restoreStackSnapshot(self: *Actor, snapshot: StackSnapshot) void {
-    self.argument_stack.restoreTo(snapshot.argument_height);
-    self.saved_register_stack.restoreTo(snapshot.saved_register_height);
+    self.argument_stack.restoreTo(snapshot.argument_height, snapshot.argument_sentinel_height);
+    self.saved_register_stack.restoreTo(snapshot.saved_register_height, {});
 }
 
 pub fn readRegister(self: Actor, location: bytecode.RegisterLocation) Value {
@@ -420,9 +423,6 @@ pub fn visitEdges(
     }
 
     for (self.argument_stack.allItems()) |*argument| {
-        if (std.meta.eql(ValueSentinel, argument.*))
-            continue;
-
         try visitor.visit(argument, null);
     }
 
@@ -451,8 +451,8 @@ pub fn unwindStacks(self: *Actor) void {
     }
     self.activation_stack.clear();
 
-    self.argument_stack.restoreTo(0);
-    self.saved_register_stack.restoreTo(0);
+    self.argument_stack.restoreTo(0, if (ArgumentStackHasSentinel) 0 else {});
+    self.saved_register_stack.restoreTo(0, {});
 }
 
 pub fn putMessageInMailbox(

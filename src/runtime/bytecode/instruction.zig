@@ -96,7 +96,9 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .CreateByteArray => "CreateByteArray",
                     .PushArg => "PushArg",
 
-                    .PushArgumentSentinel, .VerifyArgumentSentinel, .SetMethodInline => "None",
+                    .PushArgumentSentinel, .VerifyArgumentSentinel => "ArgumentSentinel",
+
+                    .SetMethodInline => "None",
                 };
             }
 
@@ -152,6 +154,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
             Return: struct {
                 value_location: RegisterLocation,
             },
+            ArgumentSentinel: usize,
 
             // --- Lowcode only payloads ---
 
@@ -223,8 +226,10 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     try writer.print("({f})", .{inst.payload.PushArg.argument_location});
                 },
 
-                .PushArgumentSentinel,
-                .VerifyArgumentSentinel,
+                .PushArgumentSentinel, .VerifyArgumentSentinel => {
+                    try writer.print("({})", .{inst.payload.ArgumentSentinel});
+                },
+
                 .SetMethodInline,
                 => {
                     try writer.writeAll("()");

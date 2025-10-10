@@ -157,10 +157,10 @@ fn lowerInstruction(
             try low_block.addInstruction(allocator, .PushArg, .zero, .{ .argument_location = argument_location }, ast_block.getSourceRange(index));
         },
         .PushArgumentSentinel => {
-            try low_block.addInstruction(allocator, .PushArgumentSentinel, .zero, {}, ast_block.getSourceRange(index));
+            try low_block.addInstruction(allocator, .PushArgumentSentinel, .zero, ast_block.getTypedPayload(index, .PushArgumentSentinel), ast_block.getSourceRange(index));
         },
         .VerifyArgumentSentinel => {
-            try low_block.addInstruction(allocator, .VerifyArgumentSentinel, .zero, {}, ast_block.getSourceRange(index));
+            try low_block.addInstruction(allocator, .VerifyArgumentSentinel, .zero, ast_block.getTypedPayload(index, .VerifyArgumentSentinel), ast_block.getSourceRange(index));
         },
         .PushRegisters => unreachable,
     }

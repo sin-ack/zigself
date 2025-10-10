@@ -25,6 +25,7 @@ pub const MaximumArguments = 128; // Reasonable limit
 pub const MaximumAssignableSlots = 255;
 
 method_execution_depth: usize = 0,
+argument_sentinel_id: usize = 0,
 allocator: Allocator,
 register_id_stack: std.ArrayList(u32),
 
@@ -72,6 +73,12 @@ fn allocateRegister(self: *AstGen) RegisterLocation {
 
 fn popRegisterID(self: *AstGen) void {
     _ = self.register_id_stack.pop();
+}
+
+fn makeArgumentSentinel(self: *AstGen) usize {
+    const id = self.argument_sentinel_id;
+    self.argument_sentinel_id += 1;
+    return id;
 }
 
 fn generateScript(self: *AstGen, executable: *Executable, script_node: ast.ScriptNode) AstGenError!void {
@@ -187,21 +194,25 @@ fn generateMethod(self: *AstGen, executable: *Executable, parent_block: *Block, 
     return method_location;
 }
 
-fn generateArgumentList(self: *AstGen, executable: *Executable, block: *Block, object_descriptor: *const ObjectDescriptor, arguments: []ast.ExpressionNode, source_range: Range) !void {
+fn generateArgumentList(self: *AstGen, executable: *Executable, block: *Block, object_descriptor: *const ObjectDescriptor, arguments: []ast.ExpressionNode, source_range: Range) !usize {
+    const argument_sentinel = self.makeArgumentSentinel();
     if (std.debug.runtime_safety)
-        try block.addInstruction(executable.allocator, .PushArgumentSentinel, .Nil, {}, source_range);
+        try block.addInstruction(executable.allocator, .PushArgumentSentinel, .Nil, argument_sentinel, source_range);
 
     for (arguments) |argument| {
         const argument_location = try self.generateExpression(executable, block, object_descriptor, argument);
         try block.addInstruction(executable.allocator, .PushArg, .Nil, .{ .argument_location = argument_location }, source_range);
     }
+
+    return argument_sentinel;
 }
 
 fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, object_descriptor: *const ObjectDescriptor, message: *ast.MessageNode) AstGenError!RegisterLocation {
+    var argument_sentinel: ?usize = null;
     const message_location = message_location: {
         if (message.receiver) |receiver| {
             const receiver_location = try self.generateExpression(executable, block, object_descriptor, receiver);
-            try self.generateArgumentList(executable, block, object_descriptor, message.arguments, message.range);
+            argument_sentinel = try self.generateArgumentList(executable, block, object_descriptor, message.arguments, message.range);
 
             const message_location = self.allocateRegister();
             if (message.message_name[0] == '_') {
@@ -226,7 +237,7 @@ fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, object
             break :message_location message_location;
         }
 
-        try self.generateArgumentList(executable, block, object_descriptor, message.arguments, message.range);
+        argument_sentinel = try self.generateArgumentList(executable, block, object_descriptor, message.arguments, message.range);
 
         const message_location = self.allocateRegister();
         if (message.message_name[0] == '_') {
@@ -247,8 +258,10 @@ fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, object
         break :message_location message_location;
     };
 
-    if (std.debug.runtime_safety)
-        try block.addInstruction(executable.allocator, .VerifyArgumentSentinel, .Nil, {}, message.range);
+    if (std.debug.runtime_safety) {
+        if (argument_sentinel) |sentinel|
+            try block.addInstruction(executable.allocator, .VerifyArgumentSentinel, .Nil, sentinel, message.range);
+    }
     return message_location;
 }
 

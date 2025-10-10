@@ -428,7 +428,10 @@ pub fn execute(self: *Interpreter) Error!Actor.ActorResult {
             defer tracy_ctx.end();
             self.prelude();
 
-            try self.actor.argument_stack.pushSentinel(self.vm.allocator);
+            const block = self.getCurrentBytecodeBlock();
+            const index = self.getInstructionIndex();
+
+            try self.actor.argument_stack.pushSentinel(self.vm.allocator, block.getTypedPayload(index, .PushArgumentSentinel));
             _ = self.getCurrentActivation().advanceInstruction();
             continue :next_opcode self.getCurrentOpcode();
         },
@@ -437,7 +440,10 @@ pub fn execute(self: *Interpreter) Error!Actor.ActorResult {
             defer tracy_ctx.end();
             self.prelude();
 
-            self.actor.argument_stack.verifySentinel();
+            const block = self.getCurrentBytecodeBlock();
+            const index = self.getInstructionIndex();
+
+            self.actor.argument_stack.verifySentinel(block.getTypedPayload(index, .VerifyArgumentSentinel));
             _ = self.getCurrentActivation().advanceInstruction();
             continue :next_opcode self.getCurrentOpcode();
         },
