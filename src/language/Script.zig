@@ -106,6 +106,7 @@ pub fn reportDiagnostics(self: Script, writer: *std.Io.Writer) !void {
         try writer.splatByteAll(' ', diagnostic.location.column - 1);
         try writer.writeAll("^\n");
     }
+    try writer.flush();
 }
 
 pub fn offsetToLocation(self: Script, offset: usize) Location {
