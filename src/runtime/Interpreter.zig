@@ -135,11 +135,11 @@ fn printCurrentInstruction(self: *Interpreter) void {
 
 /// Run code before each instruction.
 fn prelude(self: *Interpreter) void {
+    self.actor.range = self.getCurrentBytecodeBlock().getSourceRange(self.getInstructionIndex());
+
     if (EXECUTION_DEBUG) {
         self.printCurrentInstruction();
     }
-
-    self.actor.range = self.getCurrentBytecodeBlock().getSourceRange(self.getInstructionIndex());
 }
 
 pub fn execute(self: *Interpreter) Error!Actor.ActorResult {
