@@ -67,8 +67,20 @@ pub fn Stack(comptime T: type, comptime debug_name: []const u8, comptime sentine
                 return self.sentinels.items.len;
             }
         } else struct {
-            pub const pushSentinel = @compileError("Stack does not support sentinel values");
-            pub const verifySentinel = @compileError("Stack does not support sentinel values");
+            pub fn pushSentinel(self: *Self, allocator: Allocator, value: usize) !void {
+                _ = self;
+                _ = allocator;
+                _ = value;
+
+                @panic("Stack does not support sentinel values");
+            }
+
+            pub fn verifySentinel(self: *Self, expected: usize) void {
+                _ = self;
+                _ = expected;
+
+                @panic("Stack does not support sentinel values");
+            }
 
             pub fn sentinelHeight(self: *const Self) SentinelIndex {
                 _ = self;
