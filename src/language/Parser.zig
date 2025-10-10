@@ -91,7 +91,7 @@ pub fn createFromFile(allocator: Allocator, file_path: []const u8) !*Parser {
 }
 
 pub fn createFromString(allocator: Allocator, contents: []const u8) !*Parser {
-    const contents_copy = try allocator.dupeZ(u8, contents);
+    const contents_copy = try allocator.dupe(u8, contents);
     errdefer allocator.free(contents_copy);
 
     var self = try allocator.create(Parser);
@@ -933,6 +933,28 @@ fn parseKeywordExpression(self: *Parser, mode: PrimaryMode) ParseError!?AST.Expr
     };
 }
 
+fn expressionResolvesToSelf(expr: AST.ExpressionNode) bool {
+    switch (expr) {
+        .Identifier => |id| {
+            return std.mem.eql(u8, id.value, "self");
+        },
+        .Message => |message| {
+            if (message.receiver) |receiver| {
+                // We have a receiver, and it's not "self".
+                if (!expressionResolvesToSelf(receiver)) {
+                    return false;
+                }
+
+                // Our receiver _is_ "self" but the message may not necessarily be.
+            }
+
+            // We don't have a receiver, i.e. this is a self-send. Check the message name.
+            return std.mem.eql(u8, message.message_name, "self");
+        },
+        else => return false,
+    }
+}
+
 /// Try to parse a message send with `receiver` as its receiver.
 /// If the current token doesn't look like a message send, return `receiver`
 /// as-is; otherwise, return the wrapping message send.
@@ -988,7 +1010,7 @@ fn maybeParseMessageSend(self: *Parser, receiver: AST.ExpressionNode) ParseError
 }
 
 // <KeywordSend> ::= <FirstKeywordName> <KeywordExpression> (<RestKeywordName> <KeywordExpression>)*
-fn parseKeywordSend(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
+fn parseKeywordSend(self: *Parser, receiver_: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1029,6 +1051,15 @@ fn parseKeywordSend(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AS
     const arguments_slice = try arguments.toOwnedSlice(self.allocator);
     errdefer self.allocator.free(arguments_slice);
 
+    var receiver = receiver_;
+    if (receiver) |*r| {
+        if (expressionResolvesToSelf(r.*)) {
+            // Drop the receiver if it's a self-send.
+            r.deinit(self.allocator);
+            receiver = null;
+        }
+    }
+
     const end = self.tokenStartAt(self.token_index);
     const message_node = try self.allocator.create(AST.MessageNode);
     message_node.* = .{
@@ -1047,7 +1078,7 @@ fn parseKeywordSend(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AS
 // <BinarySend> ::= <BinaryOp>+ <BinaryExpression>
 // FIXME: Binary sends are currently right-associative, but they should be left-associative,
 //        because it's more intuitive. i.e. `a + b + c` should be parsed as `(a + b) + c`.
-fn parseBinarySend(self: *Parser, receiver: ?AST.ExpressionNode, previous_operator: ?[]const u8) ParseError!?AST.ExpressionNode {
+fn parseBinarySend(self: *Parser, receiver_: ?AST.ExpressionNode, previous_operator: ?[]const u8) ParseError!?AST.ExpressionNode {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
@@ -1086,6 +1117,15 @@ fn parseBinarySend(self: *Parser, receiver: ?AST.ExpressionNode, previous_operat
     errdefer self.allocator.free(arguments_slice);
     arguments_slice[0] = argument;
 
+    var receiver = receiver_;
+    if (receiver) |*r| {
+        if (expressionResolvesToSelf(r.*)) {
+            // Drop the receiver if it's a self-send.
+            r.deinit(self.allocator);
+            receiver = null;
+        }
+    }
+
     const end = self.tokenStartAt(self.token_index);
     const message_node = try self.allocator.create(AST.MessageNode);
     errdefer self.allocator.destroy(message_node);
@@ -1123,14 +1163,30 @@ fn parseBinaryExpression(self: *Parser, previous_operator: []const u8) ParseErro
 }
 
 // <UnarySend> ::= <Identifier>
-fn parseUnarySend(self: *Parser, receiver: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
+fn parseUnarySend(self: *Parser, receiver_: ?AST.ExpressionNode) ParseError!?AST.ExpressionNode {
     const tracy_zone = tracy.trace(@src());
     defer tracy_zone.end();
 
     const start = self.tokenStartAt(self.token_index);
     self.assertToken(.Identifier);
 
-    const identifier_copy = try self.getIdentifierCopy(self.consume());
+    const identifier_slice = self.getIdentifierSlice(self.consume());
+    var receiver = receiver_;
+    if (std.mem.eql(u8, identifier_slice, "self")) {
+        if (receiver) |r| return r;
+        // Both the receiver and us are self-sends, but we can't return null here.
+        // Fall through and create a self-send message.
+    } else {
+        if (receiver) |*r| {
+            if (expressionResolvesToSelf(r.*)) {
+                // Drop the receiver if it's a self-send.
+                r.deinit(self.allocator);
+                receiver = null;
+            }
+        }
+    }
+
+    const identifier_copy = try self.allocator.dupe(u8, identifier_slice);
     errdefer self.allocator.free(identifier_copy);
 
     const end = self.tokenStartAt(self.token_index);
@@ -1635,4 +1691,53 @@ fn parseString(self: *Parser) ParseError!?AST.StringNode {
         "Unterminated string literal",
     );
     return null;
+}
+
+test "self sends are elided in unary chains" {
+    var parser = try Parser.createFromString(std.testing.allocator, "self foo self bar");
+    defer parser.destroy();
+
+    var result = (try parser.parseScript()) orelse return error.TestFailed;
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(result.statements.value.statements.len == 1);
+    const expr = result.statements.value.statements[0];
+    try std.testing.expect(expr == .Message);
+    const foo_bar = expr.Message;
+    try std.testing.expectEqualStrings("bar", foo_bar.message_name);
+    try std.testing.expect(foo_bar.receiver != null);
+    try std.testing.expect(foo_bar.receiver.? == .Message);
+    const foo = foo_bar.receiver.?.Message;
+    try std.testing.expectEqualStrings("foo", foo.message_name);
+    try std.testing.expect(foo.receiver == null);
+}
+
+test "at least one self remains if chain only consists of self sends" {
+    var parser = try Parser.createFromString(std.testing.allocator, "self self self");
+    defer parser.destroy();
+
+    var result = (try parser.parseScript()) orelse return error.TestFailed;
+    defer result.deinit(std.testing.allocator);
+
+    // The first "self" is an Identifier node, the rest are elided.
+    try std.testing.expect(result.statements.value.statements.len == 1);
+    const expr = result.statements.value.statements[0];
+    try std.testing.expect(expr == .Identifier);
+    const self = expr.Identifier;
+    try std.testing.expectEqualStrings("self", self.value);
+}
+
+test "self sends are elided from both sides of unary chain" {
+    var parser = try Parser.createFromString(std.testing.allocator, "self self foo self self self");
+    defer parser.destroy();
+
+    var result = (try parser.parseScript()) orelse return error.TestFailed;
+    defer result.deinit(std.testing.allocator);
+
+    try std.testing.expect(result.statements.value.statements.len == 1);
+    const expr = result.statements.value.statements[0];
+    try std.testing.expect(expr == .Message);
+    const foo = expr.Message;
+    try std.testing.expectEqualStrings("foo", foo.message_name);
+    try std.testing.expect(foo.receiver == null);
 }
