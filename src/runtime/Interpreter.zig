@@ -379,6 +379,51 @@ pub fn execute(self: *Interpreter) Error!Actor.ActorResult {
             self.refreshActivationContext();
             continue :next_opcode self.getCurrentOpcode();
         },
+        .GetLocal => {
+            const tracy_ctx = tracy.traceNamed(@src(), "Interpreter.execute<GetLocal>");
+            defer tracy_ctx.end();
+            self.prelude();
+
+            const block = self.getCurrentBytecodeBlock();
+            const index = self.getInstructionIndex();
+
+            const receiver: ActivationObject.Ptr = self.actor.activation_stack.getCurrent().activation_object.get();
+            const local_index = block.getTypedPayload(index, .GetLocal).local_index;
+
+            // TODO: Transitional code. Eventually we will eliminate the activation
+            //       object entirely.
+            const value = receiver.getAssignableSlotFromLocalIndex(local_index).*;
+            self.vm.writeRegister(block.getTargetLocation(index), value);
+
+            _ = self.getCurrentActivation().advanceInstruction();
+            continue :next_opcode self.getCurrentOpcode();
+        },
+        .PutLocal => {
+            const tracy_ctx = tracy.traceNamed(@src(), "Interpreter.execute<PutLocal>");
+            defer tracy_ctx.end();
+            self.prelude();
+
+            const block = self.getCurrentBytecodeBlock();
+            const index = self.getInstructionIndex();
+
+            const receiver: ActivationObject.Ptr = self.actor.activation_stack.getCurrent().activation_object.get();
+            const payload = block.getTypedPayload(index, .PutLocal);
+
+            // TODO: Transitional code. Eventually we will eliminate the activation
+            //       object entirely.
+            const target_ptr = receiver.getAssignableSlotFromLocalIndex(payload.local_index);
+            const value = self.vm.readRegister(payload.value_location);
+
+            // David will remember that.
+            _ = try self.vm.heap.rememberObjectReference(receiver.asValue(), value);
+
+            target_ptr.* = value;
+            // Assignment messages return self!
+            self.vm.writeRegister(block.getTargetLocation(index), receiver.asValue());
+
+            _ = self.getCurrentActivation().advanceInstruction();
+            continue :next_opcode self.getCurrentOpcode();
+        },
         .PushArg => {
             const tracy_ctx = tracy.traceNamed(@src(), "Interpreter.execute<PushArg>");
             defer tracy_ctx.end();

@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
+const std = @import("std");
+
 pub const instruction = @import("./bytecode/instruction.zig");
 pub const block = @import("./bytecode/block.zig");
 pub const executable = @import("./bytecode/executable.zig");
@@ -9,6 +11,24 @@ pub const ObjectDescriptor = @import("./bytecode/ObjectDescriptor.zig");
 
 pub const astcode = @import("./bytecode/astcode.zig");
 pub const lowcode = @import("./bytecode/lowcode.zig");
+
+/// Index of a local slot within an activation record.
+pub const LocalIndex = enum(u8) {
+    _,
+
+    pub fn init(value: u8) LocalIndex {
+        return @enumFromInt(value);
+    }
+
+    pub fn get(self: LocalIndex) u8 {
+        return @intFromEnum(self);
+    }
+
+    pub fn format(self: LocalIndex, writer: *std.Io.Writer) !void {
+        try writer.writeByte('L');
+        try writer.printInt(self.get(), 10, .lower, .{});
+    }
+};
 
 // These are the ones that the rest of the codebase intends to use, so we pull
 // it as the default here.

@@ -152,6 +152,20 @@ fn lowerInstruction(
             const value_location = register_pool.getAllocatedRegisterFor(ast_block.getTypedPayload(index, .NonlocalReturn).value_location);
             try low_block.addInstruction(allocator, .NonlocalReturn, .zero, .{ .value_location = value_location }, ast_block.getSourceRange(index));
         },
+        .GetLocal => {
+            const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
+            try low_block.addInstruction(allocator, .GetLocal, target, ast_block.getTypedPayload(index, .GetLocal), ast_block.getSourceRange(index));
+        },
+        .PutLocal => {
+            // FIXME: Optimize chains like this:
+            //        self foo: 1; bar: 2; ...
+            //        By just converting them into a sequence of PutLocal/SelfSends.
+            //        This avoids having to put self into registers over and over again.
+            const payload = ast_block.getTypedPayload(index, .PutLocal);
+            const value_location = register_pool.getAllocatedRegisterFor(payload.value_location);
+            const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
+            try low_block.addInstruction(allocator, .PutLocal, target, .{ .local_index = payload.local_index, .value_location = value_location }, ast_block.getSourceRange(index));
+        },
         .PushArg => {
             const argument_location = register_pool.getAllocatedRegisterFor(ast_block.getTypedPayload(index, .PushArg).argument_location);
             try low_block.addInstruction(allocator, .PushArg, .zero, .{ .argument_location = argument_location }, ast_block.getSourceRange(index));

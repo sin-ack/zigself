@@ -68,6 +68,10 @@ fn instructionReferencesRegister(block: *astcode.Block, index: usize, location: 
             const payload = block.getTypedPayload(index, .PushArg);
             break :blk payload.argument_location == location;
         },
+        .PutLocal => blk: {
+            const payload = block.getTypedPayload(index, .PutLocal);
+            break :blk payload.value_location == location;
+        },
 
         .SelfSend,
         .SelfPrimSend,
@@ -79,6 +83,7 @@ fn instructionReferencesRegister(block: *astcode.Block, index: usize, location: 
         .SetMethodInline,
         .PushArgumentSentinel,
         .VerifyArgumentSentinel,
+        .GetLocal,
         => false,
 
         .PushRegisters => unreachable,

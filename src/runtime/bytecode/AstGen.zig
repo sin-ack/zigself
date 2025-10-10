@@ -112,8 +112,8 @@ fn generateExpression(self: *AstGen, executable: *Executable, block: *Block, obj
         .Block => |block_node| self.generateBlock(executable, block, object_descriptor, block_node),
         .Message => |message| self.generateMessage(executable, block, object_descriptor, message),
         .Return => |return_node| self.generateReturn(executable, block, object_descriptor, return_node),
+        .Identifier => |identifier| self.generateIdentifier(executable, block, object_descriptor, identifier),
 
-        .Identifier => |identifier| self.generateIdentifier(executable, block, identifier),
         .String => |string| self.generateString(executable, block, string),
         .Number => |number| self.generateNumber(executable, block, number),
     };
@@ -207,6 +207,17 @@ fn generateArgumentList(self: *AstGen, executable: *Executable, block: *Block, o
     return argument_sentinel;
 }
 
+/// Try to get the assignment target from this selector, if it looks like
+/// an assignment. The selector must be a keyword selector with exactly
+/// one keyword.
+///
+/// Examples: `foo:` -> `foo`, `foo:Bar:` -> null, `foo` -> null
+fn messageAsAssignmentTarget(selector: []const u8) ?[]const u8 {
+    const colon_index = std.mem.indexOfScalar(u8, selector, ':') orelse return null;
+    if (colon_index != selector.len - 1) return null;
+    return selector[0..colon_index];
+}
+
 fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, object_descriptor: *const ObjectDescriptor, message: *ast.MessageNode) AstGenError!RegisterLocation {
     var argument_sentinel: ?usize = null;
     const message_location = message_location: {
@@ -235,6 +246,32 @@ fn generateMessage(self: *AstGen, executable: *Executable, block: *Block, object
             }
 
             break :message_location message_location;
+        }
+
+        // Try to see if this message would assign to a local (as we don't have a receiver,
+        // we're pointing at the current activation record).
+        if (messageAsAssignmentTarget(message.message_name)) |assignment_target| {
+            std.debug.assert(message.arguments.len == 1);
+
+            for (object_descriptor.slots) |slot| {
+                if (std.mem.eql(u8, slot.name, assignment_target)) {
+                    if (slot.assignable_index) |local_index| {
+                        // Okay, this is actually a local put. We need to generate
+                        // our argument first though.
+                        const value_location = try self.generateExpression(executable, block, object_descriptor, message.arguments[0]);
+                        const message_location = self.allocateRegister();
+                        try block.addInstruction(executable.allocator, .PutLocal, message_location, .{
+                            // FIXME: Will we ever get more than 256 locals? We should have a check here.
+                            .local_index = .init(@intCast(local_index)),
+                            .value_location = value_location,
+                        }, message.range);
+                        break :message_location message_location;
+                    }
+
+                    // Not assignable, drop through to normal send.
+                    break;
+                }
+            }
         }
 
         argument_sentinel = try self.generateArgumentList(executable, block, object_descriptor, message.arguments, message.range);
@@ -276,7 +313,7 @@ fn generateReturn(self: *AstGen, executable: *Executable, block: *Block, object_
 //       the lifetime of the executable it will be alive, in the future we might
 //       want to delete the AST after codegen.
 
-fn generateIdentifier(self: *AstGen, executable: *Executable, block: *Block, identifier: ast.IdentifierNode) AstGenError!RegisterLocation {
+fn generateIdentifier(self: *AstGen, executable: *Executable, block: *Block, object_descriptor: *const ObjectDescriptor, identifier: ast.IdentifierNode) AstGenError!RegisterLocation {
     const identifier_location = self.allocateRegister();
     if (identifier.value[0] == '_') {
         if (primitives.getPrimitiveIndex(identifier.value[1..])) |index| {
@@ -287,6 +324,22 @@ fn generateIdentifier(self: *AstGen, executable: *Executable, block: *Block, ide
             return error.AstGenFailure;
         }
     } else {
+        // Try to see if our message matches a local.
+        for (object_descriptor.slots) |slot| {
+            if (std.mem.eql(u8, slot.name, identifier.value)) {
+                if (slot.assignable_index) |local_index| {
+                    // FIXME: Will we ever get more than 256 locals? We should have a check here.
+                    try block.addInstruction(executable.allocator, .GetLocal, identifier_location, .{ .local_index = .init(@intCast(local_index)) }, identifier.range);
+                    return identifier_location;
+                }
+
+                // TODO: Constants can be optimized even further by just pointing
+                //       to the constant table of a given executable. For now we
+                //       drop through to a normal self-send.
+                break;
+            }
+        }
+
         try block.addInstruction(executable.allocator, .SelfSend, identifier_location, .{
             .selector = Selector.fromName(identifier.value),
             .send_index = block.makeSendIndex(),

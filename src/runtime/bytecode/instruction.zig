@@ -6,6 +6,7 @@ const std = @import("std");
 
 const Range = @import("../../language/Range.zig");
 const Selector = @import("../Selector.zig");
+const LocalIndex = @import("../bytecode.zig").LocalIndex;
 const PrimitiveIndex = @import("../primitives.zig").PrimitiveIndex;
 const AstcodeRegisterLocation = @import("./astcode/register_location.zig").RegisterLocation;
 const LowcodeRegisterLocation = @import("./lowcode/register_location.zig").RegisterLocation;
@@ -27,6 +28,10 @@ fn Instruction(comptime RegisterLocationT: type) type {
             PrimSend,
             SelfSend,
             SelfPrimSend,
+
+            // Local manipulation
+            GetLocal,
+            PutLocal,
 
             // Pushing to the argument stack
             PushArg,
@@ -73,6 +78,8 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .SetMethodInline => "set_method_inline",
                     .Return => "return",
                     .NonlocalReturn => "nonlocal_return",
+                    .GetLocal => "get_local",
+                    .PutLocal => "put_local",
                     .PushArg => "push_arg",
                     .PushArgumentSentinel => "push_argument_sentinel",
                     .VerifyArgumentSentinel => "verify_argument_sentinel",
@@ -86,6 +93,8 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .PrimSend => "PrimSend",
                     .SelfPrimSend => "SelfPrimSend",
                     .Return, .NonlocalReturn => "Return",
+                    .GetLocal => "GetLocal",
+                    .PutLocal => "PutLocal",
 
                     .PushRegisters => "PushRegisters",
                     .CreateInteger => "CreateInteger",
@@ -152,6 +161,13 @@ fn Instruction(comptime RegisterLocationT: type) type {
                 block_index: u32,
             },
             Return: struct {
+                value_location: RegisterLocation,
+            },
+            GetLocal: struct {
+                local_index: LocalIndex,
+            },
+            PutLocal: struct {
+                local_index: LocalIndex,
                 value_location: RegisterLocation,
             },
             ArgumentSentinel: usize,
@@ -224,6 +240,15 @@ fn Instruction(comptime RegisterLocationT: type) type {
 
                 .PushArg => {
                     try writer.print("({f})", .{inst.payload.PushArg.argument_location});
+                },
+
+                .GetLocal => {
+                    try writer.print("({f})", .{inst.payload.GetLocal.local_index});
+                },
+
+                .PutLocal => {
+                    const payload = inst.payload.PutLocal;
+                    try writer.print("({f}, {f})", .{ payload.local_index, payload.value_location });
                 },
 
                 .PushArgumentSentinel, .VerifyArgumentSentinel => {

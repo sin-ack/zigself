@@ -18,6 +18,7 @@ const bytecode = @import("../bytecode.zig");
 const BlockMap = @import("block.zig").BlockMap;
 const MethodMap = @import("method.zig").MethodMap;
 const ValueSlot = @import("../object_lookup.zig").ValueSlot;
+const LocalIndex = @import("../bytecode.zig").LocalIndex;
 const map_import = @import("../map.zig");
 const SlotsObject = slots.Slots;
 const GenericValue = value_import.Value;
@@ -214,6 +215,12 @@ pub const Activation = extern struct {
     /// Get the value slot at the given index.
     pub fn getValueSlot(self: Activation.Ptr, index: usize) ValueSlot {
         return slots.getValueSlotGeneric(Activation, self, index);
+    }
+
+    /// Get an assignable value using the local index. Transitional code while
+    /// the activation object is phased out.
+    pub fn getAssignableSlotFromLocalIndex(self: Activation.Ptr, local_index: LocalIndex) *GenericValue {
+        return &self.getAssignableSlots()[local_index.get()];
     }
 
     // --- Finding activation receiver ---
