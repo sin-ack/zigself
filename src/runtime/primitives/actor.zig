@@ -176,9 +176,6 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         ));
     }
 
-    // NOTE: Need to advance the current actor to the next instruction to be returned to after the this actor exits.
-    _ = context.actor.activation_stack.getCurrent().advanceInstruction();
-
     var spawn_method: MethodObject.Ptr = undefined;
     switch (try findActorMethod(context.source_range, receiver, spawn_selector)) {
         .Method => |m| spawn_method = m,
@@ -236,6 +233,11 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
         },
     };
     handles.trackValue(&new_actor_context);
+
+    // NOTE: Need to advance the current actor to the next instruction to be
+    //       returned to after the this actor exits. This can only be done now,
+    //       because we can no longer return regularly from this primitive.
+    _ = context.actor.activation_stack.getCurrent().advanceInstruction();
 
     const entrypoint_selector_name = entrypoint_selector_name: {
         if (context.actor.entrypoint_selector) |message_value| {
