@@ -239,4 +239,5 @@ fn printWithIndent(comptime display_type: InspectDisplayType, indent: usize, com
     }
 
     writer.print(fmt, args) catch return;
+    writer.flush() catch return;
 }
