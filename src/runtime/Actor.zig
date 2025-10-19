@@ -58,6 +58,18 @@ register_file: bytecode.lowcode.RegisterFile = .{},
 argument_stack: ArgumentStack = .{},
 saved_register_stack: Stack(SavedRegister, "Saved register stack", false) = .{},
 
+/// The locals for each method activation on this actor. Each method activation
+/// stores its own set of locals here when activated.
+///
+/// For each method, the locals are laid out as follows:
+///
+/// [receiver][method local 0]...[method local N]
+///
+/// The total number of locals for a method is the maximum number of possible locals
+/// that can be used at any point during the method's execution, which is the
+/// deepest block local depth. Some locals may be unused at certain points during
+/// execution, and blocks can reuse locals from their parent blocks.
+locals_stack: Stack(Value, "Locals stack", false) = .{},
 
 /// The currently active source range. This is updated by the source_range
 /// instruction.
@@ -81,6 +93,7 @@ pub const StackSnapshot = struct {
     argument_height: usize,
     argument_sentinel_height: ArgumentStack.SentinelIndex,
     saved_register_height: usize,
+    locals_height: usize,
 
     /// Bump just the argument stack height. This is necessary because the stack
     /// snapshot for an activation is created while the stack still contains the
@@ -210,6 +223,7 @@ fn init(self: *Actor, actor_object: ActorObject.Ptr) void {
 fn deinit(self: *Actor, allocator: Allocator) void {
     self.clearMailbox(allocator);
 
+    self.locals_stack.deinit(allocator);
     self.argument_stack.deinit(allocator);
     self.saved_register_stack.deinit(allocator);
 
@@ -221,24 +235,39 @@ fn deinit(self: *Actor, allocator: Allocator) void {
 
 pub fn activateMethod(
     self: *Actor,
+    vm: *VirtualMachine,
     token: *heap.AllocationToken,
     method: MethodObject.Ptr,
+    arguments: []const Value,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
-    return try self.activateMethodWithContext(token, self.actor_object.get().context, method, target_location, source_range);
+    return try self.activateMethodWithContext(vm, token, self.actor_object.get().context, method, arguments, target_location, source_range);
 }
 
 pub fn activateMethodWithContext(
     self: *Actor,
+    vm: *VirtualMachine,
     token: *heap.AllocationToken,
     actor_context: Value,
     method: MethodObject.Ptr,
+    arguments: []const Value,
     target_location: bytecode.RegisterLocation,
     source_range: SourceRange,
 ) !void {
+    // HACK: Transitional code. Copy initial assignable slot values and
+    //       arguments into the new activation's local stack.
+    const assignable_slot_count = method.getMap().getAssignableSlotCount();
+    const argument_slot_count = method.getMap().getArgumentSlotCount();
+
+    // NOTE: +1 because local 0 is reserved for the receiver.
+    const local_stack_offset = try self.locals_stack.reserveSpace(vm.allocator, @intCast(method.getMap().local_depth.get() + 1), vm.global_nil);
+    self.locals_stack.allItems()[local_stack_offset] = actor_context;
+    @memcpy(self.locals_stack.allItems()[local_stack_offset + 1 .. local_stack_offset + 1 + assignable_slot_count], method.getAssignableSlots());
+    @memcpy(self.locals_stack.allItems()[local_stack_offset + 1 + assignable_slot_count .. local_stack_offset + 1 + assignable_slot_count + argument_slot_count], arguments);
+
     const activation_slot = try self.activation_stack.getNewActivationSlot(context.getVM().allocator);
-    method.activateMethod(token, self.id, actor_context, &.{}, target_location, source_range, activation_slot);
+    method.activateMethod(token, self.id, actor_context, arguments, target_location, source_range, activation_slot, @intCast(local_stack_offset));
 }
 
 pub fn pushContext(self: *Actor) void {
@@ -270,9 +299,7 @@ pub fn execute(self: *Actor) !ActorResult {
             defer token.deinit();
             method = message.method.get();
 
-            const actor_context = self.actor_object.get().context;
-            const new_activation = try self.activation_stack.getNewActivationSlot(vm.allocator);
-            method.activateMethod(&token, self.id, actor_context, message.arguments, .zero, message.source_range, new_activation);
+            try self.activateMethod(vm, &token, method, message.arguments, .zero, message.source_range);
 
             self.message_sender = message.sender;
 
@@ -379,12 +406,14 @@ pub fn takeStackSnapshot(self: Actor) StackSnapshot {
         .argument_height = self.argument_stack.height(),
         .argument_sentinel_height = self.argument_stack.sentinelHeight(),
         .saved_register_height = self.saved_register_stack.height(),
+        .locals_height = self.locals_stack.height(),
     };
 }
 
 pub fn restoreStackSnapshot(self: *Actor, snapshot: StackSnapshot) void {
     self.argument_stack.restoreTo(snapshot.argument_height, snapshot.argument_sentinel_height);
     self.saved_register_stack.restoreTo(snapshot.saved_register_height, {});
+    self.locals_stack.restoreTo(snapshot.locals_height, {});
 }
 
 pub fn readRegister(self: Actor, location: bytecode.RegisterLocation) Value {
@@ -428,6 +457,10 @@ pub fn visitEdges(
         try visitor.visit(&saved_register.value, null);
     }
 
+    for (self.locals_stack.allItems()) |*local| {
+        try visitor.visit(local, null);
+    }
+
     {
         var it = self.mailbox.first;
         while (it) |node| : (it = node.next) {
@@ -451,6 +484,7 @@ pub fn unwindStacks(self: *Actor) void {
 
     self.argument_stack.restoreTo(0, if (ArgumentStackHasSentinel) 0 else {});
     self.saved_register_stack.restoreTo(0, {});
+    self.locals_stack.restoreTo(0, {});
 }
 
 pub fn putMessageInMailbox(

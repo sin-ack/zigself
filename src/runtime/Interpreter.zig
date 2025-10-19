@@ -311,6 +311,7 @@ pub fn execute(self: *Interpreter) Error!Actor.ActorResult {
                 executable.value.getObjectDescriptor(payload.descriptor_index),
                 payload.block_index,
                 payload.is_inline,
+                payload.local_depth,
             );
             self.vm.writeRegister(block.getTargetLocation(index), object.asValue());
 
@@ -331,6 +332,7 @@ pub fn execute(self: *Interpreter) Error!Actor.ActorResult {
                 executable,
                 executable.value.getObjectDescriptor(payload.descriptor_index),
                 payload.block_index,
+                payload.method_local_offset,
             );
             self.vm.writeRegister(block.getTargetLocation(index), object.asValue());
 
@@ -388,12 +390,9 @@ pub fn execute(self: *Interpreter) Error!Actor.ActorResult {
             const block = self.getCurrentBytecodeBlock();
             const index = self.getInstructionIndex();
 
-            const receiver: ActivationObject.Ptr = self.actor.activation_stack.getCurrent().activation_object.get();
-            const local_index = block.getTypedPayload(index, .GetLocal).local_index;
-
-            // TODO: Transitional code. Eventually we will eliminate the activation
-            //       object entirely.
-            const value = receiver.getAssignableSlotFromLocalIndex(local_index).*;
+            const local_stack_offset = self.getCurrentActivation().local_stack_offset;
+            const local_index = block.getTypedPayload(index, .GetLocal).local_index.get();
+            const value = self.actor.locals_stack.allItems()[local_stack_offset + local_index];
             self.vm.writeRegister(block.getTargetLocation(index), value);
 
             _ = self.getCurrentActivation().advanceInstruction();
@@ -410,15 +409,14 @@ pub fn execute(self: *Interpreter) Error!Actor.ActorResult {
             const receiver: ActivationObject.Ptr = self.actor.activation_stack.getCurrent().activation_object.get();
             const payload = block.getTypedPayload(index, .PutLocal);
 
-            // TODO: Transitional code. Eventually we will eliminate the activation
-            //       object entirely.
-            const target_ptr = receiver.getAssignableSlotFromLocalIndex(payload.local_index);
+            const local_stack_offset = self.getCurrentActivation().local_stack_offset;
+            const local_index = payload.local_index.get();
             const value = self.vm.readRegister(payload.value_location);
 
             // David will remember that.
             _ = try self.vm.heap.rememberObjectReference(receiver.asValue(), value);
 
-            target_ptr.* = value;
+            self.actor.locals_stack.allItems()[local_stack_offset + local_index] = value;
             // Assignment messages return self!
             self.vm.writeRegister(block.getTargetLocation(index), receiver.asValue());
 
@@ -747,6 +745,9 @@ fn executeBlock(
 
     const parent_activation_object = block.getMap().parent_activation.get(self.actor.activation_stack).?.activation_object;
     const activation_slot = try self.actor.activation_stack.getNewActivationSlot(self.vm.allocator);
+
+    // The method contains the locals of the block.
+    const method_stack_offset = block.getMap().nonlocal_return_target_activation.get(self.actor.activation_stack).?.local_stack_offset;
     block.activateBlock(
         &token,
         parent_activation_object.value,
@@ -755,9 +756,25 @@ fn executeBlock(
         try message_name.get(self.vm.allocator),
         source_range,
         activation_slot,
+        method_stack_offset,
     );
+
+    // HACK: Transitional code. Copy initial assignable slot values and
+    //       arguments into the new activation's local stack.
+    const assignable_slot_count = block.getMap().getAssignableSlotCount();
+    const argument_slot_count = block.getMap().getArgumentSlotCount();
+
+    // Our locals start after the method's locals.
+    // NOTE: +1 because local 0 is reserved for the receiver.
+    const local_stack_offset = method_stack_offset + 1 + @as(u32, @intCast(block.getMap().method_local_offset.get()));
+    @memcpy(self.actor.locals_stack.allItems()[local_stack_offset .. local_stack_offset + assignable_slot_count], block.getAssignableSlots());
+    @memcpy(self.actor.locals_stack.allItems()[local_stack_offset + assignable_slot_count .. local_stack_offset + assignable_slot_count + argument_slot_count], arguments);
 }
 
+// FIXME: While inline methods *are* methods in a technical sense, they are not
+//        initialized like normal methods because they don't have their own
+//        space on the locals stack. Perhaps they should be split into their own
+//        type/function?
 fn executeMethod(
     self: *const Interpreter,
     const_receiver: Value,
@@ -795,8 +812,37 @@ fn executeMethod(
         }
     }
 
+    const local_stack_offset = if (const_method.getMap().isInlineMethod())
+        // NOTE: Because an inline method is only visible from the method that
+        //       defines it, or any other blocks/inline methods defined within
+        //       it, the currently running activation MUST be one whose local
+        //       source is the method. Therefore, we can simply reuse the
+        //       current activation's local stack offset.
+        self.getCurrentActivation().local_stack_offset
+    else
+        // NOTE: +1 because local 0 is reserved for the receiver.
+        try self.actor.locals_stack.reserveSpace(self.vm.allocator, @intCast(method.getMap().local_depth.get() + 1), self.vm.global_nil);
+
     const activation_slot = try self.actor.activation_stack.getNewActivationSlot(self.vm.allocator);
-    method.activateMethod(&token, self.actor.id, receiver_of_method, arguments, target_location, source_range, activation_slot);
+    method.activateMethod(&token, self.actor.id, receiver_of_method, arguments, target_location, source_range, activation_slot, @intCast(local_stack_offset));
+
+    // HACK: Transitional code. Copy initial assignable slot values and
+    //       arguments into the new activation's local stack.
+    const assignable_slot_count = method.getMap().getAssignableSlotCount();
+    const argument_slot_count = method.getMap().getArgumentSlotCount();
+
+    const copy_base = if (method.getMap().isInlineMethod())
+        // For inline methods, the local_depth field is reinterpreted as
+        // the offset on top of the local stack offset.
+        local_stack_offset + 1 + method.getMap().local_depth.get()
+    else
+        local_stack_offset + 1;
+
+    if (!method.getMap().isInlineMethod()) {
+        self.actor.locals_stack.allItems()[local_stack_offset] = receiver_of_method;
+    }
+    @memcpy(self.actor.locals_stack.allItems()[copy_base .. copy_base + assignable_slot_count], method.getAssignableSlots());
+    @memcpy(self.actor.locals_stack.allItems()[copy_base + assignable_slot_count .. copy_base + assignable_slot_count + argument_slot_count], arguments);
 }
 
 fn createObject(
@@ -825,6 +871,7 @@ fn createMethod(
     object_descriptor: bytecode.ObjectDescriptor,
     block_index: u32,
     is_inline: bool,
+    local_depth: u32,
 ) !MethodObject.Ptr {
     const slot_count: u16 = @intCast(object_descriptor.slots.len);
     const byte_array_required_memory = slot_count * ByteArray.requiredSizeForAllocation();
@@ -847,6 +894,7 @@ fn createMethod(
         method_name,
         block,
         executable,
+        local_depth,
     );
     const method_object = MethodObject.create(&token, self.actor.id, method_map);
     try self.writeObjectSlots(MethodMap, &token, object_descriptor, method_map, method_object);
@@ -858,6 +906,7 @@ fn createBlock(
     executable: bytecode.Executable.Ref,
     object_descriptor: bytecode.ObjectDescriptor,
     block_index: u32,
+    method_local_offset: u32,
 ) !BlockObject.Ptr {
     const block = executable.value.getBlock(block_index);
     // The latest activation is where the block was created, so it will always
@@ -896,6 +945,7 @@ fn createBlock(
         nonlocal_return_target_activation,
         block,
         executable,
+        method_local_offset,
     );
     const block_object = BlockObject.create(&token, self.actor.id, block_map);
     try self.writeObjectSlots(BlockMap, &token, object_descriptor, block_map, block_object);

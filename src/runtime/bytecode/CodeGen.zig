@@ -131,6 +131,7 @@ fn lowerInstruction(
                 .descriptor_index = payload.descriptor_index,
                 .block_index = payload.block_index,
                 .is_inline = payload.is_inline,
+                .local_depth = payload.local_depth,
             }, ast_block.getSourceRange(index));
         },
         .CreateBlock => {
@@ -140,6 +141,7 @@ fn lowerInstruction(
             try low_block.addInstruction(allocator, .CreateBlock, target, .{
                 .descriptor_index = payload.descriptor_index,
                 .block_index = payload.block_index,
+                .method_local_offset = payload.method_local_offset,
             }, ast_block.getSourceRange(index));
         },
         .Return => {

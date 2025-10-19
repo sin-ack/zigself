@@ -132,7 +132,7 @@ pub fn Genesis(context: *PrimitiveContext) !ExecutionResult {
     const blessed_receiver = try bless.bless(genesis_actor.id, receiver);
 
     genesis_actor.actor_object.get().context = blessed_receiver;
-    try genesis_actor.activateMethod(&token, method, context.target_location, context.source_range);
+    try genesis_actor.activateMethod(context.vm, &token, method, &.{}, context.target_location, context.source_range);
     context.vm.setGenesisActor(genesis_actor);
     context.vm.switchToActor(genesis_actor);
 
@@ -199,7 +199,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
     // Activate the method in the actor which requested the spawn. This is required because
     // any new actor we create does not have any memory of its own yet, so we need to create a
     // new context for it before we can do anything.
-    try context.actor.activateMethodWithContext(&token, receiver, spawn_method, context.target_location, context.source_range);
+    try context.actor.activateMethodWithContext(context.vm, &token, receiver, spawn_method, &.{}, context.target_location, context.source_range);
 
     var actor_result = try context.actor.executeUntil(before_spawn_method_activation_ref);
     // This object is owned by the actor that requested the spawn.
@@ -292,7 +292,7 @@ pub fn ActorSpawn(context: *PrimitiveContext) !ExecutionResult {
 
     token.deinit();
     token = try context.vm.heap.allocate(entrypoint_method.requiredSizeForActivation());
-    try new_actor.activateMethod(&token, entrypoint_method, context.target_location, context.source_range);
+    try new_actor.activateMethod(context.vm, &token, entrypoint_method, &.{}, context.target_location, context.source_range);
 
     // Since we are switching actors (which we should in the "spawning an actor
     // in another actor" case), we cannot return the new actor object normally.

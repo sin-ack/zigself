@@ -21,6 +21,7 @@ const heap_import = @import("../Heap.zig");
 const ObjectValue = value_import.ObjectValue;
 const SourceRange = @import("../SourceRange.zig");
 const GenericValue = value_import.Value;
+const IntegerValue = value_import.IntegerValue;
 const value_import = @import("../value.zig");
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
 const VirtualMachine = @import("../VirtualMachine.zig");
@@ -134,7 +135,7 @@ pub const Method = extern struct {
     ) !Method.Ptr {
         const toplevel_context_method_map = blk: {
             const toplevel_context_name = try ByteArray.createWithValues(allocator, heap, token, .Global, toplevel_context_string);
-            break :blk try MethodMap.create(allocator, heap, token, 0, 0, 0, false, toplevel_context_name, block, executable);
+            break :blk try MethodMap.create(allocator, heap, token, 0, 0, 0, false, toplevel_context_name, block, executable, 0);
         };
         return create(token, context.getActor().id, toplevel_context_method_map);
     }
@@ -174,9 +175,10 @@ pub const Method = extern struct {
         target_location: bytecode.RegisterLocation,
         created_from: SourceRange,
         out_activation: *Activation,
+        local_stack_offset: u32,
     ) void {
         const activation_object = ActivationObject.create(token, actor_id, .Method, self.slots.object.getMap(), arguments, self.getAssignableSlots(), receiver);
-        out_activation.initInPlace(ActivationObject.Value.init(activation_object), target_location, self.getMap().method_name.get().getByteArray(), created_from);
+        out_activation.initInPlace(ActivationObject.Value.init(activation_object), target_location, self.getMap().method_name.get().getByteArray(), created_from, local_stack_offset);
     }
 
     pub fn requiredSizeForActivation(self: Method.Ptr) usize {
@@ -193,6 +195,15 @@ pub const MethodMap = extern struct {
     base_map: ExecutableMap align(@alignOf(u64)),
     /// What the method is called.
     method_name: ObjectValue(ByteArray) align(@alignOf(u64)),
+    /// This field is interpreted differently depending on whether the method
+    /// is inline or not:
+    /// - For inline methods, this is the start of this inline method's locals
+    ///   within the containing method's local.
+    /// - For non-inline methods, this is the depth of local variables that
+    ///   should be allocated for the method and all the inline methods/blocks
+    ///   defined within it.
+    local_depth: IntegerValue(.Unsigned) align(@alignOf(u64)),
+
     slots: MapSlots(MethodMap) align(@alignOf(u64)),
 
     pub const Ptr = pointer.HeapPtr(MethodMap, .Mutable);
@@ -216,6 +227,7 @@ pub const MethodMap = extern struct {
         method_name: ByteArray.Ptr,
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
+        local_depth: u32,
     ) !MethodMap.Ptr {
         const size = MethodMap.requiredSizeForAllocation(slot_count);
 
@@ -226,7 +238,7 @@ pub const MethodMap = extern struct {
         try heap.markAddressAsNeedingFinalization(memory_area);
 
         var self: MethodMap.Ptr = @ptrCast(memory_area);
-        self.init(slot_count, assignable_slot_count, argument_slot_count, is_inline_method, method_name, block, executable, inline_cache);
+        self.init(slot_count, assignable_slot_count, argument_slot_count, is_inline_method, method_name, block, executable, inline_cache, local_depth);
 
         return self;
     }
@@ -241,18 +253,20 @@ pub const MethodMap = extern struct {
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
         inline_cache: []InlineCacheEntry,
+        local_depth: u32,
     ) void {
         self.base_map.init(.Method, argument_slot_count, slot_count, block, executable, inline_cache);
         self.setAssignableSlotCount(assignable_slot_count);
         self.setInlineMethod(is_inline_method);
         self.method_name = .init(method_name);
+        self.local_depth = .init(local_depth);
     }
 
     fn setInlineMethod(self: MethodMap.Ptr, is_inline_method: bool) void {
         MethodMap.ExtraBits.write(self.base_map.slots.map.getMetadata(), .{ .is_inline = is_inline_method });
     }
 
-    fn isInlineMethod(self: MethodMap.Ptr) bool {
+    pub fn isInlineMethod(self: MethodMap.Ptr) bool {
         return MethodMap.ExtraBits.read(self.base_map.slots.map.getMetadata().*).is_inline;
     }
 
@@ -316,6 +330,7 @@ pub const MethodMap = extern struct {
             self.method_name.get(),
             self.base_map.block.get(),
             self.base_map.definition_executable_ref.get(),
+            @intCast(self.local_depth.get()),
         );
 
         new_map.setAssignableSlotCount(self.getAssignableSlotCount());

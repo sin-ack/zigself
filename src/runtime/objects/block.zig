@@ -24,6 +24,7 @@ const Activation = @import("../Activation.zig");
 const SlotsObject = slots.Slots;
 const SourceRange = @import("../SourceRange.zig");
 const LookupResult = @import("../object_lookup.zig").LookupResult;
+const IntegerValue = value_import.IntegerValue;
 const value_import = @import("../value.zig");
 const ExecutableMap = @import("executable_map.zig").ExecutableMap;
 const VirtualMachine = @import("../VirtualMachine.zig");
@@ -209,10 +210,11 @@ pub const Block = extern struct {
         creator_message: ByteArray,
         created_from: SourceRange,
         out_activation: *Activation,
+        local_stack_depth: u32,
     ) void {
         const activation_object = ActivationObject.create(token, context.getActor().id, .Block, self.slots.object.getMap(), arguments, self.getAssignableSlots(), receiver);
 
-        out_activation.initInPlace(ActivationObject.Value.init(activation_object), target_location, creator_message, created_from);
+        out_activation.initInPlace(ActivationObject.Value.init(activation_object), target_location, creator_message, created_from, local_stack_depth);
         out_activation.parent_activation = self.getMap().parent_activation;
         out_activation.nonlocal_return_target_activation = self.getMap().nonlocal_return_target_activation;
     }
@@ -228,6 +230,10 @@ pub const BlockMap = extern struct {
     /// block. If a non-local return happens inside this block, then it will
     /// target this activation.
     nonlocal_return_target_activation: Activation.ActivationRef align(@alignOf(u64)),
+    /// The offset from the containing method's local stack base to the start of
+    /// this block's locals.
+    method_local_offset: IntegerValue(.Unsigned) align(@alignOf(u64)),
+
     slots: MapSlots(BlockMap) align(@alignOf(u64)),
 
     pub const ObjectType = Block;
@@ -248,6 +254,7 @@ pub const BlockMap = extern struct {
         nonlocal_return_target_activation: Activation.ActivationRef,
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
+        method_local_offset: u32,
     ) !BlockMap.Ptr {
         const size = BlockMap.requiredSizeForAllocation(slot_count);
 
@@ -258,7 +265,7 @@ pub const BlockMap = extern struct {
         try heap.markAddressAsNeedingFinalization(memory_area);
 
         var self: BlockMap.Ptr = @ptrCast(memory_area);
-        self.init(slot_count, assignable_slot_count, argument_slot_count, parent_activation, nonlocal_return_target_activation, block, executable, inline_cache);
+        self.init(slot_count, assignable_slot_count, argument_slot_count, parent_activation, nonlocal_return_target_activation, block, executable, inline_cache, method_local_offset);
         return self;
     }
 
@@ -272,11 +279,13 @@ pub const BlockMap = extern struct {
         block: *bytecode.Block,
         executable: bytecode.Executable.Ref,
         inline_cache: []InlineCacheEntry,
+        method_local_offset: u32,
     ) void {
         self.base_map.init(.Block, argument_slot_count, slot_count, block, executable, inline_cache);
         self.parent_activation = parent_activation;
         self.nonlocal_return_target_activation = nonlocal_return_target_activation;
         self.setAssignableSlotCount(assignable_slot_count);
+        self.method_local_offset = .init(method_local_offset);
     }
 
     pub fn finalize(self: BlockMap.Ptr, allocator: Allocator) void {
@@ -334,6 +343,7 @@ pub const BlockMap = extern struct {
             self.nonlocal_return_target_activation,
             self.base_map.block.get(),
             self.base_map.definition_executable_ref.get(),
+            @intCast(self.method_local_offset.get()),
         );
 
         new_map.setAssignableSlotCount(self.getAssignableSlotCount());

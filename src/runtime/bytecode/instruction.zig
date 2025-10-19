@@ -148,10 +148,19 @@ fn Instruction(comptime RegisterLocationT: type) type {
                 descriptor_index: u32,
                 block_index: u32,
                 is_inline: bool,
+                /// This value is interpreted differently based on whether this is
+                /// an inline method or not:
+                /// - Inline method: The local offset within the parent method.
+                /// - Non-inline method: The total local depth for the entire
+                ///   method+block chain.
+                local_depth: u32,
             },
             CreateBlock: struct {
                 descriptor_index: u32,
                 block_index: u32,
+                /// The offset from the containing method's local depth to the
+                /// start of this block's local indices.
+                method_local_offset: u32,
             },
             Return: struct {
                 value_location: RegisterLocation,
@@ -208,12 +217,13 @@ fn Instruction(comptime RegisterLocationT: type) type {
 
                 .CreateMethod => {
                     const payload = inst.payload.CreateMethod;
-                    try writer.print("({f}, OD#{}, #{})", .{ payload.method_name_location, payload.descriptor_index, payload.block_index });
+                    const depth_label = if (payload.is_inline) "method_local_offset" else "local_depth";
+                    try writer.print("({f}, OD#{}, #{}, is_inline: {}, {s}: {})", .{ payload.method_name_location, payload.descriptor_index, payload.block_index, payload.is_inline, depth_label, payload.local_depth });
                 },
 
                 .CreateBlock => {
                     const payload = inst.payload.CreateBlock;
-                    try writer.print("(OD#{}, #{})", .{ payload.descriptor_index, payload.block_index });
+                    try writer.print("(OD#{}, #{}, method_local_offset: {})", .{ payload.descriptor_index, payload.block_index, payload.method_local_offset });
                 },
 
                 .CreateByteArray => {

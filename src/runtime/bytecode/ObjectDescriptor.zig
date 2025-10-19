@@ -19,6 +19,8 @@ const Allocator = std.mem.Allocator;
 slots: []const SlotDescriptor,
 /// The number of slots requiring an assignable slot value.
 slots_requiring_assignable_slot_value: u15 = 0,
+/// The number of assignable slots in total.
+assignable_slots: u16 = 0,
 /// The number of argument slots.
 argument_slots: u8 = 0,
 /// The number of slots with an initial value present on the argument stack.
@@ -99,6 +101,7 @@ const SlotType = enum {
 pub fn init(slots: []const SlotDescriptor) ObjectDescriptor {
     var descriptor: ObjectDescriptor = .{ .slots = slots };
     for (slots) |slot| {
+        if (slot.assignable_index != null) descriptor.assignable_slots += 1;
         if (slot.requiresAssignableSlotValue()) descriptor.slots_requiring_assignable_slot_value += 1;
         if (slot.type == .Argument) descriptor.argument_slots += 1;
         if (slot.hasInitialValue()) descriptor.slots_with_initial_value += 1;

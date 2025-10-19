@@ -154,5 +154,16 @@ pub fn Stack(comptime T: type, comptime debug_name: []const u8, comptime sentine
                 self.sentinels.shrinkRetainingCapacity(sentinel_index);
             }
         }
+
+        /// Increase capacity and length by n. Return the height before the operation.
+        /// Initialize the items with `filler`.
+        pub fn reserveSpace(self: *Self, allocator: Allocator, n: usize, filler: T) !usize {
+            const old_height = self.height();
+            try self.stack.ensureTotalCapacity(allocator, old_height + n);
+            self.stack.appendNTimesAssumeCapacity(filler, n);
+
+            if (STACK_DEBUG) std.debug.print(debug_name ++ ": Reserved space for {} items, now have {} items (starting from {})\n", .{ n, self.height(), old_height });
+            return old_height;
+        }
     };
 }

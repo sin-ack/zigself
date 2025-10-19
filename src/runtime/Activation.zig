@@ -31,12 +31,17 @@ target_location: bytecode.RegisterLocation,
 /// block's own activation object. Not used with methods, since we don't want to
 /// inherit previous activation objects in methods (that would make the language
 /// dynamically scoped :^).
+// TODO: To be removed when the activation object is removed, as we will no
+//       longer perform lookups through the activation chain.
 parent_activation: ?ActivationRef = null,
 /// Will be used as the target activation that a non-local return needs to rise
 /// to. Must be non-null when a non-local return is encountered, and when
 /// non-null, must point to an activation where
 /// `nonlocal_return_target_activation` is null.
 nonlocal_return_target_activation: ?ActivationRef = null,
+/// The offset within the local stack where this activation's local variables
+/// start. "Local 0" is reserved for the receiver of the method or block.
+local_stack_offset: u32,
 
 // --- Activation creation info ---
 
@@ -64,6 +69,7 @@ pub fn initInPlace(
     target_location: bytecode.RegisterLocation,
     creator_message: ByteArray,
     created_from: SourceRange,
+    local_stack_offset: u32,
 ) void {
     self.* = .{
         .activation_id = newActivationID(),
@@ -72,6 +78,7 @@ pub fn initInPlace(
         .stack_snapshot = context.getVM().takeStackSnapshot(),
         .creator_message = creator_message,
         .created_from = created_from.copy(),
+        .local_stack_offset = local_stack_offset,
     };
 }
 
@@ -226,9 +233,14 @@ pub const ActivationStack = struct {
         );
         defer token.deinit();
 
+        // FIXME: Eventually top-level activations will have locals too, so this will be invalid.
+        //        We should instead receive method objects here, and reserve space in the actor's
+        //        locals stack.
+        const local_stack_offset: u32 = @intCast(vm.current_actor.locals_stack.height());
+
         const toplevel_context_method = try MethodObject.createTopLevelContextForExecutable(vm.allocator, &vm.heap, &token, new_executable, new_executable.value.getEntrypointBlock());
         const activation_slot = try self.getNewActivationSlot(vm.allocator);
-        toplevel_context_method.activateMethod(&token, context.getActor().id, vm.lobby_object, &.{}, target_location, source_range, activation_slot);
+        toplevel_context_method.activateMethod(&token, context.getActor().id, vm.lobby_object, &.{}, target_location, source_range, activation_slot, local_stack_offset);
     }
 };
 

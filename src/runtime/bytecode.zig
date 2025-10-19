@@ -14,10 +14,12 @@ pub const lowcode = @import("./bytecode/lowcode.zig");
 
 /// Index of a local slot within an activation record.
 pub const LocalIndex = enum(u8) {
+    Receiver = 0,
     _,
 
-    pub fn init(value: u8) LocalIndex {
-        return @enumFromInt(value);
+    /// Initialize from a raw index value.
+    pub fn initIndex(index: u8) LocalIndex {
+        return @enumFromInt(index + 1);
     }
 
     pub fn get(self: LocalIndex) u8 {
