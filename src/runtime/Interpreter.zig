@@ -310,6 +310,7 @@ pub fn execute(self: *Interpreter) Error!Actor.ActorResult {
                 method_name,
                 executable.value.getObjectDescriptor(payload.descriptor_index),
                 payload.block_index,
+                payload.is_inline,
             );
             self.vm.writeRegister(block.getTargetLocation(index), object.asValue());
 
@@ -456,15 +457,6 @@ pub fn execute(self: *Interpreter) Error!Actor.ActorResult {
                 try self.actor.saved_register_stack.push(self.vm.allocator, .{ .register = register, .value = self.vm.readRegister(register) });
             }
 
-            _ = self.getCurrentActivation().advanceInstruction();
-            continue :next_opcode self.getCurrentOpcode();
-        },
-        .SetMethodInline => {
-            const tracy_ctx = tracy.traceNamed(@src(), "Interpreter.execute<SetMethodInline>");
-            defer tracy_ctx.end();
-            self.prelude();
-
-            self.actor.next_method_is_inline = true;
             _ = self.getCurrentActivation().advanceInstruction();
             continue :next_opcode self.getCurrentOpcode();
         },
@@ -832,9 +824,8 @@ fn createMethod(
     method_name: ByteArray.Ptr,
     object_descriptor: bytecode.ObjectDescriptor,
     block_index: u32,
+    is_inline: bool,
 ) !MethodObject.Ptr {
-    defer self.actor.next_method_is_inline = false;
-
     const slot_count: u16 = @intCast(object_descriptor.slots.len);
     const byte_array_required_memory = slot_count * ByteArray.requiredSizeForAllocation();
     var token = try self.vm.heap.allocate(
@@ -852,7 +843,7 @@ fn createMethod(
         slot_count,
         object_descriptor.slots_requiring_assignable_slot_value,
         object_descriptor.argument_slots,
-        self.actor.next_method_is_inline,
+        is_inline,
         method_name,
         block,
         executable,

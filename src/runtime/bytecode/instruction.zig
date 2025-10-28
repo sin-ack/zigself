@@ -46,9 +46,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
             CreateMethod,
             CreateBlock,
 
-            // Modifiers
-            SetMethodInline,
-
             // Exiting an activation
             Return,
             NonlocalReturn,
@@ -75,7 +72,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .CreateMethod => "create_method",
                     .CreateBlock => "create_block",
                     .CreateByteArray => "create_byte_array",
-                    .SetMethodInline => "set_method_inline",
                     .Return => "return",
                     .NonlocalReturn => "nonlocal_return",
                     .GetLocal => "get_local",
@@ -106,8 +102,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .PushArg => "PushArg",
 
                     .PushArgumentSentinel, .VerifyArgumentSentinel => "ArgumentSentinel",
-
-                    .SetMethodInline => "None",
                 };
             }
 
@@ -126,8 +120,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
 
         /// The payload for the opcode.
         pub const Payload = union {
-            None: void,
-
             Send: struct {
                 receiver_location: RegisterLocation,
                 selector: Selector,
@@ -155,6 +147,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
                 method_name_location: RegisterLocation,
                 descriptor_index: u32,
                 block_index: u32,
+                is_inline: bool,
             },
             CreateBlock: struct {
                 descriptor_index: u32,
@@ -253,11 +246,6 @@ fn Instruction(comptime RegisterLocationT: type) type {
 
                 .PushArgumentSentinel, .VerifyArgumentSentinel => {
                     try writer.print("({})", .{inst.payload.ArgumentSentinel});
-                },
-
-                .SetMethodInline,
-                => {
-                    try writer.writeAll("()");
                 },
             }
         }

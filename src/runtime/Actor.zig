@@ -58,8 +58,6 @@ register_file: bytecode.lowcode.RegisterFile = .{},
 argument_stack: ArgumentStack = .{},
 saved_register_stack: Stack(SavedRegister, "Saved register stack", false) = .{},
 
-/// Whether the next created method is going to be an inline method.
-next_method_is_inline: bool = false,
 
 /// The currently active source range. This is updated by the source_range
 /// instruction.

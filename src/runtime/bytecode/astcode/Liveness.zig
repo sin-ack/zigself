@@ -80,7 +80,6 @@ fn instructionReferencesRegister(block: *astcode.Block, index: usize, location: 
         .CreateObject,
         .CreateBlock,
         .CreateByteArray,
-        .SetMethodInline,
         .PushArgumentSentinel,
         .VerifyArgumentSentinel,
         .GetLocal,

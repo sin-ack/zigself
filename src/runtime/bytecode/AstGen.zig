@@ -176,10 +176,6 @@ fn generateMethod(self: *AstGen, executable: *Executable, parent_block: *Block, 
     const result = try self.generateSlotsAndCodeCommon(executable, parent_block, parent_object_descriptor, method.slots, method.statements.value.statements, method.range);
     errdefer result.object_descriptor.deinit(executable.allocator);
 
-    if (self.method_execution_depth > 1) {
-        try parent_block.addInstruction(executable.allocator, .SetMethodInline, .Nil, {}, method.range);
-    }
-
     const method_name_location = self.allocateRegister();
     try parent_block.addInstruction(executable.allocator, .CreateByteArray, method_name_location, method_name, method.range);
 
@@ -189,6 +185,7 @@ fn generateMethod(self: *AstGen, executable: *Executable, parent_block: *Block, 
         .method_name_location = method_name_location,
         .descriptor_index = object_descriptor_index,
         .block_index = result.block_index,
+        .is_inline = self.method_execution_depth > 1,
     }, method.range);
 
     return method_location;

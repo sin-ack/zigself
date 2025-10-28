@@ -130,6 +130,7 @@ fn lowerInstruction(
                 .method_name_location = method_name_location,
                 .descriptor_index = payload.descriptor_index,
                 .block_index = payload.block_index,
+                .is_inline = payload.is_inline,
             }, ast_block.getSourceRange(index));
         },
         .CreateBlock => {
@@ -140,9 +141,6 @@ fn lowerInstruction(
                 .descriptor_index = payload.descriptor_index,
                 .block_index = payload.block_index,
             }, ast_block.getSourceRange(index));
-        },
-        .SetMethodInline => {
-            try low_block.addInstruction(allocator, .SetMethodInline, .zero, {}, ast_block.getSourceRange(index));
         },
         .Return => {
             const value_location = register_pool.getAllocatedRegisterFor(ast_block.getTypedPayload(index, .Return).value_location);
