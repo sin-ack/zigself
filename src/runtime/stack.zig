@@ -51,7 +51,7 @@ pub fn Stack(comptime T: type, comptime debug_name: []const u8, comptime sentine
             /// `verifySentinel`.
             pub fn pushSentinel(self: *Self, allocator: Allocator, value: usize) !void {
                 try self.sentinels.append(allocator, .{ .height = self.height(), .value = value });
-                if (STACK_DEBUG) std.debug.print(debug_name ++ ": Pushed (sentinel: {}), now have {} items\n", .{ value, self.height() });
+                if (STACK_DEBUG) std.debug.print(debug_name ++ ": Pushed sentinel: {}, now have {} items, sentinel height {}\n", .{ value, self.height(), self.sentinelHeight() });
             }
 
             pub fn verifySentinel(self: *Self, expected: usize) void {
@@ -60,7 +60,7 @@ pub fn Stack(comptime T: type, comptime debug_name: []const u8, comptime sentine
                     std.debug.panic("!!! Failed to verify sentinel! Expected height {}, got {}", .{ actual.height, self.height() });
                 if (actual.value != expected)
                     std.debug.panic("!!! Failed to verify sentinel! Expected value {}, got {}", .{ actual.value, expected });
-                if (STACK_DEBUG) std.debug.print(debug_name ++ ": Popped (sentinel: {}), now have {} items\n", .{ expected, self.height() });
+                if (STACK_DEBUG) std.debug.print(debug_name ++ ": Popped sentinel: {}, now have {} items, sentinel height {}\n", .{ expected, self.height(), self.sentinelHeight() });
             }
 
             pub fn sentinelHeight(self: *const Self) SentinelIndex {
@@ -143,13 +143,14 @@ pub fn Stack(comptime T: type, comptime debug_name: []const u8, comptime sentine
 
         /// Restore the stack to the given height h, popping all items after it.
         pub fn restoreTo(self: *Self, h: usize, sentinel_index: SentinelIndex) void {
+            if (STACK_DEBUG) std.debug.print(debug_name ++ ": Restoring to height {}, sentinel index {}\n", .{ h, sentinel_index });
             self.restoreToImpl(h, sentinel_index);
-            if (STACK_DEBUG) std.debug.print(debug_name ++ ": Restored to height {}\n", .{h});
         }
 
         fn restoreToImpl(self: *Self, h: usize, sentinel_index: SentinelIndex) void {
             self.stack.shrinkRetainingCapacity(h);
             if (sentinel) {
+                if (STACK_DEBUG) std.debug.print(debug_name ++ ": Shrinking sentinels to index {} from {}\n", .{ sentinel_index, self.sentinels.items.len });
                 self.sentinels.shrinkRetainingCapacity(sentinel_index);
             }
         }
