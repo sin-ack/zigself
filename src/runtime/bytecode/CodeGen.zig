@@ -15,6 +15,7 @@ const LOW_EXECUTABLE_DUMP_DEBUG = debug.LOW_EXECUTABLE_DUMP_DEBUG;
 pub fn lowerExecutable(allocator: Allocator, ast_executable: *bytecode.astcode.Executable) !bytecode.lowcode.Executable.Ref {
     var low_executable = try bytecode.lowcode.Executable.create(allocator, ast_executable.definition_script);
     errdefer low_executable.unref();
+
     // FIXME: Is there a way we can avoid copying this manually?
     for (ast_executable.object_descriptors.items, 0..) |descriptor, i| {
         const descriptor_copy = try descriptor.copy(allocator);
@@ -26,6 +27,13 @@ pub fn lowerExecutable(allocator: Allocator, ast_executable: *bytecode.astcode.E
 
     for (ast_executable.blocks.items) |block| {
         try lowerBlock(allocator, low_executable.value, block);
+    }
+
+    for (ast_executable.child_executables.items) |child_ref| {
+        const low_child_executable = try lowerExecutable(allocator, child_ref.value);
+        errdefer low_child_executable.unref();
+
+        try low_executable.value.child_executables.append(allocator, low_child_executable);
     }
 
     if (LOW_EXECUTABLE_DUMP_DEBUG)
@@ -129,9 +137,20 @@ fn lowerInstruction(
             try low_block.addInstruction(allocator, .CreateMethod, target, .{
                 .method_name_location = method_name_location,
                 .descriptor_index = payload.descriptor_index,
-                .block_index = payload.block_index,
-                .is_inline = payload.is_inline,
+                .executable_index = payload.executable_index,
                 .local_depth = payload.local_depth,
+            }, ast_block.getSourceRange(index));
+        },
+        .CreateInlineMethod => {
+            const payload = ast_block.getTypedPayload(index, .CreateInlineMethod);
+            const method_name_location = register_pool.getAllocatedRegisterFor(payload.method_name_location);
+            const target = try register_pool.allocateRegister(allocator, low_block, liveness, ast_block.getTargetLocation(index));
+
+            try low_block.addInstruction(allocator, .CreateInlineMethod, target, .{
+                .method_name_location = method_name_location,
+                .descriptor_index = payload.descriptor_index,
+                .block_index = payload.block_index,
+                .method_local_offset = payload.method_local_offset,
             }, ast_block.getSourceRange(index));
         },
         .CreateBlock => {

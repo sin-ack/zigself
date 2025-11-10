@@ -15,6 +15,8 @@ fn Executable(comptime BlockT: type) type {
         allocator: Allocator,
         blocks: std.ArrayList(*Block) = .empty,
         object_descriptors: std.ArrayList(ObjectDescriptor) = .empty,
+        /// Child executables for non-inline methods defined in this executable.
+        child_executables: std.ArrayList(Ref) = .empty,
         definition_script: Script.Ref,
         ref: ref_counted.RefCount = .{},
 
@@ -51,6 +53,11 @@ fn Executable(comptime BlockT: type) type {
                 descriptor.deinit(self.allocator);
             }
             self.object_descriptors.deinit(self.allocator);
+
+            for (self.child_executables.items) |child_ref| {
+                child_ref.unref();
+            }
+            self.child_executables.deinit(self.allocator);
         }
 
         pub fn destroy(self: *Self) void {
@@ -87,6 +94,23 @@ fn Executable(comptime BlockT: type) type {
         // Get the object descriptor at the given index.
         pub fn getObjectDescriptor(self: *Self, index: u32) ObjectDescriptor {
             return self.object_descriptors.items[index];
+        }
+
+        /// Append a child executable (used for non-inline methods).
+        /// Takes ownership of the ref.
+        pub fn makeChildExecutable(self: *Self) !u32 {
+            const child = try create(self.allocator, self.definition_script);
+            errdefer child.unref();
+
+            const index = self.child_executables.items.len;
+            try self.child_executables.append(self.allocator, child);
+
+            return @intCast(index);
+        }
+
+        /// Get a child executable by index.
+        pub fn getChildExecutable(self: *Self, index: u32) Ref {
+            return self.child_executables.items[index];
         }
 
         pub fn format(executable: Self, writer: *std.Io.Writer) !void {

@@ -88,8 +88,11 @@ const ObjectDescriptorLink = struct {
     }
 };
 
-/// Given a script, generate an Executable for it with its entrypoint being the
-/// first block it contains.
+/// Given a script, generate an Executable for its top-level body.
+///
+/// The generated executable represents the top-level "method" of the script.
+/// All non-inline methods defined directly in the script will, in turn, have
+/// their own executables generated separately.
 pub fn generateExecutableFromScript(allocator: Allocator, script: Script.Ref) AstGenError!Executable.Ref {
     const executable = try Executable.create(allocator, script);
     errdefer executable.unref();
@@ -99,8 +102,13 @@ pub fn generateExecutableFromScript(allocator: Allocator, script: Script.Ref) As
 
     try g.generateScript(executable.value, script.value.ast_root.?);
 
-    if (AST_EXECUTABLE_DUMP_DEBUG)
-        std.debug.print("Executable dump: {f}\n", .{executable.value});
+    if (AST_EXECUTABLE_DUMP_DEBUG) {
+        std.debug.print("Top-level executable dump: {f}\n", .{executable.value});
+
+        for (executable.value.child_executables.items, 0..) |child_executable_ref, index| {
+            std.debug.print("Child executable {} dump: {f}\n", .{ index, child_executable_ref.value });
+        }
+    }
 
     return executable;
 }
@@ -255,10 +263,7 @@ fn generateBlock(self: *AstGen, executable: *Executable, parent_block: *Block, p
     return block_location;
 }
 
-fn generateMethod(self: *AstGen, executable: *Executable, parent_block: *Block, parent_object_descriptor_link: *const ObjectDescriptorLink, method_name: []const u8, method: *ast.ObjectNode) AstGenError!RegisterLocation {
-    self.method_execution_depth += 1;
-    defer self.method_execution_depth -= 1;
-
+fn generateInlineMethod(self: *AstGen, executable: *Executable, parent_block: *Block, parent_object_descriptor_link: *const ObjectDescriptorLink, method_name: []const u8, method: *ast.ObjectNode) AstGenError!RegisterLocation {
     const object_descriptor = try self.buildObjectDescriptor(method.slots);
     errdefer object_descriptor.deinit(executable.allocator);
 
@@ -274,13 +279,7 @@ fn generateMethod(self: *AstGen, executable: *Executable, parent_block: *Block, 
         return error.AstGenFailure;
     }
 
-    // Unused if this is an inline method.
-    var locals_total: usize = 0;
-    const object_descriptor_link = if (self.method_execution_depth > 1)
-        parent_object_descriptor_link.chain(&object_descriptor)
-    else
-        ObjectDescriptorLink.init(&object_descriptor, &locals_total);
-
+    const object_descriptor_link = parent_object_descriptor_link.chain(&object_descriptor);
     try self.generateSlotValues(executable, parent_block, &object_descriptor_link, method.slots, method.range);
 
     const child_block_index = try executable.makeBlock();
@@ -292,7 +291,6 @@ fn generateMethod(self: *AstGen, executable: *Executable, parent_block: *Block, 
 
         const last_expression_location = try self.generateStatementList(executable, child_block, &object_descriptor_link, method.statements.value.statements);
         try child_block.addInstruction(executable.allocator, .Return, .Nil, .{ .value_location = last_expression_location }, method.range);
-
         child_block.seal();
     }
 
@@ -301,19 +299,72 @@ fn generateMethod(self: *AstGen, executable: *Executable, parent_block: *Block, 
 
     const object_descriptor_index = try executable.addObjectDescriptor(object_descriptor);
     const method_location = self.allocateRegister();
-    try parent_block.addInstruction(executable.allocator, .CreateMethod, method_location, .{
+
+    try parent_block.addInstruction(executable.allocator, .CreateInlineMethod, method_location, .{
         .method_name_location = method_name_location,
         .descriptor_index = object_descriptor_index,
         .block_index = child_block_index,
-        .is_inline = self.method_execution_depth > 1,
-        // This value is interpreted differently based on whether this is
-        // an inline method or not:
-        // - Inline method: The local offset within the parent method.
-        // - Non-inline method: The total local depth for the entire method+block chain.
-        .local_depth = if (self.method_execution_depth > 1)
-            @intCast(object_descriptor_link.local_base)
-        else
-            @intCast(locals_total),
+        .method_local_offset = @intCast(object_descriptor_link.local_base),
+    }, method.range);
+
+    return method_location;
+}
+
+fn generateMethod(self: *AstGen, parent_executable: *Executable, parent_block: *Block, parent_object_descriptor_link: *const ObjectDescriptorLink, method_name: []const u8, method: *ast.ObjectNode) AstGenError!RegisterLocation {
+    const is_inline = self.method_execution_depth > 0;
+    if (is_inline) {
+        return try self.generateInlineMethod(parent_executable, parent_block, parent_object_descriptor_link, method_name, method);
+    }
+
+    self.method_execution_depth += 1;
+    defer self.method_execution_depth -= 1;
+
+    const object_descriptor = try self.buildObjectDescriptor(method.slots);
+    errdefer object_descriptor.deinit(parent_executable.allocator);
+
+    if (object_descriptor.argument_slots > MaximumArguments) {
+        // FIXME: Return rich errors
+        // return "Maximum argument slot limit exceeded for method object"
+        return error.AstGenFailure;
+    }
+
+    if (object_descriptor.assignable_slots > MaximumAssignableSlots) {
+        // FIXME: Return rich errors
+        // return "Maximum assignable slot limit exceeded for method object"
+        return error.AstGenFailure;
+    }
+
+    var locals_total: usize = 0;
+    const object_descriptor_link = ObjectDescriptorLink.init(&object_descriptor, &locals_total);
+    try self.generateSlotValues(parent_executable, parent_block, &object_descriptor_link, method.slots, method.range);
+
+    const child_executable_index = try parent_executable.makeChildExecutable();
+    const child_executable = parent_executable.getChildExecutable(child_executable_index).value;
+
+    const child_block_index = try child_executable.makeBlock();
+    std.debug.assert(child_block_index == 0);
+    const child_block = child_executable.getBlock(child_block_index);
+
+    {
+        try self.pushRegisterID();
+        defer self.popRegisterID();
+
+        const last_expression_location = try self.generateStatementList(child_executable, child_block, &object_descriptor_link, method.statements.value.statements);
+        try child_block.addInstruction(child_executable.allocator, .Return, .Nil, .{ .value_location = last_expression_location }, method.range);
+        child_block.seal();
+    }
+
+    const method_name_location = self.allocateRegister();
+    try parent_block.addInstruction(child_executable.allocator, .CreateByteArray, method_name_location, method_name, method.range);
+
+    const object_descriptor_index = try child_executable.addObjectDescriptor(object_descriptor);
+    const method_location = self.allocateRegister();
+
+    try parent_block.addInstruction(child_executable.allocator, .CreateMethod, method_location, .{
+        .method_name_location = method_name_location,
+        .descriptor_index = object_descriptor_index,
+        .executable_index = child_executable_index,
+        .local_depth = @intCast(locals_total),
     }, method.range);
 
     return method_location;

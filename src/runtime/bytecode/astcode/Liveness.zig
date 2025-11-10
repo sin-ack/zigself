@@ -60,6 +60,10 @@ fn instructionReferencesRegister(block: *astcode.Block, index: usize, location: 
             const payload = block.getTypedPayload(index, .CreateMethod);
             break :blk payload.method_name_location == location;
         },
+        .CreateInlineMethod => blk: {
+            const payload = block.getTypedPayload(index, .CreateInlineMethod);
+            break :blk payload.method_name_location == location;
+        },
         .Return, .NonlocalReturn => blk: {
             const payload = block.getTypedPayload(index, .Return);
             break :blk payload.value_location == location;

@@ -44,6 +44,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
             // Creation (slots objects)
             CreateObject,
             CreateMethod,
+            CreateInlineMethod,
             CreateBlock,
 
             // Exiting an activation
@@ -70,6 +71,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .CreateFloatingPoint => "create_floating_point",
                     .CreateObject => "create_object",
                     .CreateMethod => "create_method",
+                    .CreateInlineMethod => "create_inline_method",
                     .CreateBlock => "create_block",
                     .CreateByteArray => "create_byte_array",
                     .Return => "return",
@@ -97,6 +99,7 @@ fn Instruction(comptime RegisterLocationT: type) type {
                     .CreateFloatingPoint => "CreateFloatingPoint",
                     .CreateObject => "CreateObject",
                     .CreateMethod => "CreateMethod",
+                    .CreateInlineMethod => "CreateInlineMethod",
                     .CreateBlock => "CreateBlock",
                     .CreateByteArray => "CreateByteArray",
                     .PushArg => "PushArg",
@@ -145,15 +148,26 @@ fn Instruction(comptime RegisterLocationT: type) type {
             CreateObject: struct { descriptor_index: u32 },
             CreateMethod: struct {
                 method_name_location: RegisterLocation,
+                /// Index into the object descriptor table of the executable that
+                /// contains this CreateMethod instruction.
                 descriptor_index: u32,
-                block_index: u32,
-                is_inline: bool,
-                /// This value is interpreted differently based on whether this is
-                /// an inline method or not:
-                /// - Inline method: The local offset within the parent method.
-                /// - Non-inline method: The total local depth for the entire
+                /// Index into the top level executable's child executable list.
+                executable_index: u32,
+                /// The total local depth for the entire
                 ///   method+block chain.
                 local_depth: u32,
+            },
+            CreateInlineMethod: struct {
+                method_name_location: RegisterLocation,
+                /// Index into the object descriptor table of the executable that
+                /// contains this CreateInlineMethod instruction.
+                descriptor_index: u32,
+                /// Index into the current method's blocks, indicating which block
+                /// is the body of this inline method.
+                block_index: u32,
+                /// The offset from the containing method's local depth to the
+                /// start of this inline method's local indices.
+                method_local_offset: u32,
             },
             CreateBlock: struct {
                 descriptor_index: u32,
@@ -217,8 +231,22 @@ fn Instruction(comptime RegisterLocationT: type) type {
 
                 .CreateMethod => {
                     const payload = inst.payload.CreateMethod;
-                    const depth_label = if (payload.is_inline) "method_local_offset" else "local_depth";
-                    try writer.print("({f}, OD#{}, #{}, is_inline: {}, {s}: {})", .{ payload.method_name_location, payload.descriptor_index, payload.block_index, payload.is_inline, depth_label, payload.local_depth });
+                    try writer.print("(method_name_location: {f}, descriptor_index: #{}, executable_index: #{}, local_depth: {})", .{
+                        payload.method_name_location,
+                        payload.descriptor_index,
+                        payload.executable_index,
+                        payload.local_depth,
+                    });
+                },
+
+                .CreateInlineMethod => {
+                    const payload = inst.payload.CreateInlineMethod;
+                    try writer.print("(method_name_location: {f}, descriptor_index: #{}, block_index: #{}, method_local_offset: {})", .{
+                        payload.method_name_location,
+                        payload.descriptor_index,
+                        payload.block_index,
+                        payload.method_local_offset,
+                    });
                 },
 
                 .CreateBlock => {

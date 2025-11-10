@@ -299,19 +299,43 @@ pub fn execute(self: *Interpreter) Error!Actor.ActorResult {
             defer tracy_ctx.end();
             self.prelude();
 
-            const executable = self.getDefinitionExecutable();
+            const parent_executable = self.getDefinitionExecutable();
             const block = self.getCurrentBytecodeBlock();
             const index = self.getInstructionIndex();
 
             const payload = block.getTypedPayload(index, .CreateMethod);
             const method_name = self.vm.readRegister(payload.method_name_location).unsafeAsObject().unsafeAsType(.ByteArray);
+            const child_executable = parent_executable.value.getChildExecutable(payload.executable_index);
+
             const object = try self.createMethod(
-                executable,
+                child_executable,
                 method_name,
-                executable.value.getObjectDescriptor(payload.descriptor_index),
-                payload.block_index,
-                payload.is_inline,
+                payload.descriptor_index,
                 payload.local_depth,
+            );
+            self.vm.writeRegister(block.getTargetLocation(index), object.asValue());
+
+            _ = self.getCurrentActivation().advanceInstruction();
+            continue :next_opcode self.getCurrentOpcode();
+        },
+        .CreateInlineMethod => {
+            const tracy_ctx = tracy.traceNamed(@src(), "Interpreter.execute<CreateInlineMethod>");
+            defer tracy_ctx.end();
+            self.prelude();
+
+            const executable = self.getDefinitionExecutable();
+            const block = self.getCurrentBytecodeBlock();
+            const index = self.getInstructionIndex();
+
+            const payload = block.getTypedPayload(index, .CreateInlineMethod);
+            const method_name = self.vm.readRegister(payload.method_name_location).unsafeAsObject().unsafeAsType(.ByteArray);
+
+            const object = try self.createInlineMethod(
+                method_name,
+                executable,
+                payload.descriptor_index,
+                payload.block_index,
+                payload.method_local_offset,
             );
             self.vm.writeRegister(block.getTargetLocation(index), object.asValue());
 
@@ -771,11 +795,7 @@ fn executeBlock(
     @memcpy(self.actor.locals_stack.allItems()[local_stack_offset + assignable_slot_count .. local_stack_offset + assignable_slot_count + argument_slot_count], arguments);
 }
 
-// FIXME: While inline methods *are* methods in a technical sense, they are not
-//        initialized like normal methods because they don't have their own
-//        space on the locals stack. Perhaps they should be split into their own
-//        type/function?
-fn executeMethod(
+fn executeInlineMethod(
     self: *const Interpreter,
     const_receiver: Value,
     const_method: MethodObject.Ptr,
@@ -801,27 +821,12 @@ fn executeMethod(
     var token = try self.vm.heap.allocate(required_memory);
     defer token.deinit();
 
-    // NOTE: The receiver of a method activation must never be an activation
-    //       object (unless it explicitly wants that), as that would allow
-    //       us to access the slots of upper scopes.
-    if (!method.expectsActivationObjectAsReceiver()) {
-        if (receiver_of_method.asObject()) |receiver_object| {
-            if (receiver_object.asType(.Activation)) |activation| {
-                receiver_of_method = activation.findActivationReceiver();
-            }
-        }
-    }
-
-    const local_stack_offset = if (const_method.getMap().isInlineMethod())
-        // NOTE: Because an inline method is only visible from the method that
-        //       defines it, or any other blocks/inline methods defined within
-        //       it, the currently running activation MUST be one whose local
-        //       source is the method. Therefore, we can simply reuse the
-        //       current activation's local stack offset.
-        self.getCurrentActivation().local_stack_offset
-    else
-        // NOTE: +1 because local 0 is reserved for the receiver.
-        try self.actor.locals_stack.reserveSpace(self.vm.allocator, @intCast(method.getMap().local_depth.get() + 1), self.vm.global_nil);
+    // NOTE: Because an inline method is only visible from the method that
+    //       defines it, or any other blocks/inline methods defined within
+    //       it, the currently running activation MUST be one whose local
+    //       source is the method. Therefore, we can simply reuse the
+    //       current activation's local stack offset.
+    const local_stack_offset = self.getCurrentActivation().local_stack_offset;
 
     const activation_slot = try self.actor.activation_stack.getNewActivationSlot(self.vm.allocator);
     method.activateMethod(&token, self.actor.id, receiver_of_method, arguments, target_location, source_range, activation_slot, @intCast(local_stack_offset));
@@ -831,16 +836,61 @@ fn executeMethod(
     const assignable_slot_count = method.getMap().getAssignableSlotCount();
     const argument_slot_count = method.getMap().getArgumentSlotCount();
 
-    const copy_base = if (method.getMap().isInlineMethod())
-        // For inline methods, the local_depth field is reinterpreted as
-        // the offset on top of the local stack offset.
-        local_stack_offset + 1 + method.getMap().local_depth.get()
-    else
-        local_stack_offset + 1;
+    const copy_base = local_stack_offset + 1 + method.getMap().local_depth.get();
 
-    if (!method.getMap().isInlineMethod()) {
-        self.actor.locals_stack.allItems()[local_stack_offset] = receiver_of_method;
+    @memcpy(self.actor.locals_stack.allItems()[copy_base .. copy_base + assignable_slot_count], method.getAssignableSlots());
+    @memcpy(self.actor.locals_stack.allItems()[copy_base + assignable_slot_count .. copy_base + assignable_slot_count + argument_slot_count], arguments);
+}
+
+fn executeMethod(
+    self: *const Interpreter,
+    const_receiver: Value,
+    const_method: MethodObject.Ptr,
+    arguments: []const Value,
+    target_location: bytecode.RegisterLocation,
+    source_range: SourceRange,
+) !void {
+    if (const_method.getMap().isInlineMethod()) {
+        return self.executeInlineMethod(const_receiver, const_method, arguments, target_location, source_range);
     }
+
+    var handles: VirtualMachine.Heap.Handles = undefined;
+    handles.init(&self.vm.heap);
+    defer handles.deinit(&self.vm.heap);
+
+    var receiver_of_method = const_receiver;
+    handles.trackValue(&receiver_of_method);
+
+    var method = const_method;
+    handles.trackObject(&method);
+
+    const required_memory = ActivationObject.requiredSizeForAllocation(
+        method.getArgumentSlotCount(),
+        method.getAssignableSlotCount(),
+    );
+
+    var token = try self.vm.heap.allocate(required_memory);
+    defer token.deinit();
+
+    if (receiver_of_method.asObject()) |receiver_object| {
+        if (receiver_object.asType(.Activation)) |activation| {
+            receiver_of_method = activation.findActivationReceiver();
+        }
+    }
+
+    const local_stack_offset = try self.actor.locals_stack.reserveSpace(self.vm.allocator, @intCast(method.getMap().local_depth.get() + 1), self.vm.global_nil);
+
+    const activation_slot = try self.actor.activation_stack.getNewActivationSlot(self.vm.allocator);
+    method.activateMethod(&token, self.actor.id, receiver_of_method, arguments, target_location, source_range, activation_slot, @intCast(local_stack_offset));
+
+    // HACK: Transitional code. Copy initial assignable slot values and
+    //       arguments into the new activation's local stack.
+    const assignable_slot_count = method.getMap().getAssignableSlotCount();
+    const argument_slot_count = method.getMap().getArgumentSlotCount();
+
+    const copy_base = local_stack_offset + 1;
+
+    self.actor.locals_stack.allItems()[local_stack_offset] = receiver_of_method;
     @memcpy(self.actor.locals_stack.allItems()[copy_base .. copy_base + assignable_slot_count], method.getAssignableSlots());
     @memcpy(self.actor.locals_stack.allItems()[copy_base + assignable_slot_count .. copy_base + assignable_slot_count + argument_slot_count], arguments);
 }
@@ -868,11 +918,11 @@ fn createMethod(
     self: *const Interpreter,
     executable: bytecode.Executable.Ref,
     method_name: ByteArray.Ptr,
-    object_descriptor: bytecode.ObjectDescriptor,
-    block_index: u32,
-    is_inline: bool,
+    descriptor_index: u32,
     local_depth: u32,
 ) !MethodObject.Ptr {
+    const object_descriptor = executable.value.getObjectDescriptor(descriptor_index);
+
     const slot_count: u16 = @intCast(object_descriptor.slots.len);
     const byte_array_required_memory = slot_count * ByteArray.requiredSizeForAllocation();
     var token = try self.vm.heap.allocate(
@@ -882,7 +932,7 @@ fn createMethod(
     );
     defer token.deinit();
 
-    const block = executable.value.getBlock(block_index);
+    const block = executable.value.getEntrypointBlock();
     const method_map = try MethodMap.create(
         self.vm.allocator,
         &self.vm.heap,
@@ -890,11 +940,49 @@ fn createMethod(
         slot_count,
         object_descriptor.slots_requiring_assignable_slot_value,
         object_descriptor.argument_slots,
-        is_inline,
+        false, // is_inline
         method_name,
         block,
         executable,
         local_depth,
+    );
+    const method_object = MethodObject.create(&token, self.actor.id, method_map);
+    try self.writeObjectSlots(MethodMap, &token, object_descriptor, method_map, method_object);
+    return method_object;
+}
+
+fn createInlineMethod(
+    self: *const Interpreter,
+    method_name: ByteArray.Ptr,
+    executable: bytecode.Executable.Ref,
+    descriptor_index: u32,
+    block_index: u32,
+    method_local_offset: u32,
+) !MethodObject.Ptr {
+    const block = executable.value.getBlock(block_index);
+    const object_descriptor = executable.value.getObjectDescriptor(descriptor_index);
+
+    const slot_count: u16 = @intCast(object_descriptor.slots.len);
+    const byte_array_required_memory = slot_count * ByteArray.requiredSizeForAllocation();
+    var token = try self.vm.heap.allocate(
+        MethodMap.requiredSizeForAllocation(slot_count) +
+            MethodObject.requiredSizeForAllocation(object_descriptor.slots_requiring_assignable_slot_value) +
+            byte_array_required_memory,
+    );
+    defer token.deinit();
+
+    const method_map = try MethodMap.create(
+        self.vm.allocator,
+        &self.vm.heap,
+        &token,
+        slot_count,
+        object_descriptor.slots_requiring_assignable_slot_value,
+        object_descriptor.argument_slots,
+        true, // is_inline
+        method_name,
+        block,
+        executable,
+        method_local_offset,
     );
     const method_object = MethodObject.create(&token, self.actor.id, method_map);
     try self.writeObjectSlots(MethodMap, &token, object_descriptor, method_map, method_object);
